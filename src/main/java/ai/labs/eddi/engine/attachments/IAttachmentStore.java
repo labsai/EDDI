@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,6 +36,13 @@ import java.util.Optional;
  * root ({@link #grantAccess} given a derived ref grants its root). Deleting a
  * root deletes its lineage, then announces {@link AttachmentRootDeleted}.
  * Listings and file-count quotas see roots only.
+ * <p>
+ * <strong>Libraries:</strong> a root {@linkplain #promote promoted} to a
+ * library (owner scope {@link OwnerScope#USER}) belongs to the library with its
+ * lineage. Its conversation id is then origin information only: the
+ * conversation it came from reads it through a grant like any other, cannot
+ * delete it, and does not list or count it as its own. The library methods work
+ * by owner key.
  * <p>
  * This is the single blob-store abstraction for EDDI; the former
  * {@code IAttachmentStorage} was folded into it so uploads, LLM forwarding,
@@ -157,7 +165,10 @@ public interface IAttachmentStore {
      *            the conversation requesting deletion (must be the owner)
      * @return {@code true} if a blob was deleted, {@code false} if none matched
      * @throws AttachmentStoreException
-     *             if the blob exists but is owned by another conversation
+     *             if the blob exists but is owned by another conversation, or
+     *             belongs to a library ({@link AttachmentAccessDeniedException},
+     *             whichever conversation asks: library documents are removed
+     *             through the library)
      */
     boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException;
 
@@ -170,7 +181,9 @@ public interface IAttachmentStore {
      * fired per root, after the delete. Views this conversation produced of a root
      * it was only granted belong to that root's owner and stay. The
      * {@linkplain #reserve quota reservations} held for the conversation go too, so
-     * an erasure during an upload leaves no quota held.
+     * an erasure during an upload leaves no quota held. A library document that
+     * came from this conversation is not deleted: only this conversation's grant on
+     * it goes.
      *
      * @param conversationId
      *            the conversation ID
@@ -180,7 +193,8 @@ public interface IAttachmentStore {
     long deleteByConversation(String conversationId);
 
     /**
-     * List the uploaded attachments (roots) <em>owned</em> by a conversation.
+     * List the uploaded attachments (roots) <em>owned</em> by a conversation — not
+     * the library documents that came from it.
      *
      * @param conversationId
      *            the conversation ID
@@ -193,7 +207,8 @@ public interface IAttachmentStore {
      * those it has been {@linkplain #grantAccess granted}. Used by the
      * {@code readAttachment} tool so group members can enumerate blobs shared with
      * them (owned by the group conversation, granted to the member). Roots only:
-     * derived blobs are listed by {@link #listDerived}.
+     * derived blobs are listed by {@link #listDerived}. A library document is
+     * listed only through a grant, and not while it is soft-removed.
      *
      * @param conversationId
      *            the requesting conversation ID
@@ -326,9 +341,9 @@ public interface IAttachmentStore {
      * Expiry is decided by the database's clock, never a node's, so clock skew
      * between nodes cannot stretch or cut a reservation.
      * <p>
-     * Only {@link OwnerScope#CONVERSATION} owners can reserve in this release: the
-     * library buckets of {@link OwnerScope#USER} and {@link OwnerScope#TEAM} owners
-     * do not exist yet.
+     * Only {@link OwnerScope#CONVERSATION} owners can reserve: nothing streams into
+     * a library — a file enters one through {@link #promote}, which checks the
+     * library's bucket under its own lock.
      *
      * @param owner
      *            the bucket's owner; for a conversation owner its key is the
@@ -518,6 +533,155 @@ public interface IAttachmentStore {
      */
     int sweepTombstones(int max);
 
+    // ------------------------------------------------------------------ library
+
+    /**
+     * Puts an uploaded file into a library: <b>moves</b> the root and its whole
+     * lineage to {@code newOwner}; nothing is copied. From then on the file belongs
+     * to the library, not to the conversation it was uploaded to:
+     * <ul>
+     * <li>it counts against the library's buckets
+     * ({@code eddi.documents.library.max-per-user},
+     * {@code max-total-bytes-per-user}: the root and its media views) and no longer
+     * against the conversation's or the uploading user's upload quota;</li>
+     * <li>the promoting conversation keeps a {@linkplain #grantAccess grant}, and
+     * reads it through that grant like any other grantee — the conversation id it
+     * keeps is origin information only;</li>
+     * <li>{@link #delete} refuses it, for every conversation (a library document is
+     * removed through the library), {@link #deleteByConversation} skips it and
+     * removes only that conversation's grant, and {@link #listByConversation} no
+     * longer lists it.</li>
+     * </ul>
+     * <p>
+     * <b>Only the owning conversation may promote</b>, and only a root it owns: a
+     * grantee, a stranger, a derived blob or a file already in a library is
+     * refused. Locks are taken in the fixed order (the library's bucket, then the
+     * root's source lock), so a view being stored at the same time is stored either
+     * before the move (and moves with it) or after it (under the new owner).
+     * <p>
+     * <b>Precondition the store cannot check:</b> the caller must refuse a root
+     * that is withheld in the owning conversation
+     * ({@code AttachmentContextExtractor.withheldStorageRefs(memory)}). "Withheld"
+     * is conversation-memory state; the store never sees it.
+     * <p>
+     * Fires {@link AttachmentOwnerChanged} once, after the change committed.
+     *
+     * @param owningConversationId
+     *            the conversation the file was uploaded to
+     * @param newOwner
+     *            the library: a {@link OwnerScope#USER} owner whose key is
+     *            {@code SpaceTenants.tenantFor(Subjects.personalSpace(principal))}
+     *            and whose user is the one who saves it
+     * @param meta
+     *            title, wanted slug, agent scope and retention; the store keeps
+     *            slugs unique per owner
+     * @return the library entry
+     * @throws AttachmentNotFoundException
+     *             if no such file exists
+     * @throws AttachmentAccessDeniedException
+     *             if the conversation does not own the file, or it is already in a
+     *             library
+     * @throws AttachmentQuotaExceededException
+     *             with scope {@code library} if the library is full; nothing is
+     *             moved then
+     * @throws IllegalArgumentException
+     *             for a conversation or team owner (team libraries are not
+     *             available in this version)
+     */
+    LibraryEntry promote(String storageRef, String owningConversationId, OwnerRef newOwner, LibraryMeta meta) throws AttachmentStoreException;
+
+    /**
+     * Moves a library document — the root and its lineage — from one library to
+     * another, re-keyed like {@link #promote}: the new library's quota applies, the
+     * slug is kept unless the new library has it already (then it is suffixed),
+     * grants are kept. Fires {@link AttachmentOwnerChanged}. <b>Trusted callers
+     * only</b>; meant for the team library, which is not available in this version,
+     * so the only target accepted today is a {@link OwnerScope#USER} library.
+     *
+     * @throws AttachmentNotFoundException
+     *             if {@code oldOwnerKey} has no such document
+     * @throws AttachmentQuotaExceededException
+     *             with scope {@code library} if the new library is full
+     * @throws IllegalArgumentException
+     *             for a conversation or team target, or the same owner key
+     */
+    LibraryEntry moveOwner(String storageRef, String oldOwnerKey, OwnerRef newOwner) throws AttachmentStoreException;
+
+    /**
+     * A page of a library, most recently accessed first.
+     *
+     * @param agentScopeOrNull
+     *            an agent id: only the documents that agent sees (those scoped to
+     *            it and those scoped to all agents); {@code null}: all of them
+     * @param includeRemoved
+     *            whether soft-removed documents are listed
+     * @param limit
+     *            at most {@code eddi.rest.listing.max-limit}; zero or less reads as
+     *            that ceiling
+     */
+    List<LibraryEntry> listByOwner(String ownerKey, String agentScopeOrNull, boolean includeRemoved, int offset, int limit);
+
+    /**
+     * One document of a library, soft-removed or not; empty when {@code ownerKey}
+     * has no such document (whoever else may own it).
+     */
+    Optional<LibraryEntry> getLibraryEntry(String ownerKey, String storageRef);
+
+    /**
+     * Records that a library document was opened: its retention counts from now.
+     * Anything that is not a library document is ignored.
+     */
+    void touchAccess(String storageRef);
+
+    /**
+     * Hides a library document: no longer listed by {@link #listByOwner} (unless
+     * asked for) nor by its grantees' {@link #listAccessible}. It keeps counting
+     * toward the library's quota until it is deleted.
+     *
+     * @return whether it was visible and is hidden now
+     */
+    boolean softRemove(String ownerKey, String storageRef, Instant when);
+
+    /**
+     * Undoes {@link #softRemove}.
+     *
+     * @return whether it was hidden and is visible now
+     */
+    boolean restore(String ownerKey, String storageRef);
+
+    /**
+     * Deletes everything a library owns — every document, its lineage, the grants
+     * on them and the library's quota reservations — and fires one
+     * {@link AttachmentRootDeleted} per document. For erasure: works by owner key
+     * alone, without any conversation. A conversation id given as owner key deletes
+     * nothing.
+     *
+     * @return the number of documents (roots) deleted
+     */
+    long deleteByOwner(String ownerKey);
+
+    /**
+     * Deletes one library document for good, as {@link #deleteByOwner} does for all
+     * of them. For the retention reaper and administrators; a tool never
+     * hard-deletes.
+     *
+     * @return whether {@code ownerKey} had it
+     */
+    boolean deleteLibraryDocument(String ownerKey, String storageRef);
+
+    /**
+     * Library documents whose retention has run out by {@code now}: their own
+     * {@code retentionDays} (or the deployment default when they have none) after
+     * their last access. A retention of zero never runs out. Oldest access first.
+     */
+    List<LibraryEntry> expired(Instant now, int limit);
+
+    /**
+     * Soft-removed library documents removed before {@code cutoff}, longest removed
+     * first.
+     */
+    List<LibraryEntry> removedBefore(Instant cutoff, int limit);
+
     /**
      * The owner of a lineage.
      *
@@ -562,13 +726,15 @@ public interface IAttachmentStore {
 
     /**
      * Thrown when storing a blob would exceed a quota. {@link #getScope()} says
-     * which: {@code "conversation"} or {@code "user"} — or {@code "reservation"}
-     * when a write outgrew, or outlived, the {@linkplain #convert reservation} that
-     * covered it.
+     * which: {@code "conversation"} or {@code "user"}, {@code "library"} for a
+     * library's own bucket ({@link #promote}, and media views of a library
+     * document) — or {@code "reservation"} when a write outgrew, or outlived, the
+     * {@linkplain #convert reservation} that covered it.
      */
     class AttachmentQuotaExceededException extends AttachmentStoreException {
         public static final String SCOPE_CONVERSATION = "conversation";
         public static final String SCOPE_USER = "user";
+        public static final String SCOPE_LIBRARY = "library";
         public static final String SCOPE_RESERVATION = "reservation";
 
         private final String scope;

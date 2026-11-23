@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -107,5 +108,27 @@ public class DocumentSettings {
 
     private static long derived(Config config, String property, long fallback) {
         return config.getOptionalValue(property, Long.class).orElse(fallback);
+    }
+
+    // --- WP-5a.1: the personal library's store limits ---
+
+    /**
+     * The personal library's limits ({@code eddi.documents.library.max-per-user},
+     * {@code .max-total-bytes-per-user}, {@code .retention-days},
+     * {@code .max-grants-per-document}). The attachment stores enforce them,
+     * reading the same properties; this is for runtime code that names a limit to a
+     * user before the store refuses. A CDI instance reads the deployment's
+     * configuration on every call; explicit settings return the built-in defaults.
+     */
+    public LibraryStoreSupport.Limits libraryLimits() {
+        if (bounds != null) {
+            return LibraryStoreSupport.Limits.defaults();
+        }
+        Config config = ConfigProvider.getConfig();
+        return new LibraryStoreSupport.Limits(
+                derived(config, "eddi.documents.library.max-per-user", LibraryStoreSupport.DEFAULT_MAX_PER_USER),
+                derived(config, "eddi.documents.library.max-total-bytes-per-user", LibraryStoreSupport.DEFAULT_MAX_TOTAL_BYTES_PER_USER),
+                (int) derived(config, "eddi.documents.library.retention-days", LibraryStoreSupport.DEFAULT_RETENTION_DAYS),
+                (int) derived(config, "eddi.documents.library.max-grants-per-document", LibraryStoreSupport.DEFAULT_MAX_GRANTS_PER_DOCUMENT));
     }
 }

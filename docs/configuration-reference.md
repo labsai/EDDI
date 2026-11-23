@@ -550,6 +550,15 @@ Per-source caps on **derived files** — the views EDDI stores of an uploaded fi
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
 
+Limits of the **personal document library**, enforced by the attachment store. A file put into a user's library leaves the conversation's and the user's upload quotas above and counts against these instead, with its image, table, audio and embedded-file views; text views never count. Nothing puts a file into a library yet — the tools and the REST surface come with later releases — so these properties have no effect until then. `0` or a negative value disables a limit.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.library.max-per-user` | `50` | Documents in one user's library, soft-removed ones included until they are purged. A full library refuses the next document with both numbers; nothing is evicted |
+| `eddi.documents.library.max-total-bytes-per-user` | `2147483648` (2 GiB) | Bytes in one user's library: the documents and their media views |
+| `eddi.documents.library.retention-days` | `365` | Days after its last opening that a library document saved without a retention of its own expires. `0` keeps such documents until they are removed |
+| `eddi.documents.library.max-grants-per-document` | `1000` | Conversations that may hold a library document open at once. Past it the conversation that opened it longest ago loses access and simply opens it again when it needs it; the newest opening is never the one evicted. `0` disables the cap |
+
 ### Documents
 
 Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.

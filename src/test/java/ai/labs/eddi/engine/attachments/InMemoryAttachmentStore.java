@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.attachments;
 
 import java.io.InputStream;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -184,5 +185,60 @@ class InMemoryAttachmentStore implements IAttachmentStore {
     @Override
     public int sweepTombstones(int max) {
         return 0;
+    }
+
+    @Override
+    public LibraryEntry promote(String storageRef, String owningConversationId, OwnerRef newOwner, LibraryMeta meta) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public LibraryEntry moveOwner(String storageRef, String oldOwnerKey, OwnerRef newOwner) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<LibraryEntry> listByOwner(String ownerKey, String agentScopeOrNull, boolean includeRemoved, int offset, int limit) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<LibraryEntry> getLibraryEntry(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void touchAccess(String storageRef) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean softRemove(String ownerKey, String storageRef, Instant when) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean restore(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long deleteByOwner(String ownerKey) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean deleteLibraryDocument(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<LibraryEntry> expired(Instant now, int limit) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<LibraryEntry> removedBefore(Instant cutoff, int limit) {
+        throw new UnsupportedOperationException();
     }
 }

@@ -415,7 +415,7 @@ Granting is idempotent on both stores (MongoDB adds to a set, PostgreSQL appends
 - **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStore`.
 - **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations; files larger than `eddi.attachments.max-size-bytes` keep their bytes in a blob backend ([Storage backends](#storage-backends)).
 - **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted, with every derived file of them.
-- **Lineage**: a derived file is a row (PostgreSQL) or GridFS file (MongoDB) of the same store with `root_ref` / `metadata.rootRef` naming the uploaded file, and its owner fields copied from it when it is written. The store announces every deleted uploaded file as a CDI event, `AttachmentRootDeleted`, so caches and jobs keyed by that file can clean up; `AttachmentOwnerChanged` is declared for the libraries of later releases and not fired yet. The new columns are additive (`ADD COLUMN IF NOT EXISTS` / new metadata fields, no backfill): `owner_key` empty reads as the conversation id, `page_count` empty as unknown.
+- **Lineage**: a derived file is a row (PostgreSQL) or GridFS file (MongoDB) of the same store with `root_ref` / `metadata.rootRef` naming the uploaded file, and its owner fields copied from it when it is written. The store announces every deleted uploaded file as a CDI event, `AttachmentRootDeleted`, so caches and jobs keyed by that file can clean up, and announces a file that moves into a library as `AttachmentOwnerChanged` ([Library documents](#library-documents)). The new columns are additive (`ADD COLUMN IF NOT EXISTS` / new metadata fields, no backfill): `owner_key` empty reads as the conversation id, `page_count` empty as unknown.
 
 ## Storage backends
 
@@ -438,4 +438,16 @@ What the stores guarantee once large files arrive:
 - **Deleting.** A file's row and a record of its bytes go together; the bytes are then deleted from the backend. If the backend cannot delete them at once, the record — a **tombstone** — stays, and a later delete or upload retries it (a few at a time, so nothing has to be scheduled). An upload whose writer stopped half-way leaves a tombstone too, which becomes due a minute after the upload's reservation (`eddi.attachments.blob.upload-ttl-seconds`, 1 h) has run out. `IAttachmentStore.pendingTombstones` counts what is still waiting, so an erasure can report it as pending. The `eddi_attachment_blob_tombstones_total` meter counts deletes the backend could not finish at once.
 
 A node of an earlier release reads a file stored in a blob backend as empty. That cannot happen before large uploads are switched on, which needs every node on this release or later.
+
+## Library documents
+
+The store can move an uploaded file into a user's **personal library** (`IAttachmentStore.promote`). Nothing calls it yet — the library tools and the REST surface come with later releases — but the rules are fixed here, in both stores:
+
+- **The file moves; nothing is copied.** The file and every derived file of it change owner (owner scope `USER`, owner key the user's personal space) in one step. Views stored later belong to the library too.
+- **It leaves its conversation.** The conversation it came from keeps a grant and reads it like any other conversation it was shared with. It cannot delete it (`delete` refuses a library document for every conversation), does not list it among its own files, and deleting the conversation removes only its grant: the document stays in the library.
+- **Library quotas of its own.** A library document and its image, table, audio and embedded-file views count against the library (`eddi.documents.library.max-per-user`, 50 documents, and `.max-total-bytes-per-user`, 2 GiB) instead of the conversation's and the user's upload quotas; text views never count. A full library refuses the next document with both numbers and never evicts one.
+- **Grants are a ring.** A library document keeps at most `eddi.documents.library.max-grants-per-document` (1,000) grants: past it, the conversation that opened it longest ago loses its grant (the newest never does) and opens it again when it needs it.
+- **Removal is soft first.** A removed document is hidden from the library's listings and its grantees' file lists, keeps counting toward the quota, and can be restored; deleting it for good, by document or for a whole library (erasure), removes its derived files, grants and quota reservations and announces it as deleted. Retention counts from the last opening (`eddi.documents.library.retention-days`, 365).
+
+Slugs — the last part of a document's name in the library — are unique per library; a taken one gets `-2`, `-3`, …. See [configuration-reference.md](configuration-reference.md) for the properties.
 

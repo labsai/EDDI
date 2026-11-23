@@ -9,8 +9,10 @@ package ai.labs.eddi.engine.attachments;
  * file promoted to a library, or moved between libraries). Everything keyed by
  * the old owner key (caches, jobs, index chunks) must be re-keyed or rebuilt.
  * <p>
- * Declared here so that listeners can be written against it; no code path
- * changes an owner yet, so nothing fires it in this release.
+ * Fired by the attachment stores once per root, after the change committed: by
+ * {@code IAttachmentStore.promote} (conversation to library) and
+ * {@code moveOwner} (library to library). Observers must be quick and must not
+ * throw; a failing one is logged and does not undo the change.
  *
  * @param rootRef
  *            the root whose owner changed

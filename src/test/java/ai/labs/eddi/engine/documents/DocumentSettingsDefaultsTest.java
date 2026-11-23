@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -55,5 +56,15 @@ class DocumentSettingsDefaultsTest {
         var expected = new DerivedCaps.Limits(200, 52_428_800L, 20, 52_428_800L, 209_715_200L);
         assertEquals(expected, DocumentSettings.none().derivedCaps());
         assertEquals(expected, new DocumentSettings().derivedCaps(), "no property set in the test configuration");
+    }
+
+    // --- WP-5a.1 ---
+
+    @Test
+    @DisplayName("library store limits: the design's defaults, from the deployment's configuration")
+    void libraryLimits() {
+        var expected = new LibraryStoreSupport.Limits(50, 2_147_483_648L, 365, 1000);
+        assertEquals(expected, DocumentSettings.none().libraryLimits());
+        assertEquals(expected, new DocumentSettings().libraryLimits(), "no property set in the test configuration");
     }
 }

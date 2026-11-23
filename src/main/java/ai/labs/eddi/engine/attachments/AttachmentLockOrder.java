@@ -22,8 +22,10 @@ import java.util.List;
  * would.
  * <p>
  * The stores map a {@link Lock} to their own key format; this class only fixes
- * the order. No team lock is taken yet: team buckets arrive with the team
- * library, and their place in the order is reserved here.
+ * the order. A personal library's bucket locks in the user place, under an id
+ * of its own ({@link LibraryStoreSupport#bucketLock}). No team lock is taken
+ * yet: team buckets arrive with the team library, and their place in the order
+ * is reserved here.
  *
  * @since 6.8.0
  */
@@ -58,7 +60,9 @@ public final class AttachmentLockOrder {
 
     /**
      * The locks to take, in the fixed order. A lock without an id (a user that is
-     * not known) is dropped, and so is a repeated one.
+     * not known) is dropped, and so is a repeated one. Two locks of one scope (a
+     * user's upload bucket and their library's) are taken in the order of their
+     * ids, so two writes that need both cannot take them in opposite order.
      *
      * @param wanted
      *            the locks a write needs, in any order
@@ -66,7 +70,7 @@ public final class AttachmentLockOrder {
      */
     public static List<Lock> ordered(Collection<Lock> wanted) {
         List<Lock> locks = new ArrayList<>(new LinkedHashSet<>(wanted.stream().filter(lock -> lock != null && lock.id() != null).toList()));
-        locks.sort(Comparator.comparing(Lock::scope));
+        locks.sort(Comparator.comparing(Lock::scope).thenComparing(Lock::id));
         return locks;
     }
 }
