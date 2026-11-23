@@ -601,6 +601,13 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
   `continuedConversation` requires the sender to be a participant = the conversation's first sender **or** a To/Cc
   recipient of a SENT reply in that conversation (extend `hasSentReply` to the recipients table, §9.5). Anyone else
   gets their own conversation keyed with their address (and the per-sender thread identity above).
+- **The turn only sees what the sender could read.** Participation lets a sender continue the conversation, not read
+  all of it: a recipient may have missed a later private mail. For a turn in thread mode, the history the model
+  receives is filtered to the mails the current sender was on — From of an inbound row, or a `delivered=true` To/Cc
+  of a SENT reply (§9.5) — plus the sender's own mail. The conversation's first sender is on every mail by
+  definition. Stored memory is unchanged; only the context handed to the turn is narrowed. Test: A mails privately
+  without B, B (who got an earlier reply) replies to that earlier reply → the turn context does not contain A's
+  private mail.
 
 ### 9.5 Ledger and sending
 
