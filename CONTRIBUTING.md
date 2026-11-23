@@ -252,11 +252,14 @@ Every PR runs through these automated gates:
 
 | Check                 | What It Does                                         | Must Pass?     |
 | --------------------- | ---------------------------------------------------- | -------------- |
-| **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
-| **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers) and the JaCoCo 90% instruction / 80% branch coverage gate — on backend changes | Blocks publishing |
+| **CI Gate**           | The aggregate verdict: fails when any check below that the change required failed, was cancelled or did not run (every check, in the merge queue) | ✅ Yes         |
+| **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests, three forks in CI) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
+| **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers), beside Build + Tests — on backend changes | Blocks publishing |
+| **Coverage Gate**     | Merges the unit and integration JaCoCo data and enforces the 90% instruction / 80% branch gate | Blocks publishing |
 | **Trivy Filesystem Scan** · **Secret Scanning** | Dependency CVE scan and Gitleaks | Blocks publishing |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
-| **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
+| **UI Manager Checks** | Manager audit, lint, i18n, typecheck, build and bundle budget — when `ui/` changes | Blocks publishing |
+| **UI Manager Unit Tests** | The Manager's Vitest suite in three shards, then the coverage thresholds on the merged result — when `ui/` changes | Blocks publishing |
 | **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
 | **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
@@ -265,7 +268,7 @@ Every PR runs through these automated gates:
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Import rules (unused/redundant imports) fail the build; length rules are advisory | ✅ Yes (imports) |
-| **JaCoCo**            | Coverage report on every build; the threshold is enforced only in **Integration Tests** | 📊 Report (gate in ITs) |
+| **JaCoCo**            | Coverage report on every build; the threshold is enforced only in **Coverage Gate** | 📊 Report (gate in Coverage Gate) |
 
 ## Security
 

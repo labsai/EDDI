@@ -68,3 +68,31 @@ data.
   0 with them zeroed. UI Manager Checks keeps audit, lint, i18n, typecheck, build and the bundle
   budget; UI Gate now requires the shard and merge jobs too. `ui/manager/.gitignore` ignores
   `.vitest/`.
+- **Docs.** AGENTS.md §2 rule 4: with a merge queue, a PR is queued (`gh pr merge --squash --auto`)
+  only once CodeRabbit has reviewed its current head, every finding is fixed or answered, every
+  thread is resolved and it is approved and green — never armed early; the queue replaces the
+  manual "check main's run before each merge" routine and the one-at-a-time rule, and a PR branch
+  takes `origin/main` only to resolve a conflict. CONTRIBUTING.md, `docs/release-versioning.md`
+  and the Manager's AGENTS.md/CONTRIBUTING.md describe CI Gate, Coverage Gate and the Vitest
+  shards.
+
+### Considered and not done
+
+- **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that
+  `auto-approve-copilot.yml` requires by name; an alternating split ignores that the ten slowest
+  ITs are 58% of the time and splits `@TestProfile` groups (more Quarkus restarts). Measure the
+  critical path with the changes above first; shard by recorded timings if IT then dominates.
+- **Slimming the push-to-main run.** Once merges go through the queue nobody waits on it; it costs
+  runner slots, not merge latency, and it is the last check if the queue is ever bypassed.
+
+### What's next (repository settings, admin only)
+
+1. After this merges: Settings → Rules (or Branches → `main`) → **Require merge queue**, squash,
+   build concurrency 2–3, group size up to 5, "only merge non-failing pull requests".
+   Rollback: untick it.
+2. **Require conversation resolution before merging**, so no PR merges with an open review thread.
+3. Make **`CI Gate`** a required status check *later*, once the open PRs have a run that reports it
+   (a re-run reuses the old workflow file; a push or close/reopen is needed) — until then every
+   open PR would wait on a check that never comes.
+4. After the first runs: compare the PR run's unit-test count (1,958 classes) and merged
+   coverage counts against `main`'s, and the new critical path against ~30 min.
