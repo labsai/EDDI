@@ -203,6 +203,12 @@ audit trail → server log → the configuration that produced it. Follow
   log. A `CONFLICT` means someone changed it meanwhile — read again. Removing the last allowlist
   entry lets every sender in and needs `confirmOpen: true`: only when the user asked for exactly
   that. A conversation an email started can never call these tools.
+  Sender roles decide what an authenticated sender may reach: `list_email_roles` gives the
+  version, the ordered roles (first match wins) and their policies; `update_email_roles`
+  replaces both with that `expectedVersion`, a `roles` JSON and a `reason`. A role only narrows
+  (target names, a tool-name ceiling, a lower per-sender daily cap); every role needs a policy;
+  unauthenticated mail is "anonymous" and gets no tools. Same `CONFLICT` and email-origin rules
+  as the sender lists.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a

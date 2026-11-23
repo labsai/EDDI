@@ -84,6 +84,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -754,7 +755,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             // CALLER_SUPPLIED connection failed closed on turn 0 with a message
             // blaming a "scheduled run".
             CallerIdentity startCaller = callerIdentityContext == null ? null : callerIdentityContext.captureOrCurrent();
-            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller, TurnOrigin.fromContext(context));
+            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller, TurnOrigin.fromContext(context),
+                    TurnToolCeiling.fromContext(context));
 
             IConversation conversation;
             // Bound around the call, not merely recorded after it: a behavior rule can
@@ -778,6 +780,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             var conversationMemory = conversation.getConversationMemory();
             conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
             conversationMemory.setOrigin(resolutionPrincipal.origin());
+            conversationMemory.setToolCeiling(resolutionPrincipal.toolCeiling());
             // Settle point of the CONVERSATION_START turn, which runs inline and never
             // reaches admitTurn's completion callback (an LLM greeting costs too).
             meterTurnCost(conversationMemory);
@@ -1526,6 +1529,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         // conversation it runs in, for good. The turn itself runs on another thread.
         final String turnOrigin = TurnOrigin.combine(TurnOrigin.current(),
                 TurnOrigin.fromContext(inputData == null ? null : inputData.getContext()));
+        // The tool ceiling of an email sender role (email plan v3 §9), read the same
+        // way: it only ever narrows the conversation it reaches.
+        final Set<String> turnCeiling = TurnToolCeiling.intersect(TurnToolCeiling.current(),
+                TurnToolCeiling.fromContext(inputData == null ? null : inputData.getContext()));
         // The request's arrival when the REST layer stamped it: time spent waiting
         // for a request thread counts against a turn deadline too.
         final long arrivalEpochMs = inputData != null && inputData.getRequestArrivalEpochMs() != null
@@ -1656,6 +1663,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                 }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 memory.setOrigin(turnOrigin);
+                memory.setToolCeiling(turnCeiling);
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
                 // A streamed turn reports its progress through the sink on memory, which
@@ -2886,21 +2894,24 @@ public class ConversationService implements IConversationService, UserErasurePar
      * since that surface authenticates a shared key rather than a person.</li>
      * </ul>
      */
-    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller, String contextOrigin) {
+    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller, String contextOrigin,
+                                                          Set<String> contextCeiling) {
         ResolutionPrincipal inherited = currentResolutionPrincipal();
         // The origin taint, unlike the provenance, is inherited whatever the child's
         // user id: it only restricts, and a delegate under another id is exactly the
         // hop a mail-started turn would use to get around it (email plan v3 §5.3).
         String origin = TurnOrigin.combine(TurnOrigin.current(), contextOrigin);
+        // The tool ceiling likewise: a delegate runs under its parent's sender role.
+        Set<String> ceiling = TurnToolCeiling.intersect(inherited == null ? null : inherited.toolCeiling(), contextCeiling);
         if (inherited != null) {
             boolean sameSubject = conversationUserId != null && conversationUserId.equals(inherited.userId());
             return new ResolutionPrincipal(conversationUserId,
-                    sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin);
+                    sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin, ceiling);
         }
         boolean verified = caller != null && caller.userId() != null && !caller.userId().isBlank()
                 && caller.userId().equals(conversationUserId);
         return new ResolutionPrincipal(conversationUserId,
-                verified ? ResolutionPrincipal.Provenance.VERIFIED : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin);
+                verified ? ResolutionPrincipal.Provenance.VERIFIED : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin, ceiling);
     }
 
     private ResolutionPrincipal currentResolutionPrincipal() {
@@ -2945,7 +2956,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             return executeConversation;
         }
         var principal = new ResolutionPrincipal(conversationMemory.getUserId(), conversationMemory.getResolutionProvenance(),
-                conversationMemory.getOrigin());
+                conversationMemory.getOrigin(), conversationMemory.getToolCeiling());
         return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
     }
 
@@ -3162,6 +3173,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                 TurnOrigin.fromContext(inputData == null ? null : inputData.getContext())), memory.getOrigin());
         if (origin != null) {
             turn.put("origin", origin);
+        }
+        Set<String> ceiling = TurnToolCeiling.intersect(TurnToolCeiling.intersect(TurnToolCeiling.current(),
+                TurnToolCeiling.fromContext(inputData == null ? null : inputData.getContext())), memory.getToolCeiling());
+        if (ceiling != null) {
+            turn.put("toolCeiling", List.copyOf(new TreeSet<>(ceiling)));
         }
         if (captureDeadLetterInput && inputData != null) {
             if (isSecretInput(inputData) || agent == null || agent.hasSecretPropertyInstructions()) {

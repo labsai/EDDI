@@ -7,6 +7,9 @@ package ai.labs.eddi.integrations.email;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
+import ai.labs.eddi.configs.channels.model.EmailControl.RolePolicy;
+import ai.labs.eddi.configs.channels.model.EmailControl.SenderRole;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -28,6 +31,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -1203,6 +1207,181 @@ class EmailInboundProcessorTest {
         void brokenTemplateFallsBack() {
             String rendered = processor.renderInput("{#if}", Map.of("subject", "Hi {x}", "text", "body"));
             assertEquals("Hi {x}\n\nbody", rendered);
+        }
+    }
+
+    @Nested
+    @DisplayName("sender roles (email plan v3 §9): bound to the authenticated sender, and only ever narrowing")
+    class SenderRoles {
+
+        static final String FINANCE = "0f0f0f0f0f0f0f0f0f0f0f0f";
+        static final String CFO = "cfo@supplier.com";
+
+        ChannelTarget finance;
+
+        @BeforeEach
+        void targets() {
+            finance = target("finance", FINANCE, "finance");
+        }
+
+        /**
+         * exec: the CFO, unrestricted; customer: the rest of supplier.com, intake only,
+         * kb_search only.
+         */
+        IntegrationContext withRoles(Map<String, String> extra, Map<String, RolePolicy> overrides) {
+            var configuration = integration(extra, target("intake", AGENT), finance);
+            Map<String, RolePolicy> policies = new HashMap<>();
+            policies.put("exec", new RolePolicy(null, null, null, null, null));
+            policies.put("customer", new RolePolicy(List.of("intake"), List.of("kb_search"), null, null, null));
+            policies.putAll(overrides);
+            configuration.setEmailControl(new EmailControl(
+                    List.of(new SenderRole("exec", List.of(CFO)), new SenderRole("customer", List.of("*@supplier.com"))), policies));
+            return new IntegrationContext(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()),
+                    Set.of("orders@contoso.com"));
+        }
+
+        Map<String, Context> startContext() throws Exception {
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Context>> start = ArgumentCaptor.forClass(Map.class);
+            verify(conversations).startConversation(any(), anyString(), anyString(), start.capture());
+            return start.getValue();
+        }
+
+        @SuppressWarnings("unchecked")
+        String senderRoleOf(int turn) {
+            return (String) ((Map<String, Object>) inputs.get(turn).getContext().get("mail").getValue()).get("senderRole");
+        }
+
+        @Test
+        @DisplayName("the CFO's authenticated mail reaches finance unrestricted, and the turn knows the role")
+        void execReachesFinance() throws Exception {
+            processor.process(withRoles(Map.of(), Map.of()), EmailTestMail.mail().from(CFO).subject("finance: Q3").polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+            assertNull(TurnToolCeiling.fromContext(startContext()), "exec has no tool ceiling");
+            assertNull(TurnToolCeiling.fromContext(inputs.get(0).getContext()));
+            assertEquals("exec", senderRoleOf(0));
+        }
+
+        @Test
+        @DisplayName("a customer reaches only intake, with only kb_search — from the conversation start on")
+        void customerNarrowed() throws Exception {
+            var ctx = withRoles(Map.of(), Map.of());
+            processor.process(ctx, EmailTestMail.mail().polled(1), Instant.now());
+
+            assertEquals(Set.of("kb_search"), TurnToolCeiling.fromContext(startContext()));
+            assertEquals(Set.of("kb_search"), TurnToolCeiling.fromContext(inputs.get(0).getContext()));
+            assertEquals("customer", senderRoleOf(0));
+
+            EmailTestMail toFinance = EmailTestMail.mail().subject("finance: pay me");
+            processor.process(ctx, toFinance.polled(2), Instant.now());
+            assertEquals(State.REFUSED, row(toFinance).state());
+            assertEquals("blocked:role_target_not_allowed", row(toFinance).lastError(), "refused, never rerouted");
+        }
+
+        @Test
+        @DisplayName("a forged From (a pass, but not aligned) naming the CFO gets no role: anonymous, no tools")
+        void forgedFromGetsNoRole() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.PASS_UNALIGNED, "bulkmailer.example");
+            processor.process(withRoles(Map.of("requireAuthentication", "false"), Map.of()), EmailTestMail.mail().from(CFO).polled(1),
+                    Instant.now());
+
+            assertEquals(Set.of(), TurnToolCeiling.fromContext(startContext()), "an unauthenticated mail runs without any tool");
+            assertEquals("anonymous", senderRoleOf(0));
+        }
+
+        @Test
+        @DisplayName("an unauthenticated mail never inherits a role, even when its From matches one")
+        void unauthenticatedInheritsNothing() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.NONE, null);
+            var ctx = withRoles(Map.of("requireAuthentication", "false"), Map.of());
+            EmailTestMail mail = EmailTestMail.mail().from(CFO).subject("finance: wire 1M");
+
+            processor.process(ctx, mail.polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+            assertEquals(Set.of(), TurnToolCeiling.fromContext(inputs.get(0).getContext()));
+            assertEquals("anonymous", senderRoleOf(0));
+        }
+
+        @Test
+        @DisplayName("a role never widens a target's own rules: exec still cannot pass finance's allowedSenders")
+        void roleDoesNotWidenTargetRules() throws Exception {
+            finance.setAllowedSenders(List.of("treasurer@supplier.com"));
+            var ctx = withRoles(Map.of(), Map.of("exec", new RolePolicy(List.of("finance"), null, null, null, null)));
+            EmailTestMail mail = EmailTestMail.mail().from(CFO).subject("finance: Q3");
+
+            processor.process(ctx, mail.polled(1), Instant.now());
+
+            assertEquals("blocked:target_not_allowed", row(mail).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a stored role cap above the integration's does not raise it")
+        void roleCapDoesNotWiden() throws Exception {
+            var ctx = withRoles(Map.of("maxTurnsPerSenderPerDay", "1"), Map.of("exec", new RolePolicy(null, null, null, null, 50)));
+            processor.process(ctx, EmailTestMail.mail().from(CFO).polled(1), Instant.now());
+            EmailTestMail second = EmailTestMail.mail().from(CFO);
+
+            processor.process(ctx, second.polled(2), Instant.now());
+
+            assertEquals("throttled", row(second).lastError());
+        }
+
+        @Test
+        @DisplayName("a role's lower cap applies")
+        void roleCapNarrows() throws Exception {
+            var ctx = withRoles(Map.of(), Map.of("customer", new RolePolicy(null, null, null, null, 1)));
+            processor.process(ctx, EmailTestMail.mail().polled(1), Instant.now());
+            EmailTestMail second = EmailTestMail.mail();
+
+            processor.process(ctx, second.polled(2), Instant.now());
+
+            assertEquals("throttled", row(second).lastError());
+        }
+
+        @Test
+        @DisplayName("a replayed CFO mail is refused as a replay: the role is never reached")
+        void replayedMailReusesNoRole() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("from", "subject", "date"), List.of(), List.of(), "cfo-sig"));
+            var ctx = withRoles(Map.of(), Map.of());
+            processor.process(ctx, EmailTestMail.mail().from(CFO).subject("finance: pay").polled(1), Instant.now());
+            EmailTestMail replay = EmailTestMail.mail().from(CFO).subject("finance: pay").messageId("<fresh@attacker.example>");
+
+            processor.process(ctx, replay.polled(2), Instant.now());
+
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a role a stored document names without a policy refuses the mail (fail closed)")
+        void roleWithoutPolicyFailsClosed() throws Exception {
+            var ctx = withRoles(Map.of(), Map.of());
+            ctx.integration().setEmailControl(new EmailControl(List.of(new SenderRole("ghost", List.of("*@supplier.com"))), Map.of()));
+            EmailTestMail mail = EmailTestMail.mail();
+
+            processor.process(ctx, mail.polled(1), Instant.now());
+
+            assertEquals("blocked:role_without_policy", row(mail).lastError());
+        }
+
+        @Test
+        @DisplayName("a restricted role cannot reach a group, whose members use their own tools")
+        void restrictedRoleNoGroup() throws Exception {
+            ChannelTarget panel = target("panel", "0d0d0d0d0d0d0d0d0d0d0d0d", "panel");
+            panel.setType(ChannelTarget.TargetType.GROUP);
+            var configuration = integration(Map.of(), target("intake", AGENT), panel);
+            configuration.setEmailControl(new EmailControl(List.of(new SenderRole("customer", List.of("*@supplier.com"))),
+                    Map.of("customer", new RolePolicy(null, List.of("kb_search"), null, null, null))));
+            var ctx = new IntegrationContext(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()), Set.of());
+            EmailTestMail mail = EmailTestMail.mail().subject("panel: discuss");
+
+            processor.process(ctx, mail.polled(1), Instant.now());
+
+            assertEquals("blocked:role_target_not_allowed", row(mail).lastError());
         }
     }
 

@@ -165,6 +165,17 @@ public class EmailChannelSupport {
         }
     }
 
+    /**
+     * Records a change of the integration's sender roles in the audit ledger
+     * ({@link EmailSenderListAudit#rolesChanged}). Never throws.
+     */
+    public void auditSenderRolesChange(String integrationId, Integer previousVersion, Integer newVersion, List<String> changes,
+                                       String reason) {
+        if (senderListAudit != null && senderListAudit.isResolvable()) {
+            senderListAudit.get().rolesChanged(integrationId, previousVersion, newVersion, changes, reason);
+        }
+    }
+
     /** Stable warning codes for a saved email integration (never a refusal). */
     public List<String> warnings(ChannelIntegrationConfiguration configuration) {
         EmailChannelSettings settings = EmailChannelSettings.from(configuration.getPlatformConfig());

@@ -106,6 +106,7 @@ public class ConversationMemoryUtilities {
         // provenance the live memory no longer claims.
         snapshot.setResolutionProvenance(conversationMemory.getResolutionProvenance());
         snapshot.setOrigin(conversationMemory.getOrigin());
+        snapshot.setToolCeiling(conversationMemory.getToolCeiling());
 
         if (conversationMemory.getConversationId() != null) {
             snapshot.setConversationId(conversationMemory.getConversationId());
@@ -183,6 +184,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setStoredFence(snapshot.getFence());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setOrigin(snapshot.getOrigin());
+        conversationMemory.setToolCeiling(snapshot.getToolCeiling());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
         conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());

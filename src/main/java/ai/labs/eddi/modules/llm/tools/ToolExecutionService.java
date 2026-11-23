@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.EscalationGuard;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
@@ -368,6 +369,16 @@ public class ToolExecutionService {
             LOGGER.warnf("Refused tool %s in conversation %s: the turn was started by an email", sanitize(toolName),
                     sanitize(conversationId));
             return "Error: " + escalation.get();
+        }
+        // The tool ceiling of an email sender role (email plan v3 §9): a turn runs only
+        // the tools the sender's role names, whatever the agent has. Checked by the
+        // dispatch name the model called; a role names tools as the model sees them.
+        Optional<String> outsideRole = TurnToolCeiling.refuseTool(toolName);
+        if (outsideRole.isPresent()) {
+            meterRegistry.counter("eddi.tool.execution.sender_role_refused", "tool", toolName).increment();
+            LOGGER.warnf("Refused tool %s in conversation %s: the email sender role does not allow it", sanitize(toolName),
+                    sanitize(conversationId));
+            return "Error: " + outsideRole.get();
         }
 
         // Caching additionally requires a scope tag to partition the entry by. When

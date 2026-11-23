@@ -92,7 +92,7 @@ public class McpToolFilter implements ToolFilter {
             "list_channel_integrations", "read_channel_integration", "create_channel_integration", "update_channel_integration",
             "delete_channel_integration",
             // Email sender lists (targeted edit of an email integration)
-            "list_email_senders", "update_email_senders",
+            "list_email_senders", "update_email_senders", "list_email_roles", "update_email_roles",
             // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
             "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
             "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",

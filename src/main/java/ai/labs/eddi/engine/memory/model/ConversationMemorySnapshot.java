@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import java.util.Set;
 import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
@@ -156,6 +157,11 @@ public class ConversationMemorySnapshot {
      * conversation among those is still recognised by its user id.
      */
     private String origin;
+    /**
+     * The tool ceiling ({@code TurnToolCeiling}) of the conversation, or
+     * {@code null} for none. Absent in documents written before it existed.
+     */
+    private Set<String> toolCeiling;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     /**
@@ -622,6 +628,14 @@ public class ConversationMemorySnapshot {
 
     public void setOrigin(String origin) {
         this.origin = origin;
+    }
+
+    public Set<String> getToolCeiling() {
+        return toolCeiling;
+    }
+
+    public void setToolCeiling(Set<String> toolCeiling) {
+        this.toolCeiling = toolCeiling;
     }
 
     public Deployment.Environment getEnvironment() {

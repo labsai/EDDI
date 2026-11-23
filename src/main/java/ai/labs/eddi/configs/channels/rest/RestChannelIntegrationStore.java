@@ -9,7 +9,9 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.EmailSenderLists;
+import ai.labs.eddi.configs.channels.model.EmailSenderRoles;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -283,7 +285,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     @Override
     public Response updateChannel(String id, Integer version, Boolean confirmOpen,
                                   ChannelIntegrationConfiguration channelConfiguration) {
-        return saveChannel(id, version, channelConfiguration, confirmOpen, null, null);
+        return saveChannel(id, version, channelConfiguration, confirmOpen, null, null, false);
     }
 
     /**
@@ -301,9 +303,15 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * @param before
      *            the lists the save starts from, when the caller already read them;
      *            {@code null} reads them from the stored version
+     * @param rolesEdit
+     *            the save is the targeted sender-role edit, which may remove every
+     *            role on purpose; a whole-document save that leaves
+     *            {@code emailControl} out while the stored version has roles is
+     *            refused, since it would put every sender back on role
+     *            {@code default} without anyone deciding so (email plan v3 §9)
      */
     private Response saveChannel(String id, Integer version, ChannelIntegrationConfiguration channelConfiguration, Boolean confirmOpen,
-                                 String reason, EmailSenderLists.View before) {
+                                 String reason, EmailSenderLists.View before, boolean rolesEdit) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
@@ -317,6 +325,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, baseVersion));
             validateUniqueName(channelConfiguration, id);
             EmailSenderLists.Change senders = null;
+            List<String> roleChanges = List.of();
             if (isEmail(channelConfiguration)) {
                 emailSupport().validateAgainstDeployment(channelConfiguration, id);
                 if (before != null) {
@@ -327,10 +336,19 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 if (senders != null && senders.allowlistEmptied() && !Boolean.TRUE.equals(confirmOpen)) {
                     throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
                 }
+                EmailControl storedControl = storedEmailControl(id, baseVersion);
+                if (!rolesEdit && storedControl != null && storedControl.hasRoles() && channelConfiguration.getEmailControl() == null) {
+                    throw new BadRequestException(ROLES_DROPPED);
+                }
+                roleChanges = EmailSenderRoles.diff(storedControl, channelConfiguration.getEmailControl());
             }
             Response response = restVersionInfo.update(id, baseVersion, channelConfiguration);
             syncDescriptor(id, channelConfiguration);
             Response answered = withEmailFollowUp(id, channelConfiguration, response);
+            if (!roleChanges.isEmpty() && answered.getStatus() < 300) {
+                var saved = answered.getLocation() == null ? null : RestUtilities.extractResourceId(answered.getLocation());
+                emailSupport().auditSenderRolesChange(id, baseVersion, saved == null ? null : saved.getVersion(), roleChanges, reason);
+            }
             if (senders == null || !senders.changed() || answered.getStatus() >= 300) {
                 return answered;
             }
@@ -563,7 +581,8 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             current.setPlatformConfig(EmailSenderLists.withLists(current.getPlatformConfig(), change.allow(), change.block()));
             // The whole-document save makes the confirmOpen check, the warning and the
             // audit entry, as it does for every save — this edit adds its reason.
-            Response saved = saveChannel(id, version, current, request.confirmOpen(), EmailSenderLists.cleanReason(request.reason()), before);
+            Response saved = saveChannel(id, version, current, request.confirmOpen(), EmailSenderLists.cleanReason(request.reason()), before,
+                    false);
             var location = saved.getLocation() == null ? null : RestUtilities.extractResourceId(saved.getLocation());
             Integer newVersion = location == null ? null : location.getVersion();
             List<String> warnings = new ArrayList<>();
@@ -577,6 +596,105 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             }
             var result = new EmailSenderLists.UpdateResult(version, newVersion, true, change.allow(), change.block(), change.added(),
                     change.removed(), change.unchanged(), warnings);
+            Response.ResponseBuilder answer = Response.ok(result).type(MediaType.APPLICATION_JSON);
+            if (saved.getLocation() != null) {
+                answer.location(saved.getLocation());
+            }
+            if (!warnings.isEmpty()) {
+                answer.header(WARNINGS_HEADER, String.join(",", warnings));
+            }
+            return answer.build();
+        }
+    }
+
+    /** The refusal of a whole-document save that would silently drop the roles. */
+    static final String ROLES_DROPPED = "This save leaves emailControl out, and the stored version has sender roles: saving it would "
+            + "put every sender back on role 'default'. Send emailControl with the integration (read it first), or change the roles "
+            + "with PUT .../email-roles.";
+
+    /**
+     * The {@code emailControl} of the stored version {@code version}, or
+     * {@code null} when it has none or does not exist. Any other failure refuses
+     * the save, as for the sender lists: unread, a save could drop the roles
+     * unseen.
+     */
+    private EmailControl storedEmailControl(String id, Integer version) {
+        if (id == null || version == null) {
+            return null;
+        }
+        try {
+            ChannelIntegrationConfiguration stored = channelStore.read(id, version);
+            return stored == null ? null : stored.getEmailControl();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (Exception e) {
+            LOG.errorf("Could not read version %d of email integration '%s' to compare its sender roles; refusing the save", version,
+                    sanitize(id));
+            throw new InternalServerErrorException("The stored sender roles could not be read; the email integration was not saved.");
+        }
+    }
+
+    @Override
+    public EmailSenderRoles.View readEmailRoles(String id) {
+        restVersionInfo.requireViewAccess(id);
+        int version = currentVersion(id);
+        ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+        return viewOf(version, current.getEmailControl());
+    }
+
+    private static EmailSenderRoles.View viewOf(Integer version, EmailControl control) {
+        return new EmailSenderRoles.View(version, control == null || control.getSenderRoles() == null ? List.of() : control.getSenderRoles(),
+                control == null || control.getRolePolicies() == null ? Map.of() : control.getRolePolicies());
+    }
+
+    /**
+     * Replaces the sender roles (email plan v3 §9). As for the sender lists, the
+     * read, the version check and the write are one step under
+     * {@link #uniquenessLock}, and the write is the ordinary save with its
+     * validation, warnings and audit entry.
+     */
+    @Override
+    public Response updateEmailRoles(String id, EmailSenderRoles.UpdateRequest request) {
+        if (request == null || request.expectedVersion() == null) {
+            throw new BadRequestException("The body must name the version it was read from: {\"expectedVersion\": <n>, ...}.");
+        }
+        restVersionInfo.requireEditAccess(id);
+        synchronized (uniquenessLock) {
+            int version = currentVersion(id);
+            ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+            EmailControl before = current.getEmailControl();
+            if (request.expectedVersion() != version) {
+                return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON).entity(viewOf(version, before)).build();
+            }
+            EmailControl requested = new EmailControl(request.senderRoles(), request.rolePolicies());
+            EmailControl normalised;
+            try {
+                normalised = EmailSenderRoles.validate(requested, current.getTargets(),
+                        EmailChannelSettings.from(current.getPlatformConfig()).maxTurnsPerSenderPerDay());
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException(e.getMessage());
+            }
+            List<String> changes = EmailSenderRoles.diff(before, normalised);
+            if (changes.isEmpty()) {
+                return Response.ok(new EmailSenderRoles.UpdateResult(version, version, false, viewOf(version, before).senderRoles(),
+                        viewOf(version, before).rolePolicies(), List.of(), List.of())).type(MediaType.APPLICATION_JSON).build();
+            }
+            current.setEmailControl(normalised);
+            Response saved = saveChannel(id, version, current, null, EmailSenderLists.cleanReason(request.reason()), null, true);
+            var location = saved.getLocation() == null ? null : RestUtilities.extractResourceId(saved.getLocation());
+            Integer newVersion = location == null ? null : location.getVersion();
+            List<String> warnings = new ArrayList<>();
+            String header = saved.getHeaderString(WARNINGS_HEADER);
+            if (header != null && !header.isBlank()) {
+                for (String code : header.split(",")) {
+                    if (!code.isBlank() && !warnings.contains(code.trim())) {
+                        warnings.add(code.trim());
+                    }
+                }
+            }
+            EmailSenderRoles.View after = viewOf(newVersion, normalised);
+            var result = new EmailSenderRoles.UpdateResult(version, newVersion, true, after.senderRoles(), after.rolePolicies(), changes,
+                    warnings);
             Response.ResponseBuilder answer = Response.ok(result).type(MediaType.APPLICATION_JSON);
             if (saved.getLocation() != null) {
                 answer.location(saved.getLocation());
@@ -745,6 +863,19 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             List<String> emailErrors = EmailChannelSettings.validate(config.getPlatformConfig());
             if (!emailErrors.isEmpty()) {
                 throw new BadRequestException(String.join(" ", emailErrors));
+            }
+        }
+        // The typed email settings (email plan v3 §4): sender roles, which only narrow.
+        // Refused on any other type, where they would read as if they applied.
+        if (config.getEmailControl() != null) {
+            if (!email) {
+                throw new BadRequestException("emailControl is only supported for email integrations.");
+            }
+            try {
+                config.setEmailControl(EmailSenderRoles.validate(config.getEmailControl(), targets,
+                        EmailChannelSettings.from(config.getPlatformConfig()).maxTurnsPerSenderPerDay()));
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException(e.getMessage());
             }
         }
 

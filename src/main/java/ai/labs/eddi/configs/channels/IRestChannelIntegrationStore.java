@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.channels;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailSenderLists;
+import ai.labs.eddi.configs.channels.model.EmailSenderRoles;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
@@ -133,4 +134,25 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
             + "not the current version; 400 for an invalid entry, an entry on both lists, more than 200 entries, or removing "
             + "the last allowlist entry without confirmOpen: true. Needs edit access.")
     Response updateEmailSenders(@PathParam("id") String id, EmailSenderLists.UpdateRequest request);
+
+    @GET
+    @Path("/{id}/email-roles")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(description = "Read the sender roles of an email integration's current version: {\"version\", \"senderRoles\": "
+            + "[{\"role\", \"senders\": [...]}], \"rolePolicies\": {role: {\"targets\", \"tools\", \"maxTurnsPerSenderPerDay\"}}}. "
+            + "A role binds to the authenticated sender of an aligned DKIM pass only; an unauthenticated mail is 'anonymous'. "
+            + "Needs view access.")
+    EmailSenderRoles.View readEmailRoles(@PathParam("id") String id);
+
+    @PUT
+    @Path("/{id}/email-roles")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(description = "Replace the sender roles and role policies of an email integration without rewriting it. The body is "
+            + "{\"expectedVersion\", \"senderRoles\": [...], \"rolePolicies\": {...}, \"reason\"}; the first matching role wins, so "
+            + "the list is replaced as a whole. A role can only narrow: targets among the integration's, tools as a ceiling, a cap of "
+            + "at most the integration's maxTurnsPerSenderPerDay. A change is a new version of the integration, audited with its "
+            + "reason. 409 with the current roles when expectedVersion is not the current version; 400 for a policy that would "
+            + "widen, a role without a policy, or an invalid pattern. Needs edit access.")
+    Response updateEmailRoles(@PathParam("id") String id, EmailSenderRoles.UpdateRequest request);
 }

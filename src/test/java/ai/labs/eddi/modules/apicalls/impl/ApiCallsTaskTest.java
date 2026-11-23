@@ -16,6 +16,10 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +32,7 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -110,6 +115,38 @@ class ApiCallsTaskTest {
             task.execute(memory, config);
 
             verify(httpCallExecutor).execute(eq(greetCall), eq(memory), any(), eq("http://localhost:8080"));
+        }
+
+        @Test
+        @DisplayName("an email sender role's tool ceiling sends only the rule-driven calls it names")
+        @SuppressWarnings("unchecked")
+        void senderRoleCeiling() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+            ApiCall allowed = new ApiCall();
+            allowed.setName("kb_search");
+            allowed.setActions(List.of("greet"));
+            ApiCall refused = new ApiCall();
+            refused.setName("http_post");
+            refused.setActions(List.of("greet"));
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(allowed, refused));
+            config.setTargetServerUrl("http://localhost:8080");
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(Map.of("result", "ok"));
+
+            var principals = new ResolutionPrincipalContext();
+            principals.bind(new ResolutionPrincipal("email:x:ann@customer-a.com", Provenance.SELF_ASSERTED, TurnOrigin.EMAIL,
+                    Set.of("kb_search")));
+            try {
+                task.execute(memory, config);
+            } finally {
+                principals.clear();
+            }
+
+            verify(httpCallExecutor).execute(eq(allowed), eq(memory), any(), any());
+            verify(httpCallExecutor, never()).execute(eq(refused), any(), any(), any());
         }
 
         @Test

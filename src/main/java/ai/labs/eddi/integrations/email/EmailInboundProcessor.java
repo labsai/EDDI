@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -360,6 +361,16 @@ public class EmailInboundProcessor {
             }
         }
 
+        // 6a. The sender's role (email plan v3 §9), after every check above: a role
+        // binds to the authenticated From of the signed view only, once the mail is
+        // known not to be a replay. An unauthenticated mail is "anonymous" before any
+        // pattern is looked at. A role only narrows what follows.
+        EmailSenderRoleResolver.Resolved role = EmailSenderRoleResolver.resolve(ctx.integration().getEmailControl(), sender, authenticated,
+                settings.maxTurnsPerSenderPerDay());
+        if (role.refusal() != null) {
+            return refuse(ctx, row, role.refusal(), EmailMetrics.BLOCKED, now);
+        }
+
         // 7. Addressed? Read from the signed view only, and after every refusal above
         // (so those reasons win, and a replayed copy is refused as a replay rather
         // than judged on headers its holder may have added), but before the budgets:
@@ -468,6 +479,9 @@ public class EmailInboundProcessor {
             if (!mayReach(target, sender, authenticated)) {
                 return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
             }
+            if (!role.allowsTarget(target)) {
+                return refuse(ctx, row, "blocked:role_target_not_allowed", EmailMetrics.BLOCKED, now);
+            }
         } else {
             owner = ownerOf(existingConversation);
             // Without the owner's agent its allowedSenders cannot be checked: when any
@@ -478,13 +492,21 @@ public class EmailInboundProcessor {
             if (!ownerAdmits(ctx.integration(), owner.agentId(), target, sender, authenticated)) {
                 return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
             }
+            // The role, too, is judged by the owner agent: some target of it must be one
+            // the role may reach. Without the owner it cannot be judged: wait.
+            if (role.targets() != null && owner.agentId() == null) {
+                return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
+            }
+            if (!roleAdmitsOwner(ctx.integration(), owner.agentId(), role)) {
+                return refuse(ctx, row, "blocked:role_target_not_allowed", EmailMetrics.BLOCKED, now);
+            }
             if (owner.agentId() != null && route.source().explicit() && !owner.agentId().equals(target.getTargetId())) {
                 routeData.put("redirectRefused", target.getName());
                 LOGGER.infof("Email integration %s: mail %s addressed target %s but continues conversation %s of another agent", sanitize(id),
                         row.id(), sanitize(target.getName()), sanitize(existingConversation));
             }
         }
-        Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData);
+        Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData, SENDER_ROLE_KEY, role.role());
 
         // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
         // no sender hears anything.
@@ -493,8 +515,8 @@ public class EmailInboundProcessor {
             defer(ctx, row, now.plus(RETRY_BUDGET), "budget", EmailMetrics.BUDGET, now);
             return Disposition.STOP;
         }
-        if (settings.maxTurnsPerSenderPerDay() > 0
-                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= settings.maxTurnsPerSenderPerDay()) {
+        if (role.maxTurnsPerSenderPerDay() > 0
+                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= role.maxTurnsPerSenderPerDay()) {
             ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.THROTTLED, now);
             return defer(ctx, row, startOfUtcDay(now).plus(Duration.ofDays(1)), "throttled", EmailMetrics.THROTTLED, now);
         }
@@ -535,7 +557,7 @@ public class EmailInboundProcessor {
             String conversationId = existingConversation;
             double costBefore = owner != null ? owner.cost() : 0.0;
             if (conversationId == null) {
-                conversationId = startConversation(target.getTargetId(), userId, id, intent);
+                conversationId = startConversation(target.getTargetId(), userId, id, intent, role.toolCeiling());
             }
             ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, conversationId, deadline, null, false, now);
             List<Map<String, Object>> attachmentData = new ArrayList<>();
@@ -547,6 +569,11 @@ public class EmailInboundProcessor {
             // Every mail turn re-asserts the taint, also on a conversation that is older
             // than the stored taint.
             context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+            // And the sender role's tool ceiling, re-asserted per mail: the stored one is
+            // narrowed by it, never widened.
+            if (role.toolCeiling() != null) {
+                context.put(TurnToolCeiling.CONTEXT_KEY, TurnToolCeiling.toContext(role.toolCeiling()));
+            }
             input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true, addressed));
             InputData inputData = new InputData(input, context);
             // The turn carries the mail's ledger key: a turn submitted again for the same
@@ -681,11 +708,18 @@ public class EmailInboundProcessor {
         return known;
     }
 
-    private String startConversation(String agentId, String userId, String integrationId, String intent) throws Exception {
+    private String startConversation(String agentId, String userId, String integrationId, String intent, Set<String> toolCeiling)
+            throws Exception {
         // The taint (email plan v3 §5.3): this conversation, and every one it starts,
         // cannot change channel integrations or decide approvals.
-        Map<String, Context> startContext = Map.of(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId),
-                TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        Map<String, Context> startContext = new LinkedHashMap<>();
+        startContext.put(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId));
+        startContext.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        // The sender role's tool ceiling (§9) holds from the CONVERSATION_START turn
+        // on.
+        if (toolCeiling != null) {
+            startContext.put(TurnToolCeiling.CONTEXT_KEY, TurnToolCeiling.toContext(toolCeiling));
+        }
         String conversationId = conversationService.startConversation(Deployment.Environment.production, agentId, userId, startContext)
                 .conversationId();
         if (intent == null) {
@@ -922,6 +956,11 @@ public class EmailInboundProcessor {
     static final String ADDRESSING_KEY = "addressing";
     /** Key of {@link RouteDecision#toMap()} in the mail map. */
     static final String ROUTE_KEY = "route";
+    /**
+     * Key in the {@code mail} context: the sender's role (email plan v3 §9), for a
+     * prompt to adapt its tone. Never read back for enforcement.
+     */
+    static final String SENDER_ROLE_KEY = "senderRole";
 
     /** Every address mail from which is this integration's own. */
     private static Set<String> ownSenders(EmailChannelSettings settings) {
@@ -1007,6 +1046,28 @@ public class EmailInboundProcessor {
             }
         }
         return !any && (routed == null || mayReach(routed, sender, authenticated));
+    }
+
+    /**
+     * Whether the sender's role may reach the agent that owns a continued
+     * conversation: some target naming that agent must be one the role may reach.
+     */
+    static boolean roleAdmitsOwner(ChannelIntegrationConfiguration integration, String ownerAgentId,
+                                   EmailSenderRoleResolver.Resolved role) {
+        if (role.targets() == null) {
+            // No target restriction; a tool ceiling travels with the turn's context.
+            return true;
+        }
+        if (ownerAgentId == null || integration.getTargets() == null) {
+            return false;
+        }
+        for (ChannelTarget candidate : integration.getTargets()) {
+            if (candidate != null && ownerAgentId.equals(candidate.getTargetId()) && candidate.getType() != ChannelTarget.TargetType.GROUP
+                    && role.allowsTarget(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static String verdictId(MailAuthentication authentication) {
