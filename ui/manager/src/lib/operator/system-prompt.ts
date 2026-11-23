@@ -782,7 +782,12 @@ const BODY_KNOWLEDGE_BASES_RUNS = `- To answer "did the documents actually land?
   \`documentsFailed\`). \`resumeAfter\` is when the provider takes calls again —
   for Gemini's daily quota, midnight Pacific time. Until then the source's
   scheduled runs are held back without listing the source or calling the
-  provider; "Run now" is not held back, but runs into the same limit. When you
+  provider; "Run now" is not held back, but runs into the same limit. Google
+  Drive and upload sources queue what they list in a durable work table and
+  drain it; a throttled document waits there until \`resumeAfter\`, and a run
+  with \`trigger: CONTINUATION\` is the automatic follow-up that drains the
+  rest, listing nothing. A document that failed five times stays failed until
+  it changes or someone uses "Retry failed" in the Manager. When you
   give the resume time, include its date unless it is today. A run that
   FAILED with an error about the provider account's quota or billing
   (\`insufficient_quota\`) is not a throttle: waiting will not help, the

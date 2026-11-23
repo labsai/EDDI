@@ -1007,6 +1007,16 @@ for its **Browse the drive** dialog.
   or moved out of scope is reconciled like a vanished web page: after `tombstoneAfterMissedRuns`
   complete runs — or at the next complete run when the configured scope itself changed (see
   [Scoping by folder](#scoping-by-folder)).
+- **Listed, then drained.** The listing queues each new or changed file in the source's
+  [work table](#the-work-table); the downloads and exports happen in the drain, under a claim, so a
+  throttle or a crash part-way leaves the rest queued rather than lost.
+- **Quota in units.** Drive counts a user's quota in units per minute, not requests: a listing or a
+  metadata read costs 100, a download or an export 200. Every call is charged first against a bucket
+  per connection that refills at `eddi.rag.throttle.googleDrive.units-per-minute` (default 250,000,
+  under Drive's 325,000); a call the bucket cannot pay for waits, within the run's deadline. The bucket
+  is per node; a 429 or a rate-limit 403 from Drive is shared through the same cooldown row as the
+  embedding throttle, so every node stops calling that connection until the time Drive asked for (one
+  minute when it named none). A download that meets it is deferred, not failed.
 - **Shortcuts.** Every listing is limited to the Shared Drive, so a shortcut to a folder elsewhere
   lists nothing and cannot widen the source. A shortcut to a folder inside it is followed once — the
   visited set is the cycle guard a shortcut back to a parent needs. A shortcut to a file is skipped:
@@ -1059,6 +1069,8 @@ out unchanged.
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After`. A `googleDrive` preview downloads nothing and returns a listing summary (files by format, bytes, skips) as its `message` |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/drive/folders?version=N&parentId=root&pageToken=` | EDIT | A `googleDrive` source's folder picker: one level of folders of its Shared Drive, at most 200 a page, through its own connection — never a file (see [Scoping by folder](#scoping-by-folder)) |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors — including the run in flight, whose counters move while it works |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/work?version=N` | VIEW | The source's [work table](#the-work-table) by state: `queued`, `deferred`, `inFlight`, `done`, `failed`, and `nextAttemptAt` — when the next deferred document is due |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/retry-failed?version=N` | EDIT | Queue the documents that failed `eddi.rag.ingestion.work.max-attempts` times again (answers `{requeued}`) and wake the drain |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
 | `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
@@ -1076,11 +1088,65 @@ embedding call each, while the document listing returns only ingestion state and
 
 Each run row carries, besides its counters, **why it stopped** (`stopReason`: `COMPLETED`, or the limit
 it hit — `PAGE_LIMIT`, `FETCH_LIMIT`, `BYTE_LIMIT`, `TIME_LIMIT` — or `CANCELLED`, which also covers a
-run that was superseded or reached its chunk budget, or `THROTTLED`, below), **what started it** (`trigger`: `MANUAL` or
-`SCHEDULED`; absent on rows written before it was recorded) and how many documents were **skipped** for
+run that was superseded or reached its chunk budget, or `THROTTLED`, below), **what started it** (`trigger`: `MANUAL`,
+`SCHEDULED`, or `CONTINUATION` for a run that drained what an earlier listing queued; absent on rows
+written before it was recorded) and how many documents were **skipped** for
 having no text worth embedding. A running run writes its counters every couple of seconds
 (`IIngestionStateStore.reportProgress`), fenced on the row still being `RUNNING`, so a late write can
 neither reopen nor overwrite a finished run. A run cancelled at shutdown keeps the counters it had got to.
+
+#### The work table
+
+A run does not fetch and embed each document the moment its source lists it. For a source whose
+documents are fetched on demand — **Google Drive** and **uploaded files** — the listing **queues** every
+new or changed document in the source's work table, and the run then **drains** the table: it claims
+due documents in small batches and processes them one by one. A crawled web page arrives with its
+content and is processed where it is found, as before; a preview queues nothing.
+
+The table is the document-state rows themselves (`rag_ingestion_documents` on PostgreSQL, its MongoDB
+twin), with work columns added: `work_state` (`PENDING`, `CLAIMED`, `DONE`, `POISON`), `work_version`,
+the version the listing saw, what the drain needs to fetch the document again (its hints and citation,
+the folder chain included), `not_before`, `attempts`, `last_error`, and the claim's owner and lease.
+Existing rows read as having no work; the columns are added on startup.
+
+- **A listing only lists.** It is cheap and complete, so it is no longer cut short by an embedding
+  provider's throttle, and a complete listing reconciles deletions even when the drain after it is
+  throttled. Queueing counts as seeing the document — it is never missed for being still queued — and
+  never touches what the document was last ingested as: its old chunks stay until new ones are
+  stored. A complete listing also withdraws the queued work of documents it no longer finds (gone, or
+  outside the folder scope now); a partial one withdraws nothing.
+- **Queueing is idempotent.** A document already queued, in flight or failed under the same version
+  keeps its row as it is — its `not_before` and attempt count included — so a cron listing the source
+  again does not undo a throttle's deferral. A new version re-queues it.
+- **Claims are exclusive.** A claim is one atomic statement per row (`FOR UPDATE SKIP LOCKED` on
+  PostgreSQL, `findOneAndUpdate` on MongoDB), so two nodes never process the same document, and only
+  the run that owns the source can claim. A claim's lease outlasts its run's stale deadline.
+- **A crash loses a slice, not a run.** Whatever a run had not finished stays queued. When a dead run
+  is reaped its claims go back to pending at once (and a claim whose lease has passed can be taken in
+  any case). A document processed again after a crash is not embedded twice: its recorded version
+  makes it unchanged.
+- **Deferring is not failing.** A throttle — the embedding provider's, or Google Drive's — moves the
+  document's `not_before` to when the provider takes calls again (`resumeAfter`, or
+  `eddi.ingestion.throttle.cooldown` from now when it named no time). Nothing is counted as failed and
+  nothing is removed. A budget stop leaves the rest due for the next run. Only a real failure (a 5xx, a
+  timeout, a document that would not embed) counts an attempt, with a backoff of one minute doubling up
+  to an hour; after `eddi.rag.ingestion.work.max-attempts` (default 5) the document is **failed for
+  good** until its version changes or **Retry failed** queues it again. A file that has no text is a
+  verdict, not a failure, and is not retried.
+- **Continuations drain the rest.** When a run ends with work left, it arms the source's one-shot
+  **continuation** schedule, `rag-ingestion:{ragConfigId}:{sourceId}:cont`, for when the next document
+  is due. Its fire drains under the knowledge base's current configuration and lists nothing; it starts
+  no run when nothing is queued. The scheduler's cluster-wide claim decides which node fires it, so a
+  backlog drains across the cluster, and a source without a `cron` still finishes what **Run now**
+  queued. Before the drain claims anything it also arms a continuation for after its claim lease, so a
+  node that dies mid-run is followed up. Disabling or removing the source withdraws its continuation;
+  a purge removes the table with the rest of the source's state. One run per source works at a time.
+- **The orphan sweep waits** for a run that leaves nothing queued, deferred or failed: a queued document
+  still has only its old chunks, which the sweep would otherwise remove.
+
+`eddi.rag.ingestion.work.claim-batch` (default 20) sets how many documents a drain claims at a time.
+The Manager shows the table under the source's run controls, with **Retry failed** when something has
+failed for good.
 
 #### When the embedding provider throttles
 
@@ -1109,13 +1175,21 @@ the provider client's short retry and never sleeps on a throttle.
   `FAILED`, with an error that says to check the provider account's plan and billing; no document is
   counted as failed.
 - **Stopping is not failing.** A run that cannot wait ends with `stopReason: THROTTLED` (the REST
-  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit,
-  and any the source still hands over before it notices the stop (the rest of a Drive listing page,
-  for example), are counted in `documentsThrottled` — not in `documentsFailed` — and are not sent to
-  the provider again during the run. It is not a count of everything still to do: documents the
-  source never listed are not counted. The run's coverage is partial, so **nothing is
-  tombstoned**, and documents already in the knowledge base keep their chunks. A document that has not
-  changed still counts as unchanged after the stop: it needs no provider call.
+  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit is
+  counted in `documentsThrottled` — not in `documentsFailed` — and deferred in the
+  [work table](#the-work-table) to `resumeAfter`; the drain stops, and nothing more is sent to the
+  provider during the run. Documents the drain did not reach stay queued. For a source processed where
+  it is listed (a crawl), the documents the source hands over after the stop count as throttled too,
+  the run's coverage is partial and **nothing is tombstoned**. Documents already in the knowledge base
+  keep their chunks either way. A document that has not changed still counts as unchanged after the
+  stop: it needs no provider call.
+- **One cooldown for everyone on the quota.** The throttle is recorded in a shared cooldown row
+  (`provider_cooldowns`, on both datastores) keyed by provider, endpoint host, model and credential
+  scope — the project when one is configured (`project`, or `quotaProject`), otherwise a truncated
+  SHA-256 of the key, which never appears in a row, a log line or a metric. Every ingestion call on any
+  node reads it first (cached for 5 seconds): a cooldown that ends within the run's deadline is waited
+  out; a longer one, or a daily one, stops the call without reaching the provider, and a drain that
+  finds it running claims nothing. Rows only move later; a passed one is ignored.
 - **`resumeAfter`** records when the provider takes calls again. For a rate limit it is the delay the
   provider named, and absent when it named none (the 30 s fallback wait is a guess and is not
   recorded). For a daily quota it is the provider's documented reset — Gemini's daily quotas reset at
@@ -1130,10 +1204,11 @@ the provider client's short retry and never sleeps on a throttle.
   when it finished. Without this a cron firing every ten minutes re-listed the whole source and spent
   the provider's quota again on every fire, only to stop once more. **Run now** is an operator's
   explicit choice and is not held back — it runs, and stops again if the provider still refuses.
-- **The next run picks up the rest.** There is no automatic retry run: the source's next scheduled run
-  after `resumeAfter`, or the next **Run now**, lists the source again and finds the documents left
-  over as new or changed. A source without a `cron` waits for a manual run. A scheduled fire whose run
-  is throttled writes no failed entry to the schedule's fire log.
+- **A continuation picks up the rest.** A source whose documents were queued (Drive, uploads) is woken
+  by its continuation at `resumeAfter` and drains what is left; a continuation the gate still holds is
+  armed again for when it opens. For a crawl, the source's next scheduled run after `resumeAfter`, or
+  the next **Run now**, lists the source again and finds the documents left over as new or changed. A
+  scheduled fire whose run is throttled writes no failed entry to the schedule's fire log.
 - **A cancelled run is not a throttled one.** A run interrupted while it waits — a shutdown, for
   example — ends `CANCELLED`, not `THROTTLED`.
 - **Outside a source run.** An ingestion embedding call that has no run deadline of its own waits at
