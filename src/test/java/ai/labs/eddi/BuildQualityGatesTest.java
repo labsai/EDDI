@@ -1590,9 +1590,13 @@ class BuildQualityGatesTest {
                         + " error) and the re-scan with the PR's own fingerprints passed, or a secret riding along with a"
                         + " config edit merges");
         String gitleaks = jobs.get("gitleaks");
-        assertTrue(gitleaks.contains("[ \"$EVENT\" = \"merge_group\" ] && files=\".gitleaks.toml\""),
-                "a merge-queue run must scan with main's .gitleaks.toml, or a queued change loosens the rules it is"
-                        + " scanned with");
+        assertTrue(gitleaks.contains("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'")
+                && gitleaks.contains("for f in .gitleaksignore .gitleaks.toml; do"),
+                "pull-request and merge-queue runs must scan with main's .gitleaks.toml and .gitleaksignore, or a"
+                        + " change loosens the rules it is scanned with");
+        assertTrue(gitleaks.contains("APPROVAL_BASE=\"$MG_BASE\"") && gitleaks.contains("comm -23"),
+                "queue and push scans must accept a finding only when the same range adds a fingerprint for exactly"
+                        + " its path, rule and line: commit-scoped fingerprints cannot match squashed commits");
         assertTrue(gitleaks.contains("changes .gitleaks.toml, the rules; no tolerance applies"),
                 "the pull-request re-scan must refuse any change to .gitleaks.toml: only fingerprints may be added");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),

@@ -2203,11 +2203,11 @@ jobs:
       # the base branch means a config change takes effect once it is merged
       # and reviewed, rather than while it is still being proposed.
       #
-      # A merge-queue run restores the RULES (.gitleaks.toml) from main as well, so
-      # a queued change cannot loosen the rules it is scanned with. It keeps the
-      # group's .gitleaksignore: those are exact commit:path:rule:line fingerprints,
-      # each one a reviewed, approved decision about one finding — which is how a
-      # test fixture gets allowlisted at all.
+      # A merge-queue run restores both files from main as well, so a queued change
+      # cannot loosen the rules it is scanned with or load an allowlist entry nobody
+      # has checked. Fingerprints the group adds still count, but only through the
+      # approval mapping in the scan step below, which accepts commit-scoped
+      # fingerprints for exactly the findings this range introduces.
       - name: Take the gitleaks config from the base branch
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
@@ -2215,9 +2215,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          files=".gitleaksignore .gitleaks.toml"
-          [ "$EVENT" = "merge_group" ] && files=".gitleaks.toml"
-          for f in $files; do
+          for f in .gitleaksignore .gitleaks.toml; do
             if git cat-file -e "$BASE_SHA:$f" 2> /dev/null; then
               git show "$BASE_SHA:$f" > "$f"
               echo "restored $f from the base branch"
@@ -2282,11 +2280,53 @@ jobs:
             echo "no usable base commit for this $EVENT, scanning only $PUSH_AFTER"
           fi
 
+          # A merge-queue run and a push to main scan commits the queue or a squash
+          # merge rewrote, so a commit-scoped fingerprint the PR added (naming the
+          # PR's own commit) cannot match them. Approval is therefore re-bound to
+          # stable fields: a finding passes when this same range adds a
+          # commit-scoped fingerprint for exactly its path, rule and line. Nothing
+          # broader is accepted, and a line that is not a commit-scoped fingerprint
+          # fails the run outright, so no path-wide or global entry can be added.
+          APPROVAL_BASE=""
+          APPROVAL_HEAD=""
+          if [ "$EVENT" = "merge_group" ]; then
+            APPROVAL_BASE="$MG_BASE"; APPROVAL_HEAD="$MG_HEAD"
+          elif [ "$EVENT" = "push" ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
+            APPROVAL_BASE="$PUSH_BEFORE"; APPROVAL_HEAD="$PUSH_AFTER"
+          fi
+          FINGERPRINT='[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+'
+          APPROVED=""
+          if [ -n "$APPROVAL_BASE" ]; then
+            IGNORE_ADDED=$(git diff --no-color -U0 "$APPROVAL_BASE" "$APPROVAL_HEAD" -- .gitleaksignore \
+              | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)
+            NOT_FINGERPRINTS=$(printf '%s\n' "$IGNORE_ADDED" | grep -vE "^${FINGERPRINT}[[:space:]]*\$" \
+              | grep -vE '^[[:space:]]*(#.*)?$' || true)
+            if [ -n "$NOT_FINGERPRINTS" ]; then
+              echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
+              printf '%s\n' "$NOT_FINGERPRINTS"
+              exit 1
+            fi
+            APPROVED=$(printf '%s\n' "$IGNORE_ADDED" | grep -E "^${FINGERPRINT}" \
+              | sed -E 's/^[0-9a-f]{40}://; s/[[:space:]]*$//' | LC_ALL=C sort -u || true)
+          fi
+
           # Exit code 2 means "leaks found"; anything else non-zero is an error
           # (bad config, missing commit). CI Gate's tolerance applies to findings
           # only, so the two are told apart here.
           rc=0
-          ./gitleaks git --redact=100 --no-banner --exit-code 2 --log-opts="$LOG_OPTS" . || rc=$?
+          REPORT="$RUNNER_TEMP/gitleaks-report.json"
+          ./gitleaks git --redact=100 --no-banner --exit-code 2 --report-format json --report-path "$REPORT" \
+            --log-opts="$LOG_OPTS" . || rc=$?
+          if [ "$rc" -eq 2 ] && [ -n "$APPROVED" ]; then
+            UNAPPROVED=$(jq -r '.[] | "\(.File):\(.RuleID):\(.StartLine)"' "$REPORT" | LC_ALL=C sort -u \
+              | LC_ALL=C comm -23 - <(printf '%s\n' "$APPROVED"))
+            if [ -z "$UNAPPROVED" ]; then
+              echo "::notice::every finding in this range is covered by a fingerprint the same range adds to .gitleaksignore"
+              exit 0
+            fi
+            echo "::error::findings with no fingerprint added in this range:"
+            printf '%s\n' "$UNAPPROVED"
+          fi
           if [ "$rc" -eq 2 ]; then
             echo "leaks=true" >> "$GITHUB_OUTPUT"
             exit 1
@@ -2320,7 +2360,7 @@ jobs:
             exit 0
           fi
           if git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore; then
-            echo "this pull request does not change .gitleaksignore; nothing to re-scan"
+            echo "this pull request does not change .gitleaksignore; nothing to check"
             exit 0
           fi
           # Every line the PR adds must be a fingerprint (or blank, or a comment).
@@ -2329,9 +2369,12 @@ jobs:
           OTHER=$(printf '%s\n' "$ADDED" | grep -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
             | grep -vE '^[[:space:]]*(#.*)?$' || true)
           if [ -n "$OTHER" ]; then
-            echo "::warning::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints; no tolerance applies:"
+            # Fails, rather than only withholding the tolerance: such a line (a
+            # path-wide or commit-less entry) would suppress future findings once
+            # it reaches main, so it must not merge even when this PR's scan is clean.
+            echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
             printf '%s\n' "$OTHER"
-            exit 0
+            exit 1
           fi
           # The base rules with the PR's fingerprints. The rules are restored here
           # again rather than trusted from the earlier step: this one runs under

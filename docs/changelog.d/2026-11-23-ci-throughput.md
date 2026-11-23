@@ -50,9 +50,9 @@ data.
   needs plus shell-lint, manifest-lint and release-pointers; it fails on any failed or cancelled
   need, and on any job the change required that did not succeed — derived from detect-changes on
   a PR or push, every job on a merge-queue run (so a broken forced-true branch cannot merge
-  untested code). One tolerance: a PR-level Secret Scanning failure when the PR itself changes
-  `.gitleaksignore`/`.gitleaks.toml` (that scan uses the base config, so such a PR could never pass);
-  the queue run then scans with the PR's config. The script was run against 16 simulated
+  untested code). One tolerance, narrowed in the review rounds below to its final form: a PR-level
+  Secret Scanning failure on findings that fingerprints the PR adds cover exactly (see "CodeRabbit
+  review" below for the policy that merged). The script was run against 16 simulated
   outcomes (PR, push and merge_group; skipped, failed and cancelled needs; both gitleaks cases).
   `BuildQualityGatesTest.ciGateBlocksWhateverBlocksPublishing` pins its needs against docker's,
   its `always()` and the merge-queue strictness; the `ciJobNeeds` helper no longer reads the words
@@ -68,15 +68,15 @@ data.
   0 with them zeroed. UI Manager Checks keeps audit, lint, i18n, typecheck, build and the bundle
   budget; UI Gate now requires the shard and merge jobs too. `ui/manager/.gitignore` ignores
   `.vitest/`.
-- **Docs.** AGENTS.md §2 rule 4: with a merge queue, a PR is queued (`gh pr merge --squash --auto`)
-  only once CodeRabbit has reviewed its current head, every finding is fixed or answered, every
+- **Docs.** AGENTS.md §2 rule 4: with a merge queue, a PR is queued only once CodeRabbit has reviewed its current head, every finding is fixed or answered, every
   thread is resolved and it is approved and green — never armed early; the queue replaces the
   manual "check main's run before each merge" routine and the one-at-a-time rule, and a PR branch
   takes `origin/main` only to resolve a conflict. Queueing happens only when the user names the
   PR; `.claude/skills/ship-pr/SKILL.md` §7 holds the readiness checklist (CodeRabbit's description
   column and review SHA, the thread audit, body-only findings, approval and CI) and the commands —
-  `gh pr merge <n> --squash`, never `--auto`, confirmed through GraphQL `isInMergeQueue` because
-  `gh pr view --json` has no merge-queue field. CONTRIBUTING.md, `docs/release-versioning.md`
+  the GraphQL `enqueuePullRequest` mutation bound to the checked head (see "CodeRabbit review"
+  below), never `--auto`, confirmed through GraphQL `isInMergeQueue` because `gh pr view --json`
+  has no merge-queue field. CONTRIBUTING.md, `docs/release-versioning.md`
   and the Manager's AGENTS.md/CONTRIBUTING.md describe CI Gate, Coverage Gate and the Vitest
   shards.
 
@@ -110,6 +110,35 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   likely, as any other process on the runner already could. Not seen in the 40,817-test forked run.
   The merged-check warning in the Integration Tests log is now labelled as expected in the step.
 
+### CodeRabbit review (full review of `a3f2304`)
+
+- **Fingerprints could never match in the queue (Major).** A squash queue rewrites every commit, so
+  a commit-scoped `.gitleaksignore` fingerprint naming the PR's commit cannot match the group's
+  squash commit — every fixture PR would have been ejected, and a push to `main` already had the
+  same problem. Approval is now re-bound to stable fields on `merge_group` and `push`: a finding
+  passes when the same range adds a commit-scoped fingerprint for exactly its `file:rule:line`
+  (gitleaks' JSON report, `jq`, `comm`). Verified against a real squash in scratch repositories:
+  fixture plus fingerprint passes, an extra unfingerprinted leak fails, no fingerprint fails.
+- **Non-fingerprint entries (Minor, security).** gitleaks 8.30 also accepts entries without a
+  commit, which would suppress future findings. A PR or a queue group that adds any
+  `.gitleaksignore` line that is not a `commit:path:rule:line` fingerprint now fails outright
+  (it used to only withhold the tolerance), and the queue loads `main`'s `.gitleaksignore`, never
+  the group's raw file.
+- **The final policy.** `.gitleaks.toml` and `.gitleaksignore` always come from `main` for the scan
+  itself; the only allowlisting a change can bring is commit-scoped fingerprints, accepted for the
+  exact findings they name — on the PR through the re-scan and CI Gate's tolerance (base scan
+  failed on findings, rules unchanged, re-scan passes), in the queue and on `main` through the
+  range mapping.
+- **Queueing is bound to the checked head.** `gh pr merge` can still arm auto-merge when a check
+  turns pending after the checklist passed, and it does not tie the request to the head SHA that
+  passed it. ship-pr §7 now enqueues with GraphQL `enqueuePullRequest` and `expectedHeadOid`
+  (input fields confirmed by introspection), which never arms auto-merge and is refused if the head
+  moved.
+- **Manual safeguards while CI Gate is not required.** AGENTS.md and §7 now say the main-is-green
+  check and one-at-a-time rule apply whenever `CI Gate` is not a required check, queue or not,
+  and §7 has it as a checklist item.
+- Changelog passages that still described an earlier tolerance or `--auto` were corrected.
+
 ### Considered and not done
 
 - **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that
@@ -135,10 +164,9 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
 
 ### Review fixes (independent review before push)
 
-- **Gitleaks tolerance tightened.** A PR-level Secret Scanning failure is tolerated only when the
-  PR changes the gitleaks config **and** a new step that re-scans the same range with the PR's own
-  `.gitleaksignore`/`.gitleaks.toml` passes (`pr_config_scan` job output). A real secret riding
-  along with an unrelated config edit now blocks.
+- **Gitleaks tolerance tightened** (an intermediate step; the next two sections replace it). A
+  PR-level Secret Scanning failure was tolerated only when the PR changed the gitleaks config and a
+  re-scan with the PR's own config passed (`pr_config_scan`).
 - **Queue strictness holds for every need.** On `merge_group` CI Gate fails on any skipped need,
   not only the jobs it names; re-simulated across 18 outcomes.
 - **Shared-tmp guard.** Recognises reflective construction and service-typed fields
@@ -156,5 +184,5 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   plus an un-allowlisted key → 1 leak found, exit 1. JUnit on the test classpath is 6.1.3, which
   closes `AutoCloseable` store values, so the lock's store release is live.
 - **Not executed anywhere yet:** every `merge_group` path (until the queue is enabled) and the
-  PR-config tolerance on a real PR. The speedups are estimates until this PR's own CI run; the
+  fingerprint tolerance on a real PR. The speedups are estimates until this PR's own CI run; the
   first main push after merge is the first run where publishing depends on Coverage Gate.

@@ -485,20 +485,27 @@ of queueing:
 4. **Approved and green.** `gh pr view <n> --json reviewDecision,mergeable,mergeStateStatus`:
    `APPROVED`, `MERGEABLE`; and `CI Gate` (or, before it is required, `Build & Test` and
    `CodeQL Analysis`) green on the head.
+5. **While `CI Gate` is not a required check**, the queue waits only for the required ones, so
+   the AGENTS.md §2 rule 4 safeguards still apply: `main`'s current commit has a finished, green
+   `CI/CD` run, and no other PR is queued or merging. Check the repository's required checks first
+   (`gh api repos/labsai/EDDI/branches/main/protection --jq '.required_status_checks.contexts'`).
 
 Then:
 
 ```bash
-# the head SHA, the commit each recent review was on, and (after queueing) whether it is queued.
+# the PR's node id, the head SHA, the commit each recent review was on, and whether it is queued.
 # `gh pr view --json` has no merge-queue field, hence GraphQL.
-gh api graphql -F n=<n> -f query='query($n:Int!){repository(owner:"labsai",name:"EDDI"){pullRequest(number:$n){state isInMergeQueue headRefOid reviews(last:10){nodes{author{login} state commit{oid}}}}}}'
+gh api graphql -F n=<n> -f query='query($n:Int!){repository(owner:"labsai",name:"EDDI"){pullRequest(number:$n){id state isInMergeQueue headRefOid reviews(last:10){nodes{author{login} state commit{oid}}}}}}'
 
-gh pr merge <n> --squash        # adds the PR to the merge queue
+# Enqueue exactly the head the checklist passed. expectedHeadOid makes GitHub refuse the request if
+# the head moved; the mutation never arms auto-merge (gh pr merge can, if a check turns pending).
+gh api graphql -F id=<node id> -F oid=<checked head sha> -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$oid}){mergeQueueEntry{position state}}}'
 ```
 
+If GitHub rejects the mutation, stop: re-run the checklist on the new head rather than retrying.
 Re-run the query afterwards: `isInMergeQueue: true` (or `state: MERGED`) is the confirmation.
 
-Never `--auto` (it arms a PR before it is ready, and fails when the repository disallows
-auto-merge), never `--admin`. If the queue ejects the PR, read the failed `merge_group` run
+Never `gh pr merge --auto` (it arms a PR before it is ready, and fails when the repository
+disallows auto-merge), never `--admin`. If the queue ejects the PR, read the failed `merge_group` run
 before anything else: a failure there is real until shown otherwise, even if the PR's own run
 was green.
