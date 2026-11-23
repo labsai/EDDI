@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
 import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.LibraryStoreContract;
@@ -166,6 +168,23 @@ class PostgresAttachmentStoreIT extends PostgresTestBase
     public void seedReservation(String ownerKey, String conversationId) {
         execute("INSERT INTO attachment_reservations (id, owner_key, conversation_id, bytes, count, expires_at) "
                 + "VALUES (gen_random_uuid()::text, ?, ?, 1, 1, NOW() + INTERVAL '1 hour')", ownerKey, conversationId);
+    }
+
+    @Override
+    public AutoCloseable holdConversationQuotaLock(String conversationId) throws Exception {
+        Connection conn = DATA_SOURCE.getConnection();
+        conn.setAutoCommit(false);
+        try (PreparedStatement ps = conn.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+            ps.setString(1, PostgresAttachmentStore.lockKey(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId)));
+            ps.executeQuery().close();
+        }
+        AtomicBoolean released = new AtomicBoolean();
+        return () -> {
+            if (released.compareAndSet(false, true)) {
+                conn.rollback();
+                conn.close();
+            }
+        };
     }
 
     @Override

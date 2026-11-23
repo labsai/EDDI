@@ -16,6 +16,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,6 +59,9 @@ public interface LibraryStoreContract {
     /** New-shape grant rows on the blob. */
     long grantRowsOn(String storageRef);
 
+    /** New-shape grant rows held by the conversation, on any blob. */
+    long grantRowsHeldBy(String conversationId);
+
     /** The legacy-shape grantee list of the blob, as stored. */
     List<String> legacyGrantees(String storageRef);
 
@@ -71,6 +78,12 @@ public interface LibraryStoreContract {
 
     /** Live and expired reservation rows of an owner key. */
     long reservationsOf(String ownerKey);
+
+    /**
+     * Takes the store's quota lock of a conversation's bucket, as another writer
+     * would, until the returned handle is closed (idempotently).
+     */
+    AutoCloseable holdConversationQuotaLock(String conversationId) throws Exception;
 
     /** Realistic ids: 24-hex conversation ids, space-tenant-shaped owner keys. */
     String ORIGIN = "6aba70011a25f8be7920e101";
@@ -160,6 +173,7 @@ public interface LibraryStoreContract {
 
         assertArrayEquals(text("kept"), store().load(root, ORIGIN), "it reads it through its grant");
         assertEquals(1, grantRowsOn(root));
+        assertEquals(1, grantRowsHeldBy(ORIGIN), "the grant row is the promoting conversation's");
         assertTrue(legacyGrantees(root).contains(ORIGIN), "in both shapes, like any grant");
         assertTrue(store().listByConversation(ORIGIN).isEmpty(), "no longer its own");
         assertEquals(List.of(root), store().listAccessible(ORIGIN).stream().map(Attachment::storageRef).toList());
@@ -223,6 +237,9 @@ public interface LibraryStoreContract {
         textView(root, "u1", "x".repeat(400), ORIGIN); // never counts
         // The conversation and the user hold 21 bytes; the library takes exactly them.
         setQuotas(2, 21 + 5, 2, 21 + 5);
+        setLibraryLimits(new LibraryStoreSupport.Limits(1, 20, 365, 1000));
+        var tooSmall = assertThrows(AttachmentQuotaExceededException.class, () -> promote(root, "exact"));
+        assertTrue(tooSmall.getMessage().contains("0 + 21 bytes"), "the root and its media view, not its text view: " + tooSmall.getMessage());
         setLibraryLimits(new LibraryStoreSupport.Limits(1, 21, 365, 1000));
 
         promote(root, "exact");
@@ -274,6 +291,35 @@ public interface LibraryStoreContract {
         assertEquals(2, lineageRows(root), "the views stay with the library document");
     }
 
+    @Test
+    default void aViewBeingStoredWhileItsRootIsPromotedFollowsTheNewOwner() throws Exception {
+        String root = upload(ORIGIN, "1234567890").storageRef(); // 10 bytes
+        byte[] image = png("mid"); // 11 bytes
+        setQuotas(0, 1_000_000, 0, 0); // so a media view of a conversation's file takes the conversation's lock
+        setLibraryLimits(new LibraryStoreSupport.Limits(50, 10 + image.length, 365, 1000));
+        ExecutorService writer = Executors.newSingleThreadExecutor();
+        AutoCloseable held = holdConversationQuotaLock(ORIGIN);
+        try {
+            // The writer reads the root as the conversation's and waits for that lock;
+            // meanwhile the root moves to the library, which takes no conversation lock.
+            Future<Attachment> pending = writer.submit(() -> imageView(root, "i1", image, ORIGIN));
+            Thread.sleep(1500);
+            promote(root, "moved");
+            held.close();
+
+            Attachment view = pending.get(60, TimeUnit.SECONDS);
+
+            assertEquals(LIB_MINE, store().ownerOf(view.storageRef(), ORIGIN));
+            var full = assertThrows(AttachmentQuotaExceededException.class, () -> imageView(root, "i2", png("i2"), ORIGIN));
+            assertEquals(AttachmentQuotaExceededException.SCOPE_LIBRARY, full.getScope(), "the view was charged to the library: it is full");
+            assertEquals(0, store().deleteByConversation(ORIGIN));
+            assertEquals(1, lineageRows(root), "stored under the new owner, it stays with the library document");
+        } finally {
+            held.close();
+            writer.shutdownNow();
+        }
+    }
+
     // ---------------------------------------------------------------- grants
 
     @Test
@@ -287,6 +333,7 @@ public interface LibraryStoreContract {
         store().grantAccess(root, LIB_READER_2);
 
         assertThrows(AttachmentAccessDeniedException.class, () -> store().load(root, ORIGIN), "the oldest grant went");
+        assertTrue(store().listAccessible(ORIGIN).isEmpty(), "and the conversation it came from no longer lists it as its own");
         assertFalse(legacyGrantees(root).contains(ORIGIN), "in both shapes, or it would still read");
         assertArrayEquals(text("popular"), store().load(root, LIB_READER_1));
         assertArrayEquals(text("popular"), store().load(root, LIB_READER_2), "never the one just written");
@@ -515,6 +562,9 @@ public interface LibraryStoreContract {
         assertEquals(OwnerScope.USER, viewOwner.scope());
         assertEquals(LIB_OTHER_KEY, viewOwner.ownerKey(), "the lineage moved with it");
         assertArrayEquals(text("its view"), store().load(view, ORIGIN), "the grants stay");
+        assertEquals(view, textView(root, "u1", "its view", ORIGIN).storageRef(),
+                "the view is keyed by its new owner: the same bytes deduplicate against it");
+        assertEquals(1, lineageRows(root));
         assertTrue(store().listByOwner(LIB_KEY, null, true, 0, 10).isEmpty());
         assertEquals(new AttachmentOwnerChanged(root, LIB_KEY, LIB_OTHER_KEY, OwnerScope.USER), ownerChanges().get(ownerChanges().size() - 1));
     }

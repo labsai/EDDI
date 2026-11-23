@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
 import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.LibraryStoreContract;
@@ -157,6 +159,14 @@ class GridFsAttachmentStoreIT extends MongoTestBase
                 .append(GridFsAttachmentStore.RESERVATION_OWNER_KEY, ownerKey).append("conversationId", conversationId)
                 .append(GridFsAttachmentStore.RESERVATION_BYTES, 1L).append(GridFsAttachmentStore.RESERVATION_COUNT, 1)
                 .append(GridFsAttachmentStore.RESERVATION_EXPIRES_AT, new Date(System.currentTimeMillis() + 3_600_000L)));
+    }
+
+    @Override
+    public AutoCloseable holdConversationQuotaLock(String conversationId) {
+        String key = GridFsAttachmentStore.lockKey(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
+        MongoCollection<Document> locks = getDatabase().getCollection(GridFsAttachmentStore.LOCKS_COLLECTION);
+        locks.insertOne(new Document("_id", key).append("owner", "test").append("expiresAt", new Date(System.currentTimeMillis() + 60_000L)));
+        return () -> locks.deleteOne(Filters.and(Filters.eq("_id", key), Filters.eq("owner", "test")));
     }
 
     @Override

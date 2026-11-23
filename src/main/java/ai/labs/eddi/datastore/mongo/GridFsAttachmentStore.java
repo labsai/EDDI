@@ -253,6 +253,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      */
     private final GridFSBucket primaryReadBucket;
     private final MongoCollection<Document> filesCollection;
+    /**
+     * The bucket's chunks, for a delete that is conditional on the files document.
+     */
+    private final MongoCollection<Document> chunksCollection;
     private final MongoCollection<Document> locksCollection;
     /**
      * Read from the PRIMARY, like the quota usage: a member's first read follows
@@ -347,6 +351,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
         this.primaryReadBucket = gridFSBucket.withReadPreference(ReadPreference.primary());
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
+        this.chunksCollection = database.getCollection(BUCKET_NAME + ".chunks");
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
         this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
         this.backfillCollection = database.getCollection(BACKFILL_COLLECTION).withReadPreference(ReadPreference.primary());
@@ -421,9 +426,12 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     /**
      * The library listings and the reaper's scans, on {@code (ownerKey,
      * lastAccessedAt)} and {@code (ownerKey, removedAt)}, and the slug check on
-     * {@code (ownerKey, librarySlug)} — sparse on the library fields, so they hold
-     * library roots only. Slug uniqueness itself runs under the library's bucket
-     * lock. A failure is logged, as for the other indexes.
+     * {@code (ownerKey, librarySlug)} — partial on library roots (a library owner
+     * scope and a {@code savedAt}), which every owner-keyed query names, so they
+     * hold library roots only and serve those queries. The reaper's scans
+     * ({@code expired}, {@code removedBefore}) name no owner and scan the library
+     * roots. Slug uniqueness itself runs under the library's bucket lock. A failure
+     * is logged, as for the other indexes.
      */
     static void ensureLibraryIndexes(MongoCollection<Document> filesCollection, long deadlineNanos, LongSupplier nanoClock) {
         String ownerKey = "metadata." + META_OWNER_KEY;
@@ -1095,6 +1103,28 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
     }
 
+    /**
+     * {@link #deleteFile}, but only while the file is still conversation-owned —
+     * one condition on the files document, so a {@link #promote} that committed
+     * after the file was read keeps it. Its bytes elsewhere are marked first, as
+     * for any delete; a file that stayed is still referenced, so the sweep keeps
+     * them and drops the mark.
+     *
+     * @return whether it was deleted
+     */
+    private boolean deleteFileIfConversationOwned(GridFSFile file, List<Map.Entry<BlobLocator, String>> retired) {
+        BlobLocator locator = retire(file);
+        if (filesCollection.deleteOne(Filters.and(Filters.eq("_id", file.getObjectId()), CONVERSATION_OWNED)).getDeletedCount() == 0) {
+            return false;
+        }
+        chunksCollection.deleteMany(Filters.eq("files_id", file.getObjectId()));
+        if (locator != null) {
+            String ownerKey = meta(file, META_OWNER_KEY) != null ? meta(file, META_OWNER_KEY) : meta(file, META_CONVERSATION_ID);
+            retired.add(Map.entry(locator, ownerKey));
+        }
+        return true;
+    }
+
     private void discardAll(List<Map.Entry<BlobLocator, String>> retired) {
         for (Map.Entry<BlobLocator, String> entry : retired) {
             discard(entry.getKey(), entry.getValue());
@@ -1432,9 +1462,13 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
         // A library document that came from this conversation keeps its conversation
         // id as origin; it is the library's, and stays.
+        // Each file is deleted only while it is still conversation-owned: a promote
+        // that moved it after the cursor read it has made it the library's.
         for (GridFSFile file : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId),
                 CONVERSATION_OWNED))) {
-            deleteFile(file, retired);
+            if (!deleteFileIfConversationOwned(file, retired)) {
+                continue;
+            }
             String ref = canonicalRef(file);
             deletedRefs.add(ref);
             if (meta(file, META_ROOT_REF) == null) {
@@ -1875,7 +1909,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
 
     /** The roots a library owns, soft-removed ones included. */
     private static Bson libraryRoots(String ownerKey) {
-        return Filters.and(Filters.eq("metadata." + META_OWNER_KEY, ownerKey), LIBRARY_OWNED, ROOTS_ONLY);
+        // savedAt is set on every library root; naming it lets the partial library
+        // indexes serve the query.
+        return Filters.and(Filters.eq("metadata." + META_OWNER_KEY, ownerKey), LIBRARY_OWNED, ROOTS_ONLY,
+                Filters.exists("metadata." + META_SAVED_AT));
     }
 
     /**

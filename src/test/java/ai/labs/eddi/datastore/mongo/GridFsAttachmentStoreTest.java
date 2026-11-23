@@ -14,6 +14,8 @@ import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
+import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
@@ -45,6 +47,7 @@ class GridFsAttachmentStoreTest {
     private GridFSBucket gridFSBucket;
     private MongoCollection<Document> filesCollection;
     private MongoCollection<Document> grantsCollection;
+    private MongoCollection<Document> chunksCollection;
     private GridFsAttachmentStore sut;
 
     @BeforeEach
@@ -53,6 +56,10 @@ class GridFsAttachmentStoreTest {
         filesCollection = mock(MongoCollection.class);
         grantsCollection = mock(MongoCollection.class, RETURNS_DEEP_STUBS);
         sut = createWithMocks(gridFSBucket, filesCollection, grantsCollection);
+        chunksCollection = mock(MongoCollection.class);
+        Field chunksField = GridFsAttachmentStore.class.getDeclaredField("chunksCollection");
+        chunksField.setAccessible(true);
+        chunksField.set(sut, chunksCollection);
 
         setLong("maxSizeBytes", 20_971_520L);
         // Unlimited quotas by default so store() skips the usage query.
@@ -441,11 +448,32 @@ class GridFsAttachmentStoreTest {
         when(f1.getObjectId()).thenReturn(id1);
         when(f2.getObjectId()).thenReturn(id2);
         whenFindIterate(f1, f2);
+        when(filesCollection.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(1));
 
         long count = sut.deleteByConversation("conv-1");
         assertEquals(2, count);
-        verify(gridFSBucket).delete(id1);
-        verify(gridFSBucket).delete(id2);
+        // Each file goes only while it is still the conversation's: one conditional
+        // delete of its files document, then its chunks.
+        ArgumentCaptor<Bson> condition = ArgumentCaptor.forClass(Bson.class);
+        verify(filesCollection, times(2)).deleteOne(condition.capture());
+        String rendered = condition.getValue().toBsonDocument().toJson();
+        assertTrue(rendered.contains("\"metadata.ownerScope\": {\"$nin\": [\"USER\", \"TEAM\"]}"), rendered);
+        verify(chunksCollection).deleteMany(Filters.eq("files_id", id1));
+        verify(chunksCollection).deleteMany(Filters.eq("files_id", id2));
+    }
+
+    @Test
+    @DisplayName("a file a promote moved after the cursor read it stays, and is not announced")
+    void deleteByConversation_keepsAFilePromotedMeanwhile() {
+        ObjectId id = new ObjectId();
+        GridFSFile file = mock(GridFSFile.class);
+        when(file.getObjectId()).thenReturn(id);
+        whenFindIterate(file);
+        when(filesCollection.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+
+        assertEquals(0, sut.deleteByConversation("conv-1"));
+        verify(chunksCollection, never()).deleteMany(any(Bson.class));
+        verify(gridFSBucket, never()).delete(any(ObjectId.class));
     }
 
     @Test
@@ -460,9 +488,11 @@ class GridFsAttachmentStoreTest {
         bucketField.setAccessible(true);
         bucketField.set(sut, nearest);
 
+        when(filesCollection.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(1));
+
         assertEquals(1, sut.deleteByConversation("conv-1"));
         verify(nearest, never()).find(any(Bson.class));
-        verify(nearest).delete(id);
+        verify(filesCollection).deleteOne(any(Bson.class));
     }
 
     @Test

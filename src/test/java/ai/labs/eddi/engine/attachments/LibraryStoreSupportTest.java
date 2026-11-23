@@ -176,6 +176,9 @@ class LibraryStoreSupportTest {
             }
             assertThrows(IllegalArgumentException.class, () -> new LibraryMeta("t", "a", " ", null));
             assertThrows(IllegalArgumentException.class, () -> new LibraryMeta("t", "a", null, -1));
+            assertDoesNotThrow(() -> new LibraryMeta("t", "a", null, LibraryMeta.MAX_RETENTION_DAYS));
+            assertThrows(IllegalArgumentException.class, () -> new LibraryMeta("t", "a", null, LibraryMeta.MAX_RETENTION_DAYS + 1),
+                    "a retention past the dates a database can hold");
         }
 
         @Test

@@ -557,7 +557,7 @@ Limits of the **personal document library**, enforced by the attachment store. A
 | `eddi.documents.library.max-per-user` | `50` | Documents in one user's library, soft-removed ones included until they are purged. A full library refuses the next document with both numbers; nothing is evicted |
 | `eddi.documents.library.max-total-bytes-per-user` | `2147483648` (2 GiB) | Bytes in one user's library: the documents and their media views |
 | `eddi.documents.library.retention-days` | `365` | Days after its last opening that a library document saved without a retention of its own expires. `0` keeps such documents until they are removed |
-| `eddi.documents.library.max-grants-per-document` | `1000` | Conversations that may hold a library document open at once. Past it the conversation that opened it longest ago loses access and simply opens it again when it needs it; the newest opening is never the one evicted. `0` disables the cap |
+| `eddi.documents.library.max-grants-per-document` | `1000` | Conversations that may hold a library document open at once. Past it the conversation that was given access first loses it (opening again does not move a conversation's place) and simply opens the document again when it needs it; the conversation opening it now is never the one evicted. `0` disables the cap |
 
 ### Documents
 

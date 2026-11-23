@@ -40,6 +40,12 @@ public record LibraryMeta(String title, String slug, String agentScope, Integer 
     public static final int MAX_SLUG_CHARS = 80;
     /** The longest agent id an entry can be scoped to. */
     public static final int MAX_AGENT_SCOPE_CHARS = 200;
+    /**
+     * The longest retention a document can carry — a hundred years, far above any
+     * operator bound, and small enough that the stores' date arithmetic never
+     * leaves the range a database can hold.
+     */
+    public static final int MAX_RETENTION_DAYS = 36_500;
 
     private static final Pattern SLUG = Pattern.compile("[a-z0-9](?:[a-z0-9-]*[a-z0-9])?");
 
@@ -47,7 +53,8 @@ public record LibraryMeta(String title, String slug, String agentScope, Integer 
      * @throws IllegalArgumentException
      *             for a blank or over-long title, a slug that is not lower-case
      *             letters, digits and inner hyphens, a blank or over-long agent
-     *             scope, or a negative retention
+     *             scope, or a retention below 0 or above
+     *             {@value #MAX_RETENTION_DAYS} days
      */
     public LibraryMeta {
         if (title == null || title.isBlank() || title.length() > MAX_TITLE_CHARS) {
@@ -60,8 +67,8 @@ public record LibraryMeta(String title, String slug, String agentScope, Integer 
         if (agentScope != null && (agentScope.isBlank() || agentScope.length() > MAX_AGENT_SCOPE_CHARS)) {
             throw new IllegalArgumentException("An agent scope must be an agent id, or null for all of the owner's agents");
         }
-        if (retentionDays != null && retentionDays < 0) {
-            throw new IllegalArgumentException("Retention days cannot be negative");
+        if (retentionDays != null && (retentionDays < 0 || retentionDays > MAX_RETENTION_DAYS)) {
+            throw new IllegalArgumentException("Retention days must be 0 to " + MAX_RETENTION_DAYS);
         }
     }
 

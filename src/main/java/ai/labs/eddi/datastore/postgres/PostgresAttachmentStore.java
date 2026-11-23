@@ -1408,6 +1408,16 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     ps.setString(1, conversationId);
                     ps.executeUpdate();
                 }
+                // The conversation's roots first, one at a time in one order: a promote
+                // holds its root FOR UPDATE and then updates the root's views, so a
+                // DELETE that reached a view first and then waited on its root would
+                // deadlock with it. Locked here, a promote that committed meanwhile has
+                // made its root the library's, which the DELETE below then skips.
+                try (PreparedStatement ps = conn.prepareStatement("SELECT storage_ref FROM attachments WHERE conversation_id = ? "
+                        + "AND owner_scope = 'CONVERSATION' AND root_ref IS NULL ORDER BY storage_ref FOR UPDATE")) {
+                    ps.setString(1, conversationId);
+                    ps.executeQuery().close();
+                }
                 // A library document that came from this conversation keeps its
                 // conversation id as origin; it is the library's, and stays.
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -2010,9 +2020,13 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
      * included) and the bytes of them and their media views.
      */
     private static long[] libraryUsage(Connection conn, OwnerScope scope, String ownerKey) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FILTER (WHERE root_ref IS NULL), "
-                + "COALESCE(SUM(size_bytes) FILTER (WHERE root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + "), 0) "
-                + "FROM attachments WHERE owner_key = ? AND owner_scope = ?")) {
+        // Two parts, each on an index: the roots by owner key (the partial library
+        // index, whose predicate LIBRARY_ROOT repeats), their media views by root.
+        try (PreparedStatement ps = conn.prepareStatement("WITH roots AS (SELECT storage_ref, size_bytes FROM attachments "
+                + "WHERE owner_key = ? AND " + LIBRARY_ROOT + " AND owner_scope = ?) "
+                + "SELECT (SELECT COUNT(*) FROM roots), (SELECT COALESCE(SUM(size_bytes), 0) FROM roots) + "
+                + "(SELECT COALESCE(SUM(v.size_bytes), 0) FROM attachments v WHERE v.root_ref IN (SELECT storage_ref FROM roots) "
+                + "AND v.kind IN " + MEDIA_KINDS_SQL + ")")) {
             ps.setString(1, ownerKey);
             ps.setString(2, scope.name());
             try (ResultSet rs = ps.executeQuery()) {
@@ -2099,7 +2113,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                         if (OwnerScope.fromStored(rs.getString(2)) != OwnerScope.CONVERSATION) {
                             throw new AttachmentAccessDeniedException("This file is in a library already");
                         }
-                        if (!rs.getString(3).equals(owningConversationId)) {
+                        if (owningConversationId == null || !owningConversationId.equals(rs.getString(3))) {
                             throw new AttachmentAccessDeniedException("Only the conversation a file was uploaded to can put it into a library");
                         }
                         oldOwnerKey[0] = rs.getString(4);
