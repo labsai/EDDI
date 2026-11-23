@@ -5681,7 +5681,9 @@
     "saveFirst": "请先保存或放弃您的其他更改；发件人角色会单独应用。",
     "reason": "原因（用于审计日志）",
     "apply": "应用角色更改",
-    "discard": "放弃"
+    "discard": "放弃",
+    "unauthenticated": "未经身份验证的邮件",
+    "otherSenders": "其他经过身份验证的发件人"
   },
   "feedback": {
     "title": "反馈",

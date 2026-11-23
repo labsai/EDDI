@@ -2280,10 +2280,15 @@ your tool schemas do not cover it, not as a routine first step:
   behaviour), an unauthenticated one 'anonymous' (no tools at all). A policy
   only narrows: targets among the integration's (refused with
   blocked:role_target_not_allowed, never rerouted; a role with tools cannot
-  reach a GROUP target), tools as a ceiling on every tool source of the turn
-  and on what it delegates to, maxTurnsPerSenderPerDay at most the
-  integration's. approvalPolicy accepts only "none" and sendOut only false
-  until those phases ship. The turn sees mail.senderRole for its tone. You
+  reach a GROUP target, named or through "*"), tools as a ceiling on every
+  tool source of the turn (hidden from the model too; LAZY loading is off
+  under a ceiling), carried into in-process delegation (converseWithAgent)
+  and follow-up check-backs, while tools that hand work to a group, a team,
+  the team backlog or a new conversation over this deployment's own API are refused
+  under any ceiling, maxTurnsPerSenderPerDay at most the integration's. Roles
+  apply as soon as senderRoles or rolePolicies is non-empty; anonymous gets
+  no tools until the approval gate adds readOnlyTools. approvalPolicy accepts
+  only "none" and sendOut only false until those phases ship. The turn sees mail.senderRole for its tone. You
   cannot change roles: an admin does that in the Manager or over MCP
   (update_email_roles, PUT .../email-roles); a whole-integration save that
   leaves emailControl out while roles exist is refused. Exchange Online: an

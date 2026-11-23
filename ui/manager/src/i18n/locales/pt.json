@@ -5733,7 +5733,9 @@
     "saveFirst": "Salve ou descarte primeiro suas outras alterações; os papéis de remetente são aplicados separadamente.",
     "reason": "Por quê (para o registro de auditoria)",
     "apply": "Aplicar alterações de papéis",
-    "discard": "Descartar"
+    "discard": "Descartar",
+    "unauthenticated": "e-mail não autenticado",
+    "otherSenders": "outros remetentes autenticados"
   },
   "feedback": {
     "title": "Avaliações",

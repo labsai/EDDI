@@ -5733,7 +5733,9 @@
     "saveFirst": "Guarde o descarte primero sus otros cambios; los roles de remitente se aplican por separado.",
     "reason": "Por qué (para el registro de auditoría)",
     "apply": "Aplicar cambios de roles",
-    "discard": "Descartar"
+    "discard": "Descartar",
+    "unauthenticated": "correo no autenticado",
+    "otherSenders": "otros remitentes autenticados"
   },
   "feedback": {
     "title": "Valoraciones",

@@ -5681,7 +5681,9 @@
     "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderrollen werden separat übernommen.",
     "reason": "Warum (für das Audit-Protokoll)",
     "apply": "Rollenänderungen übernehmen",
-    "discard": "Verwerfen"
+    "discard": "Verwerfen",
+    "unauthenticated": "nicht authentifizierte Mail",
+    "otherSenders": "andere authentifizierte Absender"
   },
   "feedback": {
     "title": "Feedback",

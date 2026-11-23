@@ -62,6 +62,24 @@ describe("EmailSenderRolesEditor", () => {
     expect(screen.getByTestId("email-roles-json")).toBeDisabled();
   });
 
+  it("shows a viewer the summary only, without the editor", async () => {
+    renderWithProviders(<EmailSenderRolesEditor integrationId="mail1" canEdit={false} onChanged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("email-roles-summary")).toBeInTheDocument());
+    expect(screen.queryByTestId("email-roles-json")).not.toBeInTheDocument();
+  });
+
+  it("treats a lone anonymous policy as active roles, not as none", async () => {
+    server.use(
+      http.get("*/channelstore/channels/:id/email-roles", () =>
+        HttpResponse.json({ version: 1, senderRoles: [], rolePolicies: { anonymous: { targets: ["support"] } } }),
+      ),
+    );
+    render();
+    await waitFor(() => expect(screen.getByTestId("email-roles-summary")).toBeInTheDocument());
+    expect(screen.queryByTestId("email-roles-none")).not.toBeInTheDocument();
+    expect(screen.getByTestId("email-roles-summary").textContent).toContain("anonymous");
+  });
+
   it("parses only an object of roles and policies", () => {
     expect(parseRolesDocument("{}")).toEqual({ senderRoles: [], rolePolicies: {} });
     expect(parseRolesDocument("[]")).toBeNull();

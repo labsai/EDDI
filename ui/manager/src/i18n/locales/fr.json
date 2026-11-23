@@ -5733,7 +5733,9 @@
     "saveFirst": "Enregistrez ou annulez d'abord vos autres modifications ; les rôles d'expéditeur s'appliquent séparément.",
     "reason": "Pourquoi (pour le journal d'audit)",
     "apply": "Appliquer les modifications des rôles",
-    "discard": "Annuler"
+    "discard": "Annuler",
+    "unauthenticated": "courriel non authentifié",
+    "otherSenders": "autres expéditeurs authentifiés"
   },
   "feedback": {
     "title": "Avis",

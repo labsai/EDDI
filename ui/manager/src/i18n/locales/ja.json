@@ -5681,7 +5681,9 @@
     "saveFirst": "先に他の変更を保存または破棄してください。送信者ロールは個別に適用されます。",
     "reason": "理由 (監査ログ用)",
     "apply": "ロールの変更を適用",
-    "discard": "破棄"
+    "discard": "破棄",
+    "unauthenticated": "認証されていないメール",
+    "otherSenders": "その他の認証済み送信者"
   },
   "feedback": {
     "title": "フィードバック",

@@ -5681,7 +5681,9 @@
     "saveFirst": "Save or discard your other changes first; the sender roles are applied on their own.",
     "reason": "Why (for the audit log)",
     "apply": "Apply role changes",
-    "discard": "Discard"
+    "discard": "Discard",
+    "unauthenticated": "unauthenticated mail",
+    "otherSenders": "other authenticated senders"
   },
   "feedback": {
     "title": "Feedback",

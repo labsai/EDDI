@@ -5681,7 +5681,9 @@
     "saveFirst": "먼저 다른 변경 사항을 저장하거나 취소하세요. 발신자 역할은 따로 적용됩니다.",
     "reason": "이유(감사 로그용)",
     "apply": "역할 변경 적용",
-    "discard": "취소"
+    "discard": "취소",
+    "unauthenticated": "인증되지 않은 메일",
+    "otherSenders": "기타 인증된 발신자"
   },
   "feedback": {
     "title": "피드백",

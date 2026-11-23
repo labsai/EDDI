@@ -27,10 +27,13 @@ function isPowerful(policy: EmailRolePolicy | undefined): boolean {
  */
 export function EmailSenderRolesEditor({
   integrationId,
+  canEdit = true,
   disabled = false,
   onChanged,
 }: {
   integrationId: string;
+  /** The caller may edit the integration; without it only the summary is shown. */
+  canEdit?: boolean;
   disabled?: boolean;
   onChanged: (version: number) => void;
 }) {
@@ -60,6 +63,11 @@ export function EmailSenderRolesEditor({
   const parsed = parseRolesDocument(current);
   const editing = text !== null && text !== toText(stored);
   const powerful = data.senderRoles.filter((r) => isPowerful(data.rolePolicies[r.role]));
+  // Roles apply as soon as either list is non-empty: a lone default/anonymous
+  // policy is a restriction too (the backend's EmailControl.isActive).
+  const policyNames = Object.keys(data.rolePolicies ?? {});
+  const active = data.senderRoles.length > 0 || policyNames.length > 0;
+  const builtInPolicies = policyNames.filter((name) => !data.senderRoles.some((r) => r.role === name));
 
   const apply = async () => {
     if (!parsed) {
@@ -94,7 +102,7 @@ export function EmailSenderRolesEditor({
   return (
     <div className="space-y-3 sm:col-span-2" data-testid="email-sender-roles">
       <span className="text-xs font-medium">{t("emailRoles.title", "Sender roles")}</span>
-      {data.senderRoles.length === 0 ? (
+      {!active ? (
         <p className="text-[10px] text-muted-foreground" data-testid="email-roles-none">
           {t("emailRoles.none", "No roles: every allowed sender reaches every target with the agent's own tools.")}
         </p>
@@ -116,6 +124,22 @@ export function EmailSenderRolesEditor({
               </li>
             );
           })}
+          {builtInPolicies.map((name) => {
+            const policy = data.rolePolicies[name];
+            return (
+              <li key={name}>
+                <span className="font-medium">{name}</span>{" "}
+                <span className="text-muted-foreground">
+                  {t("emailRoles.summary", {
+                    senders: name === "anonymous" ? t("emailRoles.unauthenticated", "unauthenticated mail") : t("emailRoles.otherSenders", "other authenticated senders"),
+                    targets: policy?.targets?.join(", ") ?? "*",
+                    tools: name === "anonymous" ? "—" : policy?.tools === undefined ? t("emailRoles.agentTools", "the agent's tools") : policy.tools.join(", ") || "—",
+                    defaultValue: "{{senders}} → targets: {{targets}}; tools: {{tools}}",
+                  })}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
       {powerful.length > 0 && (
@@ -127,6 +151,7 @@ export function EmailSenderRolesEditor({
           )}
         </p>
       )}
+      {canEdit && (<>
       <label htmlFor={`${uid}-json`} className="text-xs font-medium">
         {t("emailRoles.editLabel", "Roles and policies (JSON)")}
       </label>
@@ -175,6 +200,7 @@ export function EmailSenderRolesEditor({
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 }
