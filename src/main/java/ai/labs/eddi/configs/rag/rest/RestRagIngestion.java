@@ -419,6 +419,39 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     @Override
+    public Response readSourceWork(String ragConfigId, String sourceId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        var counts = sourceIngestionService.workProgress(ragConfigId, resolved.source());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("sourceId", sourceId);
+        body.put("queued", counts.queued());
+        body.put("deferred", counts.waiting());
+        body.put("inFlight", counts.inFlight());
+        body.put("done", counts.done());
+        body.put("failed", counts.failed());
+        body.put("nextAttemptAt", counts.nextAttemptAt() == null ? null : counts.nextAttemptAt().toString());
+        return Response.ok(body).build();
+    }
+
+    @Override
+    public Response retryFailedDocuments(String ragConfigId, String sourceId, Integer version) {
+        // EDIT, like runSource: it makes the source embed again.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        int rearmed = sourceIngestionService.retryFailed(ragConfigId, resolved.source());
+        return Response.ok(Map.of("sourceId", sourceId, "requeued", rearmed)).build();
+    }
+
+    @Override
     public Response purgeSource(String ragConfigId, String sourceId, Integer version) {
         resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
 

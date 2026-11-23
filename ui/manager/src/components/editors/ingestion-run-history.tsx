@@ -8,13 +8,15 @@ import {
   CheckCircle2,
   ChevronDown,
   Hand,
+  ListChecks,
   Loader2,
   PauseCircle,
+  Repeat,
 } from "lucide-react";
 import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
 import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
-import type { IngestionRun } from "@/lib/api/ingestion-sources";
+import type { IngestionRun, SourceWork } from "@/lib/api/ingestion-sources";
 import { formatUpcomingTime } from "@/lib/date-format";
 
 /** How many runs the history shows before "Show more". */
@@ -334,7 +336,103 @@ function TriggerBadge({ trigger }: { trigger?: IngestionRun["trigger"] }) {
       </Badge>
     );
   }
+  if (trigger === "CONTINUATION") {
+    // A run that drained what an earlier listing queued, and listed nothing.
+    return (
+      <Badge variant="outline" className="gap-1 py-0 text-[10px]">
+        <Repeat className="h-3 w-3" aria-hidden="true" />
+        {t("ragEditor.runs.triggerContinuation", "Continued")}
+      </Badge>
+    );
+  }
   return null;
+}
+
+/**
+ * What the source's work table holds: the documents its listing queued, by
+ * state. Shown only while there is something to say — nothing for a source
+ * that never queued anything, or on a server older than the work table.
+ */
+export function WorkQueueStatus({
+  work,
+  canRetry,
+  onRetryFailed,
+  retrying,
+  retryError,
+  testId,
+}: {
+  work: SourceWork | undefined;
+  canRetry: boolean;
+  onRetryFailed: () => void;
+  retrying: boolean;
+  retryError: boolean;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  if (!work) {
+    return null;
+  }
+  const total = work.queued + work.deferred + work.inFlight + work.done + work.failed;
+  if (total === 0) {
+    return null;
+  }
+  const parts: { key: string; text: string; tone?: string }[] = [
+    { key: "queued", text: t("ragEditor.runs.workQueued", "{{n}} queued", { n: work.queued }) },
+    { key: "inFlight", text: t("ragEditor.runs.workInFlight", "{{n}} in progress", { n: work.inFlight }) },
+    { key: "deferred", text: t("ragEditor.runs.workDeferred", "{{n}} waiting", { n: work.deferred }) },
+    { key: "done", text: t("ragEditor.runs.workDone", "{{n}} done", { n: work.done }) },
+    {
+      key: "failed",
+      text: t("ragEditor.runs.workFailed", "{{n}} failed", { n: work.failed }),
+      tone: work.failed > 0 ? "text-destructive" : undefined,
+    },
+  ];
+  const next = work.nextAttemptAt ? Date.parse(work.nextAttemptAt) : NaN;
+  return (
+    <div className="space-y-1.5 rounded-md border border-border px-3 py-2" data-testid={`${testId}-work`}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="font-medium text-foreground">{t("ragEditor.runs.workTitle", "Work queue")}</span>
+        {parts.map((part) => (
+          <span
+            key={part.key}
+            className={cn("text-muted-foreground", part.tone)}
+            data-testid={`${testId}-work-${part.key}`}
+          >
+            {part.text}
+          </span>
+        ))}
+        {Number.isFinite(next) && work.deferred > 0 && (
+          <span className="text-muted-foreground" data-testid={`${testId}-work-next`}>
+            {t("ragEditor.runs.workNextAttempt", "next attempt {{time}}", { time: formatUpcomingTime(next) })}
+          </span>
+        )}
+        {canRetry && work.failed > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ms-auto h-6 px-2 text-xs"
+            onClick={onRetryFailed}
+            disabled={retrying}
+            data-testid={`${testId}-work-retry`}
+          >
+            {t("ragEditor.runs.workRetryFailed", "Retry failed")}
+          </Button>
+        )}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        {t(
+          "ragEditor.runs.workHint",
+          "Documents the last listing found, embedded in the background. A rate limit or an error makes a document wait; it is never failed or removed for that.",
+        )}
+      </p>
+      {retryError && (
+        <p className="text-[11px] text-destructive" data-testid={`${testId}-work-retry-error`}>
+          {t("ragEditor.runs.workRetryFailedError", "Could not queue the failed documents again.")}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function summaryOf(t: TFunction, run: IngestionRun): string {
