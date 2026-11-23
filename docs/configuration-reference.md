@@ -718,6 +718,7 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
 | `eddi.org.mode` | `single` | Organizations. `single` is one org, `default`, and is today's behaviour. `multi` (several orgs on one cluster, designed in `planning/multi-tenancy-plan.md`) is not available in this release, and startup refuses it |
 | `eddi.org.resolver` | `single` | How a request's org is derived. Only `single` (always `default`) exists in this release; any other value refuses startup |
+| `eddi.org.layout-guard.wait` | `PT60S` | At startup EDDI reads the data-layout record before anything else and refuses to start on a layout it does not support. When the record cannot be read (the database is unreachable or refuses the read), it retries for this long, then **refuses to start**, where earlier releases started anyway. A record this release cannot interpret is refused at once. Raise it if your database routinely becomes reachable after EDDI does |
 | `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none. In single mode it is also the org's quota key, so counters are not re-keyed |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |

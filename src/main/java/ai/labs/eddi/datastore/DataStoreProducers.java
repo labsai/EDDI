@@ -129,6 +129,9 @@ import ai.labs.eddi.engine.security.spaces.notifications.PostgresWorkspaceNotifi
 import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.MongoWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.PostgresWorkspaceSettingsStore;
+import ai.labs.eddi.engine.org.IOrgMarkerStore;
+import ai.labs.eddi.engine.org.MongoOrgMarkerStore;
+import ai.labs.eddi.engine.org.PostgresOrgMarkerStore;
 import ai.labs.eddi.engine.updatecheck.ISystemSettingStore;
 import ai.labs.eddi.engine.updatecheck.MongoSystemSettingStore;
 import ai.labs.eddi.engine.updatecheck.PostgresSystemSettingStore;
@@ -425,6 +428,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
                                                           Instance<PostgresWorkspaceSettingsStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IOrgMarkerStore orgMarkerStore(Instance<MongoOrgMarkerStore> mongo, Instance<PostgresOrgMarkerStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
