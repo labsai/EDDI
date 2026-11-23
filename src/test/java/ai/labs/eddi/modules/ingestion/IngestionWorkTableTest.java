@@ -263,7 +263,8 @@ class IngestionWorkTableTest {
         assertEquals(0, deferred.failed());
         assertEquals(1, deferred.waiting(), "b waits for the provider's time");
         assertEquals(1, deferred.queued(), "c, never reached, is still due");
-        assertTrue(deferred.nextAttemptAt().isAfter(clock), "due when the provider takes calls again");
+        assertEquals(throttled.resumeAfter(), deferred.nextAttemptAt(),
+                "due exactly when the provider takes calls again, not after a failure's backoff");
 
         // A listing in the meantime must not undo b's deferral.
         throttles = id -> false;
