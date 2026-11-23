@@ -63,7 +63,8 @@ final class McpToolTiers {
     private static Map<String, List<String>> build() {
         Map<String, List<String>> tiers = new LinkedHashMap<>();
 
-        // Conversing and reading what the caller owns (every tool is ownership-guarded)
+        // Conversing, discovery, help, and reads of the caller's own data.
+        // Ownership checks apply per tool; not every tool in this tier performs one.
         put(tiers, McpRoles.CONVERSE,
                 // McpConversationTools
                 "create_conversation", "talk_to_agent", "chat_with_agent", "read_conversation", "read_conversation_log",
