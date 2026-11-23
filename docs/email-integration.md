@@ -79,13 +79,15 @@ Basic authentication is retired on Exchange Online; IMAP uses OAuth 2.0 client c
 
 EDDI logs in with the integration's `address` as the user and the token as the secret.
 
-Use a **licensed user mailbox**. An unlicensed shared mailbox is the obvious choice for a process address, but
-whether an app-only token can open one is not confirmed, and Microsoft requires a licensed mailbox for SMTP
-submission ([Email Providers → Shared mailboxes](email-providers.md#shared-mailboxes)).
+Use a **dedicated mailbox**, never a person's own. An unlicensed shared mailbox is the obvious choice for a process
+address, but whether an app-only token can open one is not yet tested, and Microsoft requires a licensed mailbox for
+SMTP submission — so for conversation mode use a licensed one until that is settled
+([Email Providers → Shared mailboxes](email-providers.md#shared-mailboxes)).
 
-**Senders in your own tenant.** Microsoft 365 does not DKIM-sign mail between senders of the same organisation, so a
-colleague's mail arrives unsigned and is refused as `unauthenticated:none` while `requireAuthentication` is on (always,
-in conversation mode). Mail from outside the tenant is not affected. Details:
+**Senders in your own tenant.** Microsoft documents that Microsoft 365 omits the DKIM signature between senders of the
+same organisation (EDDI has not yet confirmed this against a live tenant). Such a colleague's mail would arrive
+unsigned and be refused as `unauthenticated:none` while `requireAuthentication` is on (always, in conversation mode).
+Mail from outside the tenant is not affected. Details:
 [Email Providers → Microsoft 365](email-providers.md#microsoft-365--exchange-online).
 
 #### Any other IMAP host (app password)
@@ -439,9 +441,10 @@ Integrations row.
 }
 ```
 
-The allowlist's `*@contoso.com` entry admits colleagues, but on Microsoft 365 a colleague in the same tenant sends
-**unsigned** mail, which this mode refuses ([Senders in your own tenant](#exchange-online-oauth-client-credentials)).
-In practice this example answers `partner.example` only.
+The allowlist's `*@contoso.com` entry admits colleagues, but on Microsoft's documentation a colleague in the same
+Microsoft 365 tenant sends **unsigned** mail, which this mode refuses
+([Senders in your own tenant](#exchange-online-oauth-client-credentials)) — so this example would answer only
+`partner.example`. Not yet confirmed against a live tenant.
 
 ### Before you switch it on
 

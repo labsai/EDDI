@@ -16,7 +16,7 @@
 
 | Provider | Status in EDDI | Connection | IMAP (`host`, `port`) | SMTP (`smtpHost`, `smtpPort`) |
 | --- | --- | --- | --- | --- |
-| **Microsoft 365 user mailbox** | Supported — the documented path | `OAUTH2_CLIENT_CREDENTIALS` | `outlook.office365.com`, `993` [[M1]](#sources) | `smtp.office365.com`, `587` [[M2]](#sources) |
+| **Microsoft 365 dedicated, licensed mailbox** | Supported — the documented path | `OAUTH2_CLIENT_CREDENTIALS` | `outlook.office365.com`, `993` [[M8]](#sources) | `smtp.office365.com`, `587` [[M2]](#sources) |
 | **Microsoft 365 shared mailbox** | **Unverified** — see [Shared mailboxes](#shared-mailboxes) | `OAUTH2_CLIENT_CREDENTIALS` | as above | as above, but see the licence note |
 | **Google Workspace** | No OAuth path today; app password not blocked but **not live-tested** | `BASIC` (app password) | `imap.gmail.com`, `993` [[G1]](#sources) | `smtp.gmail.com`, `465` or `587` [[G1]](#sources) |
 | **Personal Gmail** | Best effort: app password, **not live-tested** | `BASIC` (app password) | `imap.gmail.com`, `993` [[G1]](#sources) | `smtp.gmail.com`, `465` or `587` [[G1]](#sources) |
@@ -53,7 +53,7 @@ provider facts behind it:
 
 | Topic | Fact | Source |
 | --- | --- | --- |
-| IMAP | `outlook.office365.com`, port 993, SSL/TLS | [[M1]](#sources) |
+| IMAP | `outlook.office365.com`, port 993, SSL/TLS | [[M8]](#sources) |
 | SMTP | `smtp.office365.com`, port **587** (recommended) or 25, TLS 1.2 or 1.3. Microsoft: a client that "recommends or defaults to TCP port 465" does not support the required TLS — use `smtpPort: 587` (the default) | [[M2]](#sources) |
 | App-only permissions | Office 365 Exchange Online → Application permissions: `IMAP.AccessAsApp` for reading, **`SMTP.SendAsApp`** for conversation-mode replies; tenant admin consent | [[M3]](#sources) |
 | Token | Client credentials grant with scope `https://outlook.office365.com/.default`; the token is used for IMAP and SMTP | [[M3]](#sources) |
@@ -61,7 +61,7 @@ provider facts behind it:
 | SMTP AUTH switch | Disabled for organisations created after January 2020; enable it for the one mailbox with `Set-CASMailbox -Identity <address> -SmtpClientAuthenticationDisabled $false` (the mailbox setting overrides the organisation's). **With Entra ID security defaults on, SMTP AUTH is disabled**; Microsoft says to turn security defaults off to use it | [[M2]](#sources), [[M4]](#sources) |
 | Licence | Client SMTP submission needs "a licensed Microsoft 365 or Office 365 mailbox" | [[M2]](#sources) |
 | Sending limits | Per mailbox: 10,000 recipients per day, 30 messages per minute, up to 1,000 recipients per message (customisable). Per tenant: an external-recipient limit that depends on the licence count (5,000 a day for a trial tenant); mail from an `*.onmicrosoft.com` domain is limited to 100 external recipients per organisation per day | [[M5]](#sources) |
-| DKIM, custom domain | "No DKIM signing occurs for outbound mail from custom domains" until an admin publishes the two selector CNAMEs and enables signing; `*.onmicrosoft.com` mail is signed automatically | [[M6]](#sources) |
+| DKIM, custom domain | "Currently, no DKIM signing occurs for outbound mail from custom domains" until an admin publishes the two selector CNAMEs and enables signing; `*.onmicrosoft.com` mail is signed automatically | [[M6]](#sources) |
 | DKIM, inside the tenant | **The signature is omitted** when sender and recipient are in the same domain, or in different domains of the same organisation; such mail carries `dkim=none (message not signed)` | [[M6]](#sources) |
 
 **What the last row means for EDDI.** A colleague in the same tenant who writes to the integration's mailbox sends an
@@ -87,7 +87,7 @@ it is **not a confirmed fit**:
   conversation-mode replies from an unlicensed shared mailbox are, on Microsoft's own wording, not supported.
   **Unverified** in practice.
 
-Until a live test settles both, use a licensed user mailbox for conversation mode.
+Until a live test settles both, use a dedicated, licensed mailbox (never a person's own) for conversation mode.
 
 ## Google Workspace
 
@@ -192,6 +192,7 @@ All checked on 2026-11-23.
 | M5 | Microsoft Learn — [Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits) |
 | M6 | Microsoft Learn — [How to use DKIM for email in your custom domain](https://learn.microsoft.com/en-us/defender-office-365/email-authentication-dkim-configure) |
 | M7 | Microsoft Support — [Modern Authentication methods now needed to continue syncing Outlook email in non-Microsoft email apps](https://support.microsoft.com/en-us/topic/c5d65390-9676-4763-b41f-d7986499a90d) |
+| M8 | Microsoft Support — [POP and IMAP email settings for Outlook](https://support.microsoft.com/en-us/office/pop-and-imap-email-settings-for-outlook-8361e398-8af4-4e97-b147-6c6c4ac95353), the page [M3] links to as the Office 365 IMAP settings (its SMTP row names the Outlook.com server; for Microsoft 365 see M2) |
 | G1 | Google for Developers — [IMAP, POP, and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp) |
 | G2 | Google for Developers — [OAuth 2.0 Mechanism (XOAUTH2)](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol) |
 | G3 | Google for Developers — [Choose Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) |
