@@ -125,8 +125,9 @@ authoring tool.
   synthesised answer. It can take minutes. Its `attachments` argument gives every member
   the same files, inline or by URL only — it refuses an uploaded file's reference. Each
   member still sees at most five files per turn (the deployment can change that); a file
-  beyond that is dropped for that member without showing in the transcript, so send no more
-  than five unless the user knows the limit.
+  beyond that is dropped for that member and noted only in the `attachments:errors` of that
+  member's own conversation, not in the transcript, so send no more than five unless the
+  user knows the limit.
 - For long discussions (always for `TASK_FORCE`), `start_group_discussion` returns at once;
   poll `read_group_conversation` sparingly and tell the user it is still running. It has
   finished at `COMPLETED`, `FAILED`, `REJECTED` or `CANCELLED`; at `AWAITING_APPROVAL` or
