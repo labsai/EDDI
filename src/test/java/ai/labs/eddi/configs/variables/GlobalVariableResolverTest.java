@@ -107,6 +107,18 @@ class GlobalVariableResolverTest {
         }
 
         @Test
+        @DisplayName("budget boundaries: literal text counts, a result exactly at the budget is built (pins behaviour)")
+        void budgetCountsLiteralText() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("k", "x"));
+
+            assertNull(resolver.resolveValueWithin("p".repeat(2000) + "${vars:k}", 1000), "a long literal prefix counts");
+            assertNull(resolver.resolveValueWithin("${vars:k}" + "t".repeat(2000), 1000), "so does the tail");
+            assertEquals("abx", resolver.resolveValueWithin("ab${vars:k}", 3));
+            assertEquals("ab${vars:missing}", resolver.resolveValueWithin("ab${vars:missing}", 17), "a missing variable stays as written");
+            assertNull(resolver.resolveValueWithin("ab${vars:missing}", 16));
+        }
+
+        @Test
         @DisplayName("nested variables expand to the final value")
         void nestedVariablesExpand() {
             when(store.getAll(DEFAULT)).thenReturn(Map.of("outer", "${vars:inner}", "inner", "sk-final"));

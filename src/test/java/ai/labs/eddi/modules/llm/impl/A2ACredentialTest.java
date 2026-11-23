@@ -12,6 +12,7 @@ import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -37,7 +38,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -251,5 +254,41 @@ class A2ACredentialTest {
         manager.evictCards();
 
         assertNull(seen.get(), "the card was published under the generation the eviction retired");
+    }
+
+    @Test
+    @DisplayName("a credential changed during discovery has its grant read again before the peer's tools are handed out (#1179)")
+    void credentialChangedDuringDiscoveryIsCheckedAgain() {
+        var manager = manager();
+        String key = A2AToolProviderManager.cardCacheKey(AGENT_URL, "${vault:peer-key}");
+        doAnswer(invocation -> {
+            // Passed for the old credential; meanwhile the value is replaced and a card
+            // fetched with the new one is published.
+            manager.evictCards();
+            manager.publishCard(key, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "peer", "description", "new key's card"),
+                    System.currentTimeMillis()), manager.cardGeneration());
+            return null;
+        }).doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:peer-key} is not resolved for agent-a"))
+                .when(secretResolver).requireGranted(any(Iterable.class), any(), anyString());
+
+        var result = manager.discoverTools(List.of(config("${vault:peer-key}")), SecretAccess.agent("agent-a"));
+
+        assertTrue(result.toolSpecs().isEmpty(), "the new card's tools must not reach an agent the new grant leaves out");
+        assertTrue(result.executors().isEmpty());
+        verify(secretResolver, times(2)).requireGranted(any(Iterable.class), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("a discovery with no credential change reads the grant once and keeps the tools")
+    void unchangedCredentialIsCheckedOnce() {
+        var manager = manager();
+        String key = A2AToolProviderManager.cardCacheKey(AGENT_URL, "${vault:peer-key}");
+        manager.publishCard(key, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "peer", "description", "card"),
+                System.currentTimeMillis()), manager.cardGeneration());
+
+        var result = manager.discoverTools(List.of(config("${vault:peer-key}")), SecretAccess.agent("agent-a"));
+
+        assertEquals(1, result.toolSpecs().size());
+        verify(secretResolver, times(1)).requireGranted(any(Iterable.class), any(), anyString());
     }
 }

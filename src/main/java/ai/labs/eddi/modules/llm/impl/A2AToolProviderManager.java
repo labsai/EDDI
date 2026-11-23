@@ -326,8 +326,28 @@ public class A2AToolProviderManager {
 
                 // Before the agent-card cache, which is keyed on the peer and shared by
                 // every agent naming it (#1179).
+                long generation = cardInvalidations.get();
                 requireSecretGranted(config, access);
+                int specsBefore = toolSpecs.size();
+                Set<String> executorsBefore = new HashSet<>(executors.keySet());
+                Set<String> resolversBefore = new HashSet<>(requestResolvers.keySet());
                 discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
+                if (cardInvalidations.get() != generation) {
+                    // A credential changed while the card was looked up or fetched, so it
+                    // may be the new credential's: the grant is read again, for what is
+                    // current now, before its tools are handed out (#1179). A refusal takes
+                    // this peer's tools back out. One re-check: a grant keyed on the
+                    // reference covers every value the card could have been fetched with;
+                    // a chain of changes during one discovery is checked at its end.
+                    try {
+                        requireSecretGranted(config, access);
+                    } catch (RuntimeException e) {
+                        toolSpecs.subList(specsBefore, toolSpecs.size()).clear();
+                        executors.keySet().retainAll(executorsBefore);
+                        requestResolvers.keySet().retainAll(resolversBefore);
+                        throw e;
+                    }
+                }
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
             } catch (ConnectionException | IllegalArgumentException | IllegalStateException e) {
@@ -808,7 +828,7 @@ public class A2AToolProviderManager {
      * configs naming one vault reference share a card, and a literal key never
      * becomes a map key. An unauthenticated fetch keeps the bare URL as its key.
      */
-    private static String cardCacheKey(String agentUrl, String apiKey) {
+    static String cardCacheKey(String agentUrl, String apiKey) {
         if (isNullOrEmpty(apiKey)) {
             return agentUrl;
         }

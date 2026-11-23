@@ -223,6 +223,7 @@ public class GlobalVariableResolver {
         Matcher matcher = VARS_PATTERN.matcher(value);
         StringBuilder result = new StringBuilder();
         List<String> substituted = new ArrayList<>();
+        int copied = 0;
 
         while (matcher.find()) {
             String explicitTenant = matcher.group(1);
@@ -234,23 +235,26 @@ public class GlobalVariableResolver {
 
             Map<String, String> variables = loadVariables(effectiveTenant);
             String resolved = variables.get(key);
+            // A missing variable leaves its reference as written.
+            String replacement = resolved != null ? resolved : matcher.group(0);
+            // Counted before anything is appended: the text since the last reference,
+            // then the replacement. A result exactly at the budget is still built.
+            if ((long) result.length() + (matcher.start() - copied) + replacement.length() > maxLength) {
+                return null;
+            }
+            result.append(value, copied, matcher.start()).append(replacement);
+            copied = matcher.end();
             if (resolved != null) {
-                if ((long) result.length() + resolved.length() > maxLength) {
-                    return null;
-                }
                 substituted.add(resolved);
-                matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
             } else {
-                // Leave the original reference — variable not found
-                matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
                 LOGGER.debugf("Global variable not found: %s/%s — passing through unchanged",
                         effectiveTenant, key);
             }
         }
-        matcher.appendTail(result);
-        if (result.length() > maxLength) {
+        if ((long) result.length() + (value.length() - copied) > maxLength) {
             return null;
         }
+        result.append(value, copied, value.length());
         String out = result.toString();
         refuseAssembledReferences(value, substituted, out);
         return out;

@@ -94,8 +94,19 @@ public class ConnectionRegistry {
 
     /** The local half of {@link #invalidate}, for a change made on another node. */
     public void invalidateLocal() {
+        // The listeners run before the documents are dropped as well as after. Before:
+        // otherwise a caller could load the new binding, pass its grant check, and
+        // still be served what a listener's cache fetched with the old one, until the
+        // listener ran (#1179). After: something fetched in between still read the
+        // old document from this cache. What remains is a fetch that completes within
+        // these few statements, published between the drop and the second run.
+        fireInvalidationListeners();
         cache.invalidateAll();
         LOGGER.debug("Connection registry cache invalidated");
+        fireInvalidationListeners();
+    }
+
+    private void fireInvalidationListeners() {
         for (Runnable listener : invalidationListeners) {
             try {
                 listener.run();
@@ -106,10 +117,10 @@ public class ConnectionRegistry {
     }
 
     /**
-     * Runs {@code listener} after every invalidation, local or announced by another
-     * node: for a cache outside this registry that holds something fetched with a
-     * connection's credential, which must not outlive the binding it was fetched
-     * with (#1179).
+     * Runs {@code listener} on every invalidation, local or announced by another
+     * node, both before this registry drops its documents and after: for a cache
+     * outside this registry that holds something fetched with a connection's
+     * credential, which must not outlive the binding it was fetched with (#1179).
      */
     public void onInvalidation(Runnable listener) {
         invalidationListeners.add(listener);
