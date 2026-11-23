@@ -7,7 +7,6 @@ package ai.labs.eddi.integrations.channels;
 import ai.labs.eddi.integrations.channels.types.EmailChannelType;
 import ai.labs.eddi.integrations.channels.types.SlackChannelType;
 import ai.labs.eddi.integrations.channels.types.WebhookChannelType;
-import ai.labs.eddi.integrations.teams.TeamsChannelType;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -96,7 +95,7 @@ public class ChannelTypeRegistry {
      * constructed outside CDI — tests and the shorter constructors.
      */
     public static ChannelTypeRegistry builtIns() {
-        return new ChannelTypeRegistry(List.of(new SlackChannelType(), new WebhookChannelType(), new EmailChannelType(), new TeamsChannelType()));
+        return new ChannelTypeRegistry(List.of(new SlackChannelType(), new WebhookChannelType(), new EmailChannelType()));
     }
 
     /** The descriptor of {@code channelType} (case-insensitive), if registered. */

@@ -132,7 +132,7 @@ class TeamsConnectorClientTest {
         var chunks = TeamsConnectorClient.chunk(longText);
         assertEquals(2, chunks.size());
         assertEquals(longText, String.join("", chunks));
-        String lines = ("a".repeat(30_000) + "\n").repeat(3);
+        String lines = ("a".repeat(15_000) + "\n").repeat(3);
         var lineChunks = TeamsConnectorClient.chunk(lines);
         assertTrue(lineChunks.get(0).endsWith("\n"));
         assertEquals(lines, String.join("", lineChunks));

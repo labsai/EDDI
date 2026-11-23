@@ -45,7 +45,7 @@ group chats and channel threads, built on the Phase 0 channel-type core. No Bot 
   ignored rather than answered for the whole channel. Group targets and HITL cards answer with a notice for now.
 - **`TeamsMetrics`**: `eddi_teams_requests_refused_total{reason}` (the failed token check) and
   `eddi_teams_activities_total{outcome}` (`handled`, `duplicate`, `no_integration`, `tenant_refused`,
-  `identity_mismatch`, `targeted_ignored`, `bot_removed`), both with fixed tag values.
+  `identity_mismatch`, `targeted_ignored`, `bot_removed`), both with fixed tag values, charted in the Full Metrics dashboard ("Teams requests and activities", both copies). `eddi.teams.max-body-bytes` and `eddi.teams.request-timeout-seconds` are in the configuration reference.
 - **`TeamsConnectorClient`** over `OutboundHttp` (STRICT SSRF, no redirects): token from
   `ChannelConnectionCredentials.resolve(integration, activityUri)` per attempt, pacing per conversation (7/1 s, 8/2 s,
   60/30 s, 1800/h; waits up to 30 s, refuses beyond), backoff on 429/412/502/504 (2–20 s, ±20 % jitter, three

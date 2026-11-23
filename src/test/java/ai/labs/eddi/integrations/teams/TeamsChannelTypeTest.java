@@ -12,6 +12,9 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
 import ai.labs.eddi.integrations.channels.ChannelTypeDescriptor;
 import ai.labs.eddi.integrations.channels.ChannelTypeRegistry;
+import ai.labs.eddi.integrations.channels.types.EmailChannelType;
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
+import ai.labs.eddi.integrations.channels.types.WebhookChannelType;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +47,14 @@ class TeamsChannelTypeTest {
 
     private final TeamsChannelType type = new TeamsChannelType();
 
+    /**
+     * The built-in types plus Teams, as CDI discovers them (builtIns() is the
+     * core's fallback for code outside CDI and does not know the adapters).
+     */
+    static ChannelTypeRegistry registry() {
+        return new ChannelTypeRegistry(List.of(new SlackChannelType(), new WebhookChannelType(), new EmailChannelType(), new TeamsChannelType()));
+    }
+
     static Map<String, String> config() {
         Map<String, String> pc = new HashMap<>();
         pc.put("appId", APP_ID);
@@ -54,7 +65,7 @@ class TeamsChannelTypeTest {
 
     @Test
     void registeredAsConnectionBacked() {
-        assertTrue(ChannelTypeRegistry.builtIns().find("teams").isPresent());
+        assertTrue(registry().find("teams").isPresent());
         assertTrue(type.connectionBacked());
         assertEquals(Set.of(AuthType.OAUTH2_CLIENT_CREDENTIALS), type.acceptedConnectionAuthTypes());
         assertFalse(type.supportsObserveMode());
@@ -157,7 +168,7 @@ class TeamsChannelTypeTest {
         when(resolver.oauthClientIdOf(anyString())).thenReturn(Optional.of(APP_ID.toUpperCase()));
         IConnectionStore connectionStore = mock(IConnectionStore.class);
         when(connectionStore.idOfName(anyString(), anyString())).thenReturn("5262b802dc6c4008b5000001");
-        credentials = new ChannelConnectionCredentials(instance, ChannelTypeRegistry.builtIns(), connectionStore,
+        credentials = new ChannelConnectionCredentials(instance, registry(), connectionStore,
                 mock(ResourceAccessGuard.class));
     }
 

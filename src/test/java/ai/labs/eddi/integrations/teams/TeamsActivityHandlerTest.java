@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -89,7 +90,7 @@ class TeamsActivityHandlerTest {
         when(locks.put(any(), any())).thenAnswer(inv -> lockMap.put(inv.getArgument(0), inv.getArgument(1)));
         when(cacheFactory.<String, ChannelTarget>getCache(anyString(), any(Duration.class))).thenReturn(locks);
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, mock(IAgentStore.class), mock(SecretResolver.class), null,
-                cacheFactory);
+                cacheFactory, TeamsChannelTypeTest.registry());
 
         credentials = mock(ChannelConnectionCredentials.class);
         when(credentials.holdsRequiredIdentity(any(), any())).thenReturn(true);
@@ -295,6 +296,14 @@ class TeamsActivityHandlerTest {
         verify(references).delete(APP, CHANNEL);
         verify(references, never()).upsert(any());
         verify(connector, never()).sendText(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("two bots in one conversation lock their targets under different keys")
+    void threadKeyCarriesTheApp() throws Exception {
+        var activity = TeamsActivityHandler.parse(message(CHANNEL + ";messageid=1", "channel", TENANT, "hi"));
+        assertNotEquals(TeamsActivityHandler.threadKey(APP, activity), TeamsActivityHandler.threadKey(OTHER_APP, activity));
+        assertTrue(TeamsActivityHandler.threadKey(APP, activity).endsWith(CHANNEL + ";messageid=1"));
     }
 
     @Test
