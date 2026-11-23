@@ -120,6 +120,20 @@ public class PostgresTeamsConversationReferenceStore implements ITeamsConversati
     }
 
     @Override
+    public void delete(String appId, String conversationId) {
+        createSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection
+                        .prepareStatement("DELETE FROM teams_conversation_references WHERE app_id = ? AND conversation_id = ?")) {
+            statement.setString(1, appId);
+            statement.setString(2, conversationId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Could not delete the Teams conversation reference", e);
+        }
+    }
+
+    @Override
     public List<TeamsConversationReference> findByUser(String userId) {
         List<TeamsConversationReference> result = new ArrayList<>();
         if (userId == null) {

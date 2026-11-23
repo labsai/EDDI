@@ -76,6 +76,7 @@
 - [Slack Integration](slack-integration.md)
 - [Webhook Triggers (CloudEvents)](webhook-triggers.md)
 - [Email Integration](email-integration.md)
+- [Microsoft 365 Setup (Entra ID)](microsoft-365.md)
 - [Microsoft Teams Integration](teams-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)

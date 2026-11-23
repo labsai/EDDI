@@ -66,6 +66,13 @@ class RestTeamsAppPackageTest {
     }
 
     @Test
+    void emptyParametersFallBackToDefaults() {
+        var response = endpoint("teams", APP).appPackage("abc", 1, null, null, null, null, null);
+        assertEquals(200, response.getStatus());
+        assertThrows(BadRequestException.class, () -> endpoint("teams", APP).appPackage("abc", null, null, null, null, null, null));
+    }
+
+    @Test
     void refusesOtherTypesAndPlainHttp() {
         assertThrows(BadRequestException.class,
                 () -> endpoint("slack", APP).appPackage("abc", 1, "EDDI", "https://eddi.technology", null, null, "#4F46E5"));

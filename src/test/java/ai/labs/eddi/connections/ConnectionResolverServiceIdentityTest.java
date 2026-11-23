@@ -24,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -111,26 +113,59 @@ class ConnectionResolverServiceIdentityTest {
     }
 
     @Test
-    @DisplayName("proof obtains one service token")
-    void proofMintsToken() {
-        when(accessTokenSupplier.accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL)).thenReturn("token");
+    @DisplayName("proof obtains one fresh service token, never a stored grant")
+    void proofMintsFreshToken() {
+        when(accessTokenSupplier.freshServiceToken(connection)).thenReturn("token");
         assertDoesNotThrow(() -> resolver.proveServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
-        verify(accessTokenSupplier).accessToken(eq(connection), eq(ConnectionResolver.SERVICE_PRINCIPAL));
+        verify(accessTokenSupplier).freshServiceToken(eq(connection));
+        // A grant keyed by the connection's name can predate an edit of its client id.
+        verify(accessTokenSupplier, never()).accessToken(any(), any());
     }
 
     @Test
     @DisplayName("proof fails when the identity provider refuses the secret")
     void proofRefused() {
-        when(accessTokenSupplier.accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL))
+        when(accessTokenSupplier.freshServiceToken(connection))
                 .thenThrow(new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "invalid_client"));
         assertThrows(ConnectionException.class, () -> resolver.proveServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
     }
 
     @Test
-    @DisplayName("proof fails on an empty token")
-    void proofEmpty() {
-        when(accessTokenSupplier.accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL)).thenReturn(" ");
-        assertThrows(ConnectionException.class, () -> resolver.proveServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
+    @DisplayName("a supplier that cannot mint proves nothing")
+    void defaultSupplierRefuses() {
+        AccessTokenSupplier plain = (c, p) -> "stored-grant-token";
+        assertThrows(ConnectionException.class, () -> plain.freshServiceToken(connection));
+    }
+
+    @Test
+    @DisplayName("the per-request check reuses a proof of the same connection, and proves again after an edit")
+    void provenIdentityIsRemembered() {
+        when(accessTokenSupplier.freshServiceToken(any())).thenReturn("token");
+        resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE);
+        resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE);
+        verify(accessTokenSupplier, times(1)).freshServiceToken(any());
+
+        connection.getOauth().setClientSecret("${vault:another-secret}");
+        resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE);
+        verify(accessTokenSupplier, times(2)).freshServiceToken(any());
+    }
+
+    @Test
+    @DisplayName("a failed per-request proof is remembered, so it is not retried on every activity")
+    void failedProofIsRemembered() {
+        when(accessTokenSupplier.freshServiceToken(any()))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "invalid_client"));
+        assertThrows(ConnectionException.class, () -> resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
+        assertThrows(ConnectionException.class, () -> resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
+        verify(accessTokenSupplier, times(1)).freshServiceToken(any());
+    }
+
+    @Test
+    @DisplayName("the per-request check refuses an identity mismatch without minting")
+    void provenIdentityChecksFirst() {
+        connection.getOauth().setTokenUrl("https://idp.attacker.example/token");
+        assertThrows(ConnectionException.class, () -> resolver.requireProvenServiceIdentity(REF, APP_ID, TOKEN_URL, SCOPE));
+        verifyNoInteractions(accessTokenSupplier);
     }
 
     @Test

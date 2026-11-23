@@ -1018,6 +1018,8 @@ eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags
 eddi_channel_config_rejected_total          # Channel integration saves refused by type validation; tags: type, reason
 eddi_channel_config_keys_dropped_total      # Undeclared platformConfig keys the router dropped from stored documents; tag: type
 eddi_channel_credential_refused_total       # Channel sends whose connection could not be resolved; tags: type, reason
+eddi_teams_requests_refused_total           # Teams requests whose Bot Connector token failed a check; tag: reason (missing|malformed|algorithm|unknown_key|signature|endorsement|issuer|audience|expired|not_yet_valid|service_url)
+eddi_teams_activities_total                 # Verified Teams activities; tag: outcome (handled|duplicate|no_integration|tenant_refused|identity_mismatch|targeted_ignored|bot_removed)
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 

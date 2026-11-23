@@ -73,6 +73,7 @@ public class TeamsActivityHandler {
     static final String HELP_TEXT = "Hi! Send me a message and I'll pass it to the agent. In a channel, @mention me.";
     static final String WELCOME_TEXT = "Hi! I'm connected. Send me a message to get started.";
     static final String GROUP_NOT_SUPPORTED = "Group discussions are not available in Teams yet.";
+    static final String DELIVERY_FAILED_TEXT = "⚠️ I have an answer but could not post it here. Please try again, or ask for a shorter reply.";
     static final String ERROR_TEXT = "⚠️ Sorry, I encountered an error processing your message. Please try again.";
     static final String AWAITING_NOTICE = "⏸️ This conversation is waiting for a reviewer's approval before it can continue.";
 
@@ -88,13 +89,15 @@ public class TeamsActivityHandler {
     private final TeamsConnectorClient connector;
     private final ITeamsConversationReferenceStore references;
     private final int requestTimeoutSeconds;
+    private final TeamsMetrics metrics;
     private final ExecutorService executor;
 
     @Inject
     public TeamsActivityHandler(ChannelTargetRouter router, TeamsChannelType channelType, ChannelConnectionCredentials credentials,
             ChatThreadConversations threads, IConversationService conversationService, TeamsConnectorClient connector,
-            ITeamsConversationReferenceStore references,
+            ITeamsConversationReferenceStore references, TeamsMetrics metrics,
             @ConfigProperty(name = "eddi.teams.request-timeout-seconds", defaultValue = "60") int requestTimeoutSeconds) {
+        this.metrics = metrics != null ? metrics : TeamsMetrics.none();
         this.router = router;
         this.channelType = channelType;
         this.credentials = credentials;
@@ -137,7 +140,7 @@ public class TeamsActivityHandler {
 
     /** The parsed fields of an activity this handler uses. */
     record Activity(String type, String id, String serviceUrl, String conversationId, String conversationType, String tenantId,
-            String fromId, String fromAadObjectId, String recipientId, String text, JsonNode raw) {
+            String fromId, String fromAadObjectId, String recipientId, boolean targeted, String text, JsonNode raw) {
 
         /** The conversation without a channel thread's {@code ;messageid=} part. */
         String baseConversationId() {
@@ -146,15 +149,26 @@ public class TeamsActivityHandler {
         }
     }
 
+    /**
+     * Reads the fields this handler uses. The tenant may appear in
+     * {@code channelData.tenant.id} and in {@code conversation.tenantId}; when both
+     * are present and disagree, the activity has no tenant (and is refused), rather
+     * than one of the two being picked.
+     */
     static Activity parse(JsonNode node) {
         JsonNode conversation = node.path("conversation");
-        String tenantId = text(node.path("channelData").path("tenant"), "id");
-        if (tenantId == null) {
-            tenantId = text(conversation, "tenantId");
+        String channelDataTenant = text(node.path("channelData").path("tenant"), "id");
+        String conversationTenant = text(conversation, "tenantId");
+        String tenantId;
+        if (channelDataTenant != null && conversationTenant != null) {
+            tenantId = channelDataTenant.equalsIgnoreCase(conversationTenant) ? channelDataTenant : null;
+        } else {
+            tenantId = channelDataTenant != null ? channelDataTenant : conversationTenant;
         }
+        JsonNode recipient = node.path("recipient");
         return new Activity(text(node, "type"), text(node, "id"), text(node, "serviceUrl"), text(conversation, "id"),
                 text(conversation, "conversationType"), tenantId, text(node.path("from"), "id"), text(node.path("from"), "aadObjectId"),
-                text(node.path("recipient"), "id"), text(node, "text"), node);
+                text(recipient, "id"), recipient.path("isTargeted").asBoolean(false), text(node, "text"), node);
     }
 
     void handle(String verifiedAppId, JsonNode node) throws Exception {
@@ -167,29 +181,59 @@ public class TeamsActivityHandler {
         if (integration == null) {
             LOGGER.warnf("[TEAMS] No integration serves app %s in conversation %s — ignoring", sanitize(verifiedAppId),
                     sanitize(activity.baseConversationId()));
+            metrics.activity(TeamsMetrics.NO_INTEGRATION);
             return;
         }
         String tenantId = activity.tenantId() == null ? null : activity.tenantId().toLowerCase(Locale.ROOT);
         if (!TeamsChannelType.isGuid(tenantId) || !TeamsChannelType.acceptedTenants(integration.getPlatformConfig()).contains(tenantId)) {
             LOGGER.warnf("[TEAMS] Activity for integration '%s' from tenant %s, which it does not accept — ignoring",
                     sanitize(integration.getName()), sanitize(String.valueOf(activity.tenantId())));
+            metrics.activity(TeamsMetrics.TENANT_REFUSED);
             return;
         }
         if (!credentials.holdsRequiredIdentity(channelType, integration)) {
             LOGGER.warnf("[TEAMS] Integration '%s' names a connection that is not app %s's own (oauth.clientId, tokenUrl and scope "
                     + "must match) — ignoring", sanitize(integration.getName()), sanitize(verifiedAppId));
+            metrics.activity(TeamsMetrics.IDENTITY_MISMATCH);
             return;
         }
         if (activity.fromId() != null && activity.fromId().equals(activity.recipientId())) {
             return;
         }
+        if (activity.targeted()) {
+            // A private message in a channel or group chat. Answering it the normal way
+            // would post the reply for everyone; private replies are not built yet.
+            LOGGER.debugf("[TEAMS] Ignoring a targeted (private) activity in conversation %s", sanitize(activity.baseConversationId()));
+            metrics.activity(TeamsMetrics.TARGETED_IGNORED);
+            return;
+        }
+        if ("conversationUpdate".equals(activity.type()) && botIn(activity, "membersRemoved")) {
+            // The bot is gone from this conversation: nothing can be sent there again.
+            forgetConversation(verifiedAppId, activity);
+            metrics.activity(TeamsMetrics.BOT_REMOVED);
+            return;
+        }
         rememberConversation(verifiedAppId, tenantId, activity);
+        metrics.activity(TeamsMetrics.HANDLED);
 
         switch (activity.type() == null ? "" : activity.type()) {
             case "message" -> handleMessage(verifiedAppId, tenantId, integration, activity);
             case "conversationUpdate" -> handleConversationUpdate(integration, activity);
             default -> LOGGER.debugf("[TEAMS] Ignoring activity type %s", sanitize(activity.type()));
         }
+    }
+
+    /** Whether the bot itself is among the members listed under {@code field}. */
+    private static boolean botIn(Activity activity, String field) {
+        if (activity.recipientId() == null) {
+            return false;
+        }
+        for (JsonNode member : activity.raw().path(field)) {
+            if (activity.recipientId().equals(text(member, "id"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -210,13 +254,7 @@ public class TeamsActivityHandler {
     }
 
     private void handleConversationUpdate(ChannelIntegrationConfiguration integration, Activity activity) {
-        boolean botAdded = false;
-        for (JsonNode member : activity.raw().path("membersAdded")) {
-            if (activity.recipientId() != null && activity.recipientId().equals(text(member, "id"))) {
-                botAdded = true;
-            }
-        }
-        if (botAdded) {
+        if (botIn(activity, "membersAdded")) {
             reply(integration, activity, WELCOME_TEXT);
         }
     }
@@ -224,7 +262,7 @@ public class TeamsActivityHandler {
     private void handleMessage(String appId, String tenantId, ChannelIntegrationConfiguration integration, Activity activity)
             throws Exception {
         if (!TeamsChannelType.isGuid(activity.fromAadObjectId())) {
-            LOGGER.debugf("[TEAMS] Message without an Entra object id (guest or bot) — ignoring");
+            LOGGER.debugf("[TEAMS] Message without an Entra object id — ignoring");
             return;
         }
         String userId = TeamsUserIdentity.eddiUserId(tenantId, activity.fromAadObjectId());
@@ -237,7 +275,7 @@ public class TeamsActivityHandler {
         boolean channelBound = activity.baseConversationId().equals(integration.getPlatformConfig().get(TeamsChannelType.KEY_CONVERSATION_ID));
 
         ResolvedTarget resolved = null;
-        ResolvedTarget locked = router.resolveThreadTarget(TeamsChannelType.ID, activity.baseConversationId(), activity.conversationId());
+        ResolvedTarget locked = router.resolveThreadTarget(TeamsChannelType.ID, activity.baseConversationId(), threadKey(appId, activity));
         if (locked != null) {
             resolved = channelBound ? locked : router.threadCredentialsForDm(locked.target(), origin);
             if (resolved == null || !sameIntegration(resolved.integration(), integration)) {
@@ -260,7 +298,7 @@ public class TeamsActivityHandler {
                     sanitize(activity.baseConversationId()));
             return;
         }
-        router.lockThreadTarget(TeamsChannelType.ID, activity.baseConversationId(), activity.conversationId(), resolved.target());
+        router.lockThreadTarget(TeamsChannelType.ID, activity.baseConversationId(), threadKey(appId, activity), resolved.target());
 
         ChannelTarget target = resolved.target();
         switch (target.getType()) {
@@ -269,6 +307,15 @@ public class TeamsActivityHandler {
             case GROUP -> reply(integration, activity, GROUP_NOT_SUPPORTED);
             default -> LOGGER.warnf("[TEAMS] Unsupported target type %s", target.getType());
         }
+    }
+
+    /**
+     * The thread-lock key: the app id with the full conversation id (a channel
+     * thread's included). Two bots in one conversation therefore keep separate
+     * locks instead of overwriting each other's.
+     */
+    static String threadKey(String appId, Activity activity) {
+        return appId + "|" + activity.conversationId();
     }
 
     private static boolean sameIntegration(ChannelIntegrationConfiguration a, ChannelIntegrationConfiguration b) {
@@ -294,7 +341,15 @@ public class TeamsActivityHandler {
             reply(integration, activity, "⏳ That took longer than " + requestTimeoutSeconds
                     + " seconds, so I stopped waiting. The agent may still be working — ask again in a moment.");
         } catch (TeamsDeliveryException e) {
-            throw e;
+            // The answer could not be posted (too large, refused, rate-limited). Try a
+            // short notice so the user is not left waiting in silence; it may fail too.
+            LOGGER.warnf("[TEAMS] Could not deliver the answer for integration '%s': %s", sanitize(integration.getName()),
+                    e.getMessage());
+            try {
+                reply(integration, activity, DELIVERY_FAILED_TEXT);
+            } catch (TeamsDeliveryException again) {
+                LOGGER.debugf("[TEAMS] The delivery-failure notice could not be posted either: %s", again.getMessage());
+            }
         } catch (Exception e) {
             LOGGER.errorf(e, "[TEAMS] Turn failed for integration '%s'", sanitize(integration.getName()));
             reply(integration, activity, ERROR_TEXT);
@@ -353,6 +408,17 @@ public class TeamsActivityHandler {
 
     private void reply(ChannelIntegrationConfiguration integration, Activity activity, String text) {
         connector.sendText(integration, activity.serviceUrl(), activity.conversationId(), activity.id(), text);
+    }
+
+    private void forgetConversation(String appId, Activity activity) {
+        if (references == null) {
+            return;
+        }
+        try {
+            references.delete(appId, activity.conversationId());
+        } catch (RuntimeException e) {
+            LOGGER.warnf("[TEAMS] Could not delete the conversation reference: %s", e.getMessage());
+        }
     }
 
     private void rememberConversation(String appId, String tenantId, Activity activity) {

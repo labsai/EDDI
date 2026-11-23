@@ -649,6 +649,20 @@ public class OAuthTokenService implements AccessTokenSupplier {
         return grant;
     }
 
+    @Override
+    public String freshServiceToken(ConnectionConfiguration connection) {
+        if (connection == null || connection.getAuthType() == null || !connection.getAuthType().isServiceAccount()) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "A fresh service token needs an OAUTH2_CLIENT_CREDENTIALS or OAUTH2_JWT_BEARER connection.");
+        }
+        TokenResponse token = mintServiceToken(connection);
+        if (token == null || token.accessToken() == null || token.accessToken().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
+                    "Connection '" + connection.getName() + "' produced an empty access token.");
+        }
+        return token.accessToken();
+    }
+
     /**
      * A fresh token for a service account: {@code client_credentials}, or the RFC
      * 7523 JWT bearer grant signed with the connection's private key.

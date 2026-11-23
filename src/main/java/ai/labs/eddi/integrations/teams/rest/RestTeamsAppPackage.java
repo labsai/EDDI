@@ -81,6 +81,13 @@ public class RestTeamsAppPackage {
                                @QueryParam("privacyUrl") String privacyUrl, @QueryParam("termsOfUseUrl") String termsOfUseUrl,
                                @QueryParam("accentColor")
                                @DefaultValue("#4F46E5") String accentColor) {
+        if (version == null || version < 1) {
+            throw new BadRequestException("The query parameter version is required.");
+        }
+        // An empty parameter (?developerName=) arrives as null, not as the default.
+        developerName = developerName == null || developerName.isBlank() ? "EDDI" : developerName.trim();
+        websiteUrl = websiteUrl == null || websiteUrl.isBlank() ? DEFAULT_WEBSITE : websiteUrl.trim();
+        accentColor = accentColor == null || accentColor.isBlank() ? "#4F46E5" : accentColor.trim();
         ChannelIntegrationConfiguration integration = channels.readChannel(id, version);
         if (integration == null || !TeamsChannelType.ID.equals(integration.getChannelType())) {
             throw new BadRequestException("Channel integration " + id + " is not a Teams integration.");

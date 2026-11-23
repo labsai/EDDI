@@ -53,6 +53,12 @@ public interface ITeamsConversationReferenceStore {
 
     Optional<TeamsConversationReference> find(String appId, String conversationId);
 
+    /**
+     * Deletes the reference of one conversation — the bot was removed from it, so
+     * it can no longer be reached there.
+     */
+    void delete(String appId, String conversationId);
+
     /** The references naming {@code userId}, for export. */
     List<TeamsConversationReference> findByUser(String userId);
 

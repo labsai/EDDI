@@ -121,6 +121,12 @@ public class TeamsChannelType implements ChannelTypeDescriptor {
         return applicationId(platformConfig).map(id -> List.of(ChannelTypeDescriptor.applicationKey(id))).orElse(List.of());
     }
 
+    /** A Teams bot's app id is its Entra client id. */
+    @Override
+    public boolean applicationIdIsConnectionClientId() {
+        return true;
+    }
+
     @Override
     public Optional<ConnectionIdentityRequirement> requiredConnectionIdentity(Map<String, String> platformConfig) {
         Optional<String> appId = applicationId(platformConfig);

@@ -8,6 +8,7 @@ import ai.labs.eddi.integrations.teams.TeamsTokenVerifier.Outcome;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.crypto.Mac;
@@ -73,7 +74,7 @@ class TeamsTokenVerifierTest {
         verifier = new TeamsTokenVerifier(keys, MAPPER, clock);
     }
 
-    private String fetch(URI uri) throws Exception {
+    private String fetch(URI uri) throws IOException {
         if (uri.toString().equals(TeamsSigningKeys.OPENID_CONFIGURATION)) {
             return "{\"jwks_uri\":\"https://login.botframework.com/v1/.well-known/keys\"}";
         }
@@ -361,6 +362,39 @@ class TeamsTokenVerifierTest {
         mutable.now = NOW.plus(Duration.ofHours(25));
         keys.find(KID);
         assertEquals(2, fetches.get());
+    }
+
+    @Test
+    @DisplayName("absurd exp / nbf values are judged, not turned into a 500")
+    void absurdDatesDoNotThrow() throws Exception {
+        var claims = claims();
+        claims.put("exp", Long.MAX_VALUE);
+        assertEquals(Outcome.VALID, verify(rs256(header(), claims, signingKey)).outcome());
+        claims.put("nbf", Long.MAX_VALUE);
+        assertEquals(Outcome.NOT_YET_VALID, verify(rs256(header(), claims, signingKey)).outcome());
+        claims = claims();
+        claims.put("exp", Long.MIN_VALUE);
+        assertEquals(Outcome.EXPIRED, verify(rs256(header(), claims, signingKey)).outcome());
+    }
+
+    @Test
+    @DisplayName("a key published after the first fetch is picked up once the refetch window passes")
+    void newlyPublishedKeyIsFound() throws Exception {
+        MutableClock mutable = new MutableClock(NOW);
+        String[] publishedKid = {KID};
+        TeamsSigningKeys keys = new TeamsSigningKeys(uri -> fetch(uri).replace("\"" + KID + "\"", "\"" + publishedKid[0] + "\""), MAPPER,
+                mutable);
+        TeamsTokenVerifier rotating = new TeamsTokenVerifier(keys, MAPPER, mutable);
+        var header = header();
+        header.put("kid", "key-2");
+        String token = rs256(header, claims(), signingKey);
+        assertEquals(Outcome.VALID, rotating.verify("Bearer " + rs256(header(), claims(), signingKey), SERVICE_URL, "msteams",
+                APP_ID::equals).outcome());
+        publishedKid[0] = "key-2";
+        // Inside the minute the unknown kid is not refetched.
+        assertEquals(Outcome.UNKNOWN_KEY, rotating.verify("Bearer " + token, SERVICE_URL, "msteams", APP_ID::equals).outcome());
+        mutable.now = NOW.plusSeconds(61);
+        assertEquals(Outcome.VALID, rotating.verify("Bearer " + token, SERVICE_URL, "msteams", APP_ID::equals).outcome());
     }
 
     static final class MutableClock extends Clock {

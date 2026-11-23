@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -23,7 +25,11 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -462,12 +468,17 @@ public class ConnectionResolver {
 
     /**
      * {@link #requireServiceIdentity} and then proof of possession: one access
-     * token is obtained from the pinned token endpoint with the connection's own
-     * secret or certificate, and dropped. A connection that names someone else's
-     * client id with a made-up secret fails here, because the identity provider
-     * refuses it. The token may come from the connection's live service grant
-     * rather than a fresh exchange; that grant was itself issued by the same pinned
-     * endpoint for the same client.
+     * token is obtained <em>right now</em> from the pinned token endpoint with the
+     * connection's own secret or certificate, and dropped
+     * ({@link AccessTokenSupplier#freshServiceToken}). A connection that names
+     * someone else's client id with a made-up secret fails here, because the
+     * identity provider refuses it.
+     * <p>
+     * Never a stored grant: a grant is keyed by the connection's name, not by its
+     * client id or endpoint, so one minted before the connection was edited to name
+     * another application would "prove" that application. A successful proof is
+     * remembered for {@link #PROOF_TTL} under a fingerprint of the connection's
+     * identity fields, for {@link #requireProvenServiceIdentity}.
      *
      * @throws ConnectionException
      *             naming the rule that failed, or the reason no token was issued
@@ -475,10 +486,75 @@ public class ConnectionResolver {
     public void proveServiceIdentity(String reference, String clientId, String tokenUrl, String scope) {
         ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
         requireServiceIdentity(connection, clientId, tokenUrl, scope);
-        String token = accessTokenSupplier.accessToken(connection, SERVICE_PRINCIPAL);
-        if (token == null || token.isBlank()) {
+        mintProof(connection);
+    }
+
+    /**
+     * {@link #requireServiceIdentity}, and a proof of possession for the connection
+     * exactly as it is now: remembered from an earlier proof of the same identity
+     * fields, or obtained now (one token exchange). For inbound traffic of an
+     * integration that never passed save validation (a ZIP import, a direct store
+     * write) or whose connection was edited since. A failed proof is remembered for
+     * {@link #FAILED_PROOF_TTL}, so a stream of activities for a bad connection
+     * does not become a stream of token requests.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed, or the reason no token was issued
+     */
+    public void requireProvenServiceIdentity(String reference, String clientId, String tokenUrl, String scope) {
+        ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        requireServiceIdentity(connection, clientId, tokenUrl, scope);
+        String fingerprint = identityFingerprint(connection);
+        if (provenIdentities.getIfPresent(fingerprint) != null) {
+            return;
+        }
+        if (failedProofs.getIfPresent(fingerprint) != null) {
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                    "Connection '" + connection.getName() + "' produced an empty access token.");
+                    "Connection '" + connection.getName() + "' recently failed to obtain a token; retrying after a short pause.");
+        }
+        mintProof(connection);
+    }
+
+    /** How long a proof of possession is trusted before it is obtained again. */
+    static final Duration PROOF_TTL = Duration.ofHours(6);
+
+    /** How long a failed proof is remembered before the next attempt. */
+    static final Duration FAILED_PROOF_TTL = Duration.ofMinutes(5);
+
+    private final Cache<String, Boolean> provenIdentities = Caffeine.newBuilder().expireAfterWrite(PROOF_TTL).maximumSize(10_000).build();
+    private final Cache<String, Boolean> failedProofs = Caffeine.newBuilder().expireAfterWrite(FAILED_PROOF_TTL).maximumSize(10_000)
+            .build();
+
+    private void mintProof(ConnectionConfiguration connection) {
+        String fingerprint = identityFingerprint(connection);
+        try {
+            accessTokenSupplier.freshServiceToken(connection);
+        } catch (RuntimeException e) {
+            failedProofs.put(fingerprint, Boolean.TRUE);
+            provenIdentities.invalidate(fingerprint);
+            throw e;
+        }
+        failedProofs.invalidate(fingerprint);
+        provenIdentities.put(fingerprint, Boolean.TRUE);
+    }
+
+    /**
+     * A digest of everything that decides which application a connection's token
+     * belongs to: tenant, name, auth type, client id, token endpoint, scopes, the
+     * client authentication method and the secret, key and thumbprint (as stored,
+     * normally vault references). Any edit of one of them yields a new fingerprint
+     * and so needs a new proof.
+     */
+    static String identityFingerprint(ConnectionConfiguration connection) {
+        var oauth = connection.getOauth();
+        String joined = String.join("\u0000", String.valueOf(connection.getTenantId()), String.valueOf(connection.getName()),
+                String.valueOf(connection.getAuthType()), String.valueOf(oauth.getClientId()), String.valueOf(oauth.getTokenUrl()),
+                String.valueOf(oauth.getScopes()), String.valueOf(oauth.getClientAuthMethod()), String.valueOf(oauth.getClientSecret()),
+                String.valueOf(oauth.getPrivateKey()), String.valueOf(oauth.getPrivateKeyId()), String.valueOf(oauth.getCertificateThumbprint()));
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(joined.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
         }
     }
 

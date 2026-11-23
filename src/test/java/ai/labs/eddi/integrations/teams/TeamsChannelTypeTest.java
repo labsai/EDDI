@@ -5,12 +5,14 @@
 package ai.labs.eddi.integrations.teams;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
 import ai.labs.eddi.integrations.channels.ChannelTypeDescriptor;
 import ai.labs.eddi.integrations.channels.ChannelTypeRegistry;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -140,41 +144,67 @@ class TeamsChannelTypeTest {
                 () -> TeamsUserIdentity.eddiUserId(TENANT + ":x", APP_ID));
     }
 
+    private ConnectionResolver resolver;
+    private ChannelConnectionCredentials credentials;
+
     @SuppressWarnings("unchecked")
-    @Test
-    @DisplayName("save proves possession: a token is obtained for the declared app id")
-    void saveProvesIdentity() {
-        ConnectionResolver resolver = mock(ConnectionResolver.class);
+    @BeforeEach
+    void credentials() throws Exception {
+        resolver = mock(ConnectionResolver.class);
         Instance<ConnectionResolver> instance = mock(Instance.class);
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(resolver);
-        var credentials = new ChannelConnectionCredentials(instance);
+        when(resolver.oauthClientIdOf(anyString())).thenReturn(Optional.of(APP_ID.toUpperCase()));
+        IConnectionStore connectionStore = mock(IConnectionStore.class);
+        when(connectionStore.idOfName(anyString(), anyString())).thenReturn("5262b802dc6c4008b5000001");
+        credentials = new ChannelConnectionCredentials(instance, ChannelTypeRegistry.builtIns(), connectionStore,
+                mock(ResourceAccessGuard.class));
+    }
 
+    private static String reference() {
+        return ChannelConnectionCredentials.connectionReference(config());
+    }
+
+    @Test
+    @DisplayName("save proves possession: a token is obtained for the declared app id")
+    void saveProvesIdentity() {
         assertEquals(List.of(), credentials.validateForSave(type, config()));
-        verify(resolver).proveServiceIdentity("${connection:teams-bot}", APP_ID, TeamsChannelType.tokenUrl(TENANT),
-                TeamsChannelType.BOT_CONNECTOR_SCOPE);
+        verify(resolver).proveServiceIdentity(reference(), APP_ID, TeamsChannelType.tokenUrl(TENANT), TeamsChannelType.BOT_CONNECTOR_SCOPE);
 
         doThrow(new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "invalid_client")).when(resolver)
                 .proveServiceIdentity(any(), any(), any(), any());
         assertEquals(List.of("platformConfig.connection: invalid_client"), credentials.validateForSave(type, config()));
     }
 
-    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("a connection with another client id is refused before any token is requested")
+    void otherClientIdRefusedFirst() {
+        when(resolver.oauthClientIdOf(anyString())).thenReturn(Optional.of("99999999-2222-3333-4444-555555555555"));
+        assertEquals(1, credentials.validateForSave(type, config()).size());
+        verify(resolver, never()).proveServiceIdentity(any(), any(), any(), any());
+    }
+
     @Test
     @DisplayName("at runtime the identity is re-checked without a network call")
     void runtimeIdentityCheck() {
-        ConnectionResolver resolver = mock(ConnectionResolver.class);
-        Instance<ConnectionResolver> instance = mock(Instance.class);
-        when(instance.isResolvable()).thenReturn(true);
-        when(instance.get()).thenReturn(resolver);
-        var credentials = new ChannelConnectionCredentials(instance);
         var integration = new ChannelIntegrationConfiguration();
         integration.setPlatformConfig(config());
 
         assertTrue(credentials.holdsRequiredIdentity(type, integration));
         doThrow(new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "other app")).when(resolver)
-                .requireServiceIdentity(any(), any(), any(), any());
+                .requireProvenServiceIdentity(any(), any(), any(), any());
         assertFalse(credentials.holdsRequiredIdentity(type, integration));
         verify(resolver, never()).proveServiceIdentity(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a Teams integration too incomplete to name its identity holds none: fail closed")
+    void incompleteConfigHoldsNoIdentity() {
+        var integration = new ChannelIntegrationConfiguration();
+        var pc = config();
+        pc.remove("tenantId");
+        integration.setPlatformConfig(pc);
+        assertFalse(credentials.holdsRequiredIdentity(type, integration));
+        verify(resolver, never()).requireProvenServiceIdentity(any(), any(), any(), any());
     }
 }

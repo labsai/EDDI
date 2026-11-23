@@ -42,6 +42,9 @@ thereby allowed to log in to a mailbox. The connection must be bound `SERVICE`: 
 
 #### Exchange Online (OAuth client credentials)
 
+[Microsoft 365 Setup](microsoft-365.md#mailbox-over-imap-and-smtp) covers the app registration, a certificate instead
+of a client secret, and the negative test; the steps below are the short version.
+
 Basic authentication is retired on Exchange Online; IMAP uses OAuth 2.0 client credentials and SASL `XOAUTH2`.
 
 1. In Microsoft Entra ID, register an application and create a client secret.

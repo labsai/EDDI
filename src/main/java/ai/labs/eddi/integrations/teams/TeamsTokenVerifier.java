@@ -152,11 +152,11 @@ public class TeamsTokenVerifier {
         }
         Instant now = clock.instant();
         JsonNode exp = claims.get("exp");
-        if (exp == null || !exp.isNumber() || Instant.ofEpochSecond(exp.asLong()).plus(CLOCK_SKEW).isBefore(now)) {
+        if (exp == null || !exp.isNumber() || epochSecond(exp).plus(CLOCK_SKEW).isBefore(now)) {
             return Verification.refused(Outcome.EXPIRED);
         }
         JsonNode nbf = claims.get("nbf");
-        if (nbf != null && (!nbf.isNumber() || Instant.ofEpochSecond(nbf.asLong()).minus(CLOCK_SKEW).isAfter(now))) {
+        if (nbf != null && (!nbf.isNumber() || epochSecond(nbf).minus(CLOCK_SKEW).isAfter(now))) {
             return Verification.refused(Outcome.NOT_YET_VALID);
         }
         String serviceUrlClaim = textOf(claims, "serviceurl");
@@ -167,6 +167,19 @@ public class TeamsTokenVerifier {
             return Verification.refused(Outcome.SERVICE_URL);
         }
         return new Verification(Outcome.VALID, appId);
+    }
+
+    /**
+     * A numeric date claim as an instant, clamped to the range {@link Instant} can
+     * hold: a signed token with an absurd {@code exp} must be judged, not crash the
+     * request into a 500.
+     */
+    private static Instant epochSecond(JsonNode claim) {
+        // A day inside the bounds, so adding or subtracting the skew cannot overflow.
+        long margin = Duration.ofDays(1).toSeconds();
+        long seconds = claim.asLong();
+        return Instant.ofEpochSecond(
+                Math.max(Instant.MIN.getEpochSecond() + margin, Math.min(Instant.MAX.getEpochSecond() - margin, seconds)));
     }
 
     private static boolean signatureValid(TeamsSigningKeys.SigningKey key, String signedPart, byte[] signature) {

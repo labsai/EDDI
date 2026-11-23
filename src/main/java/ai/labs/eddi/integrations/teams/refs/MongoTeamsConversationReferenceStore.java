@@ -75,6 +75,11 @@ public class MongoTeamsConversationReferenceStore implements ITeamsConversationR
     }
 
     @Override
+    public void delete(String appId, String conversationId) {
+        references.deleteOne(key(appId, conversationId));
+    }
+
+    @Override
     public List<TeamsConversationReference> findByUser(String userId) {
         List<TeamsConversationReference> result = new ArrayList<>();
         if (userId == null) {

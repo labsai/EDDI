@@ -54,9 +54,10 @@ import java.util.function.LongSupplier;
  * <li><b>Retries.</b> 429, 412, 502 and 504 are retried with exponential
  * backoff and jitter (2 s to 20 s, at most three retries), honouring a
  * {@code Retry-After} up to 20 s.</li>
- * <li><b>Size.</b> Text longer than {@link #MAX_CHUNK_CHARS} UTF-16 units
- * (about 80 KB, the size Teams guarantees to deliver) is split into several
- * messages, at a line break where there is one.</li>
+ * <li><b>Size.</b> Text longer than {@link #MAX_CHUNK_CHARS} UTF-16 units (at
+ * most 80 KB whether Teams counts UTF-8 or UTF-16 bytes; 80 KB is what it
+ * guarantees to deliver) is split into several messages, at a line break where
+ * there is one.</li>
  * <li>Messages are sent with {@code textFormat: extendedmarkdown}.</li>
  * </ul>
  *
@@ -67,7 +68,7 @@ public class TeamsConnectorClient {
 
     private static final Logger LOGGER = Logger.getLogger(TeamsConnectorClient.class);
 
-    static final int MAX_CHUNK_CHARS = 40_000;
+    static final int MAX_CHUNK_CHARS = 20_000;
     static final Duration MAX_PACING_WAIT = Duration.ofSeconds(30);
     static final int MAX_RETRIES = 3;
     static final long MIN_BACKOFF_MS = 2_000;

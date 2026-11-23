@@ -191,11 +191,18 @@ public class ChannelConnectionCredentials {
 
     /**
      * Whether {@code integration}'s connection still holds the identity its type
-     * demands ({@link ChannelTypeDescriptor#requiredConnectionIdentity}), checked
-     * without a network call. An inbound adapter calls this before trusting the
-     * integration with a verified application's traffic: save validation is
-     * skipped by a ZIP import or a direct store write, and the connection can be
-     * edited after the save. {@code true} for a type that demands no identity.
+     * demands ({@link ChannelTypeDescriptor#requiredConnectionIdentity}) and has
+     * proven it for the connection exactly as it is now
+     * ({@link ConnectionResolver#requireProvenServiceIdentity}: remembered from an
+     * earlier proof, else one token exchange). An inbound adapter calls this before
+     * trusting the integration with a verified application's traffic: save
+     * validation is skipped by a ZIP import or a direct store write, and the
+     * connection can be edited after the save.
+     * <p>
+     * {@code true} for a type that ties no identity to its connection;
+     * {@code false} for one that does
+     * ({@link ChannelTypeDescriptor#applicationIdIsConnectionClientId}) when the
+     * configuration is too incomplete to say which identity.
      */
     public boolean holdsRequiredIdentity(ChannelTypeDescriptor descriptor, ChannelIntegrationConfiguration integration) {
         if (descriptor == null || integration == null) {
@@ -203,7 +210,7 @@ public class ChannelConnectionCredentials {
         }
         Optional<ConnectionIdentityRequirement> identity = descriptor.requiredConnectionIdentity(integration.getPlatformConfig());
         if (identity.isEmpty()) {
-            return true;
+            return !descriptor.applicationIdIsConnectionClientId();
         }
         String reference = connectionReference(integration.getPlatformConfig());
         if (reference == null || connectionResolver == null || !connectionResolver.isResolvable()) {
@@ -211,7 +218,7 @@ public class ChannelConnectionCredentials {
         }
         ConnectionIdentityRequirement required = identity.get();
         try {
-            connectionResolver.get().requireServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
+            connectionResolver.get().requireProvenServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
             return true;
         } catch (ConnectionException e) {
             channelTypes.recordCredentialRefused(descriptor.id(), "identity_mismatch");

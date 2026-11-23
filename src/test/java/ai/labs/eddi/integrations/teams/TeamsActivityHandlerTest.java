@@ -106,7 +106,8 @@ class TeamsActivityHandlerTest {
         }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
         connector = mock(TeamsConnectorClient.class);
         references = mock(ITeamsConversationReferenceStore.class);
-        handler = new TeamsActivityHandler(router, new TeamsChannelType(), credentials, threads, conversationService, connector, references, 5);
+        handler = new TeamsActivityHandler(router, new TeamsChannelType(), credentials, threads, conversationService, connector, references,
+                TeamsMetrics.none(), 5);
     }
 
     private ChannelIntegrationConfiguration integration(String name, String appId, String conversationId, String agentId) throws Exception {
@@ -255,6 +256,45 @@ class TeamsActivityHandlerTest {
         activity.put("membersAdded", List.of(Map.of("id", "28:" + APP)));
         handler.handle(APP, MAPPER.valueToTree(activity));
         verify(connector).sendText(any(), eq(SERVICE_URL), eq("a:personal-1"), any(), eq(TeamsActivityHandler.WELCOME_TEXT));
+    }
+
+    @Test
+    @DisplayName("two tenant ids that disagree leave the activity without a tenant: refused")
+    void conflictingTenants() throws Exception {
+        integration("dm", APP, null, "agent-dm");
+        var activity = (ObjectNode) message("a:personal-1", "personal", TENANT, "hello");
+        ((ObjectNode) activity.get("conversation")).put("tenantId", FOREIGN_TENANT);
+        handler.handle(APP, activity);
+        verify(connector, never()).sendText(any(), any(), any(), any(), any());
+        verify(references, never()).upsert(any());
+    }
+
+    @Test
+    @DisplayName("a targeted (private) message is never answered in the open")
+    void targetedIgnored() throws Exception {
+        integration("dm", APP, null, "agent-dm");
+        var activity = (ObjectNode) message(CHANNEL, "channel", TENANT, "<at>Bot</at> secret question");
+        activity.set("recipient", MAPPER.valueToTree(Map.of("id", "28:" + APP, "isTargeted", true)));
+        handler.handle(APP, activity);
+        verify(threads, never()).open(anyString(), anyString(), anyString());
+        verify(connector, never()).sendText(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("the bot being removed deletes the conversation reference and sends nothing")
+    void botRemoved() throws Exception {
+        integration("dm", APP, null, "agent-dm");
+        Map<String, Object> activity = new HashMap<>();
+        activity.put("type", "conversationUpdate");
+        activity.put("serviceUrl", SERVICE_URL);
+        activity.put("recipient", Map.of("id", "28:" + APP));
+        activity.put("conversation", Map.of("id", CHANNEL, "conversationType", "channel"));
+        activity.put("channelData", Map.of("tenant", Map.of("id", TENANT)));
+        activity.put("membersRemoved", List.of(Map.of("id", "28:" + APP)));
+        handler.handle(APP, MAPPER.valueToTree(activity));
+        verify(references).delete(APP, CHANNEL);
+        verify(references, never()).upsert(any());
+        verify(connector, never()).sendText(any(), any(), any(), any(), any());
     }
 
     @Test

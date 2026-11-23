@@ -32,4 +32,21 @@ public interface AccessTokenSupplier {
      *             when no usable grant exists or the token endpoint refuses
      */
     String accessToken(ConnectionConfiguration connection, String principal);
+
+    /**
+     * A token obtained right now from the connection's token endpoint with its own
+     * secret or key, bypassing and not touching the grant store. Proof of
+     * possession: a stored grant is keyed by the connection's name, not by its
+     * client id or endpoint, so it can outlive an edit of either and prove nothing
+     * about the connection as it is now. Refuses by default, so an implementation
+     * that cannot mint never "proves" anything.
+     *
+     * @throws ConnectionException
+     *             when the endpoint refuses or the connection is not a service
+     *             account
+     */
+    default String freshServiceToken(ConnectionConfiguration connection) {
+        throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                "This token supplier cannot obtain a fresh service token.");
+    }
 }

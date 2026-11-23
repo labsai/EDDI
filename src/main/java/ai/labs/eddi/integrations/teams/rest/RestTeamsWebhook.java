@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.teams.TeamsActivityHandler;
+import ai.labs.eddi.integrations.teams.TeamsMetrics;
 import ai.labs.eddi.integrations.teams.TeamsTokenVerifier;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,10 +64,12 @@ public class RestTeamsWebhook {
     private final ObjectMapper objectMapper;
     private final ICache<String, Boolean> dedup;
     private final int maxBodyBytes;
+    private final TeamsMetrics metrics;
 
     @Inject
     public RestTeamsWebhook(TeamsTokenVerifier verifier, TeamsActivityHandler handler, ObjectMapper objectMapper, ICacheFactory cacheFactory,
-            @ConfigProperty(name = "eddi.teams.max-body-bytes", defaultValue = "262144") int maxBodyBytes) {
+            TeamsMetrics metrics, @ConfigProperty(name = "eddi.teams.max-body-bytes", defaultValue = "262144") int maxBodyBytes) {
+        this.metrics = metrics != null ? metrics : TeamsMetrics.none();
         this.verifier = verifier;
         this.handler = handler;
         this.objectMapper = objectMapper;
@@ -109,6 +112,7 @@ public class RestTeamsWebhook {
         TeamsTokenVerifier.Verification verification = verifier.verify(authorization, serviceUrl, channelId, handler::isKnownApp);
         if (!verification.valid()) {
             LOGGER.warnf("Teams activity refused: %s", verification.outcome());
+            metrics.refused(verification.outcome());
             int status = verification.outcome() == TeamsTokenVerifier.Outcome.ENDORSEMENT ? 403 : 401;
             return Response.status(status).build();
         }
@@ -121,6 +125,7 @@ public class RestTeamsWebhook {
             String key = verification.appId() + "|" + conversationId + "|" + activityId;
             if (dedup.putIfAbsent(key, Boolean.TRUE) != null) {
                 LOGGER.debugf("Duplicate Teams activity %s — skipping", sanitize(activityId));
+                metrics.activity(TeamsMetrics.DUPLICATE);
                 return Response.ok().build();
             }
         }

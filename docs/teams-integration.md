@@ -17,10 +17,13 @@ EDDI talks to Teams over the Bot Connector REST API directly. No Bot Framework S
    of its app registration.
 2. **A credential for the app registration.** A certificate is preferred: from 2027-03-01 Microsoft requires
    certificate-based tokens for file access, and a certificate has no secret to leak. A client secret works too.
+   [Microsoft 365 Setup](microsoft-365.md#teams-bot) walks through the app registration, the certificate and the
+   Azure Bot.
 3. **A public HTTPS address for EDDI.** In the Azure Bot, set *Configuration → Messaging endpoint* to
    `https://<your-eddi>/integrations/teams/messages`. Every Teams integration of a deployment shares this one endpoint;
    the token of each request says which bot it is for. For local development use a tunnel (the Bot Framework Emulator
-   is archived and cannot replace a real Azure Bot).
+   is archived and does not support single-tenant bots, per Microsoft's
+   [provision and publish a bot](https://learn.microsoft.com/en-us/azure/bot-service/provision-and-publish-a-bot) page).
 4. **The Teams channel enabled** on the Azure Bot (*Channels → Microsoft Teams*).
 
 ## 1. Create the connection
@@ -35,7 +38,7 @@ The integration holds no secret. The credential lives in an EDDI [connection](co
 | `oauth.tokenUrl` | `https://login.microsoftonline.com/<tenantId>/oauth2/v2.0/token` |
 | `oauth.scopes` | `["https://api.botframework.com/.default"]` |
 | `oauth.clientAuthMethod` | `private_key_jwt` with the certificate's private key and thumbprint (preferred), or `client_secret_post` / `client_secret_basic` with a vaulted secret |
-| `baseUrlAllowlist` | the Bot Connector origin your bot is served from, for example `https://smba.trafficmanager.net` |
+| `baseUrlAllowlist` | the Bot Connector origin of your cloud: `https://smba.trafficmanager.net` for the commercial cloud; other clouds use other origins ([Microsoft 365 Setup](microsoft-365.md#national-clouds)) |
 
 The token endpoint must be listed in the deployment's credential endpoint allowlist
 (`eddi.connections.credential-endpoint-allowlist`), as for any OAuth connection.
@@ -70,7 +73,8 @@ app token for it. The certificate path is client credentials with `private_key_j
 
 Any other key is refused, a pasted secret as much as a `${vault:…}` reference.
 
-One bot can have one channel-less integration and any number of channel-bound ones (one per `conversationId`). A
+One bot can have one channel-less integration and any number of channel-bound ones. A `conversationId` can be bound
+only once in the whole deployment, so two bots cannot each have an integration for the same channel. A
 message in a channel goes to the integration bound to that channel **and** declaring the same app id; anything else
 goes to the bot's channel-less integration.
 
@@ -86,9 +90,9 @@ The client id, token endpoint and scope are checked again (without a network cal
 a ZIP import or a direct store write skips save validation and the connection can be edited later. An activity for an
 integration whose connection no longer matches is dropped with a WARN.
 
-This proves the saver can use the app's credential. It does not check who owns the named connection: connections are
-not scoped per workspace yet, so anyone who may create channel integrations can name any connection that already holds
-the app's credential.
+Who may name the connection is checked too: the saver needs **use** access to it, and a channel-less integration,
+which takes the bot's personal chats, needs **edit** access. Sharing a connection for use therefore lets someone send
+through it, but not take over the bot's direct messages.
 
 ## 3. Install the app in Teams
 
@@ -116,9 +120,9 @@ requires. Optional query parameters: `developerName`, `websiteUrl`, `privacyUrl`
 5. **The turn.** Each (conversation, user, agent) has one EDDI conversation, replaced by a fresh one if it has ended.
    The user is `teams:<tenantId>:<aadObjectId>`: the user's Entra object id, stable across chats. This is a channel
    identity, not an authenticated EDDI login, so a `PER_USER` connection is never resolved for it. Messages without an
-   Entra object id (guests without one, other bots) are ignored.
+   Entra object id (other bots, and any sender Teams delivers without one) are ignored.
 6. **The answer** is posted in the same conversation as a reply to the message, with `textFormat: extendedmarkdown`.
-   Text over 80 KB is split. Sends are paced to Teams' per-conversation limits (7 a second, 8 in 2 seconds, 60 in
+   Text longer than 20,000 characters is split, so each message stays under the 80 KB Teams guarantees to deliver. Sends are paced to Teams' per-conversation limits (7 a second, 8 in 2 seconds, 60 in
    30 seconds, 1800 an hour), and 429, 412, 502 and 504 are retried with backoff. The token comes from the connection
    on every send, with the activity's `serviceUrl` as the target, so the connection's `baseUrlAllowlist` decides where
    it may go.

@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.teams.TeamsActivityHandler;
+import ai.labs.eddi.integrations.teams.TeamsMetrics;
 import ai.labs.eddi.integrations.teams.TeamsTokenVerifier;
 import ai.labs.eddi.integrations.teams.TeamsTokenVerifier.Outcome;
 import ai.labs.eddi.integrations.teams.TeamsTokenVerifier.Verification;
@@ -50,7 +51,7 @@ class RestTeamsWebhookTest {
         Map<String, Boolean> seen = new ConcurrentHashMap<>();
         when(cache.putIfAbsent(any(), any())).thenAnswer(inv -> seen.putIfAbsent(inv.getArgument(0), inv.getArgument(1)));
         when(cacheFactory.<String, Boolean>getCache(eq(CacheFactory.TEAMS_ACTIVITY_DEDUP), any(Duration.class))).thenReturn(cache);
-        webhook = new RestTeamsWebhook(verifier, handler, new ObjectMapper(), cacheFactory, 1024);
+        webhook = new RestTeamsWebhook(verifier, handler, new ObjectMapper(), cacheFactory, TeamsMetrics.none(), 1024);
     }
 
     @Test

@@ -536,7 +536,6 @@ public class ChannelTargetRouter {
         return integrationMap.get(typeAndChannel);
     }
 
-    /** The distinct indexed integrations of a type, lowest routing key first. */
     /**
      * Whether any integration of {@code channelType}, channel-bound or not,
      * declares {@code applicationId}. Lets an adapter refuse a token whose audience
@@ -556,6 +555,7 @@ public class ChannelTargetRouter {
                 .anyMatch(cfg -> descriptor.get().applicationId(cfg.getPlatformConfig()).filter(applicationId::equals).isPresent());
     }
 
+    /** The distinct indexed integrations of a type, lowest routing key first. */
     private List<ChannelIntegrationConfiguration> integrationsOf(String channelType) {
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         Map<String, ChannelIntegrationConfiguration> current = integrationMap;
