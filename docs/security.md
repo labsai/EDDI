@@ -1000,6 +1000,10 @@ Four small parsers and matchers run on text an agent designer or a chatting user
 
 A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
 
+### Uploaded PDFs: cross-reference entries
+
+PDFBox stores every cross-reference entry a file declares, with no bound of its own. A file of about 150 bytes, one cross-reference stream with `/W [0 0 0]` and a `/Size` of two billion, makes it store two billion entries and exhausts a 256 MB heap in seconds. Every PDF EDDI reads from untrusted bytes (document ingestion, chat attachments, `readAttachment`, the PDF reader tool) is therefore opened through `BoundedPdfLoader`, which replaces PDFBox's cross-reference resolver with one that counts each stored entry and stops the parse past **500,000**. The count is exact whatever form the table takes (classic table, stream or lenient repair), because PDFBox stores all of them through the same method. A file over the cap is refused with *"This PDF declares more than 500000 objects…"*, and the user is told to split it. The decode budgets that bound what a PDF's streams expand to are separate and unchanged.
+
 ---
 
 ## Tool Execution Pipeline

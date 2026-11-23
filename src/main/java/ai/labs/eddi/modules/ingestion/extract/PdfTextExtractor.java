@@ -5,7 +5,6 @@
 package ai.labs.eddi.modules.ingestion.extract;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -36,9 +35,12 @@ import java.util.List;
  * <p>
  * PDFBox reads whatever it is given with no limit of its own, and a PDF is a
  * container of compressed streams and of page descriptions that are small
- * programs. Three bounds, each on a different way a file can take the process
+ * programs. Four bounds, each on a different way a file can take the process
  * down with it:
  * <ul>
+ * <li><b>Memory, while the file is opened.</b> PDFBox stores every
+ * cross-reference entry a file declares, and a 150-byte file can declare two
+ * billion; {@link BoundedPdfLoader} caps them.</li>
  * <li><b>Memory, per stream and per document.</b> {@link PdfStreamBudget}
  * measures what every compressed stream expands to before the file is opened,
  * because PDFBox decodes a stream whole into memory and a deflate bomb is a few
@@ -121,7 +123,7 @@ public class PdfTextExtractor implements DocumentTextExtractor {
     }
 
     private String read(byte[] content, ExtractionLimits limits, Instant deadline) {
-        try (PDDocument document = Loader.loadPDF(content, "", null, null,
+        try (PDDocument document = BoundedPdfLoader.load(content,
                 MemoryUsageSetting.setupMainMemoryOnly(limits.maxUncompressedBytes()).streamCache)) {
             if (document.isEncrypted()) {
                 // PDFBox opens some encrypted files with an empty password and then

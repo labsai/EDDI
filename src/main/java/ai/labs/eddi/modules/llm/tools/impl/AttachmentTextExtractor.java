@@ -4,13 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.BoundedPdfLoader;
 import ai.labs.eddi.modules.ingestion.extract.PdfDecodeBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfStreamBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.IOUtils;
@@ -125,11 +125,13 @@ public class AttachmentTextExtractor {
      * Loads a PDF from bytes with a temp-file scratch cache rather than PDFBox's
      * default unlimited in-memory buffering. The scratch cache alone does not bound
      * a "PDF bomb": PDFBox decodes every stream into a buffer it sizes itself, so
-     * {@link #withDecodeBudget} wraps every use of a loaded document.
+     * {@link #withDecodeBudget} wraps every use of a loaded document. And
+     * {@link BoundedPdfLoader} caps the cross-reference entries PDFBox stores,
+     * which a 150-byte file could otherwise push into the billions.
      */
     private static PDDocument loadPdf(byte[] pdfBytes) throws IOException {
         StreamCacheCreateFunction tempFileCache = IOUtils.createTempFileOnlyStreamCache();
-        return Loader.loadPDF(pdfBytes, "", null, null, tempFileCache);
+        return BoundedPdfLoader.load(pdfBytes, tempFileCache);
     }
 
     /** One PDF operation, run inside the decode budget. */
