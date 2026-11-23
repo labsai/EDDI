@@ -610,21 +610,55 @@ class BuildQualityGatesTest {
      * and the OpenSSF Gold 90/80 threshold is off everywhere, with every test still
      * green and nothing to see — which is the invisible-disabled-gate shape the
      * rest of this class exists to eliminate, reintroduced one layer up.
+     * <p>
+     * Since the gate moved out of Integration Tests into its own job, the line to
+     * pin is the explicit {@code jacoco:check@merged-check} invocation there. The
+     * integration-test job still runs {@code verify -DskipITs=false}, but with
+     * {@code -Djacoco.haltOnFailure=false} (it has no unit-test data), so a search
+     * for that pair — what this test used to do — would stay green with the gate
+     * disarmed. What is graded instead: exactly one invocation of the check, armed
+     * and not relaxed, in a job that waits for both suites, refuses to run on
+     * missing data, and that docker cannot publish without.
      */
     @Test
-    @DisplayName("a CI job actually passes the flag that arms the coverage gate")
+    @DisplayName("the merged coverage gate is armed in CI, fed by both suites, and blocks publishing")
     void theCoverageGateIsArmedByCi() throws Exception {
-        List<String> verifyInvocations = read(CI_WORKFLOW).lines()
+        List<String> checks = read(CI_WORKFLOW).lines()
                 .map(String::trim)
-                .filter(line -> line.contains("mvnw verify"))
+                .filter(line -> line.contains("jacoco:check@merged-check"))
                 .toList();
+        assertEquals(1, checks.size(), CI_WORKFLOW + " must invoke jacoco:check@merged-check exactly once — that"
+                + " invocation is the 90/80 gate. Found: " + checks);
+        String check = checks.get(0);
+        assertTrue(check.contains(SKIP_ITS_DISABLED),
+                "the merged-check invocation must pass " + SKIP_ITS_DISABLED + ": the execution carries"
+                        + " <skip>${skipITs}</skip>, so without it the gate skips itself. Found: " + check);
+        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests")) {
+            assertFalse(check.contains(relaxation),
+                    "the merged-check invocation must not pass " + relaxation + ", which turns the gate into a"
+                            + " report: " + check);
+        }
 
-        assertFalse(verifyInvocations.isEmpty(), CI_WORKFLOW + " runs no `mvnw verify` at all, so nothing reaches the"
-                + " verify-phase coverage gate");
-        assertTrue(verifyInvocations.stream().anyMatch(line -> line.contains(SKIP_ITS_DISABLED)),
-                "no `mvnw verify` in " + CI_WORKFLOW + " passes " + SKIP_ITS_DISABLED + ". The 90/80 jacoco gate"
-                        + " carries <skip>${skipITs}</skip>, so that flag is the ONLY thing that runs it anywhere."
-                        + " Found: " + verifyInvocations);
+        Map<String, String> jobs = ciJobBlocks();
+        String gateJob = jobs.entrySet().stream()
+                .filter(job -> job.getValue().contains("jacoco:check@merged-check"))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElseThrow();
+        List<String> gateNeeds = ciJobNeeds(jobs.get(gateJob));
+        assertTrue(gateNeeds.containsAll(List.of("build-and-test", "integration-test")),
+                gateJob + " must need build-and-test and integration-test, whose execution data it merges: "
+                        + gateNeeds);
+        String gateBlock = jobs.get(gateJob);
+        for (String data : List.of("target/jacoco.exec", "target/jacoco-it.exec", "target/jacoco-quarkus.exec")) {
+            assertTrue(gateBlock.contains(data),
+                    gateJob + " must check that " + data + " is present before merging: JaCoCo skips a missing"
+                            + " file with an info line, so the gate would grade less data, or none, and pass");
+        }
+        assertTrue(gateBlock.contains("[ ! -s \"$f\" ]") && gateBlock.contains("target/site/jacoco-merged/jacoco.csv"),
+                gateJob + " must fail on an empty or missing data file and on a missing merged report");
+        assertTrue(ciJobNeeds(jobs.get("docker")).contains(gateJob),
+                "docker must need " + gateJob + ", or an image below the coverage threshold is still published");
     }
 
     /**
@@ -942,11 +976,12 @@ class BuildQualityGatesTest {
 
     /**
      * The Integration Tests job skips surefire ({@code -DskipUTs=true}) because
-     * Build &amp; Test already ran the unit tests on the same commit. The merged
-     * coverage gate still needs their execution data: without
-     * {@code target/jacoco.exec} restored it would grade integration-test coverage
-     * alone against the 90/80 limits and fail every release, or — if the limits
-     * were ever relaxed to make that pass — stop measuring what it claims to.
+     * Build &amp; Test runs the unit tests on the same commit. The merged coverage
+     * gate (the Coverage Gate job) still needs their execution data: without
+     * {@code target/jacoco.exec} handed over it would grade integration-test
+     * coverage alone against the 90/80 limits and fail every release, or — if the
+     * limits were ever relaxed to make that pass — stop measuring what it claims
+     * to. The integration tests' own data takes the same route.
      */
     @Test
     @DisplayName("a CI job that skips the unit tests restores their coverage data for the merged gate")
@@ -956,10 +991,13 @@ class BuildQualityGatesTest {
                 CI_WORKFLOW + " no longer passes -DskipUTs=true; if the unit tests run twice again on purpose, delete"
                         + " this test together with the unit-test-coverage-data hand-off");
         assertEquals(2, ci.split("name: unit-test-coverage-data", -1).length - 1,
-                "the unit-test coverage data must be uploaded by Build & Test and downloaded by the job that skips"
-                        + " the unit tests — exactly one of each");
+                "the unit-test coverage data must be uploaded by Build & Test and downloaded by the Coverage Gate"
+                        + " job — exactly one of each");
         assertTrue(ci.contains("path: target/jacoco.exec"),
                 "Build & Test must upload target/jacoco.exec, the file the `merge` execution reads");
+        assertEquals(2, ci.split("name: integration-test-coverage-data", -1).length - 1,
+                "the integration-test coverage data must be uploaded by Integration Tests and downloaded by the"
+                        + " Coverage Gate job — exactly one of each");
     }
 
     /**

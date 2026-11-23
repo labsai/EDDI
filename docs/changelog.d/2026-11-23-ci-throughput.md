@@ -28,3 +28,16 @@ data.
   and `SharedWorkingDirTmpGuardTest` fails if a test constructs either service without it, or if a
   third production class starts deriving a path from `user.dir` (mutation-checked).
   No unit test boots Quarkus, so forks cannot clash on Quarkus or Mongo dev-service ports.
+- **Integration Tests no longer wait for Build & Test.** It needed it only to download the unit
+  tests' JaCoCo data for the merged 90/80 gate. The gate moves to a new **Coverage Gate** job that
+  needs both suites, checks that `jacoco.exec`, `jacoco-it.exec` and `jacoco-quarkus.exec` are all
+  present and non-empty (JaCoCo skips a missing file with an info line, so a renamed artifact would
+  otherwise grade less data and pass), runs
+  `compile jacoco:report@report … jacoco:check@merged-check -DskipITs=false` and fails if the
+  merged report is missing. Integration Tests passes `-Djacoco.haltOnFailure=false`, since it has
+  no unit data. Verified locally: on unit-only data the command fails at 0.89/0.79, so the check is
+  armed. Docker (publishing) and the Slack summary now include the gate.
+  `BuildQualityGatesTest.theCoverageGateIsArmedByCi` used to grep for `mvnw verify -DskipITs=false`,
+  which the integration job still satisfies with the check relaxed; it now pins the single
+  `jacoco:check@merged-check` line (armed, no `haltOnFailure`/`jacoco.skip`), its needs, the
+  data-presence step and docker's dependency on it.

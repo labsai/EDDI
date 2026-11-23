@@ -1366,13 +1366,17 @@ jobs:
           out ""
           out "</details>"
           out ""
-          out "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage."
+          out "> ℹ️ Unit tests only. See the **Coverage Gate** job for merged UT+IT coverage."
 
   # ─── Job 2: Integration Tests ─────────────────────────────────
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-and-test, maven-cache]
+    # Deliberately NOT `needs: build-and-test`. It used to wait for Build & Test only
+    # to download the unit tests' coverage data for the merged gate, which put the
+    # two ~14-minute suites end to end on every backend change. The merged gate now
+    # runs in coverage-gate, which needs both, so the suites run side by side.
+    needs: [detect-changes, maven-cache]
     # Same split as build-and-test: on a pull request only a backend change runs the
     # Testcontainers suite; on push and on tags any code change does.
     if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
@@ -1395,9 +1399,69 @@ jobs:
           restore-keys: |
             maven-v1-${{ runner.os }}-
 
-      # Build & Test already ran the unit tests on this commit (this job `needs` it).
-      # Their coverage data and reports are restored instead of re-running ~20k tests,
-      # so the merged coverage gate below sees exactly what it saw before.
+      - name: Run integration tests
+        # -DskipUi=true: the ITs are API-level, and ContainerBaseIT's image needs no UI.
+        # -DskipUTs=true: Build & Test runs the unit tests on this commit in parallel.
+        # -Djacoco.haltOnFailure=false: `verify` still runs the merged-check
+        # execution here, but this job has no unit-test data (target/jacoco.exec), so
+        # it would grade integration-test coverage alone against the UT+IT threshold.
+        # The 90/80 gate is enforced in coverage-gate, on all three data files;
+        # BuildQualityGatesTest pins that it stays armed there.
+        run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Djacoco.haltOnFailure=false -Dquarkus.bootstrap.effective-model-builder=true -B
+        env:
+          MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: integration-test-results
+          path: target/failsafe-reports/
+          retention-days: 14
+
+      # Both agents' execution data: the failsafe JaCoCo agent (jacoco-it.exec) and
+      # quarkus-jacoco inside the @QuarkusTest application (jacoco-quarkus.exec).
+      - name: Upload integration-test coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: integration-test-coverage-data
+          path: |
+            target/jacoco-it.exec
+            target/jacoco-quarkus.exec
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── Job 2a: Coverage Gate ────────────────────────────────────
+  # The merged unit + integration JaCoCo gate (90% instructions / 80% branches,
+  # OpenSSF Gold). It used to run inside Integration Tests, which therefore had to
+  # wait for Build & Test; now both suites run in parallel and hand their execution
+  # data here. Nothing is re-run: the job compiles, merges and checks.
+  coverage-gate:
+    name: Coverage Gate
+    runs-on: ubuntu-latest
+    needs: [detect-changes, maven-cache, build-and-test, integration-test]
+    # Exactly integration-test's condition: the gate grades UT+IT data, so it runs
+    # where the ITs do (and Build & Test always runs when they do).
+    if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
+
       - name: Download unit-test coverage data
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1410,20 +1474,49 @@ jobs:
           name: test-results
           path: target/surefire-reports
 
-      - name: Run integration tests
-        # -DskipUi=true: the ITs are API-level, and ContainerBaseIT's image needs no UI.
-        # -DskipUTs=true: see the two steps above.
-        run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Dquarkus.bootstrap.effective-model-builder=true -B
-        env:
-          MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
+      - name: Download integration-test coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: integration-test-coverage-data
+          path: target
 
-      - name: Upload integration test results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - name: Download integration-test reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: integration-test-results
-          path: target/failsafe-reports/
-          retention-days: 14
+          path: target/failsafe-reports
+
+      # JaCoCo's merge and check goals skip with an info line when a data file is
+      # absent, so a renamed or empty artifact would turn the gate into a check of
+      # less data — or of nothing — that still reports green. Refuse to run without
+      # all three.
+      - name: Every execution-data file is present
+        run: |
+          set -euo pipefail
+          for f in target/jacoco.exec target/jacoco-it.exec target/jacoco-quarkus.exec; do
+            if [ ! -s "$f" ]; then
+              echo "::error::$f is missing or empty, so the merged coverage gate would grade incomplete data"
+              exit 1
+            fi
+            echo "$f: $(stat -c %s "$f") bytes"
+          done
+
+      # The merged-check execution carries <skip>${skipITs}</skip>, so
+      # -DskipITs=false is what arms it; nothing here may relax it
+      # (BuildQualityGatesTest pins this line). Classes come from this job's own
+      # compile: javac output is deterministic, and the unit and integration data
+      # were already merged against separately compiled classes before this job
+      # existed. A mismatch would lower coverage, so it fails closed. The style
+      # gates are skipped because Build & Test owns them.
+      - name: Merge coverage and enforce the 90/80 gate
+        run: ./mvnw compile jacoco:report@report jacoco:merge@merge-it jacoco:report@report-integration jacoco:merge@merge jacoco:report@merged-report jacoco:check@merged-check -DskipITs=false -DskipUi=true -Dformatter.skip=true -Dcheckstyle.skip=true -B
+
+      - name: The merged report was produced
+        run: |
+          if [ ! -s target/site/jacoco-merged/jacoco.csv ]; then
+            echo "::error::target/site/jacoco-merged/jacoco.csv is missing: the merged report did not run, so the gate graded nothing"
+            exit 1
+          fi
 
       - name: Upload integration coverage report
         if: always()
@@ -2900,9 +2993,10 @@ jobs:
     runs-on: ubuntu-latest
     # Every gate that must hold before anything is published is a `needs`:
     #   build-and-test    unit tests
-    #   integration-test  `mvnw verify` — the ONLY job that runs the JaCoCo
-    #                     90/80 coverage gate, so without it the threshold could
-    #                     never block a ship
+    #   integration-test  `mvnw verify` with the Testcontainers suite
+    #   coverage-gate     the ONLY job that enforces the JaCoCo 90/80 merged
+    #                     coverage gate, so without it the threshold could never
+    #                     block a ship
     #   trivy-scan        blocking filesystem CVE scan (exit-code 1)
     #   codeql            SAST build + analysis
     #   codeql-ui         SAST for ui/manager and ui/chat
@@ -2921,7 +3015,7 @@ jobs:
     #                     names — so a job added to the gate cannot be forgotten
     #                     here
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged
@@ -3680,7 +3774,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
+      [detect-changes, build-and-test, integration-test, coverage-gate, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
 
     steps:
       - name: Send build notification
@@ -3709,6 +3803,9 @@ jobs:
           # Determine overall status
           BUILD="${{ needs.build-and-test.result }}"
           IT="${{ needs.integration-test.result }}"
+          # The merged coverage gate moved out of Integration Tests into its own job;
+          # it reports under the same line, or a coverage shortfall would read "Passed".
+          if [ "${{ needs.coverage-gate.result }}" = "failure" ]; then IT="failure"; fi
           UI="${{ needs.ui-gate.result }}"
           IMAGE="${{ needs.build-image.result }}"
           E2E="${{ needs.e2e-fullstack.result }}"
