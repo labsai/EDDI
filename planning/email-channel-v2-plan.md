@@ -559,8 +559,11 @@ add readers, so the decision must be per **integration**, not per mail:
 - `replyAudience: thread` ⇒ every conversation of the integration runs as
   **`email-thread:<integrationId>:<sha256(threadRoot)>`** (non-participants: `…:<sha256(threadRoot + "\n" + sender)>`,
   §9.4). Add the `email-thread:` prefix to `ReservedPrincipals` (reserved) and to `hasNoPersistentMemory` (no
-  long-term memory read or written, no memory tools). Conversation memory (the thread itself) works as usual — every
-  reader already has the thread.
+  long-term memory read or written, no memory tools). Conversation memory (the thread itself) is **stored** as usual,
+  but what a turn can read from it is limited to the mails its sender was on (§9.4): the history, the template data
+  built from it (`memory.past`, `conversationLog`) and any conversation-scoped property written while handling a mail
+  the sender was not on are left out of that turn. A `PropertySetterTask` or other pipeline task therefore cannot
+  re-expose a filtered-out mail through a derived property.
 - `EmailReplyRecipients.isAuthenticatedIdentity` accepts `email-thread:<thisIntegrationId>:…`; the step's mail map
   still has to show `aligned-pass` and the same From as the ledger row (unchanged checks).
 - `identityMode` is ignored (refuse a non-default value at save) when `replyAudience: thread`.
@@ -584,8 +587,9 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
   `replyIncludeNewReaders: true`, minus every address that has not been on **every** earlier mail of this
   conversation — as the From of an inbound row, or as a `delivered=true` To/Cc of a SENT reply (§9.5), per message.
   Being a participant is not enough: A mails privately without B, then adds B in Cc, and B must not get an answer
-  that draws on that private mail. A colleague the sender added in this very mail is skipped; capped (`maxReplyRecipients` → empty cc + `cc_capped`). The turn reads the whole
-  conversation, so this is what keeps earlier mails from reaching someone who never received them. Tests: a participant
+  that draws on that private mail. A colleague the sender added in this very mail is skipped; capped (`maxReplyRecipients` → empty cc + `cc_capped`). The turn's context is filtered to the
+  sender's own view (§9.4), and this check keeps earlier mails from reaching a reply recipient who never received
+  them. Tests: a participant
   adds an allowed colleague in Cc on a later mail → the reply goes to the sender only; B received an earlier reply
   but not A's private mail, A then Cc's B → B is skipped.
 - Used in **two** places with identical input: the inbound processor (to put `mail.audience = {to, cc}` into the
@@ -606,7 +610,7 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
   receives is filtered to the mails the current sender was on — From of an inbound row, or a `delivered=true` To/Cc
   of a SENT reply (§9.5) — plus the sender's own mail. The check applies to **every** sender, the conversation's
   first sender included: a later participant may have mailed EDDI privately, and the first sender received none of
-  that. Stored memory is unchanged; only the context handed to the turn is narrowed. Tests: A mails privately
+  that. Stored memory is unchanged; only what the turn can read is narrowed — history, the template data built from it and conversation-scoped properties written from mails the sender was not on (§9.2). Tests: A mails privately
   without B, B (who got an earlier reply) replies to that earlier reply → the turn context does not contain A's
   private mail; B mails EDDI privately, A (the first sender) continues → the turn context does not contain B's
   private mail.
