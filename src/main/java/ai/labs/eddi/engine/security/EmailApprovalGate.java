@@ -124,6 +124,14 @@ public final class EmailApprovalGate {
     private static final String FIELD_REJECTED_REPLY = "rejectedReply";
     private static final String FIELD_PAUSE_REASON = "pauseReason";
     private static final String FIELD_MAIL = "mail";
+    private static final String FIELD_READ_ONLY_ONLY = "readOnlyOnly";
+
+    /**
+     * Gate reason of a call refused because the turn may use only
+     * {@code readOnlyTools}: a held mail released without an aligned sender
+     * authentication (v3 plan §7.3).
+     */
+    public static final String READ_ONLY_ONLY_REASON = "email-gate:released-unauthenticated";
 
     /** The policy name of a target without an email gate. */
     public static final String POLICY_NONE = "none";
@@ -144,7 +152,7 @@ public final class EmailApprovalGate {
      * The gate of a turn whose gate is unknown or unreadable: every tool call waits
      * for approval and rule-driven calls are refused (fail closed).
      */
-    static final Policy FAIL_CLOSED = new Policy(POLICY_ACTIONS, List.of(), false, null, null, null);
+    static final Policy FAIL_CLOSED = new Policy(POLICY_ACTIONS, List.of(), false, null, null, null, false);
 
     private EmailApprovalGate() {
     }
@@ -166,17 +174,28 @@ public final class EmailApprovalGate {
      *            what the approver is shown of the held mail on a pre-run pause
      *            (sender, subject, a body excerpt, attachment names), or null;
      *            never persisted on the conversation's sticky gate
+     * @param readOnlyOnly
+     *            whether the turn may use only {@code readOnlyTools}: every other
+     *            tool call is refused, never paused for approval — a held mail a
+     *            reviewer released without an aligned sender authentication (v3
+     *            plan §7.3). Recorded on the conversation, so its later turns stay
+     *            restricted too.
      */
     public record Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason,
-            Map<String, Object> mail) {
+            Map<String, Object> mail, boolean readOnlyOnly) {
 
         public Policy {
             readOnlyTools = readOnlyTools == null ? List.of() : List.copyOf(readOnlyTools);
             mail = mail == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(mail));
         }
 
+        public Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason,
+                Map<String, Object> mail) {
+            this(policy, readOnlyTools, preRun, rejectedReply, pauseReason, mail, false);
+        }
+
         public Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason) {
-            this(policy, readOnlyTools, preRun, rejectedReply, pauseReason, null);
+            this(policy, readOnlyTools, preRun, rejectedReply, pauseReason, null, false);
         }
 
         /** Whether one of {@code addresses} matches a {@code readOnlyTools} pattern. */
@@ -210,7 +229,21 @@ public final class EmailApprovalGate {
      */
     public static Context contextValue(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply,
                                        String pauseReason, Map<String, Object> mail) {
+        return contextValue(policy, readOnlyTools, preRun, rejectedReply, pauseReason, mail, false);
+    }
+
+    /**
+     * As {@link #contextValue(String, List, boolean, String, String, Map)};
+     * {@code readOnlyOnly} restricts the turn to {@code readOnlyTools} (refusing
+     * every other call) and arms the gate even when {@code policy} is {@code none}
+     * (as {@code actions}).
+     */
+    public static Context contextValue(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply,
+                                       String pauseReason, Map<String, Object> mail, boolean readOnlyOnly) {
         Map<String, Object> value = new LinkedHashMap<>();
+        if (readOnlyOnly && (policy == null || policy.isBlank() || POLICY_NONE.equalsIgnoreCase(policy))) {
+            policy = POLICY_ACTIONS;
+        }
         if (policy == null || policy.isBlank() || POLICY_NONE.equalsIgnoreCase(policy)) {
             value.put(FIELD_POLICY, POLICY_NONE);
             return new Context(Context.ContextType.object, value);
@@ -226,6 +259,9 @@ public final class EmailApprovalGate {
         }
         if (preRun && mail != null && !mail.isEmpty()) {
             value.put(FIELD_MAIL, new LinkedHashMap<>(mail));
+        }
+        if (readOnlyOnly) {
+            value.put(FIELD_READ_ONLY_ONLY, true);
         }
         return new Context(Context.ContextType.object, value);
     }
@@ -342,6 +378,9 @@ public final class EmailApprovalGate {
         if (policy.pauseReason() != null) {
             value.put(FIELD_PAUSE_REASON, policy.pauseReason());
         }
+        if (policy.readOnlyOnly()) {
+            value.put(FIELD_READ_ONLY_ONLY, true);
+        }
         return value;
     }
 
@@ -413,7 +452,8 @@ public final class EmailApprovalGate {
         if (inherited == null || !POLICY_EVERY_TURN.equalsIgnoreCase(inherited.policy())) {
             return null;
         }
-        return new Policy(inherited.policy(), inherited.readOnlyTools(), true, inherited.rejectedReply(), INHERITED_PRE_RUN_REASON, null);
+        return new Policy(inherited.policy(), inherited.readOnlyTools(), true, inherited.rejectedReply(), INHERITED_PRE_RUN_REASON, null,
+                inherited.readOnlyOnly());
     }
 
     /**
@@ -463,6 +503,19 @@ public final class EmailApprovalGate {
             return result;
         }
         return new ToolApprovalGate.GateResult(gated, allowed, reasons);
+    }
+
+    /**
+     * Under {@link Policy#readOnlyOnly()}, the gated side of a batch is refused
+     * instead of paused: the turn may use only {@code readOnlyTools}, and no
+     * approver can widen that (v3 plan §7.3). Returns the calls to refuse — every
+     * gated call, whichever gate gated it — or an empty list.
+     */
+    public static List<ToolExecutionRequest> refusedAsReadOnlyOnly(Policy gate, ToolApprovalGate.GateResult result) {
+        if (gate == null || !gate.readOnlyOnly() || result == null) {
+            return List.of();
+        }
+        return List.copyOf(result.gated());
     }
 
     /**
@@ -569,8 +622,10 @@ public final class EmailApprovalGate {
             Object rejected = map.get(FIELD_REJECTED_REPLY);
             Object reason = map.get(FIELD_PAUSE_REASON);
             Map<String, Object> mail = map.get(FIELD_MAIL) instanceof Map<?, ?> held ? (Map<String, Object>) held : null;
+            Object readOnlyOnly = map.get(FIELD_READ_ONLY_ONLY);
             return new Policy(name, readOnly, Boolean.TRUE.equals(preRun) || "true".equalsIgnoreCase(String.valueOf(preRun)),
-                    rejected == null ? null : String.valueOf(rejected), reason == null ? null : String.valueOf(reason), mail);
+                    rejected == null ? null : String.valueOf(rejected), reason == null ? null : String.valueOf(reason), mail,
+                    Boolean.TRUE.equals(readOnlyOnly) || "true".equalsIgnoreCase(String.valueOf(readOnlyOnly)));
         } catch (RuntimeException e) {
             return FAIL_CLOSED;
         }

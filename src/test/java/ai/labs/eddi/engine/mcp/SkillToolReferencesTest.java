@@ -88,7 +88,10 @@ class SkillToolReferencesTest {
             "conversationControls", "rawHtml", "titleGeneration", // agent configuration fields (SKILL.md, Change an agent)
             "canOpenTranscript", // list_conversation_ratings result field
             // email channel target fields and policy values (SKILL.md, Channels)
-            "approvalPolicy", "readOnlyTools", "rejectedReply", "firstContact", "everyTurn");
+            "approvalPolicy", "readOnlyTools", "rejectedReply", "firstContact", "everyTurn",
+            // held-mail decision values and list_held_email result fields (SKILL.md,
+            // Channels)
+            "runOnce", "runAndAllow", "runAndAllowOffered", "runsAnonymously");
 
     private static Path repoRoot() {
         // Surefire runs with the project basedir as the working directory.

@@ -35,7 +35,8 @@ class EscalationGuardTest {
     @ParameterizedTest(name = "{0} is guarded")
     @ValueSource(strings = {"update_email_senders", "create_channel_integration", "update_channel_integration", "delete_channel_integration",
             "resume_conversation", "approve_group_phase", "submit_group_human_input", "update_email_roles", "update_email_send_out",
-            "decide_held_email", "UPDATE_EMAIL_SENDERS", "eddi_update_email_senders", "eddi.resume_conversation", "mcp/update_channel_integration"})
+            "decide_held_email", "list_held_email", "UPDATE_EMAIL_SENDERS", "eddi_update_email_senders", "eddi.resume_conversation",
+            "mcp/update_channel_integration"})
     void guardedTools(String name) {
         assertTrue(EscalationGuard.isGuardedTool(name));
     }
@@ -48,7 +49,8 @@ class EscalationGuardTest {
     }
 
     @ParameterizedTest(name = "{0} {1} is guarded")
-    @CsvSource({"POST, /channelstore/channels/abc/email-senders", "PUT, /channelstore/channels/abc", "DELETE, /channelstore/channels/abc",
+    @CsvSource({"POST, /channelstore/channels/abc/email-senders", "POST, /channelstore/channels/abc/email-held/row-1/decision",
+            "PUT, /channelstore/channels/abc", "DELETE, /channelstore/channels/abc",
             "POST, /channelstore/channels", "POST, /eddi/root/channelstore/channels/abc/email-suppressions/clear",
             "POST, /channelstore//channels/abc", "POST, /channelstore/channels;jsessionid=1/abc", "POST, /x/../channelstore/channels/abc",
             "POST, /channelstore%2Fchannels/abc", "POST, /channelstore%252Fchannels/abc", "POST, /CHANNELSTORE/Channels/abc",

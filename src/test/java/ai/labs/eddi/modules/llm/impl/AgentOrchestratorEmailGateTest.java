@@ -243,4 +243,41 @@ class AgentOrchestratorEmailGateTest {
         verify(calculatorTool, times(1)).calculate(anyString());
         verify(dateTimeTool, times(1)).getCurrentDateTime(anyString());
     }
+
+    /** A mail a reviewer released without an aligned pass (v3 plan §7.3). */
+    private void releasedAnonymousTurn(String... readOnlyTools) {
+        when(memory.getOrigin()).thenReturn(TurnOrigin.EMAIL);
+        IData<Object> gate = new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY,
+                EmailApprovalGate.contextValue("none", List.of(readOnlyTools), false, null, null, null, true));
+        when(currentStep.getData("context:" + EmailApprovalGate.CONTEXT_KEY)).thenReturn(gate);
+    }
+
+    @Test
+    @DisplayName("released unauthenticated mail: a call outside readOnlyTools is refused, not paused - even under policy none - and a "
+            + "read-only call runs")
+    void releasedAnonymousMailIsReadOnly() {
+        releasedAnonymousTurn("getCurrentDateTime");
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(calculate(), dateTime()), text("done"));
+
+        assertDoesNotThrow(() -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), twoToolTask(), memory,
+                agentExemptingBoth(), 0));
+
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(dateTimeTool, times(1)).getCurrentDateTime(anyString());
+    }
+
+    @Test
+    @DisplayName("released unauthenticated mail: what the agent's own gate gates is refused too - no approver can widen it")
+    void releasedAnonymousMailNeverPauses() {
+        releasedAnonymousTurn();
+        var cfg = new ToolApprovalsConfig();
+        cfg.setRequireApproval(List.of("builtin:*"));
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(calculate()), text("done"));
+
+        assertDoesNotThrow(() -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), twoToolTask(), memory, cfg,
+                0));
+        verify(calculatorTool, never()).calculate(anyString());
+    }
 }

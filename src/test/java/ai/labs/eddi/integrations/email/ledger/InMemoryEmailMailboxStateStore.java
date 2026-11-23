@@ -8,16 +8,14 @@ import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /** {@link IEmailMailboxStateStore} in memory, for unit tests. */
 public class InMemoryEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     private final Map<String, MailboxState> states = new HashMap<>();
-    private final Set<String> notices = new HashSet<>();
+    private final Map<String, Instant> notices = new HashMap<>();
 
     @Override
     public synchronized Optional<MailboxState> read(String integrationId) {
@@ -53,12 +51,17 @@ public class InMemoryEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     @Override
     public synchronized boolean claimNotice(String integrationId, String noticeKey, Instant now) {
-        return notices.add(integrationId + "|" + noticeKey);
+        return notices.putIfAbsent(integrationId + "|" + noticeKey, now) == null;
+    }
+
+    @Override
+    public synchronized Optional<Instant> noticeClaimedAt(String integrationId, String noticeKey) {
+        return Optional.ofNullable(notices.get(integrationId + "|" + noticeKey));
     }
 
     @Override
     public synchronized void delete(String integrationId) {
         states.remove(integrationId);
-        notices.removeIf(key -> key.startsWith(integrationId + "|"));
+        notices.keySet().removeIf(key -> key.startsWith(integrationId + "|"));
     }
 }

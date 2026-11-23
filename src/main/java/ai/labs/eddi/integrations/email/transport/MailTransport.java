@@ -79,11 +79,22 @@ public interface MailTransport {
         MarkResult markProcessed(MailboxMessage message, EmailChannelSettings settings) throws MailboxException;
 
         /**
+         * Marks a message held for review (email channel v3 plan §7.2): as
+         * {@link #markProcessed}, except that with {@code move:<folder>} it moves to
+         * the Held folder ({@link EmailChannelSettings#heldFolder()}) instead. The
+         * cursor advances past it either way; a release finds it again by its
+         * Message-ID ({@link #findByMessageId}, which searches the Held folder too).
+         */
+        default MarkResult markHeld(MailboxMessage message, EmailChannelSettings settings) throws MailboxException {
+            return markProcessed(message, settings);
+        }
+
+        /**
          * Finds a message by its Message-ID in the polled folder or, when processed
-         * mail is moved, in that folder, and fetches it (at most {@code maxBytes}). How
-         * a mail whose turn never ran is submitted again: it was marked or moved
-         * already, so the cursor does not list it any more. Empty when it is in neither
-         * folder.
+         * mail is moved, in that folder or the Held folder, and fetches it (at most
+         * {@code maxBytes}). How a mail whose turn never ran is submitted again: it was
+         * marked or moved already, so the cursor does not list it any more. Empty when
+         * it is in neither folder.
          */
         default Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes) throws MailboxException {
             return Optional.empty();

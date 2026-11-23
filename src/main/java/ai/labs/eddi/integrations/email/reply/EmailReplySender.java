@@ -27,6 +27,7 @@ import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailMetrics;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier;
+import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
@@ -632,6 +633,16 @@ public class EmailReplySender {
      * discriminator), and starts its first attempt.
      */
     Optional<LedgerEntry> enqueue(Request request, Instant now) {
+        // The one door every outgoing mail of a conversation passes — reply, pause
+        // notice, resume, rejectedReply, group synthesis, the stranded sweep's rebuild:
+        // a mail a reviewer released without an aligned pass never causes outgoing
+        // mail (v3 plan §7.3, §16), whatever its conversation does.
+        if (EmailReviewState.anonymousRelease(request.inbound())) {
+            metrics.reply("refused");
+            LOGGER.infof("Email integration %s: no %s for conversation %s (released_unauthenticated)", sanitize(request.integrationId()),
+                    request.kind().id(), sanitize(request.conversationId()));
+            return Optional.empty();
+        }
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
                 request.stepMail(), request.userId());
         if (!decision.allowed()) {

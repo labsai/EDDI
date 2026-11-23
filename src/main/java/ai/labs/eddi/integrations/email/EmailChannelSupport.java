@@ -22,9 +22,11 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ServiceUnavailableException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -65,6 +67,13 @@ public class EmailChannelSupport {
     /** The sending-health self-test (v3 plan §6.5). */
     @Inject
     Instance<EmailSelfTest> selfTest;
+
+    /**
+     * The ledger retention: held mail cannot wait longer than its row lives
+     * ({@code emailControl.review.expiry}, plan §7.1).
+     */
+    @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d")
+    Duration ledgerRetention = Duration.ofDays(30);
 
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
@@ -123,6 +132,7 @@ public class EmailChannelSupport {
             }
         }
         validateSmime(settings, errors);
+        validateReviewExpiry(configuration, errors);
         List<EmailIntegration> others;
         try {
             others = directory.scan();
@@ -237,6 +247,22 @@ public class EmailChannelSupport {
             errors.add("emailControl.smime.sign is 'required', but the signing certificate cannot be used: " + outcome.unavailable() + ".");
         } else if (outcome.result() != null && !outcome.result().usable()) {
             errors.add("emailControl.smime.sign is 'required', but " + outcome.result().describe());
+        }
+    }
+
+    /**
+     * {@code emailControl.review.expiry} at most the ledger retention minus one
+     * day: a held row must outlive its review.
+     */
+    void validateReviewExpiry(ChannelIntegrationConfiguration configuration, List<String> errors) {
+        var control = configuration.getEmailControl();
+        if (control == null || control.getReview() == null || control.getReview().getExpiry() == null) {
+            return;
+        }
+        Duration max = ledgerRetention == null ? Duration.ofDays(29) : ledgerRetention.minusDays(1);
+        if (EmailChannelSettings.from(configuration).reviewExpiry().compareTo(max) > 0) {
+            errors.add("emailControl.review.expiry must be at most the ledger retention (eddi.email.ledger-retention) minus one day: "
+                    + max + ".");
         }
     }
 

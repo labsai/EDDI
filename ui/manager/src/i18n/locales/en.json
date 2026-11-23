@@ -5589,7 +5589,8 @@
       "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
       "approvalPolicyNone": "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
       "ruleCallsRefused": "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
-      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. Name the read-only tools instead. The agent's own tool approvals still apply."
+      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. Name the read-only tools instead. The agent's own tool approvals still apply.",
+      "anonymousTools": "Saved. Unauthenticated mail is processed: it runs anonymously with every tool the target's agent has. Mail released from review never does — it is limited to Read-only tools."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5977,5 +5978,48 @@
     "approved": "Change approved and applied",
     "rejected": "Change rejected; nothing was applied",
     "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
+  },
+  "heldEmail": {
+    "title": "Held mail",
+    "subtitle": "Mail an email integration would have dropped — the sender is not on its allowlist, or did not authenticate. Decide whether it is processed at all.",
+    "integration": "Integration",
+    "sender": "Sender",
+    "reason": "Held because",
+    "expires": "Dropped on",
+    "review": "Review",
+    "unauthenticated": "not authenticated",
+    "reasonNotAllowlisted": "not on the allowlist",
+    "reasonUnauthenticated": "sender not authenticated",
+    "discarded": "Discarded.",
+    "releasedAllowed": "Released, and the sender is on the allowlist now. It runs at the next poll.",
+    "released": "Released. It runs at the next poll.",
+    "dialogTitle": "Held mail",
+    "from": "From",
+    "loadingPreview": "Reading the mail from the mailbox…",
+    "previewUnavailable": "The mail could not be read from the mailbox:",
+    "noSubject": "(no subject)",
+    "attachments": "Attachments",
+    "truncated": "Only the start of the text is shown.",
+    "untrusted": "The mail is untrusted input. Releasing it means \"process it\", not \"do what it asks\": the target's approval policy still applies.",
+    "anonymousWarning": "This sender did not authenticate, so the From may be forged. If you run it, it runs anonymously, may use only the target's read-only tools, and nothing is ever sent to anyone because of it. It cannot be allowed.",
+    "note": "Note (for the audit log)",
+    "discard": "Discard",
+    "runOnce": "Run once",
+    "runAndAllow": "Run and allow this sender"
+  },
+  "emailHeld": {
+    "title": "Held mail: review instead of drop",
+    "hint": "Mail that would be refused can be held for a person instead, who discards it, runs it once, or runs it and allows the sender. Loops, bounces, the blocklist and limits are never reviewable.",
+    "notAllowlisted": "Sender not on the allowlist",
+    "drop": "Drop",
+    "review": "Hold for review",
+    "unauthenticated": "Sender not authenticated",
+    "unauthenticatedHint": "A released unauthenticated mail runs anonymously, with read-only tools only, and never causes outgoing mail.",
+    "expiry": "Drop undecided mail after",
+    "expiryHint": "An ISO-8601 duration from PT1H to P90D, at most the ledger retention minus a day.",
+    "maxPerDay": "Held mail per day at most",
+    "maxPerDomain": "Per sender domain and day at most",
+    "reviewers": "Reviewers",
+    "reviewersHint": "Besides this integration's editors: role:eddi-approver, role:eddi-editor or role:eddi-admin, or user ids of people who hold one of those roles. Empty: eddi-approver. Run and allow always needs edit access."
   }
 }

@@ -94,7 +94,7 @@ public class McpToolFilter implements ToolFilter {
             // Email sender lists (targeted edit of an email integration)
             "list_email_senders", "update_email_senders",
             // Email sending-health self-test
-            "run_email_self_test",
+            "run_email_self_test", "list_held_email", "decide_held_email",
             // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
             "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
             "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",

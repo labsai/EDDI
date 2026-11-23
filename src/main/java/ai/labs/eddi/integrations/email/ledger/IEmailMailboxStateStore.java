@@ -118,6 +118,9 @@ public interface IEmailMailboxStateStore {
      */
     boolean claimNotice(String integrationId, String noticeKey, Instant now);
 
+    /** When {@code noticeKey} of {@code integrationId} was claimed, if it was. */
+    Optional<Instant> noticeClaimedAt(String integrationId, String noticeKey);
+
     /** Removes everything held for the integration (it was deleted). */
     void delete(String integrationId);
 }

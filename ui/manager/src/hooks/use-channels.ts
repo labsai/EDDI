@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import {
   getEnrichedChannelDescriptors,
   getChannel,
@@ -8,6 +9,11 @@ import {
   duplicateChannel,
   getEmailSenders,
   updateEmailSenders,
+  getAllHeldEmail,
+  getHeldEmailPreview,
+  decideHeldEmail,
+  type HeldEmailDecision,
+  type HeldEmailQueue,
   type ChannelIntegrationConfiguration,
   type EmailSenderChange,
 } from "@/lib/api/channels";
@@ -116,6 +122,55 @@ export function useUpdateEmailSenders() {
   return useMutation({
     mutationFn: ({ id, change }: { id: string; change: EmailSenderChange }) => updateEmailSenders(id, change),
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
+    },
+  });
+}
+
+// ─── Held mail ────────────────────────────────────────────────────
+
+const HELD_EMAIL_KEY = ["held-email"] as const;
+
+/**
+ * The held mail of every email integration the caller may review, in one read
+ * (an approver cannot list the integrations) — the approvals page lists it as
+ * its own kind.
+ */
+export function useAllHeldEmail(enabled = true) {
+  // Only the roles the endpoint admits ask at all; a refusal stops the polling.
+  const isAdmin = useHasRole("eddi-admin");
+  const isEditor = useHasRole("eddi-editor");
+  const isApprover = useHasRole("eddi-approver");
+  const query = useQuery({
+    queryKey: [...HELD_EMAIL_KEY, "all"],
+    queryFn: () => getAllHeldEmail(),
+    enabled: enabled && (isAdmin || isEditor || isApprover),
+    retry: false,
+    refetchInterval: (q) => (q.state.error ? false : 30_000),
+  });
+  const queues: HeldEmailQueue[] = query.data ?? [];
+  return { queues, isLoading: query.isLoading };
+}
+export function useHeldEmailPreview(id: string, rowId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...HELD_EMAIL_KEY, id, rowId, "preview"],
+    queryFn: () => getHeldEmailPreview(id, rowId),
+    enabled: !!id && !!rowId && enabled,
+    retry: false,
+    // Live, never cached: the mail is re-read each time the dialog opens.
+    gcTime: 0,
+    staleTime: 0,
+  });
+}
+
+/** A held-mail decision; runAndAllow writes a new integration version too. */
+export function useDecideHeldEmail() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, rowId, decision, note }: { id: string; rowId: string; decision: HeldEmailDecision; note?: string }) =>
+      decideHeldEmail(id, rowId, decision, note),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: HELD_EMAIL_KEY });
       queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
     },
   });

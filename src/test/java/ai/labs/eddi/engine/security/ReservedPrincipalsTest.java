@@ -48,6 +48,8 @@ class ReservedPrincipalsTest {
             Map.entry("self-test:", "email self-test token hash used as a ledger sourceRef (EmailSelfTest), not a principal"),
             Map.entry("user:", "grant subject / attachment lock key (Subjects.USER_PREFIX encodes the principal)"),
             Map.entry("team:", "grant subject (Subjects.TEAM_PREFIX)"),
+            Map.entry("role:",
+                    "a reviewers entry naming a role (EmailChannelSettings.REVIEWER_ROLE_PREFIX), matched against the caller's roles, never a principal"),
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),
             Map.entry("space:", "descriptor access token (Subjects.SPACE_TOKEN_PREFIX)"),
             Map.entry("conversation:", "attachment lock key"),

@@ -99,6 +99,9 @@ export function CreateChannelDialog({
             botToken: botToken.trim(),
             signingSecret: signingSecret.trim(),
           },
+      // A new email integration holds a stranger's mail for review instead of
+      // dropping it (email channel v3 §15 Q4); it can be switched back to drop.
+      ...(isEmail ? { emailControl: { onRefused: { notAllowlisted: "review" as const } } } : {}),
       targets: [createDefaultTarget(targetAgentId.trim(), isEmail)],
       defaultTargetName: "default",
     };

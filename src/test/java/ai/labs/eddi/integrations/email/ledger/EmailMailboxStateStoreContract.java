@@ -99,6 +99,8 @@ interface EmailMailboxStateStoreContract {
     default void noticesAndDelete() {
         assertTrue(store().claimNotice("int-1", "2026-10-25:budget", NOW));
         assertFalse(store().claimNotice("int-1", "2026-10-25:budget", NOW));
+        assertTrue(store().noticeClaimedAt("int-1", "2026-10-25:budget").isPresent(), "a claim records when it was taken");
+        assertTrue(store().noticeClaimedAt("int-1", "2026-10-25:quota").isEmpty());
         assertTrue(store().claimNotice("int-1", "2026-10-25:throttled", NOW));
         assertTrue(store().claimNotice("int-2", "2026-10-25:budget", NOW));
         store().saveCursor("int-1", "INBOX", 1, 1, null, NOW);

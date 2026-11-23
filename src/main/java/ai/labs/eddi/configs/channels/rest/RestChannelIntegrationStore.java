@@ -9,31 +9,41 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailHeldMailView;
 import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
 import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
-import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.EmailHeldMailReview;
+import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailSelfTest;
-import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
-import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
+import ai.labs.eddi.utils.RestUtilities;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
@@ -43,6 +53,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
@@ -158,6 +169,246 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private static boolean isEmail(ChannelIntegrationConfiguration configuration) {
         return configuration != null && EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(configuration.getChannelType());
     }
+
+    /**
+     * Held mail (v3 phase C3); field-injected so the constructors stay as they are.
+     */
+    @Inject
+    Instance<EmailHeldMailReview> heldMail;
+
+    /** The caller's roles, for the held-mail reviewer check. */
+    @Inject
+    Instance<SecurityIdentity> securityIdentity;
+
+    private EmailHeldMailReview heldMail() {
+        if (heldMail == null || !heldMail.isResolvable()) {
+            throw new ServiceUnavailableException("Held mail is not available on this node.");
+        }
+        return heldMail.get();
+    }
+
+    // --- Held mail (email channel v3 plan §7) ----------------------------------
+
+    /** The email integrations, for the cross-integration held-mail read. */
+    @Inject
+    Instance<EmailIntegrationDirectory> emailDirectory;
+
+    @Override
+    public List<EmailHeldMailView.Queue> readAllHeldEmail(Integer limit) {
+        refuseTaintedRead();
+        if (emailDirectory == null || !emailDirectory.isResolvable()) {
+            throw new ServiceUnavailableException("Held mail is not available on this node.");
+        }
+        List<EmailHeldMailView.Queue> queues = new ArrayList<>();
+        for (EmailIntegrationDirectory.EmailIntegration integration : emailDirectory.get().scan()) {
+            boolean editor = resourceAccessGuard == null || resourceAccessGuard.hasAccess(integration.id(), AccessLevel.EDIT);
+            if (!editor && !mayReview(integration.settings().reviewers())) {
+                continue;
+            }
+            EmailHeldMailView.Queue queue = forCaller(heldMail().queue(integration.id(), integration.configuration(), limit == null ? 50 : limit),
+                    editor);
+            if (!queue.items().isEmpty()) {
+                queues.add(queue);
+            }
+        }
+        return queues;
+    }
+
+    @Override
+    public EmailHeldMailView.Queue readHeldEmail(String id, Integer limit) {
+        refuseTaintedRead();
+        ChannelIntegrationConfiguration current = requireReviewer(id);
+        return forCaller(heldMail().queue(id, current, limit == null ? 50 : limit), callerEdits(id));
+    }
+
+    @Override
+    public EmailHeldMailView.Preview readHeldEmailPreview(String id, String rowId) {
+        refuseTaintedRead();
+        ChannelIntegrationConfiguration current = requireReviewer(id);
+        LedgerEntry row = heldMail().heldRow(id, rowId).orElseThrow(() -> new NotFoundException("No held mail " + rowId + " on " + id + "."));
+        try {
+            EmailHeldMailView.Preview preview = heldMail().preview(id, current, row);
+            return new EmailHeldMailView.Preview(forCaller(preview.item(), callerEdits(id)), preview.fromName(), preview.subject(), preview.text(),
+                    preview.textTruncated(), preview.attachments());
+        } catch (EmailHeldMailReview.PreviewUnavailable e) {
+            if (e.getCause() != null) {
+                throw new ServiceUnavailableException(e.getMessage());
+            }
+            throw new WebApplicationException(e.getMessage(),
+                    Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).entity(e.getMessage()).build());
+        }
+    }
+
+    /**
+     * A reviewer's decision (v3 plan §7.3). The order is the security model:
+     * <ol>
+     * <li>never from a conversation an email started ({@code origin=email}, §5.3) —
+     * checked here as well as by {@code TaintedRequestFilter} and the MCP
+     * guard;</li>
+     * <li>the caller may review (EDIT, or a reviewer);</li>
+     * <li>{@code runAndAllow} additionally needs EDIT and the stored aligned pass:
+     * a forged From fails the allowlist before authentication is looked at, so the
+     * reason alone cannot tell. The address added is the row's, never the
+     * request's;</li>
+     * <li>for {@code runAndAllow} the allowlist is written first, through the same
+     * path as {@code update_email_senders}; only then is the mail released. A
+     * failed write releases nothing; a release lost to another decision after the
+     * write is a 409 that says the sender was allowed.</li>
+     * </ol>
+     */
+    @Override
+    public Response decideHeldEmail(String id, String rowId, EmailHeldMailView.DecisionRequest request) {
+        if (TurnOrigin.currentIsEmail()) {
+            throw new ForbiddenException("A conversation an email started cannot decide held mail.");
+        }
+        String decision = request == null || request.decision() == null ? null : request.decision().trim();
+        if (decision == null || !EmailReviewState.DECISIONS.contains(decision)) {
+            throw new BadRequestException("The body must be {\"decision\": \"discard\" | \"runOnce\" | \"runAndAllow\", \"note\": \"...\"}.");
+        }
+        requireReviewer(id);
+        LedgerEntry row = heldMail().heldRow(id, rowId).orElseThrow(() -> new NotFoundException("No held mail " + rowId + " on " + id + "."));
+        String note = EmailHeldMailReview.cleanNote(request.note());
+        Instant now = Instant.now();
+        Integer allowlistVersion = null;
+        List<String> warnings = new ArrayList<>();
+        switch (decision) {
+            case EmailReviewState.DISCARD -> {
+                if (!heldMail().discard(row, note, now)) {
+                    throw decidedMeanwhile(null);
+                }
+                return Response
+                        .ok(new EmailHeldMailView.DecisionResult(row.id(), decision, IEmailMessageLedger.State.REFUSED.name(), null, List.of()))
+                        .build();
+            }
+            case EmailReviewState.RUN_AND_ALLOW -> {
+                restVersionInfo.requireEditAccess(id);
+                if (!EmailReviewState.alignedPass(row.authVerdict())) {
+                    throw new BadRequestException("runAndAllow needs a sender whose DKIM and DMARC alignment passed; this mail's verdict is '"
+                            + row.authVerdict() + "', so its From may be forged. Use runOnce.");
+                }
+                if (row.recipient() == null || row.recipient().isBlank()) {
+                    throw new BadRequestException("This held mail names no sender to allow. Use runOnce.");
+                }
+                int version = currentVersion(id);
+                Response saved = updateEmailSenders(id, new EmailSenderLists.UpdateRequest(version,
+                        new EmailSenderLists.Entries(List.of(row.recipient()), List.of()), new EmailSenderLists.Entries(List.of(), List.of()),
+                        note == null ? "held mail released and its sender allowed" : note, false));
+                if (saved.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                    throw new WebApplicationException("The integration changed while deciding; nothing was released. Try again.",
+                            Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN)
+                                    .entity("The integration changed while deciding; nothing was released. Try again.").build());
+                }
+                if (saved.getEntity() instanceof EmailSenderLists.UpdateResult result) {
+                    allowlistVersion = result.version();
+                    warnings.addAll(result.warnings());
+                }
+                if (!heldMail().release(row, decision, note, now)) {
+                    throw decidedMeanwhile("The sender was added to the allowlist, but the mail had been decided meanwhile.");
+                }
+            }
+            default -> {
+                if (!heldMail().release(row, decision, note, now)) {
+                    throw decidedMeanwhile(null);
+                }
+            }
+        }
+        return Response.ok(new EmailHeldMailView.DecisionResult(row.id(), decision, IEmailMessageLedger.State.RECEIVED.name(), allowlistVersion,
+                warnings)).build();
+    }
+
+    private static WebApplicationException decidedMeanwhile(String detail) {
+        String message = detail != null ? detail : "This held mail was decided (or expired) meanwhile; nothing was changed.";
+        return new WebApplicationException(message, Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).entity(message).build());
+    }
+
+    /**
+     * Whoever may decide held mail of {@code id}: EDIT on the integration, or —
+     * with {@code emailControl.review.reviewers} empty — the {@code eddi-approver}
+     * role, or else one of the listed user ids or {@code role:<name>} entries.
+     *
+     * @return the integration's current version
+     */
+    ChannelIntegrationConfiguration requireReviewer(String id) {
+        if (callerEdits(id)) {
+            // An editor may know that the integration exists: a 404 is no leak.
+            return readEmailIntegration(id, currentVersion(id));
+        }
+        // Anyone else gets the same 403 for an integration that does not exist, is
+        // not an email integration, or that they do not review: no existence oracle.
+        ChannelIntegrationConfiguration current;
+        try {
+            current = readEmailIntegration(id, currentVersion(id));
+        } catch (NotFoundException e) {
+            throw notAReviewer();
+        }
+        if (mayReview(EmailChannelSettings.from(current).reviewers())) {
+            return current;
+        }
+        throw notAReviewer();
+    }
+
+    private static ForbiddenException notAReviewer() {
+        return new ForbiddenException("Only the integration's editors and its reviewers (emailControl.review.reviewers) may review held mail.");
+    }
+
+    /**
+     * Whether the caller holds EDIT on the integration (authorization off: yes).
+     */
+    private boolean callerEdits(String id) {
+        return resourceAccessGuard == null || resourceAccessGuard.hasAccess(id, AccessLevel.EDIT);
+    }
+
+    /**
+     * A conversation an email started never reads held mail: it is other senders'
+     * untrusted text, which the turn could echo or act on (v3 plan §5.3).
+     */
+    private static void refuseTaintedRead() {
+        if (TurnOrigin.currentIsEmail()) {
+            throw new ForbiddenException("A conversation an email started cannot read held mail.");
+        }
+    }
+
+    /** The queue as this caller sees it: run-and-allow only for an editor. */
+    private static EmailHeldMailView.Queue forCaller(EmailHeldMailView.Queue queue, boolean editor) {
+        if (editor) {
+            return queue;
+        }
+        return new EmailHeldMailView.Queue(queue.integrationId(), queue.integrationName(),
+                queue.items().stream().map(item -> forCaller(item, false)).toList(), queue.truncated());
+    }
+
+    private static EmailHeldMailView.Item forCaller(EmailHeldMailView.Item item, boolean editor) {
+        if (editor || !item.runAndAllowOffered()) {
+            return item;
+        }
+        return new EmailHeldMailView.Item(item.rowId(), item.integrationId(), item.sender(), item.authVerdict(), item.heldFor(), item.heldAt(),
+                item.expiresAt(), false, item.runsAnonymously());
+    }
+
+    /** Whether the caller is a reviewer by role or id. */
+    boolean mayReview(List<String> reviewers) {
+        SecurityIdentity identity = securityIdentity == null || !securityIdentity.isResolvable() ? null : securityIdentity.get();
+        if (identity == null || identity.isAnonymous()) {
+            return false;
+        }
+        if (reviewers.isEmpty()) {
+            return identity.hasRole(APPROVER_ROLE);
+        }
+        String principal = identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+        for (String reviewer : reviewers) {
+            if (reviewer.startsWith(EmailChannelSettings.REVIEWER_ROLE_PREFIX)) {
+                if (identity.hasRole(reviewer.substring(EmailChannelSettings.REVIEWER_ROLE_PREFIX.length()).trim())) {
+                    return true;
+                }
+            } else if (reviewer.equals(principal)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The approver role (#1396). */
+    static final String APPROVER_ROLE = "eddi-approver";
 
     private EmailChannelSupport emailSupport() {
         if (emailSupport == null || !emailSupport.isResolvable()) {

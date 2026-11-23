@@ -92,6 +92,23 @@ class ImapMarkProcessedTest {
     }
 
     @Test
+    @DisplayName("held mail (v3 §7.2) is moved to the sibling Held folder, created when missing; flagged in place without move:")
+    void heldMailGoesToTheHeldFolder() throws Exception {
+        when(folder.getPermanentFlags()).thenReturn(new Flags(Flags.Flag.USER));
+        when(store.hasCapability("MOVE")).thenReturn(true);
+        Folder held = mock(Folder.class);
+        when(held.exists()).thenReturn(false);
+        when(store.getFolder("EDDI/Held")).thenReturn(held);
+        var session = new ImapMailTransport.ImapSession(integrationId, store, folder);
+
+        assertEquals(MarkResult.MOVED, session.markHeld(message, settings("move:EDDI/Processed")));
+        verify(held).create(Folder.HOLDS_MESSAGES);
+        verify(folder).moveMessages(any(Message[].class), eq(held));
+        verify(store, never()).getFolder("EDDI/Processed");
+
+        assertEquals(MarkResult.FLAGGED, session.markHeld(message, settings(null)));
+    }
+    @Test
     @DisplayName("the keyword named explicitly in PERMANENTFLAGS is enough")
     void explicitKeyword() throws Exception {
         Flags permanent = new Flags(Flags.Flag.SEEN);

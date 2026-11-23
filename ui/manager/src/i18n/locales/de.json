@@ -5589,7 +5589,8 @@
       "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen.",
       "approvalPolicyNone": "Gespeichert, aber ein Ziel, dessen Agent handeln kann, hat keine Freigaberichtlinie: Mails nutzen seine Tools nur unter den eigenen Tool-Freigaben des Agenten. Erwägen Sie „Jede Aktion freigeben“.",
       "ruleCallsRefused": "Gespeichert. Ein Ziel mit Freigaberichtlinie hat regelgesteuerte HTTP- oder MCP-Aufrufe: Ein Mail-Turn verweigert sie, sofern „Nur lesende Tools“ sie nicht nennt.",
-      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf die Freigabe des E-Mail-Gates. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin."
+      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf die Freigabe des E-Mail-Gates. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin.",
+      "anonymousTools": "Gespeichert. Nicht authentifizierte Mails werden verarbeitet: sie laufen anonym mit allen Tools des Ziel-Agenten. Aus der Prüfung freigegebene Mails nie – sie sind auf schreibgeschützte Tools beschränkt."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5977,5 +5978,48 @@
     "approved": "Änderung genehmigt und angewendet",
     "rejected": "Änderung abgelehnt; nichts wurde angewendet",
     "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
+  },
+  "heldEmail": {
+    "title": "Zurückgehaltene Mails",
+    "subtitle": "Mails, die eine E-Mail-Integration verworfen hätte – der Absender steht nicht auf der Positivliste oder hat sich nicht authentifiziert. Entscheiden Sie, ob sie überhaupt verarbeitet werden.",
+    "integration": "Integration",
+    "sender": "Absender",
+    "reason": "Zurückgehalten, weil",
+    "expires": "Verworfen am",
+    "review": "Prüfen",
+    "unauthenticated": "nicht authentifiziert",
+    "reasonNotAllowlisted": "nicht auf der Positivliste",
+    "reasonUnauthenticated": "Absender nicht authentifiziert",
+    "discarded": "Verworfen.",
+    "releasedAllowed": "Freigegeben, und der Absender steht jetzt auf der Positivliste. Sie läuft beim nächsten Abruf.",
+    "released": "Freigegeben. Sie läuft beim nächsten Abruf.",
+    "dialogTitle": "Zurückgehaltene Mail",
+    "from": "Von",
+    "loadingPreview": "Mail wird aus dem Postfach gelesen…",
+    "previewUnavailable": "Die Mail konnte nicht aus dem Postfach gelesen werden:",
+    "noSubject": "(kein Betreff)",
+    "attachments": "Anhänge",
+    "truncated": "Nur der Anfang des Textes wird angezeigt.",
+    "untrusted": "Die Mail ist nicht vertrauenswürdige Eingabe. Freigeben heißt „verarbeiten\", nicht „tun, was sie verlangt\": die Freigaberichtlinie des Ziels gilt weiterhin.",
+    "anonymousWarning": "Dieser Absender hat sich nicht authentifiziert, der Absender kann also gefälscht sein. Wenn Sie sie ausführen, läuft sie anonym, darf nur die schreibgeschützten Tools des Ziels nutzen, und ihretwegen wird nie etwas an jemanden gesendet. Sie kann nicht zugelassen werden.",
+    "note": "Notiz (für das Audit-Log)",
+    "discard": "Verwerfen",
+    "runOnce": "Einmal ausführen",
+    "runAndAllow": "Ausführen und Absender zulassen"
+  },
+  "emailHeld": {
+    "title": "Zurückgehaltene Mails: prüfen statt verwerfen",
+    "hint": "Mails, die abgelehnt würden, können stattdessen für eine Person zurückgehalten werden, die sie verwirft, einmal ausführt oder ausführt und den Absender zulässt. Schleifen, Bounces, die Sperrliste und Limits sind nie prüfbar.",
+    "notAllowlisted": "Absender nicht auf der Positivliste",
+    "drop": "Verwerfen",
+    "review": "Zur Prüfung zurückhalten",
+    "unauthenticated": "Absender nicht authentifiziert",
+    "unauthenticatedHint": "Eine freigegebene, nicht authentifizierte Mail läuft anonym, nur mit schreibgeschützten Tools, und löst nie ausgehende Mails aus.",
+    "expiry": "Unentschiedene Mails verwerfen nach",
+    "expiryHint": "Eine ISO-8601-Dauer von PT1H bis P90D, höchstens die Ledger-Aufbewahrung minus einen Tag.",
+    "maxPerDay": "Höchstens zurückgehaltene Mails pro Tag",
+    "maxPerDomain": "Höchstens pro Absenderdomain und Tag",
+    "reviewers": "Prüfer",
+    "reviewersHint": "Zusätzlich zu den Bearbeitern dieser Integration: role:eddi-approver, role:eddi-editor oder role:eddi-admin, oder Benutzer-IDs von Personen mit einer dieser Rollen. Leer: eddi-approver. Ausführen und zulassen braucht immer Bearbeitungsrechte."
   }
 }

@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * MongoDB implementation of {@link IEmailMessageLedger}.
@@ -69,6 +70,12 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_CONTENT_HASH = "contentHash";
     /** OUT rows: whether the message left S/MIME-signed; absent when not known. */
     static final String F_SIGNED = "signed";
+    /** Inbound rows held for review: the authentication verdict when held. */
+    static final String F_AUTH_VERDICT = "authVerdict";
+    /** Inbound rows held for review: where the review stands. */
+    static final String F_REVIEW = "review";
+    /** Inbound rows held for review: when they were held. */
+    static final String F_HELD_AT = "heldAt";
 
     private final MongoCollection<Document> rows;
 
@@ -91,6 +98,10 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_APPROVAL), Indexes.ascending(F_NEXT)),
                 new IndexOptions().name("idx_email_ledger_approval").sparse(true));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_STATE), Indexes.ascending(F_CREATED)),
+                new IndexOptions().name("idx_email_ledger_held"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_HELD_AT)),
+                new IndexOptions().name("idx_email_ledger_held_at").sparse(true));
     }
 
     @Override
@@ -234,11 +245,63 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     public List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
         List<LedgerEntry> result = new ArrayList<>();
         for (Document document : rows.find(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_STATE, State.RECEIVED.name()),
-                Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.ne(F_CONVERSATION, null), Filters.lte(F_NEXT, Date.from(now))))
+                Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.or(Filters.ne(F_CONVERSATION, null), Filters.regex(F_REVIEW, "^" + Pattern.quote(EmailReviewState.RELEASED))),
+                Filters.lte(F_NEXT, Date.from(now))))
                 .sort(Sorts.ascending(F_NEXT)).limit(limit)) {
             result.add(toEntry(document));
         }
         return result;
+    }
+
+    @Override
+    public boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash, Instant nextAttemptAt,
+                                    String lastError, Instant expiresAt, Instant now) {
+        List<Bson> updates = new ArrayList<>();
+        updates.add(Updates.set(F_STATE, to.name()));
+        updates.add(Updates.set(F_REVIEW, IEmailMessageLedger.cap(review, MAX_REVIEW)));
+        updates.add(Updates.set(F_NEXT, date(nextAttemptAt)));
+        updates.add(Updates.set(F_ERROR, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR)));
+        updates.add(Updates.set(F_UPDATED, Date.from(now)));
+        if (authVerdict != null) {
+            updates.add(Updates.set(F_AUTH_VERDICT, IEmailMessageLedger.cap(authVerdict, MAX_AUTH_VERDICT)));
+        }
+        if (contentHash != null) {
+            updates.add(Updates.set(F_CONTENT_HASH, contentHash));
+        }
+        if (to == State.HELD) {
+            updates.add(Updates.set(F_HELD_AT, Date.from(now)));
+        }
+        if (expiresAt != null) {
+            updates.add(Updates.max(F_EXPIRES, Date.from(expiresAt)));
+        }
+        return rows.updateOne(Filters.and(Filters.eq(F_ID, id), Filters.eq(F_STATE, from.name())), Updates.combine(updates))
+                .getModifiedCount() == 1;
+    }
+
+    @Override
+    public List<LedgerEntry> findHeld(String integrationId, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        for (Document document : rows.find(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_STATE, State.HELD.name()),
+                Filters.eq(F_KIND, Kind.TRIGGER.name()))).sort(Sorts.ascending(F_CREATED, F_ID)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
+    public long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since) {
+        List<Bson> filters = new ArrayList<>(List.of(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.gte(F_HELD_AT, Date.from(since))));
+        if (Boolean.TRUE.equals(aligned)) {
+            filters.add(Filters.eq(F_AUTH_VERDICT, EmailReviewState.ALIGNED_PASS));
+            if (senderDomain != null) {
+                filters.add(Filters.regex(F_RECIPIENT, "@" + Pattern.quote(senderDomain) + "$"));
+            }
+        } else if (Boolean.FALSE.equals(aligned)) {
+            filters.add(Filters.ne(F_AUTH_VERDICT, EmailReviewState.ALIGNED_PASS));
+        }
+        return rows.countDocuments(Filters.and(filters));
     }
 
     @Override
@@ -316,7 +379,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_ERROR, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR))
                 .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()))
                 .append(F_APPROVAL, IEmailMessageLedger.cap(entry.approvalState(), MAX_APPROVAL_STATE)).append(F_CONTENT_HASH, entry.contentHash())
-                .append(F_SIGNED, entry.signed());
+                .append(F_SIGNED, entry.signed()).append(F_AUTH_VERDICT, IEmailMessageLedger.cap(entry.authVerdict(), MAX_AUTH_VERDICT))
+                .append(F_REVIEW, IEmailMessageLedger.cap(entry.review(), MAX_REVIEW)).append(F_HELD_AT, date(entry.heldAt()));
     }
 
     static LedgerEntry toEntry(Document document) {
@@ -327,7 +391,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 State.valueOf(document.getString(F_STATE)), attempts == null ? 0 : attempts, instant(document.getDate(F_NEXT)),
                 document.getString(F_CLAIM), document.getString(F_PROVIDER), document.getString(F_ERROR), instant(document.getDate(F_CREATED)),
                 instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)), document.getString(F_APPROVAL),
-                document.getString(F_CONTENT_HASH), document.getBoolean(F_SIGNED));
+                document.getString(F_CONTENT_HASH), document.getBoolean(F_SIGNED), document.getString(F_AUTH_VERDICT), document.getString(F_REVIEW),
+                instant(document.getDate(F_HELD_AT)));
     }
 
     private static Date date(Instant instant) {

@@ -269,6 +269,28 @@ class EmailReplySenderTest {
             assertTrue(sender.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, anonymous, NOW).isEmpty());
             assertTrue(transport.recipients.isEmpty());
         }
+
+        @Test
+        @DisplayName("a held mail released without an aligned pass never causes outgoing mail, even if everything else says send (v3 §7.3)")
+        void anonymousReleaseNeverAnswered() {
+            LedgerEntry plain = inbound(State.TURN_SUBMITTED);
+            LedgerEntry released = new LedgerEntry(plain.id(), plain.integrationId(), plain.kind(), plain.direction(), plain.messageId(),
+                    plain.conversationId(), plain.sourceRef(), plain.idempotencyKey(), plain.recipient(), plain.state(), 0, null, null, null, null,
+                    plain.createdAt(), plain.updatedAt(), plain.expiresAt(), null, "hash", null, "fail", "released:runOnce:unauthenticated");
+            ledger.put(released);
+
+            assertTrue(sender.onTurnCompleted(INTEGRATION, settings(), released, CONVERSATION, answered("Sure, done."), NOW).isEmpty());
+            assertTrue(transport.recipients.isEmpty());
+            assertTrue(replies().isEmpty());
+
+            // The same release with an aligned pass is answered: the refusal is the
+            // verdict's.
+            LedgerEntry aligned = new LedgerEntry(plain.id(), plain.integrationId(), plain.kind(), plain.direction(), plain.messageId(),
+                    plain.conversationId(), plain.sourceRef(), plain.idempotencyKey(), plain.recipient(), plain.state(), 0, null, null, null, null,
+                    plain.createdAt(), plain.updatedAt(), plain.expiresAt(), null, "hash", null, "aligned-pass", "released:runOnce:not_allowlisted");
+            ledger.put(aligned);
+            assertTrue(sender.onTurnCompleted(INTEGRATION, settings(), aligned, CONVERSATION, answered("Sure, done."), NOW).isPresent());
+        }
     }
 
     @Nested

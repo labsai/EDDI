@@ -6,8 +6,9 @@ package ai.labs.eddi.configs.channels;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
-import ai.labs.eddi.configs.channels.model.EmailSenderLists;
+import ai.labs.eddi.configs.channels.model.EmailHeldMailView;
 import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
+import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
@@ -134,6 +135,50 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
             + "not the current version; 400 for an invalid entry, an entry on both lists, more than 200 entries, or removing "
             + "the last allowlist entry without confirmOpen: true. Needs edit access.")
     Response updateEmailSenders(@PathParam("id") String id, EmailSenderLists.UpdateRequest request);
+
+    @GET
+    @Path("/email-held")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})
+    @Operation(description = "The held mail of every email integration the caller may review (its editors, or its "
+            + "emailControl.review.reviewers; by default eddi-approver) — one queue per integration that holds any, as GET "
+            + ".../{id}/email-held answers it. What the Manager's approvals page lists; an approver cannot list the integrations "
+            + "themselves.")
+    List<EmailHeldMailView.Queue> readAllHeldEmail(@QueryParam("limit")
+    @DefaultValue("50") Integer limit);
+    @GET
+    @Path("/{id}/email-held")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})
+    @Operation(description = "The mail of an email integration held for review instead of dropped (emailControl.onRefused): "
+            + "{integrationId, integrationName, items: [{rowId, sender, authVerdict, heldFor, heldAt, expiresAt, runAndAllowOffered, "
+            + "runsAnonymously}], truncated}, oldest first. No content: open one with GET .../email-held/{rowId}. Needs edit access to the "
+            + "integration, or to be one of its reviewers (emailControl.review.reviewers; by default eddi-approver).")
+    EmailHeldMailView.Queue readHeldEmail(@PathParam("id") String id, @QueryParam("limit")
+    @DefaultValue("50") Integer limit);
+
+    @GET
+    @Path("/{id}/email-held/{rowId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})
+    @Operation(description = "A live preview of one held mail, re-read from the mailbox by its Message-ID (polled, move and Held "
+            + "folders) and never stored: sender, authentication verdict, subject, the first 4000 characters of the text (quoted history "
+            + "stripped), attachment names. 404 when the row is not held, 409 when the mail is no longer in the mailbox, 503 when the "
+            + "mailbox cannot be read. Same access as the list.")
+    EmailHeldMailView.Preview readHeldEmailPreview(@PathParam("id") String id, @PathParam("rowId") String rowId);
+
+    @POST
+    @Path("/{id}/email-held/{rowId}/decision")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})
+    @Operation(description = "Decide a held mail: {\"decision\": \"discard\" | \"runOnce\" | \"runAndAllow\", \"note\": \"...\"}. discard "
+            + "drops it (review_discarded). runOnce runs it at the next poll, skipping only the checks that held it; it still meets the "
+            + "target's approvalPolicy. runAndAllow also adds the exact sender address to the allowlist (a new version, audited, the note "
+            + "as reason): it needs edit access and an aligned DKIM pass of the sender. A mail released without one runs anonymously, with "
+            + "the target's readOnlyTools only, and never causes outgoing mail. 404 when the row is not held, 409 when it was decided "
+            + "meanwhile. Never callable from a conversation an email started. Audited.")
+    Response decideHeldEmail(@PathParam("id") String id, @PathParam("rowId") String rowId, EmailHeldMailView.DecisionRequest request);
 
     @POST
     @Path("/{id}/email-self-test")

@@ -5641,7 +5641,8 @@
       "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas.",
       "approvalPolicyNone": "Guardado, pero un destino cuyo agente puede actuar no tiene política de aprobación: el correo usa sus herramientas solo bajo las aprobaciones propias del agente. Considere «Aprobar cada acción».",
       "ruleCallsRefused": "Guardado. Un destino con política de aprobación tiene llamadas HTTP o MCP guiadas por reglas: un turno de correo las rechaza salvo que Herramientas de solo lectura las nombre.",
-      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera la aprobación de la compuerta de correo. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes."
+      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera la aprobación de la compuerta de correo. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes.",
+      "anonymousTools": "Guardado. Se procesa el correo no autenticado: se ejecuta de forma anónima con todas las herramientas del agente destino. El correo liberado desde revisión nunca: se limita a herramientas de solo lectura."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -6029,5 +6030,48 @@
     "approved": "Cambio aprobado y aplicado",
     "rejected": "Cambio rechazado; no se aplicó nada",
     "approveBlockedDirty": "Guarda primero tus cambios de la cuota o recarga la página para descartarlos: guardarlos después de una aprobación sobrescribiría la cuota aprobada."
+  },
+  "heldEmail": {
+    "title": "Correo retenido",
+    "subtitle": "Correo que una integración de correo habría descartado: el remitente no está en su lista de permitidos o no se autenticó. Decida si se procesa.",
+    "integration": "Integración",
+    "sender": "Remitente",
+    "reason": "Retenido porque",
+    "expires": "Se descarta el",
+    "review": "Revisar",
+    "unauthenticated": "no autenticado",
+    "reasonNotAllowlisted": "no está en la lista de permitidos",
+    "reasonUnauthenticated": "remitente no autenticado",
+    "discarded": "Descartado.",
+    "releasedAllowed": "Liberado, y el remitente ya está en la lista de permitidos. Se ejecuta en el próximo sondeo.",
+    "released": "Liberado. Se ejecuta en el próximo sondeo.",
+    "dialogTitle": "Correo retenido",
+    "from": "De",
+    "loadingPreview": "Leyendo el correo del buzón…",
+    "previewUnavailable": "No se pudo leer el correo del buzón:",
+    "noSubject": "(sin asunto)",
+    "attachments": "Adjuntos",
+    "truncated": "Solo se muestra el inicio del texto.",
+    "untrusted": "El correo es una entrada no confiable. Liberarlo significa «procesarlo», no «hacer lo que pide»: la política de aprobación del destino sigue aplicándose.",
+    "anonymousWarning": "Este remitente no se autenticó, así que el From puede estar falsificado. Si lo ejecuta, se ejecuta de forma anónima, solo puede usar las herramientas de solo lectura del destino y nunca se envía nada a nadie por su causa. No se puede permitir.",
+    "note": "Nota (para el registro de auditoría)",
+    "discard": "Descartar",
+    "runOnce": "Ejecutar una vez",
+    "runAndAllow": "Ejecutar y permitir este remitente"
+  },
+  "emailHeld": {
+    "title": "Correo retenido: revisar en lugar de descartar",
+    "hint": "El correo que se rechazaría puede retenerse para una persona, que lo descarta, lo ejecuta una vez o lo ejecuta y permite al remitente. Los bucles, rebotes, la lista de bloqueo y los límites nunca son revisables.",
+    "notAllowlisted": "Remitente fuera de la lista de permitidos",
+    "drop": "Descartar",
+    "review": "Retener para revisión",
+    "unauthenticated": "Remitente no autenticado",
+    "unauthenticatedHint": "Un correo no autenticado liberado se ejecuta de forma anónima, solo con herramientas de solo lectura, y nunca provoca correo saliente.",
+    "expiry": "Descartar el correo sin decidir tras",
+    "expiryHint": "Una duración ISO-8601 de PT1H a P90D, como máximo la retención del registro menos un día.",
+    "maxPerDay": "Correo retenido por día como máximo",
+    "maxPerDomain": "Como máximo por dominio remitente y día",
+    "reviewers": "Revisores",
+    "reviewersHint": "Además de los editores de esta integración: role:eddi-approver, role:eddi-editor o role:eddi-admin, o IDs de usuarios que tengan uno de esos roles. Vacío: eddi-approver. Ejecutar y permitir siempre requiere permiso de edición."
   }
 }

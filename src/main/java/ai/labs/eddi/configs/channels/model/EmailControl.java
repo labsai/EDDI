@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -48,12 +50,20 @@ import java.util.Objects;
 public class EmailControl {
 
     private Smime smime;
+    private OnRefused onRefused;
+    private Review review;
 
     public EmailControl() {
     }
 
     public EmailControl(Smime smime) {
         this.smime = smime;
+    }
+
+    public EmailControl(Smime smime, OnRefused onRefused, Review review) {
+        this.smime = smime;
+        this.onRefused = onRefused;
+        this.review = review;
     }
 
     /** S/MIME signing of the mail the integration sends (plan §6.2). */
@@ -65,19 +75,189 @@ public class EmailControl {
         this.smime = smime;
     }
 
+    /**
+     * What happens to mail EDDI would refuse for a reviewable reason (plan §7.1):
+     * dropped, or held for a reviewer.
+     */
+    public OnRefused getOnRefused() {
+        return onRefused;
+    }
+
+    public void setOnRefused(OnRefused onRefused) {
+        this.onRefused = onRefused;
+    }
+
+    /** How held mail is reviewed: expiry, caps and who decides (plan §7.1). */
+    public Review getReview() {
+        return review;
+    }
+
+    public void setReview(Review review) {
+        this.review = review;
+    }
+
     /** A deep copy: changing the copy never changes this object. */
     public EmailControl copy() {
-        return new EmailControl(smime == null ? null : new Smime(smime.getSign(), smime.getConnection()));
+        return new EmailControl(smime == null ? null : new Smime(smime.getSign(), smime.getConnection()),
+                onRefused == null ? null : new OnRefused(onRefused.getNotAllowlisted(), onRefused.getUnauthenticated(), onRefused.getNotAddressed()),
+                review == null
+                        ? null
+                        : new Review(review.getExpiry(), review.getMaxHeldPerDay(), review.getMaxHeldPerSenderDomainPerDay(),
+                                review.getReviewers() == null ? null : new ArrayList<>(review.getReviewers())));
     }
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof EmailControl other && Objects.equals(smime, other.smime);
+        return o instanceof EmailControl other && Objects.equals(smime, other.smime) && Objects.equals(onRefused, other.onRefused)
+                && Objects.equals(review, other.review);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(smime);
+        return Objects.hash(smime, onRefused, review);
+    }
+
+    /**
+     * {@code emailControl.onRefused}: per reviewable refusal, {@code "drop"} (the
+     * default) or {@code "review"}. Strings, not an enum, so a stored value EDDI
+     * does not know reads as {@code drop} instead of making the document
+     * unloadable; a write with one is refused by
+     * {@link EmailChannelSettings#validate}.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class OnRefused {
+
+        /** Drop the mail (today's behaviour, the default). */
+        public static final String DROP = "drop";
+        /** Hold it for a reviewer. */
+        public static final String REVIEW = "review";
+
+        private String notAllowlisted;
+        private String unauthenticated;
+        private String notAddressed;
+
+        public OnRefused() {
+        }
+
+        public OnRefused(String notAllowlisted, String unauthenticated, String notAddressed) {
+            this.notAllowlisted = notAllowlisted;
+            this.unauthenticated = unauthenticated;
+            this.notAddressed = notAddressed;
+        }
+
+        /** For {@code blocked:not_allowlisted}. */
+        public String getNotAllowlisted() {
+            return notAllowlisted;
+        }
+
+        public void setNotAllowlisted(String notAllowlisted) {
+            this.notAllowlisted = notAllowlisted;
+        }
+
+        /** For {@code unauthenticated:*}. */
+        public String getUnauthenticated() {
+            return unauthenticated;
+        }
+
+        public void setUnauthenticated(String unauthenticated) {
+            this.unauthenticated = unauthenticated;
+        }
+
+        /**
+         * For mail that does not address the integration (v2 phase 3). Reserved: only
+         * {@code drop} is accepted until addressing exists.
+         */
+        public String getNotAddressed() {
+            return notAddressed;
+        }
+
+        public void setNotAddressed(String notAddressed) {
+            this.notAddressed = notAddressed;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof OnRefused other && Objects.equals(notAllowlisted, other.notAllowlisted)
+                    && Objects.equals(unauthenticated, other.unauthenticated) && Objects.equals(notAddressed, other.notAddressed);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(notAllowlisted, unauthenticated, notAddressed);
+        }
+    }
+
+    /** {@code emailControl.review}: how held mail is reviewed. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class Review {
+
+        private String expiry;
+        private Integer maxHeldPerDay;
+        private Integer maxHeldPerSenderDomainPerDay;
+        private List<String> reviewers;
+
+        public Review() {
+        }
+
+        public Review(String expiry, Integer maxHeldPerDay, Integer maxHeldPerSenderDomainPerDay, List<String> reviewers) {
+            this.expiry = expiry;
+            this.maxHeldPerDay = maxHeldPerDay;
+            this.maxHeldPerSenderDomainPerDay = maxHeldPerSenderDomainPerDay;
+            this.reviewers = reviewers;
+        }
+
+        /**
+         * ISO-8601 duration ({@code P7D} by default) after which undecided held mail is
+         * dropped.
+         */
+        public String getExpiry() {
+            return expiry;
+        }
+
+        public void setExpiry(String expiry) {
+            this.expiry = expiry;
+        }
+
+        /** Held mail per integration and UTC day (default 50). */
+        public Integer getMaxHeldPerDay() {
+            return maxHeldPerDay;
+        }
+
+        public void setMaxHeldPerDay(Integer maxHeldPerDay) {
+            this.maxHeldPerDay = maxHeldPerDay;
+        }
+
+        /** Held mail per sender domain and UTC day (default 5). */
+        public Integer getMaxHeldPerSenderDomainPerDay() {
+            return maxHeldPerSenderDomainPerDay;
+        }
+
+        public void setMaxHeldPerSenderDomainPerDay(Integer maxHeldPerSenderDomainPerDay) {
+            this.maxHeldPerSenderDomainPerDay = maxHeldPerSenderDomainPerDay;
+        }
+
+        /**
+         * Who may decide: EDDI user ids, or {@code role:<name>}. Empty: EDIT holders of
+         * the integration and {@code eddi-approver}.
+         */
+        public List<String> getReviewers() {
+            return reviewers;
+        }
+
+        public void setReviewers(List<String> reviewers) {
+            this.reviewers = reviewers;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Review other && Objects.equals(expiry, other.expiry) && Objects.equals(maxHeldPerDay, other.maxHeldPerDay)
+                    && Objects.equals(maxHeldPerSenderDomainPerDay, other.maxHeldPerSenderDomainPerDay) && Objects.equals(reviewers, other.reviewers);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(expiry, maxHeldPerDay, maxHeldPerSenderDomainPerDay, reviewers);
+        }
     }
 
     /**

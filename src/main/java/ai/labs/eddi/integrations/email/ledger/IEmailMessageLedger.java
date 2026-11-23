@@ -152,10 +152,22 @@ public interface IEmailMessageLedger {
          * Inbound: deliberately not processed, the reason in {@code lastError}.
          * Terminal.
          */
-        REFUSED;
+        REFUSED,
+        /**
+         * Inbound: refused for reviewable reasons only, and held for a reviewer (email
+         * channel v3 plan §7.2). The mail is marked processed (moved to the Held
+         * folder) so the cursor advances; {@code nextAttemptAt} is when the review
+         * expires. A decision moves it to {@link #RECEIVED} (released) or
+         * {@link #REFUSED}. Not terminal, but never due for a poll: only a reviewer or
+         * the expiry sweep moves it.
+         */
+        HELD;
 
         public boolean isTerminal() {
-            return this != PENDING && this != RECEIVED && this != CLAIMED && this != TURN_SUBMITTED;
+            return switch (this) {
+                case PENDING, RECEIVED, CLAIMED, TURN_SUBMITTED, HELD -> false;
+                case SENT, FAILED, SUPPRESSED, DONE, REFUSED -> true;
+            };
         }
     }
 
@@ -213,11 +225,48 @@ public interface IEmailMessageLedger {
      * @param contentHash
      *            inbound only: SHA-256 (hex) of the raw mail the gate held, so the
      *            mail that runs after the approval is the mail that was approved;
-     *            or null
+     *            or null. Also set when a mail is held for review (v3 §7.2): only
+     *            that mail may run once released
+     * @param signed
+     *            OUT rows: whether the message left S/MIME-signed, or null
+     * @param authVerdict
+     *            inbound rows held for review: the sender authentication verdict
+     *            when it was held ({@code aligned-pass}, {@code fail}, ...), or
+     *            null
+     * @param review
+     *            inbound rows held for review: where the review stands —
+     *            {@code held:<reasons>}, {@code released:<decision>:<reasons>},
+     *            {@code discarded:<reasons>} or {@code expired:<reasons>}, reasons
+     *            joined by {@code +} — or null. Its own field, so deferrals and the
+     *            approval gate, which rewrite {@code lastError}, never lose it;
+     *            changed only by {@link #transitionReview}
+     * @param heldAt
+     *            inbound rows held for review: when the mail was held (the daily
+     *            caps count by it), or null
      */
     record LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId, String sourceRef,
             String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken, String providerId,
-            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState, String contentHash, Boolean signed) {
+            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState, String contentHash, Boolean signed,
+            String authVerdict, String review, Instant heldAt) {
+
+        /** A row whose review, if any, records no hold time. */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState,
+                String contentHash, Boolean signed, String authVerdict, String review) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts, nextAttemptAt,
+                    claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, approvalState, contentHash, signed, authVerdict, review,
+                    null);
+        }
+
+        /** A row without a review. */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState,
+                String contentHash, Boolean signed) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts, nextAttemptAt,
+                    claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, approvalState, contentHash, signed, null, null);
+        }
 
         /** A row without an approval hold whose {@code signed} is not known. */
         public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
@@ -247,11 +296,15 @@ public interface IEmailMessageLedger {
                     claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, null, null, signed);
         }
 
-        /** This row with the approval hold of {@code other}. */
+        /**
+         * This row with the approval hold, the content hash and the review of
+         * {@code other} — every field the row-rewriting copies must carry over.
+         */
         public LedgerEntry withApprovalOf(LedgerEntry other) {
             return new LedgerEntry(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state,
                     attempts, nextAttemptAt, claimToken, providerId, lastError, createdAt, updatedAt, expiresAt,
-                    other == null ? null : other.approvalState(), other == null ? null : other.contentHash(), signed);
+                    other == null ? null : other.approvalState(), other == null ? null : other.contentHash(), signed,
+                    other == null ? null : other.authVerdict(), other == null ? null : other.review());
         }
 
         public LedgerEntry {
@@ -374,14 +427,73 @@ public interface IEmailMessageLedger {
 
     /**
      * Up to {@code limit} {@link Kind#TRIGGER} rows of {@code integrationId} in
-     * {@link State#RECEIVED} that already name a conversation and whose
-     * {@code nextAttemptAt} is at or before {@code now}, oldest first — the mail
-     * one integration's poll must find again by its Message-ID and submit once
-     * more. Scoped to the integration in the store, so rows nobody polls any more
-     * (a deleted integration's, an invalid one's) never take another integration's
-     * places; retention removes them.
+     * {@link State#RECEIVED} that already name a conversation — or that a reviewer
+     * released from review ({@link LedgerEntry#review()} {@code released:…}, with
+     * or without a conversation; v3 §7.3) — and whose {@code nextAttemptAt} is at
+     * or before {@code now}, oldest first — the mail one integration's poll must
+     * find again by its Message-ID and submit once more. Scoped to the integration
+     * in the store, so rows nobody polls any more (a deleted integration's, an
+     * invalid one's) never take another integration's places; retention removes
+     * them.
      */
     List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit);
+
+    /**
+     * The most of {@link LedgerEntry#review()} a store keeps (the PostgreSQL column
+     * width).
+     */
+    int MAX_REVIEW = 128;
+
+    /**
+     * The most of {@link LedgerEntry#authVerdict()} a store keeps (the PostgreSQL
+     * column width).
+     */
+    int MAX_AUTH_VERDICT = 32;
+
+    /**
+     * Moves a row from {@code from} to {@code to}, only if it is still in
+     * {@code from}, and sets its {@link LedgerEntry#review()} — the held-mail
+     * transitions (v3 §7): held, released, discarded, expired. Of two reviewers (or
+     * a reviewer and the expiry sweep) exactly one wins. Sets {@code nextAttemptAt}
+     * and {@code lastError} as given; {@link LedgerEntry#authVerdict()} and
+     * {@link LedgerEntry#contentHash()} only when not null.
+     *
+     * @return whether the row was changed
+     */
+    default boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash,
+                                     Instant nextAttemptAt, String lastError, Instant now) {
+        return transitionReview(id, from, to, review, authVerdict, contentHash, nextAttemptAt, lastError, null, now);
+    }
+
+    /**
+     * As the other {@code transitionReview}, also moving {@code expiresAt} to
+     * {@code expiresAt} when that is later — a released row must outlive its run.
+     * Moving to {@link State#HELD} sets {@link LedgerEntry#heldAt()} to
+     * {@code now}.
+     */
+    boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash, Instant nextAttemptAt,
+                             String lastError, Instant expiresAt, Instant now);
+
+    /**
+     * Up to {@code limit} {@link Kind#TRIGGER} rows of {@code integrationId} in
+     * {@link State#HELD}, oldest first — the review queue.
+     */
+    List<LedgerEntry> findHeld(String integrationId, int limit);
+
+    /**
+     * How many {@link Kind#TRIGGER} rows of {@code integrationId} were held for
+     * review at or after {@code since} ({@link LedgerEntry#heldAt()}, whatever was
+     * decided since — a discard does not free a place).
+     * <ul>
+     * <li>{@code aligned} null: all of them;</li>
+     * <li>{@code aligned} true: those held with an aligned pass from a sender of
+     * {@code senderDomain} — so a forged From cannot use up a real domain's
+     * share;</li>
+     * <li>{@code aligned} false: those held without one, whatever their From claims
+     * — one shared bucket ({@code senderDomain} is ignored).</li>
+     * </ul>
+     */
+    long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since);
 
     /**
      * The most of {@link LedgerEntry#approvalState()} a store keeps (the PostgreSQL

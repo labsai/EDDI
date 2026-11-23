@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,7 +43,7 @@ interface EmailMessageLedgerContract {
     /** Every field a row may store — and no body, subject or MIME. */
     Set<String> ALLOWED_FIELDS = Set.of("id", "integrationid", "kind", "direction", "messageid", "conversationid", "sourceref",
             "idempotencykey", "recipient", "state", "attempts", "nextattemptat", "claimtoken", "providerid", "lasterror", "createdat",
-            "updatedat", "expiresat", "approvalstate", "contenthash", "signed");
+            "updatedat", "expiresat", "approvalstate", "contenthash", "signed", "authverdict", "review", "reviewstate", "heldat");
 
     IEmailMessageLedger ledger();
 
@@ -562,5 +563,127 @@ interface EmailMessageLedgerContract {
         ledger().transition(later.id(), State.RECEIVED, State.DONE, "conv-l", NOW.plusSeconds(600), "email_gate:awaiting_start", false, NOW);
         assertTrue(ledger().findByApprovalState("email_gate:awaiting_start", NOW, 10).isEmpty(), "not due before its next look");
         assertEquals(1, ledger().findByApprovalState("email_gate:awaiting_start", NOW.plusSeconds(601), 10).size());
+    }
+
+    @Test
+    @DisplayName("held mail (v3 C3): HELD is its own, non-terminal state; the review, verdict and hash round-trip and survive transitions")
+    default void heldMailRoundTrip() {
+        assertFalse(State.HELD.isTerminal());
+        LedgerEntry row = inbound("int-1", "<held-1@example.com>", "stranger@partner.com", NOW);
+        assertTrue(ledger().insertIfAbsent(row));
+        String review = EmailReviewState.held(List.of(EmailReviewState.UNAUTHENTICATED, EmailReviewState.NOT_ALLOWLISTED));
+        assertEquals("held:not_allowlisted+unauthenticated", review);
+        assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, review, "fail", "abc123", NOW.plus(Duration.ofDays(7)),
+                "held:not_allowlisted+unauthenticated", NOW));
+        assertFalse(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, review, "fail", "abc123", NOW, "x", NOW),
+                "conditional on the state it is in");
+        LedgerEntry held = ledger().findById(row.id()).orElseThrow();
+        assertEquals(State.HELD, held.state());
+        assertEquals(review, held.review());
+        assertEquals("fail", held.authVerdict());
+        assertEquals("abc123", held.contentHash());
+        assertEquals(NOW.plus(Duration.ofDays(7)), held.nextAttemptAt());
+        // An unrelated transition (a deferral, the approval gate) keeps the review
+        // fields.
+        assertTrue(ledger().transitionApproval(row.id(), null, "email_gate:x", null, NOW));
+        assertEquals(review, ledger().findById(row.id()).orElseThrow().review());
+        assertEquals("fail", ledger().findById(row.id()).orElseThrow().authVerdict());
+        // Released: back to RECEIVED, the verdict kept when not given again.
+        String released = EmailReviewState.released(EmailReviewState.RUN_ONCE, EmailReviewState.reasons(review));
+        assertTrue(ledger().transitionReview(row.id(), State.HELD, State.RECEIVED, released, null, null, NOW, "review_released", NOW));
+        assertFalse(ledger().transitionReview(row.id(), State.HELD, State.REFUSED, "discarded:x", null, null, null, "review_discarded", NOW),
+                "a second reviewer loses");
+        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.RECEIVED, null, NOW, "auth_temporary", false, NOW));
+        LedgerEntry after = ledger().findById(row.id()).orElseThrow();
+        assertEquals(released, after.review());
+        assertEquals("fail", after.authVerdict());
+        assertEquals("abc123", after.contentHash());
+        assertEquals(List.of(EmailReviewState.NOT_ALLOWLISTED, EmailReviewState.UNAUTHENTICATED), EmailReviewState.reasons(after.review()));
+        assertTrue(EmailReviewState.anonymousRelease(after));
+    }
+
+    @Test
+    @DisplayName("held mail: the review queue lists HELD rows of one integration, oldest first")
+    default void heldQueue() {
+        LedgerEntry first = inbound("int-1", "<q1@example.com>", "a@partner.com", NOW.minusSeconds(20));
+        LedgerEntry second = inbound("int-1", "<q2@example.com>", "b@partner.com", NOW.minusSeconds(10));
+        LedgerEntry other = inbound("int-2", "<q3@example.com>", "c@partner.com", NOW);
+        LedgerEntry notHeld = inbound("int-1", "<q4@example.com>", "d@partner.com", NOW);
+        for (LedgerEntry row : List.of(second, first, other, notHeld)) {
+            assertTrue(ledger().insertIfAbsent(row));
+        }
+        for (LedgerEntry row : List.of(second, first, other)) {
+            assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null,
+                    NOW.plusSeconds(3600), "held:not_allowlisted", NOW));
+        }
+        assertEquals(List.of(first.id(), second.id()), ledger().findHeld("int-1", 10).stream().map(LedgerEntry::id).toList());
+        assertEquals(List.of(first.id()), ledger().findHeld("int-1", 1).stream().map(LedgerEntry::id).toList());
+        assertEquals(List.of(other.id()), ledger().findHeld("int-2", 10).stream().map(LedgerEntry::id).toList());
+        assertTrue(ledger().findDue(Kind.TRIGGER, State.HELD, NOW, 10).isEmpty(), "not expired yet");
+        assertEquals(3, ledger().findDue(Kind.TRIGGER, State.HELD, NOW.plusSeconds(3601), 10).size(), "the expiry sweep finds them");
+    }
+
+    @Test
+    @DisplayName("held mail: the daily caps count every mail ever held today, per integration and per sender domain - a discard frees nothing")
+    default void heldCounts() {
+        LedgerEntry a = inbound("int-1", "<c1@example.com>", "a@partner.com", NOW);
+        LedgerEntry b = inbound("int-1", "<c2@example.com>", "b@sub.partner.com", NOW);
+        LedgerEntry c = inbound("int-1", "<c3@example.com>", "c@other_x.com", NOW);
+        LedgerEntry forged = inbound("int-1", "<c6@example.com>", "f@partner.com", NOW);
+        LedgerEntry heldYesterday = inbound("int-1", "<c4@example.com>", "d@partner.com", NOW);
+        LedgerEntry arrivedEarlier = inbound("int-1", "<c7@example.com>", "g@partner.com", NOW.minus(Duration.ofDays(2)));
+        LedgerEntry plain = inbound("int-1", "<c5@example.com>", "e@partner.com", NOW);
+        for (LedgerEntry row : List.of(a, b, c, forged, heldYesterday, arrivedEarlier, plain)) {
+            assertTrue(ledger().insertIfAbsent(row));
+        }
+        for (LedgerEntry row : List.of(a, b, c, arrivedEarlier)) {
+            assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW, "held",
+                    NOW));
+        }
+        assertTrue(ledger().transitionReview(forged.id(), State.RECEIVED, State.HELD, "held:not_allowlisted+unauthenticated", "fail", null, NOW,
+                "held", NOW));
+        assertTrue(ledger().transitionReview(heldYesterday.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW,
+                "held", NOW.minus(Duration.ofDays(1))));
+        assertTrue(
+                ledger().transitionReview(a.id(), State.HELD, State.REFUSED, "discarded:not_allowlisted", null, null, null, "review_discarded", NOW));
+        Instant today = NOW.minus(Duration.ofHours(1));
+        assertEquals(5, ledger().countHeldSince("int-1", null, null, today), "by when it was held: a mail that arrived earlier counts today");
+        assertEquals(2, ledger().countHeldSince("int-1", "partner.com", true, today),
+                "exact domain, aligned only, the discarded one included - the forged one is not partner.com's");
+        assertEquals(1, ledger().countHeldSince("int-1", "other_x.com", true, today), "an underscore is not a wildcard");
+        assertEquals(0, ledger().countHeldSince("int-1", "otherxx.com", true, today));
+        assertEquals(1, ledger().countHeldSince("int-1", "anything.com", false, today), "unauthenticated mail shares one bucket");
+        assertEquals(0, ledger().countHeldSince("int-2", null, null, today));
+        assertNotNull(ledger().findById(forged.id()).orElseThrow().heldAt());
+    }
+
+    @Test
+    @DisplayName("held mail: a release can extend the retention of the row, never shorten it")
+    default void releaseExtendsRetention() {
+        LedgerEntry row = inbound("int-1", "<x1@example.com>", "a@partner.com", NOW);
+        assertTrue(ledger().insertIfAbsent(row));
+        assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW, "held", NOW));
+        Instant later = NOW.plus(Duration.ofDays(60));
+        assertTrue(ledger().transitionReview(row.id(), State.HELD, State.RECEIVED, "released:runOnce:not_allowlisted", null, null, NOW,
+                "review_released", later, NOW));
+        assertEquals(later, ledger().findById(row.id()).orElseThrow().expiresAt());
+        assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.RECEIVED, "released:runOnce:not_allowlisted:anon", null, null, NOW,
+                "x", NOW, NOW));
+        assertEquals(later, ledger().findById(row.id()).orElseThrow().expiresAt(), "never shortened");
+    }
+
+    @Test
+    @DisplayName("held mail: a released row is due for resubmission without a conversation")
+    default void releasedRowsAreResubmitted() {
+        LedgerEntry held = inbound("int-1", "<r1@example.com>", "a@partner.com", NOW);
+        LedgerEntry plain = inbound("int-1", "<r2@example.com>", "b@partner.com", NOW);
+        assertTrue(ledger().insertIfAbsent(held));
+        assertTrue(ledger().insertIfAbsent(plain));
+        assertTrue(ledger().transition(plain.id(), State.RECEIVED, State.RECEIVED, null, NOW, "auth_temporary", false, NOW));
+        assertTrue(ledger().transitionReview(held.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", "h", NOW, "held", NOW));
+        assertTrue(ledger().findDueResubmissions("int-1", NOW, 10).isEmpty(), "neither a held row nor a plain deferral without a conversation");
+        assertTrue(ledger().transitionReview(held.id(), State.HELD, State.RECEIVED, "released:runOnce:not_allowlisted", null, null, NOW,
+                "review_released", NOW));
+        assertEquals(List.of(held.id()), ledger().findDueResubmissions("int-1", NOW, 10).stream().map(LedgerEntry::id).toList());
     }
 }

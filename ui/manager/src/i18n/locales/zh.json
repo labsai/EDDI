@@ -5589,7 +5589,8 @@
       "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。",
       "approvalPolicyNone": "已保存，但一个智能体可执行操作的目标没有审批策略：邮件仅在智能体自身的工具审批范围内使用其工具。建议使用“审批每个操作”。",
       "ruleCallsRefused": "已保存。一个带审批策略的目标包含规则驱动的 HTTP 或 MCP 调用：除非只读工具中列出，否则邮件轮次会拒绝它们。",
-      "readOnlyEverything": "已保存，但一个带审批策略的目标的只读工具模式匹配所有工具（如 *）：邮件轮次的任何工具调用都不会等待邮件关卡的审批。请改为列出只读工具。智能体自身的工具审批仍然有效。"
+      "readOnlyEverything": "已保存，但一个带审批策略的目标的只读工具模式匹配所有工具（如 *）：邮件轮次的任何工具调用都不会等待邮件关卡的审批。请改为列出只读工具。智能体自身的工具审批仍然有效。",
+      "anonymousTools": "已保存。未验证的邮件会被处理：它会以匿名方式使用目标代理的全部工具运行。从审核中放行的邮件不会——它仅限只读工具。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5977,5 +5978,48 @@
     "approved": "更改已批准并应用",
     "rejected": "更改已拒绝；未应用任何内容",
     "approveBlockedDirty": "请先保存您对配额的编辑，或重新加载页面以放弃这些编辑：在批准后再保存会覆盖已批准的配额。"
+  },
+  "heldEmail": {
+    "title": "暂扣的邮件",
+    "subtitle": "邮件集成本会丢弃的邮件：发件人不在允许列表中，或未通过身份验证。请决定是否处理。",
+    "integration": "集成",
+    "sender": "发件人",
+    "reason": "暂扣原因",
+    "expires": "丢弃时间",
+    "review": "审核",
+    "unauthenticated": "未验证",
+    "reasonNotAllowlisted": "不在允许列表中",
+    "reasonUnauthenticated": "发件人未验证",
+    "discarded": "已丢弃。",
+    "releasedAllowed": "已放行，发件人现已在允许列表中。将在下次轮询时运行。",
+    "released": "已放行。将在下次轮询时运行。",
+    "dialogTitle": "暂扣的邮件",
+    "from": "发件人",
+    "loadingPreview": "正在从邮箱读取邮件…",
+    "previewUnavailable": "无法从邮箱读取邮件：",
+    "noSubject": "(无主题)",
+    "attachments": "附件",
+    "truncated": "仅显示正文开头。",
+    "untrusted": "邮件是不可信的输入。放行意味着“处理它”，而不是“照它说的做”：目标的审批策略仍然适用。",
+    "anonymousWarning": "该发件人未通过验证，因此发件人地址可能是伪造的。如果运行它，它将匿名运行，只能使用目标的只读工具，并且绝不会因此向任何人发送任何内容。不能允许该发件人。",
+    "note": "备注(用于审计日志)",
+    "discard": "丢弃",
+    "runOnce": "运行一次",
+    "runAndAllow": "运行并允许此发件人"
+  },
+  "emailHeld": {
+    "title": "暂扣邮件：审核而非丢弃",
+    "hint": "本会被拒绝的邮件可以暂扣给人员处理：丢弃、运行一次，或运行并允许发件人。循环、退信、阻止列表和限额永远不可审核。",
+    "notAllowlisted": "发件人不在允许列表中",
+    "drop": "丢弃",
+    "review": "暂扣待审核",
+    "unauthenticated": "发件人未验证",
+    "unauthenticatedHint": "放行的未验证邮件将匿名运行，仅能使用只读工具，且绝不会产生外发邮件。",
+    "expiry": "未决邮件丢弃期限",
+    "expiryHint": "ISO-8601 时长，PT1H 到 P90D，最多为台账保留期减一天。",
+    "maxPerDay": "每天最多暂扣邮件数",
+    "maxPerDomain": "每个发件域每天最多",
+    "reviewers": "审核人",
+    "reviewersHint": "除本集成的编辑者外：role:eddi-approver、role:eddi-editor 或 role:eddi-admin，或拥有其中一个角色的用户 ID。留空：eddi-approver。运行并允许始终需要编辑权限。"
   }
 }
