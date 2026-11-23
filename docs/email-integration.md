@@ -451,8 +451,9 @@ Microsoft 365 tenant sends **unsigned** mail, which this mode refuses
 - **DKIM and DMARC for the mailbox's domain.** EDDI submits the reply to `smtpHost`; it does not sign it. The mail
   server must sign outgoing mail with DKIM for the domain of `address`, and that domain should publish DMARC —
   otherwise replies land in spam or are rejected, and the people you answer cannot tell your mail from a forgery.
-  Neither Microsoft 365 nor Google Workspace signs with your own domain until an administrator turns it on for that
-  domain ([Email Providers](email-providers.md)).
+  Microsoft documents that Microsoft 365 does not DKIM-sign custom-domain mail until an administrator enables it, and
+  Google Workspace needs an administrator to publish a key and click Start authentication
+  ([Email Providers](email-providers.md)).
 - **SMTP submission for the connection.** The same connection logs in to IMAP and SMTP, so its `baseUrlAllowlist`
   must also name `smtp://<smtpHost>:587` (STARTTLS, the default) or `smtps://<smtpHost>` (port 465). Exchange Online:
   keep `smtpPort` at `587` and add `smtp://smtp.office365.com:587` to the allowlist — Microsoft documents port 587 (or

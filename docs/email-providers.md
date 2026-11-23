@@ -55,10 +55,10 @@ provider facts behind it:
 | --- | --- | --- |
 | IMAP | `outlook.office365.com`, port 993, SSL/TLS | [[M8]](#sources) |
 | SMTP | `smtp.office365.com`, port **587** (recommended) or 25, TLS 1.2 or 1.3. Microsoft: a client that "recommends or defaults to TCP port 465" does not support the required TLS — use `smtpPort: 587` (the default) | [[M2]](#sources) |
-| App-only permissions | Office 365 Exchange Online → Application permissions: `IMAP.AccessAsApp` for reading, **`SMTP.SendAsApp`** for conversation-mode replies; tenant admin consent | [[M3]](#sources) |
+| App-only permissions | Office 365 Exchange Online → Application permissions: `IMAP.AccessAsApp` for reading, **`SMTP.SendAsApp`** for conversation-mode replies; tenant admin consent (M3 states this for POP/IMAP and gives the same consent scope for SMTP) | [[M3]](#sources) |
 | Token | Client credentials grant with scope `https://outlook.office365.com/.default`; the token is used for IMAP and SMTP | [[M3]](#sources) |
 | Mailbox scope | `New-ServicePrincipal` registers the app in Exchange; `Add-MailboxPermission … -AccessRights FullAccess` grants it one mailbox. Microsoft adds: sending *as* another mailbox with client credentials needs `Add-RecipientPermission` (SendAs) | [[M3]](#sources) |
-| SMTP AUTH switch | Disabled for organisations created after January 2020; enable it for the one mailbox with `Set-CASMailbox -Identity <address> -SmtpClientAuthenticationDisabled $false` (the mailbox setting overrides the organisation's). **With Entra ID security defaults on, SMTP AUTH is disabled**; Microsoft says to turn security defaults off to use it | [[M2]](#sources), [[M4]](#sources) |
+| SMTP AUTH switch | Disabled for organisations created after January 2020 [[M2]](#sources); enable it for the one mailbox with `Set-CASMailbox -Identity <address> -SmtpClientAuthenticationDisabled $false` (the mailbox setting overrides the organisation's) [[M4]](#sources). **With Entra ID security defaults on, SMTP AUTH is disabled**; Microsoft says to turn security defaults off to use it [[M4]](#sources) | [[M2]](#sources), [[M4]](#sources) |
 | Licence | Client SMTP submission needs "a licensed Microsoft 365 or Office 365 mailbox" | [[M2]](#sources) |
 | Sending limits | Per mailbox: 10,000 recipients per day, 30 messages per minute, up to 1,000 recipients per message (customisable). Per tenant: an external-recipient limit that depends on the licence count (5,000 a day for a trial tenant); mail from an `*.onmicrosoft.com` domain is limited to 100 external recipients per organisation per day | [[M5]](#sources) |
 | DKIM, custom domain | "Currently, no DKIM signing occurs for outbound mail from custom domains" until an admin publishes the two selector CNAMEs and enables signing; `*.onmicrosoft.com` mail is signed automatically | [[M6]](#sources) |
@@ -95,7 +95,7 @@ Until a live test settles both, use a dedicated, licensed mailbox (never a perso
 | --- | --- | --- |
 | IMAP | `imap.gmail.com`, port 993, implicit TLS | [[G1]](#sources) |
 | SMTP | `smtp.gmail.com`, port 465 (implicit TLS) or 587 (STARTTLS) | [[G1]](#sources) |
-| OAuth scope | `https://mail.google.com/` for IMAP, POP and SMTP; Google classes it as **restricted** | [[G2]](#sources), [[G3]](#sources) |
+| OAuth scope | `https://mail.google.com/` for IMAP, POP and SMTP [[G2]](#sources); Google classes it as **restricted** [[G3]](#sources) | [[G2]](#sources), [[G3]](#sources) |
 | Password login | Since 14 March 2025, IMAP, SMTP and POP "no longer work with legacy passwords"; app passwords are the remaining exception Google names | [[G4]](#sources) |
 | App passwords | Need 2-Step Verification. Google lists signing in with "a work, school, or another organization account" among the reasons the option may not appear. Whether a Workspace admin can enable or block them is **unverified** | [[G5]](#sources) |
 | IMAP switch | The admin turns IMAP on or off under *Apps → Google Workspace → Gmail → End User Access*, for everyone or per organisational unit | [[G6]](#sources) |
