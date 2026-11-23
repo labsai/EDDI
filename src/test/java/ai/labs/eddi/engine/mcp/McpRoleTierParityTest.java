@@ -360,6 +360,11 @@ class McpRoleTierParityTest {
     }
 
     /**
+     * Tools whose gate sits inside an audit try block, after the outcome variable.
+     */
+    private static final Set<String> GATE_NOT_FIRST_STATEMENT = Set.of("delete_user_data", "export_user_data");
+
+    /**
      * Each gate reads its own tool's tier. Nothing else would notice a gate in
      * deploy_agent that reads {@code McpToolTiers.of("undeploy_agent")} while both
      * happen to share a tier, so the sources are scanned: every
@@ -394,7 +399,23 @@ class McpRoleTierParityTest {
                 // project formatter puts alone on a line at member indentation
                 int bodyEnd = fromAnnotation.indexOf("\n    }\n", sig.start());
                 assertTrue(bodyEnd > 0, "no closing brace for " + name);
-                Matcher gate = gateStatement.matcher(fromAnnotation.substring(sig.start(), bodyEnd));
+                String body = fromAnnotation.substring(sig.start(), bodyEnd);
+                // The gate must be the first statement, so that no argument handling or side
+                // effect runs before the role is checked. The GDPR tools open with the audit
+                // outcome variable and a try block, so they are the only named exceptions.
+                int open = body.indexOf("{\n");
+                assertTrue(open > 0, "no opening brace for " + name);
+                String firstStatement = body.substring(open + 2).stripLeading();
+                // Leading line comments are not statements
+                while (firstStatement.startsWith("//")) {
+                    int eol = firstStatement.indexOf('\n');
+                    firstStatement = eol < 0 ? "" : firstStatement.substring(eol + 1).stripLeading();
+                }
+                if (!GATE_NOT_FIRST_STATEMENT.contains(name)
+                        && !firstStatement.startsWith("requireAnyRole(identity, authEnabled, McpToolTiers.of(\"" + name + "\"));")) {
+                    violations.add(name + " does not start with its gate");
+                }
+                Matcher gate = gateStatement.matcher(body);
                 int count = 0;
                 while (gate.find()) {
                     count++;

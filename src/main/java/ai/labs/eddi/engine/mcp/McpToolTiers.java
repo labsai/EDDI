@@ -46,11 +46,11 @@ final class McpToolTiers {
      *
      * @throws IllegalArgumentException
      *             if the tool has no entry. That is a programming error: a gate
-     *             that names a tool missing from this map fails closed on every
-     *             call, as an internal error rather than a {@code FORBIDDEN} tool
-     *             error, since no role was refused. {@code McpRoleTierParityTest}
-     *             ({@code eachGateNamesItsOwnTool}, the measured matrix) fails the
-     *             build first.
+     *             that names a tool missing from this map fails closed: every call
+     *             throws this exception instead of running the tool, and no role
+     *             was refused, so it is not a {@code FORBIDDEN} tool error.
+     *             {@code McpRoleTierParityTest} ({@code eachGateNamesItsOwnTool},
+     *             the measured matrix) fails the build first.
      */
     static List<String> of(String tool) {
         List<String> tier = TIERS.get(tool);
