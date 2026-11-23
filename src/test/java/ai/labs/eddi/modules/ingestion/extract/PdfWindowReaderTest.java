@@ -8,7 +8,6 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
-import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -95,9 +94,9 @@ class PdfWindowReaderTest {
         var limits = new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024);
         var windowed = new PdfWindowReader(PdfWindowReader.Options.of(scratch, limits, null));
 
-        for (int first = 1; first <= 40; first += 4) {
+        for (int first = 1; first <= 40; first += 2) {
             int from = first;
-            String text = windowed.withWindow(pdf, from, from + 3, (document, window) -> text(document, window));
+            String text = windowed.withWindow(pdf, from, from + 1, (document, window) -> text(document, window));
             assertTrue(text.contains("Page " + from + " line 1:"), "window from page " + from);
         }
         var refused = assertThrows(UnreadableDocumentException.class,
@@ -157,10 +156,16 @@ class PdfWindowReaderTest {
     @DisplayName("the window deadline applies")
     void deadline() {
         Path pdf = PdfFixtures.writeTo(dir.resolve("plain.pdf"), PdfFixtures.plain(3));
-        var hurried = new PdfWindowReader(reader.options().withWindowDeadline(Duration.ofNanos(1)));
+        var hurried = new PdfWindowReader(reader.options().withWindowDeadline(Duration.ofMillis(1)));
 
+        // The clock may not move between the window's start and the reader's first
+        // check, so the operation lets the deadline pass and asks the window.
         var refused = assertThrows(UnreadableDocumentException.class,
-                () -> hurried.withWindow(pdf, 1, 3, (document, window) -> text(document, window)));
+                () -> hurried.withWindow(pdf, 1, 3, (document, window) -> {
+                    sleep(Duration.ofMillis(20));
+                    window.requireBeforeDeadline();
+                    return text(document, window);
+                }));
         assertEquals(PdfWindowReader.TOO_LONG, refused.getMessage());
     }
 
@@ -214,8 +219,12 @@ class PdfWindowReaderTest {
         assertEquals(ExtractionLimits.defaults().maxDecodedBytes(), reader.options().maxDecodedBytes());
     }
 
+    /**
+     * Reads text as every production read does: page content charged to the budget.
+     */
     private static String text(PDDocument document, PdfWindowReader.Window window) throws IOException {
-        var stripper = new PDFTextStripper();
+        var stripper = new BoundedTextStripper(window.deadline());
+        stripper.allowGlyphs(1_000_000);
         stripper.setStartPage(window.firstPage());
         stripper.setEndPage(window.lastPage());
         return stripper.getText(document);
@@ -229,6 +238,14 @@ class PdfWindowReaderTest {
             var out = new ByteArrayOutputStream();
             document.save(out);
             return out.toByteArray();
+        }
+    }
+
+    private static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

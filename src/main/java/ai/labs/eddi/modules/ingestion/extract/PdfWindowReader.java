@@ -28,26 +28,27 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * Reads a PDF that is a file, one window of pages at a time, without the file or
- * the whole document's object graph on the heap.
+ * Reads a PDF that is a file, one window of pages at a time, without the file
+ * or the whole document's object graph on the heap.
  *
  * <p>
  * <b>Why a window re-opens the document.</b> PDFBox reading from a
- * {@link RandomAccessReadBufferedFile} keeps only a buffer of the file in memory,
- * and a {@link MemoryUsageSetting} bounds its stream cache — but neither bounds
- * the COS objects the parser builds as pages are read, nor the document's
- * resource cache, and both live as long as the document is open. So every
- * window opens the document afresh and closes it in {@code finally}; what one
- * window built is garbage before the next starts. The resource cache is replaced
- * by one that keeps nothing, so fonts and images are not retained across pages
- * either. <b>Nothing PDFBox-typed may escape a window</b>: an operation returns
- * plain data — counts, text, records — never a page, a stream or a font.
+ * {@link RandomAccessReadBufferedFile} keeps only a buffer of the file in
+ * memory, and a {@link MemoryUsageSetting} bounds its stream cache — but
+ * neither bounds the COS objects the parser builds as pages are read, nor the
+ * document's resource cache, and both live as long as the document is open. So
+ * every window opens the document afresh and closes it in {@code finally}; what
+ * one window built is garbage before the next starts. The resource cache is
+ * replaced by one that keeps nothing, so fonts and images are not retained
+ * across pages either. <b>Nothing PDFBox-typed may escape a window</b>: an
+ * operation returns plain data — counts, text, records — never a page, a stream
+ * or a font.
  *
  * <p>
  * <b>Bounds per window.</b> Each window arms its own {@link PdfDecodeBudget} on
- * the calling thread — the budget is a {@code ThreadLocal}, so the operation must
- * not hand PDFBox work to another thread — and its own deadline, and checks the
- * page tree before the operation can iterate it
+ * the calling thread — the budget is a {@code ThreadLocal}, so the operation
+ * must not hand PDFBox work to another thread — and its own deadline, and
+ * checks the page tree before the operation can iterate it
  * ({@link PdfStructureExtractor#requireReadablePageTree}). A budget overrun, a
  * deadline, a stack overflow in the parser, an encrypted or unparseable file:
  * each refuses the window with an {@link UnreadableDocumentException} whose
@@ -56,19 +57,22 @@ import java.time.Instant;
  *
  * <p>
  * <b>No brute-force repair of a large file.</b> When a file's cross-reference
- * table is broken, PDFBox's lenient parser rebuilds it by scanning the whole file
- * for objects and holding what it finds — the very cost this class exists to
- * avoid, and once per window. A file larger than
+ * table is broken, PDFBox's lenient parser rebuilds it by scanning the whole
+ * file for objects and holding what it finds — the very cost this class exists
+ * to avoid, and once per window. A file larger than
  * {@link Options#lenientParseMaxBytes()} is therefore parsed strictly, and
- * refused with a message when that fails. Smaller files are parsed leniently, as
- * on the upload path.
+ * refused with a message when that fails. Smaller files are parsed leniently,
+ * as on the upload path.
  */
 public final class PdfWindowReader {
 
     /** Pages per window: {@code eddi.documents.structure.window-pages}. */
     public static final int DEFAULT_WINDOW_PAGES = 50;
 
-    /** One window's deadline: {@code eddi.documents.structure.window-deadline-seconds}. */
+    /**
+     * One window's deadline:
+     * {@code eddi.documents.structure.window-deadline-seconds}.
+     */
     public static final Duration DEFAULT_WINDOW_DEADLINE = Duration.ofSeconds(90);
 
     /**
@@ -81,7 +85,7 @@ public final class PdfWindowReader {
     /** Heap the stream cache may use before it spills to the scratch directory. */
     static final long DEFAULT_MAIN_MEMORY_BYTES = 8L * 1024 * 1024;
 
-    static final String TOO_LONG = "This PDF took too long to read. Split it into smaller files and upload those.";
+    static final String TOO_LONG = BoundedTextStripper.TOO_LONG;
 
     static final String ENCRYPTED = "This PDF is encrypted. Upload a copy without a password.";
 
@@ -187,8 +191,8 @@ public final class PdfWindowReader {
     /**
      * Opens {@code pdf}, runs {@code op} on pages {@code firstPage..lastPage}, and
      * closes it, all on the calling thread under this window's budget and deadline.
-     * The page range is the operation's to honour; it is checked to be a range,
-     * not against the document.
+     * The page range is the operation's to honour; it is checked to be a range, not
+     * against the document.
      *
      * @throws UnreadableDocumentException
      *             when the window cannot be read within its bounds

@@ -39,15 +39,16 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>
  * <b>One subdirectory per instance.</b> Several EDDI nodes may share a temp
- * volume, so this never works in, or sweeps, the shared root directly. Each node
- * uses {@code <work-dir>/node-<nodeId>} — the node id is stable across restarts
- * ({@link NodeIdentity}), so a restarted node finds and deletes what its previous
- * incarnation left — and holds an exclusive lock on a file in it for as long as
- * it runs. A second live JVM with the same node id (two dev instances on one
- * host) finds the lock taken and uses {@code node-<nodeId>-<bootId>} instead, and
- * sweeps nothing of the first's. At startup a node also removes such per-boot
- * directories of its own node id whose lock nobody holds any more: their owner
- * is gone. A directory whose lock is held is never touched.
+ * volume, so this never works in, or sweeps, the shared root directly. Each
+ * node uses {@code <work-dir>/node-<nodeId>} — the node id is stable across
+ * restarts ({@link NodeIdentity}), so a restarted node finds and deletes what
+ * its previous incarnation left — and holds an exclusive lock on a file in it
+ * for as long as it runs. A second live JVM with the same node id (two dev
+ * instances on one host) finds the lock taken and uses
+ * {@code node-<nodeId>-<bootId>} instead, and sweeps nothing of the first's. At
+ * startup a node also removes such per-boot directories of its own node id
+ * whose lock nobody holds any more: their owner is gone. A directory whose lock
+ * is held is never touched.
  *
  * <p>
  * <b>A byte budget.</b> {@link #reserve} blocks until the bytes are free, up to
@@ -111,7 +112,10 @@ public class DocumentWorkDir {
         this.maxBytes = maxBytes;
     }
 
-    /** Only characters safe in a file name on every platform; never a path separator. */
+    /**
+     * Only characters safe in a file name on every platform; never a path
+     * separator.
+     */
     static String fileNameToken(String raw) {
         String token = raw == null ? "" : raw.replaceAll("[^A-Za-z0-9_-]", "_");
         return token.isEmpty() ? "node" : token;
@@ -412,7 +416,10 @@ public class DocumentWorkDir {
         }
     }
 
-    /** A copied file and its reservation; closing deletes the file and releases both. */
+    /**
+     * A copied file and its reservation; closing deletes the file and releases
+     * both.
+     */
     public static final class WorkFile implements AutoCloseable {
         private final Path path;
         private final Reservation reservation;

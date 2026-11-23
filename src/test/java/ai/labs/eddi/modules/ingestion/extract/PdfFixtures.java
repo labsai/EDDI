@@ -669,11 +669,11 @@ public final class PdfFixtures {
 
     /**
      * A large PDF written straight to {@code target}, never held in memory: text
-     * pages like {@link #plain(int)}'s (so each estimates {@link #TOKENS_PER_PAGE}),
-     * an outline with a chapter every {@code pagesPerChapter} pages, and each page
-     * padded with an unreferenced, unfiltered stream so the file reaches about
-     * {@code targetBytes}. Nothing reads the padding; it is there to make the file
-     * large without making it slow.
+     * pages like {@link #plain(int)}'s (so each estimates
+     * {@link #TOKENS_PER_PAGE}), an outline with a chapter every
+     * {@code pagesPerChapter} pages, and each page padded with an unreferenced,
+     * unfiltered stream so the file reaches about {@code targetBytes}. Nothing
+     * reads the padding; it is there to make the file large without making it slow.
      *
      * @return {@code target}
      */

@@ -28,6 +28,9 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -130,6 +133,19 @@ import java.util.Set;
  * the unit started mid-page: a note block first says that the text above the
  * heading belongs to the unit before. Parts get no such note.
  *
+ * <h2>Files too large for memory</h2>
+ * <p>
+ * {@link #manifest(Path, String, SplitConfig, ExtractionLimits, PdfWindowReader.Options, int)}
+ * and
+ * {@link #blocks(Path, DocumentUnit, BlockOptions, ExtractionLimits, PdfWindowReader.Options, int)}
+ * read a file on disk through {@link PdfWindowReader}, a window of pages at a
+ * time, the document opened afresh for each: the same scan, the same cut and
+ * the same blocks as the array overloads, from shared code, but with the decode
+ * budget and the deadline applying <b>per window</b> rather than to the whole
+ * read. The raw-byte scan runs over the file through
+ * {@link PdfStreamBudgetFile}; the SHA-256 is computed as the file streams
+ * through it. No byte array of the whole file is made.
+ *
  * <p>
  * Images, tables and audio are not counted yet; their counts are zero. Warnings
  * never quote the document: outline titles and headings are data and go only
@@ -164,6 +180,9 @@ public class PdfStructureExtractor {
     private static final int OBJECTS_PER_DEADLINE_CHECK = 64;
 
     private static final COSName GO_TO = COSName.getPDFName("GoTo");
+
+    /** Bytes of a file the raw-byte scan is given one window's deadline for. */
+    static final long SCAN_BYTES_PER_WINDOW_DEADLINE = 64L * 1024 * 1024;
 
     /** Headings collected at most; later ones are ignored, with a warning. */
     static final int MAX_HEADINGS = MAX_OUTLINE_ITEMS;
@@ -268,16 +287,112 @@ public class PdfStructureExtractor {
         }
         SplitConfig config = split == null ? SplitConfig.defaults() : split;
         ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
-        Structure structure = guarded(pdf, bounds, preFilter,
-                (document, pageNumbers, deadline) -> structure(document, pageNumbers, config, bounds, deadline));
-        // Outside the read, with the document closed: the fitting is pure, and a fault
-        // in it is this code's, not the file's — it must not be reported as an
-        // unreadable PDF.
+        Structure structure = guarded(pdf, bounds, preFilter, (document, pageNumbers, deadline) -> {
+            int pageCount = pageNumbers.size();
+            var scanner = new PageScanner(pageCount);
+            scanner.scan(document, 1, scanner.measured(bounds), bounds, deadline);
+            Set<String> warnings = new LinkedHashSet<>();
+            PageScan scan = scanner.finish(bounds, warnings);
+            return structure(scan, pageCount, config, bounds, warnings,
+                    found -> new OutlineReader(document, pageNumbers, pageCount, deadline, found).sections());
+        });
+        return fitted(structure, rootRef, sha256(pdf), config);
+    }
+
+    /**
+     * {@link #manifest(byte[], String, SplitConfig, ExtractionLimits)} for a file
+     * on disk, read a window of pages at a time: the same manifest from the same
+     * bytes, without the file or the whole document on the heap.
+     *
+     * <p>
+     * Three kinds of pass, each its own open of the document: one numbers the
+     * pages; one per window of {@code windowPages} measures its pages; one reads
+     * the outline, when the cut needs it. Each runs under {@code reading}'s decode
+     * budget and deadline <b>per window</b>; {@code limits} decides what is
+     * measured and the per-stream bound of the raw-byte scan, as it does for an
+     * array, and its {@link ExtractionLimits#maxDuration()} is not used.
+     *
+     * @param windowPages
+     *            pages per window, at least 1
+     * @throws UnreadableDocumentException
+     *             as the array overload does, and when a window exceeds its bounds
+     */
+    public DocumentManifest manifest(Path pdf, String rootRef, SplitConfig split, ExtractionLimits limits,
+                                     PdfWindowReader.Options reading, int windowPages) {
+        SplitConfig config = split == null ? SplitConfig.defaults() : split;
+        ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
+        var reader = new PdfWindowReader(reading);
+        int pageCount = prepare(pdf, bounds, reader, windowPages);
+        var scanner = new PageScanner(pageCount);
+        int measured = scanner.measured(bounds);
+        for (long first = 1; first <= measured; first += windowPages) {
+            int last = (int) Math.min(measured, first + windowPages - 1);
+            reader.withWindow(pdf, (int) first, last, (document, window) -> {
+                scanner.scan(document, window.firstPage(), window.lastPage(), bounds, window.deadline());
+                return null;
+            });
+        }
+        Set<String> warnings = new LinkedHashSet<>();
+        PageScan scan = scanner.finish(bounds, warnings);
+        Structure structure = structure(scan, pageCount, config, bounds, warnings,
+                found -> reader.withDocument(pdf, (document, window) -> {
+                    Map<COSDictionary, Integer> pageNumbers = numberPages(document, window.deadline());
+                    if (pageNumbers.size() != pageCount) {
+                        throw new UnreadableDocumentException("This PDF changed while it was read.");
+                    }
+                    return new OutlineReader(document, pageNumbers, pageCount, window.deadline(), found).sections();
+                }));
+        return fitted(structure, rootRef, sha256(pdf), config);
+    }
+
+    /**
+     * Fits the sections to the budget, outside any read: the fitting is pure, and a
+     * fault in it is this code's, not the file's — it must not be reported as an
+     * unreadable PDF.
+     */
+    private static DocumentManifest fitted(Structure structure, String rootRef, String sha256, SplitConfig config) {
         UnitBudgetFitter.Result fitted = UnitBudgetFitter.fit(structure.sections(), structure.tokens(), config);
         Set<String> warnings = new LinkedHashSet<>(structure.warnings());
         warnings.addAll(fitted.warnings());
-        return new DocumentManifest(rootRef, sha256(pdf), structure.tokens().length, structure.used(),
-                fitted.units(), List.of(), List.copyOf(warnings));
+        return new DocumentManifest(rootRef, sha256, structure.tokens().length, structure.used(), fitted.units(),
+                List.of(), List.copyOf(warnings));
+    }
+
+    /**
+     * What every read of a file begins with: the raw-byte scan over the file, then
+     * a pass that numbers the pages — refusing a tree that lists a page twice or
+     * none — and returns how many there are.
+     */
+    private static int prepare(Path pdf, ExtractionLimits bounds, PdfWindowReader reader, int windowPages) {
+        if (pdf == null) {
+            throw new UnreadableDocumentException("This file could not be read as a PDF.");
+        }
+        if (windowPages < 1) {
+            throw new IllegalArgumentException("windowPages must be at least 1");
+        }
+        PdfStreamBudgetFile.requireWithin(pdf, bounds.maxUncompressedBytes(), scanDeadline(pdf, reader.options()));
+        return reader.withDocument(pdf, (document, window) -> {
+            int pages = numberPages(document, window.deadline()).size();
+            if (pages == 0) {
+                throw new UnreadableDocumentException("This PDF has no pages.");
+            }
+            return pages;
+        });
+    }
+
+    /**
+     * The raw-byte scan's deadline: one window's for every
+     * {@value #SCAN_BYTES_PER_WINDOW_DEADLINE} bytes of the file, at least one.
+     */
+    private static Instant scanDeadline(Path pdf, PdfWindowReader.Options reading) {
+        long size;
+        try {
+            size = Files.size(pdf);
+        } catch (IOException e) {
+            throw new UnreadableDocumentException("This file could not be read as a PDF.", e);
+        }
+        long windows = Math.max(1, (size + SCAN_BYTES_PER_WINDOW_DEADLINE - 1) / SCAN_BYTES_PER_WINDOW_DEADLINE);
+        return Instant.now().plus(reading.windowDeadline().multipliedBy(windows));
     }
 
     /**
@@ -323,8 +438,40 @@ public class PdfStructureExtractor {
             throw new UnreadableDocumentException("This file could not be read as a PDF.");
         }
         ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
-        return guarded(pdf, bounds, preFilter,
-                (document, pageNumbers, deadline) -> readBlocks(document, pageNumbers.size(), unit, bounds, deadline));
+        return guarded(pdf, bounds, preFilter, (document, pageNumbers, deadline) -> {
+            var read = new BlockRead(unit, pageNumbers.size(), bounds);
+            read.pages(document, unit.firstPage(), read.last(), deadline);
+            return read.finish();
+        });
+    }
+
+    /**
+     * {@link #blocks(byte[], DocumentUnit, BlockOptions, ExtractionLimits)} for a
+     * file on disk, read a window of {@code windowPages} pages at a time under
+     * {@code reading}'s per-window bounds: the same blocks from the same bytes. The
+     * windows stop once the unit's character allowance is spent.
+     *
+     * @throws UnreadableDocumentException
+     *             as the array overload does, and when a window exceeds its bounds
+     */
+    public List<Block> blocks(Path pdf, DocumentUnit unit, BlockOptions options, ExtractionLimits limits,
+                              PdfWindowReader.Options reading, int windowPages) {
+        Objects.requireNonNull(unit, "unit");
+        if (unit.firstPage() < 1 || unit.lastPage() < unit.firstPage()) {
+            throw new IllegalArgumentException("A unit covers pages first..last, first >= 1");
+        }
+        ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
+        var reader = new PdfWindowReader(reading);
+        int pageCount = prepare(pdf, bounds, reader, windowPages);
+        var read = new BlockRead(unit, pageCount, bounds);
+        for (long first = unit.firstPage(); first <= read.last() && !read.stopped(); first += windowPages) {
+            int last = (int) Math.min(read.last(), first + windowPages - 1);
+            reader.withWindow(pdf, (int) first, last, (document, window) -> {
+                read.pages(document, window.firstPage(), window.lastPage(), window.deadline());
+                return null;
+            });
+        }
+        return read.finish();
     }
 
     /**
@@ -399,13 +546,24 @@ public class PdfStructureExtractor {
         }
     }
 
-    private static Structure structure(PDDocument document, Map<COSDictionary, Integer> pageNumbers,
-                                       SplitConfig split, ExtractionLimits limits, Instant deadline)
-            throws IOException {
-        int pageCount = pageNumbers.size();
-        Set<String> warnings = new LinkedHashSet<>();
-        PageScan scan = scanPages(document, pageCount, limits, deadline, warnings);
+    /**
+     * The outline's sections, read only when the cut needs them; warnings go into
+     * the set given.
+     */
+    @FunctionalInterface
+    private interface OutlineSource {
+        List<Section> sections(Set<String> warnings);
+    }
 
+    /**
+     * Decides the cut from a finished scan. Pure but for {@code outline}, which is
+     * asked only when the strategy and the scan call for the outline.
+     *
+     * @param warnings
+     *            the scan's warnings; the cut's are added
+     */
+    private static Structure structure(PageScan scan, int pageCount, SplitConfig split, ExtractionLimits limits,
+                                       Set<String> warnings, OutlineSource outline) {
         SplitStrategy wanted = split.strategy();
         List<Section> sections = null;
         SplitStrategy used = SplitStrategy.PAGES;
@@ -413,7 +571,7 @@ public class PdfStructureExtractor {
             warnings.add(noTextWarning(Math.min(pageCount, limits.maxParts()), pageCount));
         } else if (wanted != SplitStrategy.PAGES) {
             if (wanted != SplitStrategy.HEADINGS) {
-                sections = new OutlineReader(document, pageNumbers, pageCount, deadline, warnings).sections();
+                sections = outline.sections(warnings);
                 used = sections == null ? used : SplitStrategy.OUTLINE;
             }
             if (sections == null && wanted != SplitStrategy.OUTLINE) {
@@ -482,7 +640,7 @@ public class PdfStructureExtractor {
      *             {@link #MAX_PAGE_TREE_DEPTH}, or the tree holds more than
      *             {@link #MAX_PAGES} pages — before the iterator runs on it
      */
-    private static void requireReadablePageTree(PDDocument document, Instant deadline) {
+    static void requireReadablePageTree(PDDocument document, Instant deadline) {
         COSDictionary root = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGES);
         if (root == null || !isBranch(root)) {
             return;
@@ -551,58 +709,93 @@ public class PdfStructureExtractor {
      * extraction is: the page's content charged to the decode budget, its glyphs
      * capped at {@link ExtractionLimits#maxCharacters()}, the deadline checked.
      * Only one page's lines are held at a time.
+     *
+     * <p>
+     * Pages are scanned in order, all at once from one open document or a window at
+     * a time from several; the result is the same. Holds plain data only, so it
+     * outlives the documents it scanned.
      */
-    private static PageScan scanPages(PDDocument document, int pageCount, ExtractionLimits limits,
-                                      Instant deadline, Set<String> warnings)
-            throws IOException {
-        int[] tokens = new int[pageCount];
-        int measured = Math.min(pageCount, limits.maxParts());
-        var stripper = new BoundedTextStripper(deadline);
-        List<Line> lines = new ArrayList<>();
-        stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
-                fontSize)));
-        List<Heading> headings = new ArrayList<>();
-        List<Integer> columnPages = new ArrayList<>();
-        boolean headingsTruncated = false;
-        long total = 0;
-        for (int page = 1; page <= measured; page++) {
-            requireBefore(deadline);
-            lines.clear();
-            stripper.setStartPage(page);
-            stripper.setEndPage(page);
-            stripper.allowGlyphs(limits.maxCharacters());
-            int characters = stripper.getText(document).strip().length();
-            tokens[page - 1] = (characters + 3) / 4;
-            total += tokens[page - 1];
+    private static final class PageScanner {
+        private final int[] tokens;
+        private final List<Heading> headings = new ArrayList<>();
+        private final List<Integer> columnPages = new ArrayList<>();
+        private boolean headingsTruncated;
+        private long total;
+        private int scannedTo;
 
-            float bodySize = PageLayout.bodySize(lines);
-            if (PageLayout.multiColumn(lines, bodySize)) {
-                columnPages.add(page);
+        PageScanner(int pageCount) {
+            this.tokens = new int[pageCount];
+        }
+
+        /**
+         * How many pages are measured: the first {@link ExtractionLimits#maxParts()}.
+         */
+        int measured(ExtractionLimits limits) {
+            return Math.min(tokens.length, limits.maxParts());
+        }
+
+        /** Scans pages {@code from..to}, which must follow the pages scanned so far. */
+        void scan(PDDocument document, int from, int to, ExtractionLimits limits, Instant deadline)
+                throws IOException {
+            if (from != scannedTo + 1 || to > tokens.length) {
+                throw new IllegalStateException("Pages " + from + ".." + to + " do not follow page " + scannedTo);
             }
-            for (Line line : PageLayout.readingOrder(lines)) {
-                if (headingsTruncated || !PageLayout.isHeading(line, bodySize)) {
-                    continue;
+            var stripper = new BoundedTextStripper(deadline);
+            List<Line> lines = new ArrayList<>();
+            stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
+                    fontSize)));
+            for (int page = from; page <= to; page++) {
+                requireBefore(deadline);
+                lines.clear();
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                stripper.allowGlyphs(limits.maxCharacters());
+                int characters = stripper.getText(document).strip().length();
+                tokens[page - 1] = (characters + 3) / 4;
+                total += tokens[page - 1];
+
+                float bodySize = PageLayout.bodySize(lines);
+                if (PageLayout.multiColumn(lines, bodySize)) {
+                    columnPages.add(page);
                 }
-                String title = cleanTitle(line.text());
-                if (title == null) {
-                    continue;
+                for (Line line : PageLayout.readingOrder(lines)) {
+                    if (headingsTruncated || !PageLayout.isHeading(line, bodySize)) {
+                        continue;
+                    }
+                    String title = cleanTitle(line.text());
+                    if (title == null) {
+                        continue;
+                    }
+                    if (headings.size() >= MAX_HEADINGS) {
+                        headingsTruncated = true;
+                        continue;
+                    }
+                    headings.add(new Heading(page, title, line.fontSize()));
                 }
-                if (headings.size() >= MAX_HEADINGS) {
-                    headingsTruncated = true;
-                    continue;
-                }
-                headings.add(new Heading(page, title, line.fontSize()));
+                scannedTo = page;
             }
         }
-        if (measured < pageCount) {
-            int average = (int) Math.round((double) total / measured);
-            for (int page = measured + 1; page <= pageCount; page++) {
-                tokens[page - 1] = average;
+
+        /**
+         * The scan, with the pages past the measured ones given the average of those,
+         * and a warning saying so.
+         */
+        PageScan finish(ExtractionLimits limits, Set<String> warnings) {
+            int pageCount = tokens.length;
+            int measured = measured(limits);
+            if (scannedTo != measured) {
+                throw new IllegalStateException("Scanned " + scannedTo + " of " + measured + " pages");
             }
-            warnings.add("Only the first " + measured + " of " + pageCount + " pages were measured; the "
-                    + "estimates for the rest are the average of those.");
+            if (measured < pageCount) {
+                int average = (int) Math.round((double) total / measured);
+                for (int page = measured + 1; page <= pageCount; page++) {
+                    tokens[page - 1] = average;
+                }
+                warnings.add("Only the first " + measured + " of " + pageCount + " pages were measured; the "
+                        + "estimates for the rest are the average of those.");
+            }
+            return new PageScan(tokens, List.copyOf(headings), headingsTruncated, List.copyOf(columnPages));
         }
-        return new PageScan(tokens, headings, headingsTruncated, columnPages);
     }
 
     /**
@@ -666,52 +859,98 @@ public class PdfStructureExtractor {
         return levels.size() - 1;
     }
 
-    private static List<Block> readBlocks(PDDocument document, int pageCount, DocumentUnit unit,
-                                          ExtractionLimits limits, Instant deadline)
-            throws IOException {
-        if (unit.lastPage() > pageCount) {
-            throw new UnreadableDocumentException("This part runs to page " + unit.lastPage() + ", but the PDF has "
-                    + pageCount + (pageCount == 1 ? " page" : " pages") + ": it belongs to another file.");
-        }
-        int last = (int) Math.min(unit.lastPage(), (long) unit.firstPage() + limits.maxParts() - 1);
-        var stripper = new BoundedTextStripper(deadline);
-        List<Line> lines = new ArrayList<>();
-        stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
-                fontSize)));
-        List<Block> blocks = new ArrayList<>();
-        long characters = 0;
-        int read = unit.firstPage() - 1;
-        boolean cut = false;
-        for (int page = unit.firstPage(); page <= last; page++) {
-            requireBefore(deadline);
-            lines.clear();
-            stripper.setStartPage(page);
-            stripper.setEndPage(page);
-            stripper.allowGlyphs(limits.maxCharacters() - characters + GLYPH_SLACK);
-            stripper.getText(document);
-            // Only a top-level unit gets the mid-page note: the first part of a chapter
-            // starts where its chapter starts, above its own heading, and this read
-            // cannot see the chapter's title to say so.
-            String noteTitle = page == unit.firstPage() && unit.parentId() == null ? unit.title() : null;
-            List<TextBlock> pageBlocks = pageBlocks(page, lines, noteTitle);
-            for (TextBlock block : pageBlocks) {
-                characters += block.text().length();
+    /**
+     * One unit's blocks, read page by page in order — from one open document or a
+     * window at a time from several, with the same result: the character allowance
+     * and the notes carry across windows. Holds plain data only.
+     */
+    private static final class BlockRead {
+        private final DocumentUnit unit;
+        private final ExtractionLimits limits;
+        private final int last;
+        private final List<Block> blocks = new ArrayList<>();
+        private long characters;
+        private int read;
+        private boolean cut;
+        private boolean stopped;
+
+        /**
+         * @throws UnreadableDocumentException
+         *             when the unit runs past the document's last page
+         */
+        BlockRead(DocumentUnit unit, int pageCount, ExtractionLimits limits) {
+            if (unit.lastPage() > pageCount) {
+                throw new UnreadableDocumentException("This part runs to page " + unit.lastPage() + ", but the PDF "
+                        + "has " + pageCount + (pageCount == 1 ? " page" : " pages") + ": it belongs to another file.");
             }
-            blocks.addAll(pageBlocks);
-            read = page;
-            if (stripper.pageWasCut() || characters >= limits.maxCharacters()) {
-                cut = stripper.pageWasCut() || page < unit.lastPage();
-                break;
+            this.unit = unit;
+            this.limits = limits;
+            this.last = (int) Math.min(unit.lastPage(), (long) unit.firstPage() + limits.maxParts() - 1);
+            this.read = unit.firstPage() - 1;
+        }
+
+        /** The last page that may be read: the unit's, or the page cap's. */
+        int last() {
+            return last;
+        }
+
+        /**
+         * Whether the character allowance stopped the read: no page after it is read.
+         */
+        boolean stopped() {
+            return stopped;
+        }
+
+        /** Reads pages {@code from..to}, which must follow the pages read so far. */
+        void pages(PDDocument document, int from, int to, Instant deadline) throws IOException {
+            if (stopped) {
+                return;
+            }
+            if (from != read + 1 || to > last) {
+                throw new IllegalStateException("Pages " + from + ".." + to + " do not follow page " + read);
+            }
+            var stripper = new BoundedTextStripper(deadline);
+            List<Line> lines = new ArrayList<>();
+            stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
+                    fontSize)));
+            for (int page = from; page <= to; page++) {
+                requireBefore(deadline);
+                lines.clear();
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                stripper.allowGlyphs(limits.maxCharacters() - characters + GLYPH_SLACK);
+                stripper.getText(document);
+                // Only a top-level unit gets the mid-page note: the first part of a
+                // chapter starts where its chapter starts, above its own heading, and this
+                // read cannot see the chapter's title to say so.
+                String noteTitle = page == unit.firstPage() && unit.parentId() == null ? unit.title() : null;
+                List<TextBlock> pageBlocks = pageBlocks(page, lines, noteTitle);
+                for (TextBlock block : pageBlocks) {
+                    characters += block.text().length();
+                }
+                blocks.addAll(pageBlocks);
+                read = page;
+                if (stripper.pageWasCut() || characters >= limits.maxCharacters()) {
+                    cut = stripper.pageWasCut() || page < unit.lastPage();
+                    stopped = true;
+                    return;
+                }
             }
         }
-        if (cut) {
-            blocks.add(endNote(blocks, read, "[The text of this part stops here: it is longer than the "
-                    + limits.maxCharacters() + " characters one read may take. Ask for fewer pages to read the rest.]"));
-        } else if (read < unit.lastPage()) {
-            blocks.add(endNote(blocks, read, "[Only the first " + (read - unit.firstPage() + 1) + " pages of this "
-                    + "part were read; pages " + (read + 1) + "–" + unit.lastPage() + " are not included.]"));
+
+        /** The blocks read, with a note at the end when the read stopped early. */
+        List<Block> finish() {
+            List<Block> result = new ArrayList<>(blocks);
+            if (cut) {
+                result.add(endNote(result, read, "[The text of this part stops here: it is longer than the "
+                        + limits.maxCharacters() + " characters one read may take. Ask for fewer pages to read the "
+                        + "rest.]"));
+            } else if (read < unit.lastPage()) {
+                result.add(endNote(result, read, "[Only the first " + (read - unit.firstPage() + 1) + " pages of "
+                        + "this part were read; pages " + (read + 1) + "–" + unit.lastPage() + " are not included.]"));
+            }
+            return List.copyOf(result);
         }
-        return List.copyOf(blocks);
     }
 
     /** A note after every block read, on the last page read. */
@@ -833,6 +1072,22 @@ public class PdfStructureExtractor {
     private static void requireBefore(Instant deadline) {
         if (Instant.now().isAfter(deadline) || Thread.currentThread().isInterrupted()) {
             throw new UnreadableDocumentException(BoundedTextStripper.TOO_LONG);
+        }
+    }
+
+    /** The file's SHA-256, computed as it streams through a small buffer. */
+    private static String sha256(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            for (int n; (n = in.read(buffer)) > 0;) {
+                digest.update(buffer, 0, n);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException e) {
+            throw new UnreadableDocumentException("This file could not be read as a PDF.", e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every Java runtime", e);
         }
     }
 

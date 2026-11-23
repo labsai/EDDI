@@ -138,7 +138,7 @@ class DocumentWorkDirTest {
         void tooLargeEver() {
             var workDir = workDir("a", "boot1", 100);
 
-            var refused = assertThrows(BudgetExceeded.class, () -> workDir.reserve(101, Duration.ofMinutes(5)));
+            var refused = assertThrows(BudgetExceeded.class, () -> workDir.reserve(101, Duration.ofSeconds(2)));
             assertTrue(refused.getMessage().contains("eddi.attachments.large.work-dir-max-bytes"), refused.getMessage());
             assertEquals(0, workDir.usedBytes());
         }

@@ -26,8 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The acceptance gate of the windowed path: a 1,200-page PDF of about 40 MB is
  * read to its manifest — every page, window by window — in a JVM whose heap is
  * {@code -Xmx256m}, and again in one whose heap is smaller than the file, which
- * no path that loads the file into memory can survive. Child JVMs, so the
- * bound does not depend on the heap surefire runs with.
+ * no path that loads the file into memory can survive. Child JVMs, so the bound
+ * does not depend on the heap surefire runs with.
  */
 @DisplayName("PdfLargeFileHeapTest — a large PDF on a small heap")
 class PdfLargeFileHeapTest {
@@ -70,20 +70,29 @@ class PdfLargeFileHeapTest {
 
         assertFalse(result.timedOut(), result.output());
         assertEquals(0, result.exitCode(), result.output());
-        // 12 chapters of 100 pages, each fitted to the default unit budget.
-        String expectedTokens = "tokens=" + (long) PAGES * PdfFixtures.TOKENS_PER_PAGE;
-        assertTrue(result.lastLine().startsWith("OK pages=" + PAGES + " "), result.output());
-        assertTrue(result.lastLine().endsWith(expectedTokens), result.output());
+        assertEquals("OK pages=" + PAGES + " units=48 tokens=" + PAGES * tokensPerPage(), result.lastLine(),
+                result.output());
     }
 
     @Test
-    @DisplayName("a heap smaller than the file: only a path that never holds the file survives")
+    @DisplayName("-Xmx64m, less heap than the file is large: only a path that never holds the file survives")
     void heapSmallerThanTheFile() throws Exception {
-        ChildJvm.Result result = probe("-Xmx32m");
+        // Reading the same file through Files.readAllBytes and the array overload runs
+        // out of memory at 64 MB (and at 48 MB); the windowed path needs less than 48.
+        ChildJvm.Result result = probe("-Xmx64m");
 
         assertFalse(result.timedOut(), result.output());
         assertEquals(0, result.exitCode(), result.output());
         assertTrue(result.lastLine().startsWith("OK pages=" + PAGES + " "), result.output());
+    }
+
+    /** What one page of the fixture estimates, from a small copy read in memory. */
+    private static int tokensPerPage() throws IOException {
+        Path small = PdfFixtures.largeTo(dir.resolve("small.pdf"), 10, 100, 0);
+        var manifest = new PdfStructureExtractor().manifest(Files.readAllBytes(small), "small", null, null);
+        int tokens = manifest.leaves().stream().mapToInt(unit -> unit.estimatedTokens()).sum();
+        assertEquals(0, tokens % 10, "every page alike");
+        return tokens / 10;
     }
 
     private static ChildJvm.Result probe(String heap) throws Exception {

@@ -18,15 +18,15 @@ import java.time.Instant;
  * <p>
  * The same scan, byte for byte, on a {@link FileChannel}: the file is read in
  * windows of {@link #DEFAULT_WINDOW_BYTES} through one reused buffer, forwards
- * while keywords are searched and backwards when a dictionary is looked for, and
- * each compressed stream is handed to the filters as a stream over its range of
- * the file. The heap holds the window, a dictionary (at most 64 KB) and what one
- * stream's filter chain keeps between stages, never the file.
+ * while keywords are searched and backwards when a dictionary is looked for,
+ * and each compressed stream is handed to the filters as a stream over its
+ * range of the file. The heap holds the window, a dictionary (at most 64 KB)
+ * and what one stream's filter chain keeps between stages, never the file.
  *
  * <p>
- * The file is read through positional reads, not a memory mapping: a mapped file
- * stays mapped until the collector unmaps it, and on Windows a mapped file cannot
- * be deleted in the {@code finally} that owns it.
+ * The file is read through positional reads, not a memory mapping: a mapped
+ * file stays mapped until the collector unmaps it, and on Windows a mapped file
+ * cannot be deleted in the {@code finally} that owns it.
  */
 public final class PdfStreamBudgetFile {
 

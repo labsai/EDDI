@@ -114,10 +114,10 @@ public class DocumentSettings {
     // --- WP-4.2: windowed reading of large PDFs ---
 
     /**
-     * Pages one window of a large PDF holds ({@code eddi.documents.structure.window-pages},
-     * default 50): the document is opened afresh per window, and a crash loses at
-     * most one. Values below 1 fall back to the default. Explicit settings return
-     * the default.
+     * Pages one window of a large PDF holds
+     * ({@code eddi.documents.structure.window-pages}, default 50): the document is
+     * opened afresh per window, and a crash loses at most one. Values below 1 fall
+     * back to the default. Explicit settings return the default.
      */
     public int windowPages() {
         if (bounds != null) {
@@ -130,8 +130,9 @@ public class DocumentSettings {
 
     /**
      * How long one window may take
-     * ({@code eddi.documents.structure.window-deadline-seconds}, default 90). Values
-     * below 1 fall back to the default. Explicit settings return the default.
+     * ({@code eddi.documents.structure.window-deadline-seconds}, default 90).
+     * Values below 1 fall back to the default. Explicit settings return the
+     * default.
      */
     public Duration windowDeadline() {
         if (bounds != null) {
