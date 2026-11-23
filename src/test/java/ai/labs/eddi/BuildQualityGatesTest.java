@@ -1105,7 +1105,13 @@ class BuildQualityGatesTest {
                 needs.addAll(ciSplitNames(line.strip().substring(6)));
             } else if (inNeeds) {
                 String stripped = line.strip();
-                if (!stripped.startsWith("- ") && !stripped.startsWith("#")) {
+                if (stripped.startsWith("#")) {
+                    // A comment inside or after the list. Its words are not job names:
+                    // parsing them read docker's NOTE ("still built, pushed, tagged")
+                    // as needs on jobs called `pushed` and `tagged`.
+                    continue;
+                }
+                if (!stripped.startsWith("- ")) {
                     break;
                 }
                 needs.addAll(ciSplitNames(stripped.replaceFirst("^- ", "")));
@@ -1542,6 +1548,39 @@ class BuildQualityGatesTest {
         assertEquals(List.of(), missing,
                 "docker in " + CI_WORKFLOW + " must need these, or an image whose E2E tier failed is still pushed,"
                         + " tagged, signed and attested");
+    }
+
+    /**
+     * {@code ci-gate} is the required status check and what the merge queue waits
+     * for. Whatever stops {@code docker} from publishing has to stop a merge too,
+     * or a commit lands on main that main's own push run then refuses to ship; so
+     * its {@code needs} are graded against docker's own list rather than a copy
+     * here. It must run {@code always()}: GitHub treats a skipped required check as
+     * passed, so a gate that can be skipped is no gate. And it must not tolerate a
+     * skip on a merge-queue run, where every job is forced to run.
+     */
+    @Test
+    @DisplayName("CI Gate needs everything docker needs plus the lints, always runs, and is strict in the merge queue")
+    void ciGateBlocksWhateverBlocksPublishing() throws Exception {
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(jobs.containsKey("ci-gate") && jobs.containsKey("docker"),
+                CI_WORKFLOW + " no longer declares both ci-gate and docker, so this assertion grades nothing");
+
+        List<String> gateNeeds = ciJobNeeds(jobs.get("ci-gate"));
+        List<String> missing = new ArrayList<>(ciJobNeeds(jobs.get("docker")));
+        missing.addAll(List.of("shell-lint", "manifest-lint", "release-pointers"));
+        missing.removeAll(gateNeeds);
+        assertEquals(List.of(), missing,
+                "ci-gate in " + CI_WORKFLOW + " must need these: each one blocks publishing (or is a lint whose skip"
+                        + " merges an ungraded change), so a merge that ignored it lands a commit main will not ship");
+
+        assertEquals("always()", ciJobCondition(jobs.get("ci-gate")).strip(),
+                "ci-gate must be `if: always()`: a skipped required check counts as passed");
+        String gate = jobs.get("ci-gate");
+        assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] || [ \"$required\" = \"true\" ]"),
+                "ci-gate must require every job on a merge_group run, whatever the path filters said");
+        assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
+                CI_WORKFLOW + " no longer triggers on merge_group, so the merge queue would wait for checks forever");
     }
 
     /**

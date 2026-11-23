@@ -6,6 +6,13 @@ on:
     tags: ["[0-9]*"]
   pull_request:
     branches: [main]
+  # The merge queue: GitHub tests main + the queued PR(s) on a temporary
+  # gh-readonly-queue/main/... branch and merges only that tested commit. These runs
+  # take the full pipeline (detect-changes forces every filter, as for a tag) and
+  # publish nothing (every publishing job gates on event_name == 'push'). CI Gate
+  # is the check the queue waits for.
+  merge_group:
+    types: [checks_requested]
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
 # three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
@@ -48,6 +55,7 @@ jobs:
       release_pointers: ${{ steps.result.outputs.release_pointers }}
       ui: ${{ steps.result.outputs.ui }}
       backend: ${{ steps.result.outputs.backend }}
+      gitleaks_config: ${{ steps.result.outputs.gitleaks_config }}
       # JSON list consumed by e2e-fullstack's matrix; see "Resolve E2E databases".
       databases: ${{ steps.dbs.outputs.databases }}
     steps:
@@ -57,8 +65,9 @@ jobs:
       - name: Check paths
         id: filter
         # Skipped on tag pushes — a release must run the FULL pipeline no matter
-        # what the tagged commit happens to touch (see "Resolve" below).
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        # what the tagged commit happens to touch (see "Resolve" below) — and on
+        # merge-queue runs, which are the last gate before main and run everything.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'merge_group' }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -236,6 +245,15 @@ jobs:
             ui:
               - 'ui/**'
               - '.github/workflows/ci.yml'
+            # Not a job gate. CI Gate reads it: on a pull request Secret Scanning takes
+            # the gitleaks config from the BASE branch, so a PR that allowlists a test
+            # fixture in .gitleaksignore can never pass that check on the PR itself.
+            # CI Gate tolerates that one failure only when the PR changes the config
+            # (the change is then in front of the reviewer); the merge-queue run scans
+            # with the PR's config and blocks as usual.
+            gitleaks_config:
+              - '.gitleaksignore'
+              - '.gitleaks.toml'
 
       # The nightly collation PR rewrites the changelog and nothing else, so the
       # Java suite has nothing to grade on it. Exempting the BRANCH NAME alone
@@ -279,13 +297,16 @@ jobs:
           # tag published REGARDLESS of test results. Forcing code=true here lets
           # docker rely on plain `needs` success instead, so a tag on a commit
           # with failing tests builds nothing.
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          # A merge-queue run takes the same branch: it is the last test before the
+          # commit lands on main, so it runs every job ("Check paths" is skipped).
+          if [[ "$GITHUB_REF" == refs/tags/* || "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "scripts=true" >> "$GITHUB_OUTPUT"
             echo "operator_docs=true" >> "$GITHUB_OUTPUT"
             echo "release_pointers=true" >> "$GITHUB_OUTPUT"
             echo "ui=true" >> "$GITHUB_OUTPUT"
             echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "gitleaks_config=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
@@ -293,6 +314,7 @@ jobs:
             echo "release_pointers=${{ steps.filter.outputs.release_pointers }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+            echo "gitleaks_config=${{ steps.filter.outputs.gitleaks_config }}" >> "$GITHUB_OUTPUT"
           fi
           # Outside the tag/else split on purpose: DeploymentManifestsTest reads that
           # split positionally. A later write to the same output key wins.
@@ -321,6 +343,9 @@ jobs:
           echo "- Backend changed: **${{ steps.result.outputs.backend }}**" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "- 🏷️ Tag push — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            echo "- 🚦 Merge queue — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ steps.result.outputs.code }}" = "false" ]; then
             echo "- ⏭️ Skipping build/test/docker (docs/licenses/config-only change)" >> "$GITHUB_STEP_SUMMARY"
@@ -2096,6 +2121,8 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           ZERO=0000000000000000000000000000000000000000
@@ -2113,6 +2140,19 @@ jobs:
             done
             LOG_OPTS="--no-merges $PR_BASE..$PR_HEAD"
             echo "scanning pull request range $PR_BASE..$PR_HEAD"
+          elif [ "$EVENT" = "merge_group" ]; then
+            # The queue's commit(s) on top of main. Without this branch the run
+            # fell through to "scan the tip with --no-merges", which finds nothing
+            # when the tip is a merge commit. The config is the group's own (as on
+            # a push): what is about to land, reviewed and approved.
+            for sha in "$MG_BASE" "$MG_HEAD"; do
+              if ! have "$sha"; then
+                echo "::error::gitleaks: $sha is not in this checkout, so the merge group was not scanned."
+                exit 1
+              fi
+            done
+            LOG_OPTS="--no-merges $MG_BASE..$MG_HEAD"
+            echo "scanning merge group range $MG_BASE..$MG_HEAD"
           elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
             LOG_OPTS="--no-merges $PUSH_BEFORE..$PUSH_AFTER"
             echo "scanning pushed range $PUSH_BEFORE..$PUSH_AFTER"
@@ -2987,6 +3027,105 @@ jobs:
           fi
           echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                "e2e-fullstack=$E2E, e2e-auth=$AUTH, e2e-operator=$OPERATOR — gate satisfied"
 
+  # ─── Job 2z: CI Gate ────────────────────────────────────────────
+  # The one check that says "this commit may land": the required status check, and
+  # what the merge queue waits for. Before it existed only Build & Test and CodeQL
+  # were required, so a PR could merge with red integration tests, E2E or UI jobs.
+  #
+  # It needs every job docker needs (whatever blocks publishing blocks merging —
+  # BuildQualityGatesTest pins that) plus the cheap lints, whose own comments say a
+  # skip there merges a change nothing graded. Changelog Discipline is left out:
+  # it is documented as reporting, not blocking (AGENTS.md §2 rule 8).
+  #
+  # always(), so it reports on every run — a skipped required check counts as
+  # passed — and grades the results itself:
+  #   1. nothing it needs failed or was cancelled (one exception, below);
+  #   2. every job the change REQUIRED ran and succeeded. On a pull request and a
+  #      push that is derived from detect-changes, with the same conditions the
+  #      jobs use; on a merge-queue run every job is required, so a regression in
+  #      the forced-true branch of detect-changes (filters empty, everything
+  #      skipped) fails here instead of merging untested code.
+  # The exception: on a pull request, Secret Scanning reads the gitleaks config
+  # from the base branch, so a PR that allowlists a fixture cannot pass it. That
+  # failure is tolerated, loudly, only when the PR changes .gitleaksignore or
+  # .gitleaks.toml; the merge-queue run scans with the PR's config and blocks.
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
+    if: always()
+    steps:
+      - name: Require every job this change needed to pass
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          result() { jq -r --arg job "$1" '.[$job].result // "missing"' <<< "$NEEDS"; }
+          output() { jq -r --arg job "$1" --arg key "$2" '.[$job].outputs[$key] // ""' <<< "$NEEDS"; }
+          STATUS=0
+          fail() { echo "::error::$1"; STATUS=1; }
+
+          if [ "$(result detect-changes)" != "success" ]; then
+            echo "::error::detect-changes=$(result detect-changes), so which jobs had to run is unknown"
+            exit 1
+          fi
+          CODE=$(output detect-changes code)
+          BACKEND=$(output detect-changes backend)
+          OPERATOR_DOCS=$(output detect-changes operator_docs)
+          SCRIPTS=$(output detect-changes scripts)
+          RELEASE_POINTERS=$(output detect-changes release_pointers)
+          GITLEAKS_CONFIG=$(output detect-changes gitleaks_config)
+          echo "event=$EVENT code=$CODE backend=$BACKEND operator_docs=$OPERATOR_DOCS scripts=$SCRIPTS release_pointers=$RELEASE_POINTERS gitleaks_config=$GITLEAKS_CONFIG"
+
+          # 1. Nothing failed or was cancelled.
+          for job in $(jq -r 'keys[]' <<< "$NEEDS"); do
+            r=$(result "$job")
+            case "$r" in
+              success | skipped) ;;
+              *)
+                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ]; then
+                  echo "::warning::Secret Scanning failed with the BASE branch's gitleaks config, and this PR changes .gitleaksignore/.gitleaks.toml. Tolerated here because the PR's own allowlist entry cannot apply until it merges; the merge-queue run scans with the PR's config and blocks. Review the allowlist change itself."
+                else
+                  fail "$job=$r"
+                fi
+                ;;
+            esac
+          done
+
+          # 2. Every job the change required ran and passed.
+          either() { [ "$1" = "true" ] || [ "$2" = "true" ] && echo true || echo false; }
+          if [ "$EVENT" = "pull_request" ]; then
+            BUILD_AND_TEST=$(either "$BACKEND" "$OPERATOR_DOCS")
+            INTEGRATION=$([ "$CODE" = "true" ] && [ "$BACKEND" = "true" ] && echo true || echo false)
+          else
+            BUILD_AND_TEST=$CODE
+            INTEGRATION=$CODE
+          fi
+          require() {
+            local job=$1 required=$2
+            if [ "$EVENT" = "merge_group" ] || [ "$required" = "true" ]; then
+              local r
+              r=$(result "$job")
+              if [ "$r" != "success" ] && ! { [ "$job" = "gitleaks" ] && [ "$r" = "failure" ]; }; then
+                fail "$job had to run for this change but is $r"
+              fi
+            fi
+          }
+          for job in codeql codeql-ui gitleaks e2e-gate ui-gate; do require "$job" true; done
+          require build-and-test "$BUILD_AND_TEST"
+          require integration-test "$INTEGRATION"
+          require coverage-gate "$INTEGRATION"
+          for job in trivy-scan build-image openapi-snapshot e2e-fullstack e2e-auth e2e-operator; do require "$job" "$CODE"; done
+          require shell-lint "$SCRIPTS"
+          require manifest-lint "$(either "$CODE" "$OPERATOR_DOCS")"
+          require release-pointers "$RELEASE_POINTERS"
+
+          if [ "$STATUS" -ne 0 ]; then
+            exit 1
+          fi
+          echo "CI Gate satisfied: $(jq -r 'to_entries | map("\(.key)=\(.value.result)") | join(", ")' <<< "$NEEDS")"
+
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
     name: Docker Build & Push
@@ -3791,6 +3930,14 @@ jobs:
           # Skip if no webhook configured
           if [ -z "$SLACK_WEBHOOK" ]; then
             echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          # Merge-queue runs: GitHub reports a failed group on the PR itself and takes
+          # it out of the queue, and the push run on main after a merge notifies as
+          # before — a message per queue entry would only duplicate both.
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "### ⏭️ Merge-queue run — no Slack notification" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 

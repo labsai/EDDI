@@ -41,3 +41,19 @@ data.
   which the integration job still satisfies with the check relaxed; it now pins the single
   `jacoco:check@merged-check` line (armed, no `haltOnFailure`/`jacoco.skip`), its needs, the
   data-presence step and docker's dependency on it.
+- **Merge-queue support and a `CI Gate` check.** `ci.yml` triggers on `merge_group`.
+  detect-changes skips the path filter there and forces every filter true in the same branch as
+  a tag, so a queue run is the full pipeline (both E2E databases) and publishes nothing (every
+  publishing job gates on `push`). Secret Scanning scans `merge_group.base_sha..head_sha` (it
+  fell through to "scan the tip with `--no-merges`", which finds nothing on a merge commit), and
+  Slack stays quiet for queue runs. The new **CI Gate** job (`if: always()`) needs every job docker
+  needs plus shell-lint, manifest-lint and release-pointers; it fails on any failed or cancelled
+  need, and on any job the change required that did not succeed — derived from detect-changes on
+  a PR or push, every job on a merge-queue run (so a broken forced-true branch cannot merge
+  untested code). One tolerance: a PR-level Secret Scanning failure when the PR itself changes
+  `.gitleaksignore`/`.gitleaks.toml` (that scan uses the base config, so such a PR could never pass);
+  the queue run then scans with the PR's config. The script was run against 16 simulated
+  outcomes (PR, push and merge_group; skipped, failed and cancelled needs; both gitleaks cases).
+  `BuildQualityGatesTest.ciGateBlocksWhateverBlocksPublishing` pins its needs against docker's,
+  its `always()` and the merge-queue strictness; the `ciJobNeeds` helper no longer reads the words
+  of a comment after a `needs:` list as job names (it reported docker as needing `pushed`/`tagged`).
