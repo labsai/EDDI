@@ -195,7 +195,9 @@ audit trail → server log → the configuration that produced it. Follow
   true, to the mail's single Reply-To instead). Its credential is a
   connection name whose allowlist names the IMAP (and SMTP) origin, and the result's `warnings`
   (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
-  `email.honor-reply-to`) are worth relaying. Where a helpdesk already owns the mailbox, use a
+  `email.honor-reply-to`, `email.consult-not-enabled`, `email.consult-owner-cannot-use`) are worth relaying. A target's `consultable`
+  lets its agent consult another target's agent that a mail names (`@legal`); the consulted agent runs
+  memory-less and mails nobody. Where a helpdesk already owns the mailbox, use a
   `webhook` channel instead. `read_docs("email-integration")`.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
