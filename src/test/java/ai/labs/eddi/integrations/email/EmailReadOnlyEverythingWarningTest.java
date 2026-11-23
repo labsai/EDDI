@@ -41,4 +41,12 @@ class EmailReadOnlyEverythingWarningTest {
         assertEquals(List.of("star", "stars"), EmailChannelSupport.targetsWithEverythingReadOnly(targets));
         assertTrue(EmailChannelSupport.targetsWithEverythingReadOnly(null).isEmpty());
     }
+
+    @Test
+    @DisplayName("a prefix such as eddi* is restricted, so it is not reported as universal")
+    void prefixPatternIsNotUniversal() {
+        var targets = List.of(target("prefix", ApprovalPolicy.ACTIONS, "eddi*"), target("star", ApprovalPolicy.ACTIONS, "*"));
+
+        assertEquals(List.of("star"), EmailChannelSupport.targetsWithEverythingReadOnly(targets));
+    }
 }

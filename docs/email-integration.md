@@ -503,7 +503,7 @@ Each AGENT target of an email integration takes three optional fields:
 
 | `approvalPolicy` | What happens to a mail for this target |
 |---|---|
-| `none` | Only the agent's own `toolApprovals` apply. The default of every target saved before the gate existed, so upgrading changes nothing |
+| `none` | Only the agent's own `toolApprovals` apply. The default of every target saved before the gate existed, so saved targets keep their behaviour; a tainted conversation with no recorded gate (one from before the gate existed) still fails closed as under `actions` until its next mail records one |
 | `actions` | The agent runs and answers; **every tool call that `readOnlyTools` does not name pauses for approval**. What the Manager preselects for a new email target |
 | `firstContact` | As `actions`, and a sender's **first mail to this target** waits for approval before the agent runs |
 | `everyTurn` | **Every mail** waits for approval before the agent runs |

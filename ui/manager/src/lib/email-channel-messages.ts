@@ -135,7 +135,7 @@ export function channelWarningMessage(code: string, t: TFunction): string {
     case "email.read-only-everything":
       return t(
         "emailChannel.warning.readOnlyEverything",
-        "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for approval. Name the read-only tools instead.",
+        "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. The agent's own tool approvals still apply. Name the read-only tools instead.",
       );
     default:
       return code;

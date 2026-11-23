@@ -404,8 +404,9 @@ public class ImapMailTransport implements MailTransport {
                 return Optional.empty();
             }
             try {
+                MailboxException[] oversized = new MailboxException[1];
                 List<FoundMessage> candidates = new ArrayList<>(
-                        search(folder, messageId, maxBytes, expectedSha256 == null && preferredSourceRef == null));
+                        search(folder, messageId, maxBytes, expectedSha256 == null && preferredSourceRef == null, oversized));
                 boolean settled = expectedSha256 != null
                         ? candidates.stream().anyMatch(c -> expectedSha256.equalsIgnoreCase(c.sha256()))
                         : !candidates.isEmpty() && (preferredSourceRef == null
@@ -417,13 +418,18 @@ public class ImapMailTransport implements MailTransport {
                     if (moved.exists()) {
                         moved.open(Folder.READ_ONLY);
                         try {
-                            candidates.addAll(search((IMAPFolder) moved, messageId, maxBytes, false));
+                            candidates.addAll(search((IMAPFolder) moved, messageId, maxBytes, false, oversized));
                         } finally {
                             moved.close(false);
                         }
                     }
                 }
-                return FoundMessage.choose(candidates, preferredSourceRef, expectedSha256);
+                Optional<FoundMessage> chosen = FoundMessage.choose(candidates, preferredSourceRef, expectedSha256);
+                if (chosen.isEmpty() && oversized[0] != null) {
+                    // Nothing else matched: the oversized one may be the mail asked for.
+                    throw oversized[0];
+                }
+                return chosen;
             } catch (MessagingException e) {
                 throw new MailboxException(MailboxException.Category.CONNECTION, "Searching the mailbox failed: " + rootMessage(e), e);
             }
@@ -434,7 +440,7 @@ public class ImapMailTransport implements MailTransport {
          * compared with the id exactly before it is fetched. Every exact hit is
          * fetched, so the caller can choose; {@code firstOnly} stops at the first.
          */
-        private static List<FoundMessage> search(IMAPFolder in, String messageId, long maxBytes, boolean firstOnly)
+        private static List<FoundMessage> search(IMAPFolder in, String messageId, long maxBytes, boolean firstOnly, MailboxException[] oversized)
                 throws MessagingException, MailboxException {
             List<FoundMessage> found = new ArrayList<>();
             for (Message candidate : in.search(new HeaderTerm("Message-ID", messageId))) {
@@ -443,7 +449,18 @@ public class ImapMailTransport implements MailTransport {
                     continue;
                 }
                 ImapMessage message = new ImapMessage((IMAPMessage) candidate, in.getUID(candidate), in.getUIDValidity(), in.getFullName());
-                found.add(new FoundMessage(message.fetchRaw(maxBytes), message.internalDate(), message.sourceRef()));
+                try {
+                    found.add(new FoundMessage(message.fetchRaw(maxBytes), message.internalDate(), message.sourceRef()));
+                } catch (MailboxException e) {
+                    if (e.getCategory() != MailboxException.Category.TOO_LARGE) {
+                        throw e;
+                    }
+                    // An oversized twin must not hide an in-limit candidate: keep looking.
+                    if (oversized[0] == null) {
+                        oversized[0] = e;
+                    }
+                    continue;
+                }
                 if (firstOnly) {
                     break;
                 }

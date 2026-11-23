@@ -415,20 +415,49 @@ public class EmailReplySender {
         if (EmailApprovalNotes.START_APPROVED.equals(outcome)) {
             // CONVERSATION_START has run; the mail itself goes back to the poll — its
             // turn answers it, so nothing is sent here.
-            if (ledger.transition(row.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
-                LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", row.id(), sanitize(row.integrationId()));
+            try {
+                if (ledger.transition(row.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
+                    LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", row.id(),
+                            sanitize(row.integrationId()));
+                } else {
+                    LOGGER.warnf("Mail %s was approved but its row was not in DONE: it is not reopened for the next poll", row.id());
+                }
+            } catch (RuntimeException e) {
+                // Give the hold back, so the sweep settles it again instead of leaving an
+                // approved mail closed and unanswered.
+                reopenHeldStart(row, outcome, now);
+                throw e;
             }
             return new HeldStartOutcome(outcome, Optional.empty());
         }
-        ledger.transition(row.id(), State.DONE, State.DONE, null, null, outcome, false, now);
-        LOGGER.infof("Mail %s held before its conversation started was settled: %s", row.id(), outcome);
-        Optional<EmailIntegration> integration = directory.find(row.integrationId());
-        if (integration.isEmpty() || !integration.get().settings().replies()) {
-            return new HeldStartOutcome(outcome, Optional.empty());
+        try {
+            ledger.transition(row.id(), State.DONE, State.DONE, null, null, outcome, false, now);
+            LOGGER.infof("Mail %s held before its conversation started was settled: %s", row.id(), outcome);
+            Optional<EmailIntegration> integration = directory.find(row.integrationId());
+            if (integration.isEmpty() || !integration.get().settings().replies()) {
+                return new HeldStartOutcome(outcome, Optional.empty());
+            }
+            Located located = new Located(row, integration.get().settings());
+            return new HeldStartOutcome(outcome,
+                    resumeRequest(located, snapshot, verdict == null ? "NONE" : verdict).flatMap(request -> enqueue(request, now)));
+        } catch (RuntimeException e) {
+            // The notice was not queued: keep the row on the held-start sweep, which
+            // tries again (the reply key makes a second queueing a no-op).
+            reopenHeldStart(row, outcome, now);
+            throw e;
         }
-        Located located = new Located(row, integration.get().settings());
-        return new HeldStartOutcome(outcome,
-                resumeRequest(located, snapshot, verdict == null ? "NONE" : verdict).flatMap(request -> enqueue(request, now)));
+    }
+
+    /**
+     * Puts a held start back on {@code AWAITING_START} after its settlement failed
+     * part-way.
+     */
+    private void reopenHeldStart(LedgerEntry row, String settledAs, Instant now) {
+        try {
+            ledger.transitionApproval(row.id(), settledAs, EmailApprovalNotes.AWAITING_START, null, now);
+        } catch (RuntimeException again) {
+            LOGGER.warnf("Held mail %s was settled as %s but could not be put back for a retry: %s", row.id(), settledAs, again.getMessage());
+        }
     }
 
     /**

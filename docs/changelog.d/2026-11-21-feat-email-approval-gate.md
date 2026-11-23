@@ -127,3 +127,13 @@ turn carried.
 (content binding, deferral), `EmailReplySenderApprovalGateTest`, `EmailInboundSweeperTest`,
 `ConversationHitlServiceEmailGateTimeoutTest`, the ledger contract (`approvalHold`, MongoDB and PostgreSQL ITs), and
 `EmailApprovalGatePersistenceTest` (step context and the recorded gate through both stores).
+
+### CodeRabbit round 1 (2026-11-23)
+
+- The inspector keeps an earlier `ungated` result when a later workflow or LLM config cannot be read.
+- A `readOnlyTools` pattern is universal only when it is made of `*` alone, so `eddi*` no longer triggers the warning.
+- `normalizeEndpointPath` keeps just the path of an absolute URL with a templated host.
+- The IMAP `findByMessageId` rethrows a too-large fetch only when no other folder yields the message.
+- A held start that fails mid-settle goes back on the held-start sweep instead of being stranded.
+- Switching a channel away from email clears the per-target approval fields.
+- Known limit: a scheduled check-back that opens a new conversation does not carry the `everyTurn` gate yet.

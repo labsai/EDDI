@@ -916,8 +916,24 @@ public class HttpCallToolsProvider implements ToolSourceProvider {
             } catch (IllegalArgumentException e) {
                 // Not parseable as a URI — a templated host, most likely. Leave it be:
                 // matching something odd is better than throwing during discovery.
-                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", sanitize(rawPath));
-                return path;
+                // The executor renders templates before it parses the URL, so a templated
+                // absolute URL addresses the same endpoint as its rendered form: keep the
+                // path after the authority, as the URI branch above does.
+                int authorityEnd = path.indexOf('/', path.indexOf("://") + 3);
+                if (authorityEnd < 0) {
+                    path = "/";
+                } else {
+                    String rest = path.substring(authorityEnd);
+                    int cut = rest.length();
+                    for (char stop : new char[]{'?', '#'}) {
+                        int at = rest.indexOf(stop);
+                        if (at >= 0 && at < cut) {
+                            cut = at;
+                        }
+                    }
+                    path = rest.substring(0, cut);
+                }
+                LOGGER.debugf("Normalised templated endpoint path '%s' for approval matching", sanitize(rawPath));
             }
         }
         if (!path.isEmpty() && !path.startsWith("/")) {

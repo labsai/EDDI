@@ -959,6 +959,14 @@ class AgentOrchestratorTest {
     }
 
     @Test
+    @DisplayName("an absolute URL with a template keeps the path the rendered URL would have")
+    void normalizeEndpointPath_absoluteTemplatedUrl() {
+        assertEquals("/orders/{orderId}", AgentOrchestrator.normalizeEndpointPath("https://shop.example.com/orders/{orderId}"));
+        assertEquals("/orders/{orderId}", AgentOrchestrator.normalizeEndpointPath("https://{host}/orders/{orderId}?x={y}"));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://{host}"));
+    }
+
+    @Test
     @DisplayName("a value that merely begins \"http\" is not parsed as a URL")
     void normalizeEndpointPath_doesNotMistakeANonUrlForAUrl() {
         // The case that actually distinguishes the two implementations: a value
@@ -989,9 +997,10 @@ class AgentOrchestratorTest {
     }
 
     @Test
-    void normalizeEndpointPath_leavesAnUnparseableValueAlone() {
-        // A templated host is not a URI; matching something odd beats throwing
-        // during tool discovery.
-        assertEquals("http://{host}/x", AgentOrchestrator.normalizeEndpointPath("http://{host}/x"));
+    void normalizeEndpointPath_keepsOnlyThePathOfAnUnparseableValue() {
+        // A templated host is not a URI and must not throw during tool discovery; the
+        // path after the authority is what a read-only pattern matches against, never
+        // the whole URL.
+        assertEquals("/x", AgentOrchestrator.normalizeEndpointPath("http://{host}/x"));
     }
 }
