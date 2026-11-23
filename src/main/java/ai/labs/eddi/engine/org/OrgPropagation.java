@@ -93,6 +93,47 @@ public final class OrgPropagation {
         };
     }
 
+    /**
+     * The current binding, to restore around work that is chosen only later. Use it
+     * where the work to run is not known at capture time, such as a queued task
+     * whose submission happens on another thread.
+     */
+    public static Captured capture() {
+        return new Captured(OrgContext.bindingOrNull());
+    }
+
+    /**
+     * A binding captured by {@link #capture()}; restoring it follows the same rules
+     * as a wrapped task.
+     */
+    public static final class Captured {
+        private final OrgContext.Binding binding;
+
+        private Captured(OrgContext.Binding binding) {
+            this.binding = binding;
+        }
+
+        public <T> T call(Callable<T> work) throws Exception {
+            Objects.requireNonNull(work, "work");
+            return restore(binding, work);
+        }
+
+        public void run(Runnable work) {
+            Objects.requireNonNull(work, "work");
+            try {
+                restore(binding, () -> {
+                    work.run();
+                    return null;
+                });
+            } catch (RuntimeException | Error e) {
+                throw e;
+            } catch (Exception e) {
+                // unreachable: a Runnable throws no checked exception
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
     /** An executor that wraps every task with the binding current at submission. */
     public static Executor wrap(Executor executor) {
         Objects.requireNonNull(executor, "executor");

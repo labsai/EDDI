@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.org.OrgContext;
+import ai.labs.eddi.engine.org.OrgId;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.enterprise.inject.Instance;
@@ -170,6 +172,10 @@ class ClusterConversationCoordinatorTest {
         volatile boolean reject;
         /** Submissions whose callback did not mark them as turns (WS2). */
         final AtomicInteger plainCallbacks = new AtomicInteger();
+        /**
+         * The org binding each submission was made under; BaseRuntime carries it on.
+         */
+        final List<Optional<OrgId>> boundAtSubmission = new CopyOnWriteArrayList<>();
 
         @Override
         public void init() {
@@ -207,6 +213,7 @@ class ClusterConversationCoordinatorTest {
             if (!(done instanceof ITurnExecution)) {
                 plainCallbacks.incrementAndGet();
             }
+            boundAtSubmission.add(OrgContext.current());
             return pool.submit(() -> {
                 try {
                     T result = callable.call();
@@ -446,6 +453,25 @@ class ClusterConversationCoordinatorTest {
         }
         assertEquals(1, leases.released.size());
         assertEquals(1, leases.handedOver.size());
+    }
+
+    @Test
+    @DisplayName("a turn waiting for its lease is submitted under its enqueuer's org binding, wherever the lease arrives (plan §6.3)")
+    void aTurnWaitingForItsLeaseKeepsItsEnqueuersBinding() throws Exception {
+        leases.grantImmediately = false;
+        Turn turn = new Turn("bound", log);
+        OrgContext.callAs(OrgId.DEFAULT, () -> {
+            coordinator.submitInOrder("conv-org", turn);
+            return null;
+        });
+        assertEquals(1, leases.pending.size());
+
+        // the lease arrives on an unbound thread
+        leases.pending.get(0).complete(leases.handle("c.conv-org"));
+        await(turn);
+
+        assertEquals(List.of(Optional.of(OrgId.DEFAULT)), runtime.boundAtSubmission);
+        assertEquals("conv-org", turn.lease.get().conversationId(), "the lease reached the original task");
     }
 
     @Test

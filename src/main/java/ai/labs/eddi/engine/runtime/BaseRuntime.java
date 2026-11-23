@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.org.OrgPropagation;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -296,7 +297,11 @@ public class BaseRuntime implements IRuntime {
 
         final Future<T> submitted;
         try {
-            submitted = target.submit(() -> {
+            // The work and its callbacks run with the submitter's org binding (plan §6.3).
+            // Every submission here is bounded work, a turn, a deployment or one call,
+            // so inheriting the submitter's org cannot leave a long-lived task bound to
+            // one caller.
+            submitted = target.submit(OrgPropagation.wrap(() -> {
                 leaveQueue.run();
                 load.active.incrementAndGet();
                 try {
@@ -304,7 +309,7 @@ public class BaseRuntime implements IRuntime {
                 } finally {
                     load.active.decrementAndGet();
                 }
-            });
+            }));
         } catch (RuntimeException | Error e) {
             leaveQueue.run();
             throw e;
