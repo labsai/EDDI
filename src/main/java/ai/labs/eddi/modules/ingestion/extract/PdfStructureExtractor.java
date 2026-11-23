@@ -322,7 +322,7 @@ public class PdfStructureExtractor {
         SplitConfig config = split == null ? SplitConfig.defaults() : split;
         ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
         var reader = new PdfWindowReader(reading);
-        int pageCount = prepare(pdf, bounds, reader, windowPages);
+        int pageCount = prepare(pdf, bounds, reader, windowPages, true);
         var scanner = new PageScanner(pageCount);
         int measured = scanner.measured(bounds);
         for (long first = 1; first <= measured; first += windowPages) {
@@ -363,14 +363,17 @@ public class PdfStructureExtractor {
      * a pass that numbers the pages — refusing a tree that lists a page twice or
      * none — and returns how many there are.
      */
-    private static int prepare(Path pdf, ExtractionLimits bounds, PdfWindowReader reader, int windowPages) {
+    private static int prepare(Path pdf, ExtractionLimits bounds, PdfWindowReader reader, int windowPages,
+                               boolean preScan) {
         if (pdf == null) {
             throw new UnreadableDocumentException("This file could not be read as a PDF.");
         }
         if (windowPages < 1) {
             throw new IllegalArgumentException("windowPages must be at least 1");
         }
-        PdfStreamBudgetFile.requireWithin(pdf, bounds.maxUncompressedBytes(), scanDeadline(pdf, reader.options()));
+        if (preScan) {
+            preScan(pdf, bounds, reader.options());
+        }
         return reader.withDocument(pdf, (document, window) -> {
             int pages = numberPages(document, window.deadline()).size();
             if (pages == 0) {
@@ -378,6 +381,20 @@ public class PdfStructureExtractor {
             }
             return pages;
         });
+    }
+
+    /**
+     * The raw-byte scan over a file, as
+     * {@link #manifest(Path, String, SplitConfig, ExtractionLimits, PdfWindowReader.Options, int)}
+     * runs it first: once per file is enough.
+     *
+     * @throws UnreadableDocumentException
+     *             when a compressed stream expands past
+     *             {@link ExtractionLimits#maxUncompressedBytes()}
+     */
+    public static void preScan(Path pdf, ExtractionLimits limits, PdfWindowReader.Options reading) {
+        ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
+        PdfStreamBudgetFile.requireWithin(pdf, bounds.maxUncompressedBytes(), scanDeadline(pdf, reading));
     }
 
     /**
@@ -456,13 +473,26 @@ public class PdfStructureExtractor {
      */
     public List<Block> blocks(Path pdf, DocumentUnit unit, BlockOptions options, ExtractionLimits limits,
                               PdfWindowReader.Options reading, int windowPages) {
+        return blocks(pdf, unit, options, limits, reading, windowPages, true);
+    }
+
+    /**
+     * @param preScan
+     *            whether to run the raw-byte scan over the file first. A caller
+     *            that reads many units of one file whose scan it has already run —
+     *            its manifest was just built from it, or {@link #preScan} passed —
+     *            passes {@code false}, rather than reading the whole file again per
+     *            unit. The decode budget still bounds every window.
+     */
+    public List<Block> blocks(Path pdf, DocumentUnit unit, BlockOptions options, ExtractionLimits limits,
+                              PdfWindowReader.Options reading, int windowPages, boolean preScan) {
         Objects.requireNonNull(unit, "unit");
         if (unit.firstPage() < 1 || unit.lastPage() < unit.firstPage()) {
             throw new IllegalArgumentException("A unit covers pages first..last, first >= 1");
         }
         ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
         var reader = new PdfWindowReader(reading);
-        int pageCount = prepare(pdf, bounds, reader, windowPages);
+        int pageCount = prepare(pdf, bounds, reader, windowPages, preScan);
         var read = new BlockRead(unit, pageCount, bounds);
         for (long first = unit.firstPage(); first <= read.last() && !read.stopped(); first += windowPages) {
             int last = (int) Math.min(read.last(), first + windowPages - 1);
@@ -641,6 +671,15 @@ public class PdfStructureExtractor {
      *             {@link #MAX_PAGES} pages — before the iterator runs on it
      */
     static void requireReadablePageTree(PDDocument document, Instant deadline) {
+        requireReadablePageTree(document, deadline, MAX_PAGES);
+    }
+
+    /**
+     * The same, refusing more than {@code maxPages} pages (at most
+     * {@link #MAX_PAGES}).
+     */
+    static void requireReadablePageTree(PDDocument document, Instant deadline, int maxPages) {
+        int pageCap = Math.min(maxPages, MAX_PAGES);
         COSDictionary root = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGES);
         if (root == null || !isBranch(root)) {
             return;
@@ -678,8 +717,8 @@ public class PdfStructureExtractor {
                             + MAX_PAGE_TREE_DEPTH + " levels deep, which no genuine document needs.");
                 }
                 stack.push(new Position(dictionary));
-            } else if ((kid == null || kid instanceof COSDictionary) && ++pages > MAX_PAGES) {
-                throw new UnreadableDocumentException("This PDF has more than " + MAX_PAGES
+            } else if ((kid == null || kid instanceof COSDictionary) && ++pages > pageCap) {
+                throw new UnreadableDocumentException("This PDF has more than " + pageCap
                         + " pages, which is more than one document may have.");
             }
         }

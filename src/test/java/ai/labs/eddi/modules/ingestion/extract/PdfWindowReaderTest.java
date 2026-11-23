@@ -153,6 +153,57 @@ class PdfWindowReaderTest {
     }
 
     @Test
+    @DisplayName("a strictly parsed file declaring more cross-reference entries than allowed is refused first")
+    void xrefEntriesBounded() {
+        // A hand-written file: a classic table. And one PDFBox saved, whatever form it
+        // chose. Both have a handful of objects; the cap is set below that.
+        Path table = PdfFixtures.writeTo(dir.resolve("table.pdf"), PdfFixtures.deepPageTree(3));
+        Path saved = PdfFixtures.writeTo(dir.resolve("saved.pdf"), PdfFixtures.plain(3));
+        var capped = new PdfWindowReader(reader.options().withLenientParseMaxBytes(16).withCaps(2, 1_000));
+        var roomy = new PdfWindowReader(reader.options().withLenientParseMaxBytes(16));
+
+        for (Path pdf : new Path[]{table, saved}) {
+            var refused = assertThrows(UnreadableDocumentException.class,
+                    () -> capped.withWindow(pdf, 1, 1, (document, window) -> text(document, window)), pdf.toString());
+            assertTrue(refused.getMessage().contains("declares more than 2 objects"), refused.getMessage());
+            roomy.withWindow(pdf, 1, 1, (document, window) -> text(document, window));
+        }
+    }
+
+    @Test
+    @DisplayName("a classic table's declared entries are counted exactly")
+    void xrefSubsectionsSummed() {
+        Path table = PdfFixtures.writeTo(dir.resolve("table.pdf"), PdfFixtures.deepPageTree(3));
+        long entries = PdfFixtures.deepPageTreeObjects(3) + 1;
+
+        PdfXrefBound.requireWithin(table, entries);
+        assertThrows(UnreadableDocumentException.class, () -> PdfXrefBound.requireWithin(table, entries - 1));
+    }
+
+    @Test
+    @DisplayName("more pages than allowed are refused while the page tree is walked")
+    void pageCap() {
+        Path pdf = PdfFixtures.writeTo(dir.resolve("plain.pdf"), PdfFixtures.plain(5));
+        var capped = new PdfWindowReader(reader.options().withCaps(PdfWindowReader.DEFAULT_MAX_XREF_ENTRIES, 4));
+
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> capped.withWindow(pdf, 1, 1, (document, window) -> text(document, window)));
+        assertTrue(refused.getMessage().contains("more than 4 pages"), refused.getMessage());
+        reader.withWindow(pdf, 1, 1, (document, window) -> text(document, window));
+    }
+
+    @Test
+    @DisplayName("a large file that is not a PDF is not reported as a damaged index")
+    void largeNonPdf() throws IOException {
+        Path file = Files.writeString(dir.resolve("notes.pdf"), "x".repeat(4_096), StandardCharsets.US_ASCII);
+        var strict = new PdfWindowReader(reader.options().withLenientParseMaxBytes(16));
+
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> strict.withWindow(file, 1, 1, (document, window) -> text(document, window)));
+        assertEquals(PdfWindowReader.NOT_A_PDF, refused.getMessage());
+    }
+
+    @Test
     @DisplayName("the window deadline applies")
     void deadline() {
         Path pdf = PdfFixtures.writeTo(dir.resolve("plain.pdf"), PdfFixtures.plain(3));

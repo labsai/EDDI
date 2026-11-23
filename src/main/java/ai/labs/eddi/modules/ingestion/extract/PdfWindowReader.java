@@ -22,6 +22,7 @@ import org.apache.pdfbox.pdmodel.graphics.shading.PDShading;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -82,6 +83,20 @@ public final class PdfWindowReader {
      */
     public static final long DEFAULT_LENIENT_PARSE_MAX_BYTES = 20L * 1024 * 1024;
 
+    /**
+     * Cross-reference entries a strictly parsed file may declare. PDFBox holds each
+     * in a map, at roughly a hundred bytes, in every window; half a million is far
+     * more than a 5,000-page document needs and stays well inside a 256 MB heap.
+     */
+    public static final long DEFAULT_MAX_XREF_ENTRIES = 500_000;
+
+    /**
+     * Pages a document read in windows may have. Every window walks the whole page
+     * tree and so holds every page's dictionary; twice the 5,000 pages large
+     * documents are planned for.
+     */
+    public static final int DEFAULT_MAX_PAGES = 10_000;
+
     /** Heap the stream cache may use before it spills to the scratch directory. */
     static final long DEFAULT_MAIN_MEMORY_BYTES = 8L * 1024 * 1024;
 
@@ -127,15 +142,20 @@ public final class PdfWindowReader {
      *            how long one window may take
      * @param lenientParseMaxBytes
      *            files above this size are parsed strictly
+     * @param maxXrefEntries
+     *            cross-reference entries a strictly parsed file may declare
+     * @param maxPages
+     *            pages the document may have
      */
     public record Options(Path scratchDir, long mainMemoryBytes, long scratchBytes, long maxDecodedBytes,
-            Duration windowDeadline, long lenientParseMaxBytes) {
+            Duration windowDeadline, long lenientParseMaxBytes, long maxXrefEntries, int maxPages) {
 
         public Options {
             if (scratchDir == null) {
                 throw new IllegalArgumentException("a scratch directory is required");
             }
-            if (mainMemoryBytes <= 0 || scratchBytes < 0 || maxDecodedBytes <= 0 || lenientParseMaxBytes < 0) {
+            if (mainMemoryBytes <= 0 || scratchBytes < 0 || maxDecodedBytes <= 0 || lenientParseMaxBytes < 0
+                    || maxXrefEntries <= 0 || maxPages <= 0) {
                 throw new IllegalArgumentException("sizes must be positive");
             }
             if (windowDeadline == null || windowDeadline.isNegative() || windowDeadline.isZero()) {
@@ -151,18 +171,25 @@ public final class PdfWindowReader {
             ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
             return new Options(scratchDir, DEFAULT_MAIN_MEMORY_BYTES, bounds.maxUncompressedBytes(),
                     bounds.maxDecodedBytes(), windowDeadline == null ? DEFAULT_WINDOW_DEADLINE : windowDeadline,
-                    DEFAULT_LENIENT_PARSE_MAX_BYTES);
+                    DEFAULT_LENIENT_PARSE_MAX_BYTES, DEFAULT_MAX_XREF_ENTRIES, DEFAULT_MAX_PAGES);
         }
 
         /** The same, with another strict-parse threshold. */
         public Options withLenientParseMaxBytes(long bytes) {
-            return new Options(scratchDir, mainMemoryBytes, scratchBytes, maxDecodedBytes, windowDeadline, bytes);
+            return new Options(scratchDir, mainMemoryBytes, scratchBytes, maxDecodedBytes, windowDeadline, bytes,
+                    maxXrefEntries, maxPages);
         }
 
         /** The same, with another per-window deadline. */
         public Options withWindowDeadline(Duration deadline) {
             return new Options(scratchDir, mainMemoryBytes, scratchBytes, maxDecodedBytes, deadline,
-                    lenientParseMaxBytes);
+                    lenientParseMaxBytes, maxXrefEntries, maxPages);
+        }
+
+        /** The same, with other caps on cross-reference entries and pages. */
+        public Options withCaps(long xrefEntries, int pages) {
+            return new Options(scratchDir, mainMemoryBytes, scratchBytes, maxDecodedBytes, windowDeadline,
+                    lenientParseMaxBytes, xrefEntries, pages);
         }
     }
 
@@ -239,7 +266,7 @@ public final class PdfWindowReader {
             if (document.isEncrypted()) {
                 throw new UnreadableDocumentException(ENCRYPTED);
             }
-            PdfStructureExtractor.requireReadablePageTree(document, window.deadline());
+            PdfStructureExtractor.requireReadablePageTree(document, window.deadline(), options.maxPages());
             return op.apply(document, window);
         } catch (UnreadableDocumentException e) {
             throw e;
@@ -253,6 +280,14 @@ public final class PdfWindowReader {
         RandomAccessRead source;
         try {
             lenient = Files.size(pdf) <= options.lenientParseMaxBytes();
+            if (!lenient) {
+                if (!hasPdfHeader(pdf)) {
+                    throw new UnreadableDocumentException(NOT_A_PDF);
+                }
+                // Before PDFBox builds its map of every entry, which strict parsing
+                // does not bound.
+                PdfXrefBound.requireWithin(pdf, options.maxXrefEntries());
+            }
             source = new RandomAccessReadBufferedFile(pdf);
         } catch (IOException e) {
             throw new UnreadableDocumentException(NOT_A_PDF, e);
@@ -270,6 +305,19 @@ public final class PdfWindowReader {
             closeQuietly(source, e);
             throw e;
         }
+    }
+
+    /**
+     * Whether {@code %PDF-} occurs in the first kilobyte, where readers look for
+     * it.
+     */
+    private static boolean hasPdfHeader(Path pdf) throws IOException {
+        byte[] head = new byte[1024];
+        int read;
+        try (var in = Files.newInputStream(pdf)) {
+            read = in.readNBytes(head, 0, head.length);
+        }
+        return new String(head, 0, read, StandardCharsets.ISO_8859_1).contains("%PDF-");
     }
 
     private static void closeQuietly(RandomAccessRead source, Throwable cause) {

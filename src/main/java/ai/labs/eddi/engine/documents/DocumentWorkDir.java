@@ -20,6 +20,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -27,9 +28,14 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -45,10 +51,10 @@ import java.util.concurrent.locks.ReentrantLock;
  * its previous incarnation left — and holds an exclusive lock on a file in it
  * for as long as it runs. A second live JVM with the same node id (two dev
  * instances on one host) finds the lock taken and uses
- * {@code node-<nodeId>-<bootId>} instead, and sweeps nothing of the first's. At
- * startup a node also removes such per-boot directories of its own node id
- * whose lock nobody holds any more: their owner is gone. A directory whose lock
- * is held is never touched.
+ * {@code node-<nodeId>.boot-<bootId>} instead, and sweeps nothing of the
+ * first's. At startup a node also removes such per-boot directories of its own
+ * node id whose lock nobody holds any more: their owner is gone. A directory
+ * whose lock is held is never touched.
  *
  * <p>
  * <b>A byte budget.</b> {@link #reserve} blocks until the bytes are free, up to
@@ -57,8 +63,11 @@ import java.util.concurrent.locks.ReentrantLock;
  * the file it copies, which is deleted on {@link WorkFile#close()}.
  *
  * <p>
- * Directories are created owner-only ({@code 0700}) and files owner-only
- * ({@code 0600}) where the file system has POSIX permissions.
+ * Directories and the lock file are created owner-only ({@code 0700},
+ * {@code 0600}) where the file system has POSIX permissions, and a directory
+ * that is a link, belongs to another user or is writable by others is refused
+ * rather than swept. Copied files are {@code 0600}; PDFBox's scratch files take
+ * the process umask, inside the owner-only directory.
  */
 @ApplicationScoped
 public class DocumentWorkDir {
@@ -69,6 +78,13 @@ public class DocumentWorkDir {
     static final String LOCK_FILE = ".lock";
 
     static final String DIRECTORY_PREFIX = "node-";
+
+    /**
+     * Between a node id and a boot id in a per-boot directory's name. A node id
+     * never contains a dot ({@link #fileNameToken}), so {@code node-a.boot-*} can
+     * never name the directory of node {@code a-b}.
+     */
+    static final String BOOT_SEPARATOR = ".boot-";
 
     /** The default {@code eddi.attachments.large.work-dir-max-bytes}: 4 GiB. */
     public static final long DEFAULT_MAX_BYTES = 4L * 1024 * 1024 * 1024;
@@ -157,14 +173,16 @@ public class DocumentWorkDir {
         createOwnerOnly(base);
         Path stable = base.resolve(DIRECTORY_PREFIX + nodeId);
         createOwnerOnly(stable);
+        requirePrivate(stable);
         if (tryLock(stable)) {
             directory = stable;
             sweep(stable);
             removeAbandonedBootDirectories();
             return;
         }
-        Path perBoot = base.resolve(DIRECTORY_PREFIX + nodeId + "-" + bootId);
+        Path perBoot = base.resolve(DIRECTORY_PREFIX + nodeId + BOOT_SEPARATOR + bootId);
         createOwnerOnly(perBoot);
+        requirePrivate(perBoot);
         if (!tryLock(perBoot)) {
             throw new IOException("another process holds both " + stable + " and " + perBoot);
         }
@@ -175,8 +193,7 @@ public class DocumentWorkDir {
 
     /** Takes this instance's lock in {@code dir}; false when someone holds it. */
     private boolean tryLock(Path dir) throws IOException {
-        FileChannel channel = FileChannel.open(dir.resolve(LOCK_FILE), StandardOpenOption.CREATE,
-                StandardOpenOption.WRITE);
+        FileChannel channel = openLockFile(dir);
         FileLock taken = tryLock(channel);
         if (taken == null) {
             channel.close();
@@ -202,14 +219,13 @@ public class DocumentWorkDir {
      * left alone.
      */
     private void removeAbandonedBootDirectories() {
-        String prefix = DIRECTORY_PREFIX + nodeId + "-";
+        String prefix = DIRECTORY_PREFIX + nodeId + BOOT_SEPARATOR;
         try (DirectoryStream<Path> siblings = Files.newDirectoryStream(base, prefix + "*")) {
             for (Path sibling : siblings) {
-                if (!Files.isDirectory(sibling, LinkOption.NOFOLLOW_LINKS)) {
+                if (!Files.isDirectory(sibling, LinkOption.NOFOLLOW_LINKS) || !isPrivate(sibling)) {
                     continue;
                 }
-                try (FileChannel channel = FileChannel.open(sibling.resolve(LOCK_FILE), StandardOpenOption.CREATE,
-                        StandardOpenOption.WRITE)) {
+                try (FileChannel channel = openLockFile(sibling)) {
                     FileLock abandoned = tryLock(channel);
                     if (abandoned == null) {
                         continue;
@@ -260,6 +276,70 @@ public class DocumentWorkDir {
             Files.deleteIfExists(path);
         } catch (IOException e) {
             LOGGER.warnf("Could not delete %s: %s", path, e.getMessage());
+        }
+    }
+
+    /** Opens (creating, owner-only where it can) the lock file of {@code dir}. */
+    private static FileChannel openLockFile(Path dir) throws IOException {
+        Path lockFile = dir.resolve(LOCK_FILE);
+        if (!Files.exists(lockFile, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                Files.createFile(lockFile, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+            } catch (UnsupportedOperationException noPosix) {
+                Files.createFile(lockFile);
+            } catch (FileAlreadyExistsException raced) {
+                // another process made it first; it is opened below either way
+            }
+        }
+        return FileChannel.open(lockFile, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Refuses a directory this process must not sweep: a link, or — where the file
+     * system has owners and POSIX permissions — one another user owns or others may
+     * write to. The base may be a shared temp directory, where anyone can create a
+     * directory under the name this one would use.
+     *
+     * @throws IOException
+     *             naming the reason
+     */
+    static void requirePrivate(Path dir) throws IOException {
+        if (!isPrivate(dir)) {
+            throw new IOException(dir + " is a link, belongs to another user, or is writable by others");
+        }
+    }
+
+    private static boolean isPrivate(Path dir) {
+        try {
+            if (Files.isSymbolicLink(dir) || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+                return false;
+            }
+            var view = Files.getFileAttributeView(dir, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+            if (view == null) {
+                // No POSIX owners or modes (Windows): ACLs decide, and the default
+                // temp directory there is per user.
+                return true;
+            }
+            PosixFileAttributes attributes = view.readAttributes();
+            Set<PosixFilePermission> permissions = attributes.permissions();
+            if (permissions.contains(PosixFilePermission.GROUP_WRITE)
+                    || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+                return false;
+            }
+            // The owner this process gives new files: of a probe it creates in the
+            // temp directory, which works where no user name resolves (containers).
+            return attributes.owner().equals(processOwner());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static UserPrincipal processOwner() throws IOException {
+        Path probe = Files.createTempFile("eddi-owner-", ".probe");
+        try {
+            return Files.getOwner(probe);
+        } finally {
+            Files.deleteIfExists(probe);
         }
     }
 
@@ -349,6 +429,7 @@ public class DocumentWorkDir {
         Path dir = directory();
         Reservation reservation = reserve(reserveBytes, wait);
         Path file = null;
+        boolean handedOver = false;
         try {
             file = store.materialize(storageRef, requestingConversationId, dir);
             long size = Files.size(file);
@@ -356,13 +437,17 @@ public class DocumentWorkDir {
                 throw new BudgetExceeded("The file is larger (" + size + " bytes) than the space reserved for it ("
                         + reserveBytes + " bytes).");
             }
-            return new WorkFile(file, reservation);
+            WorkFile copy = new WorkFile(file, reservation);
+            handedOver = true;
+            return copy;
         } catch (IOException e) {
-            cleanUp(file, reservation);
             throw new AttachmentStoreException("Failed to measure the copied attachment", e);
-        } catch (RuntimeException | AttachmentStoreException e) {
-            cleanUp(file, reservation);
-            throw e;
+        } finally {
+            // Whatever went wrong — an Error included — neither the file nor the
+            // bytes outlive a copy nobody holds.
+            if (!handedOver) {
+                cleanUp(file, reservation);
+            }
         }
     }
 

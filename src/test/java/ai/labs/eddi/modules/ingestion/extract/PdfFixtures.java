@@ -341,6 +341,12 @@ public final class PdfFixtures {
         return rawPdf(objects.stream().map(o -> o.getBytes(StandardCharsets.US_ASCII)).toList());
     }
 
+    /** How many objects {@link #deepPageTree(int)} writes. */
+    public static int deepPageTreeObjects(int depth) {
+        String text = new String(deepPageTree(depth), StandardCharsets.ISO_8859_1);
+        return text.split(" 0 obj\n", -1).length - 1;
+    }
+
     /**
      * {@link #deepPageTree(int)} with its {@code startxref} pointing nowhere and
      * its cross-reference table unrecognisable, so PDFBox's parser rebuilds the

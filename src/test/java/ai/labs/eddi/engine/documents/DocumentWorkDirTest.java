@@ -16,6 +16,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -106,14 +109,38 @@ class DocumentWorkDirTest {
             Path secondDir = workDir("a", "boot2", 1024).directory();
 
             assertNotEquals(firstDir, secondDir);
-            assertEquals(base.resolve("node-a-boot2").toAbsolutePath().normalize(), secondDir);
+            assertEquals(base.resolve("node-a.boot-boot2").toAbsolutePath().normalize(), secondDir);
             assertTrue(Files.exists(inUse), "the first process's file survives");
+        }
+
+        @Test
+        @DisplayName("another node whose id extends this one's is never taken for a per-boot directory")
+        void nodeIdPrefixIsNotAPerBootDirectory() throws IOException {
+            Path otherNode = Files.createDirectories(base.resolve("node-a-b"));
+            Path othersFile = Files.writeString(otherNode.resolve("eddi-blob-1.bin"), "node a-b's, it is down");
+
+            workDir("a", "boot1", 1024).directory();
+
+            assertTrue(Files.exists(othersFile), "node a-b's directory is not node a's to clean");
+        }
+
+        @Test
+        @DisplayName("a directory others may write to is refused, not swept (POSIX)")
+        void sharedDirectoryRefused() throws IOException {
+            Path own = Files.createDirectories(base.resolve("node-a"));
+            assumeTrue(Files.getFileAttributeView(own, PosixFileAttributeView.class) != null, "POSIX only");
+            Files.setPosixFilePermissions(own, PosixFilePermissions.fromString("rwxrwxrwx"));
+            Path planted = Files.writeString(own.resolve("planted"), "someone else's");
+
+            var workDir = workDir("a", "boot1", 1024);
+            assertThrows(IllegalStateException.class, workDir::directory);
+            assertTrue(Files.exists(planted));
         }
 
         @Test
         @DisplayName("a per-boot directory whose owner is gone is removed; one whose owner lives is not")
         void abandonedPerBootDirectories() throws IOException {
-            Path abandoned = Files.createDirectories(base.resolve("node-a-oldboot"));
+            Path abandoned = Files.createDirectories(base.resolve("node-a.boot-oldboot"));
             Files.writeString(abandoned.resolve("eddi-blob-1.bin"), "left behind");
             var live = workDir("a", "boot1", 1024);
             live.directory();
@@ -274,6 +301,18 @@ class DocumentWorkDirTest {
                     .thenThrow(new AttachmentStoreException("backend unreachable"));
 
             assertThrows(AttachmentStoreException.class,
+                    () -> workDir.materialize(store, REF, CONVERSATION, 600, Duration.ZERO));
+            assertEquals(0, workDir.usedBytes());
+        }
+
+        @Test
+        @DisplayName("an Error from the store releases the reservation too")
+        void storeError() throws Exception {
+            var workDir = workDir("a", "boot1", 1_000);
+            var store = mock(IAttachmentStore.class);
+            when(store.materialize(eq(REF), eq(CONVERSATION), any())).thenThrow(new StackOverflowError("deep"));
+
+            assertThrows(StackOverflowError.class,
                     () -> workDir.materialize(store, REF, CONVERSATION, 600, Duration.ZERO));
             assertEquals(0, workDir.usedBytes());
         }

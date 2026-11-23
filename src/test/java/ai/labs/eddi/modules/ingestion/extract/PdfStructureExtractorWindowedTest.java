@@ -184,13 +184,30 @@ class PdfStructureExtractorWindowedTest {
     }
 
     @Test
-    @DisplayName("the window deadline applies to every pass")
+    @DisplayName("a window deadline that cannot be met refuses the read (the pre-scan is the first to see it)")
     void windowDeadline() {
         Path file = PdfFixtures.writeTo(dir.resolve("doc.pdf"), PdfFixtures.plain(3));
 
         var refused = assertThrows(UnreadableDocumentException.class, () -> extractor.manifest(file, "ref", null,
                 null, reading.withWindowDeadline(Duration.ofNanos(1)), 50));
         assertEquals(PdfWindowReader.TOO_LONG, refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("blocks can skip the pre-scan a manifest already ran; the decode budget still holds")
+    void blocksWithoutPreScan() {
+        Path bomb = PdfFixtures.writeTo(dir.resolve("bomb.pdf"), PdfFixtures.flateBomb(8 * 1024 * 1024));
+        var limits = new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024);
+        var tight = PdfWindowReader.Options.of(reading.scratchDir(), limits, null);
+        var unit = new DocumentUnit("u1", null, 1, null, 1, 1, 0, 0, 0, 0);
+
+        var scanned = assertThrows(UnreadableDocumentException.class,
+                () -> extractor.blocks(bomb, unit, null, limits, tight, 50));
+        assertTrue(scanned.getMessage().contains("compressed stream that expands"), scanned.getMessage());
+        var budgeted = assertThrows(UnreadableDocumentException.class,
+                () -> extractor.blocks(bomb, unit, null, limits, tight, 50, false));
+        assertTrue(budgeted.getMessage().contains("one window of pages"), budgeted.getMessage());
+        assertThrows(UnreadableDocumentException.class, () -> PdfStructureExtractor.preScan(bomb, limits, tight));
     }
 
     @Test
