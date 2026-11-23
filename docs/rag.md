@@ -282,7 +282,7 @@ still retrievable. The Manager's drop zone offers the same thing as a checkbox.
 
 A replacement holds the document's **lease** from before it embeds until the previous version is
 removed, so two replacements of one name do not interleave — and neither does a replacement and a
-delete of that name. In a cluster the lease is cluster-wide (a `rag.<hash>` key in the `LEASES`
+delete of that name — as far as a lease can guarantee it (best-effort; see the end of this paragraph). In a cluster the lease is cluster-wide (a `rag.<hash>` key in the `LEASES`
 bucket, see [clustering](clustering.md)), so this holds when several instances share one vector
 store: a replacement that arrives while another instance is replacing or deleting the same name waits
 for it (up to 30 minutes, then fails with `failed: Document '…' is being replaced or deleted on
@@ -292,7 +292,9 @@ removes the previous version: an instance cut off from NATS stops there with `fa
 lost the lease …` instead of overwriting what another instance did meanwhile — if it had already
 stored the new version, the status also carries the both-versions-may-remain `warning`. The checks narrow
 the window but cannot close it — this is exclusion with checks, not a fence: a write already issued when
-the lease expires still lands, as with any vector store that cannot check a token. While NATS is
+the lease expires still lands, and so does one from a holder that paused (a long GC pause, a stalled
+thread) after its check and resumed after another instance took the document over, as with any vector
+store that cannot check a token. While NATS is
 unreachable, leases follow `eddi.cluster.degraded.turns`: `local` (the default) replaces and deletes under
 the instance-local lock only — a node cut off from NATS does not wait for an operation on a connected one —
 and `reject` fails the replacement and answers a delete `409`. Appending (`replace=false`) takes no lease.
@@ -313,7 +315,7 @@ EDIT on the knowledge base, like ingesting, and it is synchronous.
 | `200` `{"status": "deleted", ...}` | The document's chunks are gone. A name nothing was ingested under is also `200`: there is nothing left to remove |
 | `200` with `warning` | The vector store cannot delete by metadata, so nothing was removed and the text is still retrievable (`status: "not_deleted"`) |
 | `400` | `documentName` is missing, blank or `unnamed` — every document ingested without a name shares `unnamed`, and deleting that would delete all of them |
-| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement or delete of the same name — on this or another instance — still holds the document after 30 seconds, or its cluster lease cannot be taken (see above); nothing was removed, retry |
+| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement or delete of the same name — on this or another instance — still holds the document after 30 seconds (about 1.25 seconds more at most: the cluster lease is always given one second plus scheduling slack, so a free one can still be granted), or its cluster lease cannot be taken (see above); nothing was removed, retry |
 | `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
 
 **A delete and a replacement of one name do not interleave, as far as the lease can guarantee it.** Both take the same per-document lease, so

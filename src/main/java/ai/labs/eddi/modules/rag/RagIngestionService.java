@@ -127,8 +127,9 @@ public class RagIngestionService {
 
     /**
      * The least the lease wait is given, even when the lock wait used up the
-     * caller's time: one lease round trip, so a free lease is still granted. It is
-     * the most a caller's bound can be overshot by.
+     * caller's time: one lease round trip, so a free lease is still granted.
+     * Together with {@link #ACQUIRE_SLACK} it is the most a caller's bound can be
+     * overshot by: about 1.25 seconds, plus ordinary scheduling overhead.
      */
     private static final Duration MIN_LEASE_WAIT = Duration.ofSeconds(1);
 
@@ -481,7 +482,10 @@ public class RagIngestionService {
      */
     Duration deleteLockTimeout = Duration.ofSeconds(30);
 
-    /** Shortens or lengthens the wait of {@link #delete}; for tests and tuning. */
+    /**
+     * Shortens or lengthens the wait of {@link #delete}; for tests and tuning. The
+     * wait can run over by up to {@code MIN_LEASE_WAIT} plus {@code ACQUIRE_SLACK}.
+     */
     public void setDeleteLockTimeout(Duration deleteLockTimeout) {
         this.deleteLockTimeout = deleteLockTimeout;
     }
