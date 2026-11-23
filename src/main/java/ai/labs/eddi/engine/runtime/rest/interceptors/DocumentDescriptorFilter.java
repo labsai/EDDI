@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
+import ai.labs.eddi.engine.org.OrgRequest;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.RestUtilities;
@@ -47,6 +48,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
+    private final OrgRequest orgRequest;
 
     private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
 
@@ -55,15 +57,22 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
 
     @Inject
     public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard, OrgRequest orgRequest) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.orgRequest = orgRequest;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
+        // a response filter runs after the resource method, outside its org binding
+        // (plan §6.2)
+        orgRequest.runBound(() -> writeDescriptors(contextRequest, contextResponse));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void writeDescriptors(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
         try {
             int httpStatus = contextResponse.getStatus();
 

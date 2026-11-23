@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
@@ -33,6 +34,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @author ginccc
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class IllegalArgumentExceptionMapper implements ExceptionMapper<IllegalArgumentException> {
 
     private static final Logger LOGGER = Logger.getLogger(IllegalArgumentExceptionMapper.class);

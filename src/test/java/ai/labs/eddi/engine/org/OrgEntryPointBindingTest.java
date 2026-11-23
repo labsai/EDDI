@@ -205,6 +205,35 @@ class OrgEntryPointBindingTest {
         return text.substring(from, to);
     }
 
+    /** Code that runs outside resource methods (plan Appendix A.12). */
+    private static final Pattern OUTSIDE_RESOURCE_METHODS = Pattern.compile(
+            "implements[^{]*\\b(ContainerRequestFilter|ContainerResponseFilter|SecurityIdentityAugmentor|ExceptionMapper)\\b"
+                    + "|@Server(Request|Response)Filter|@ServerExceptionMapper|@Observes\\s+Router\\b|@Route\\(");
+    private static final Pattern BINDS_REQUEST = Pattern.compile("orgRequest\\.(runBound|callBound)\\(");
+    private static final Pattern NEUTRAL = Pattern.compile("(?m)^@OrgNeutral\\(\"([^\"]+)\"\\)\\s*$");
+
+    @Test
+    void everyFilterMapperAugmentorAndRouteSaysHowItTreatsTheOrg() throws IOException {
+        List<String> unclassified = new ArrayList<>();
+        int found = 0;
+        for (Source s : sources()) {
+            if (!OUTSIDE_RESOURCE_METHODS.matcher(s.text()).find() || isEntryPoint(s)) {
+                continue;
+            }
+            found++;
+            Matcher neutral = NEUTRAL.matcher(s.text());
+            boolean classified = BINDS_REQUEST.matcher(s.text()).find() || PLATFORM.matcher(s.text()).find()
+                    || neutral.find() && neutral.group(1).length() >= 20;
+            if (!classified) {
+                unclassified.add(s.name());
+            }
+        }
+        assertTrue(found >= 25, "the scan found only " + found + " filters, mappers and routes; the pattern is probably broken");
+        assertTrue(unclassified.isEmpty(), "Code outside resource methods runs without the resource's org binding (plan §6.2). "
+                + "Bind the work that touches org data with OrgRequest.runBound/callBound, or mark the class "
+                + "@OrgNeutral(\"why it touches no org data\") or @PlatformPlane(\"why\"): " + unclassified);
+    }
+
     @Test
     void noRestInterfaceCarriesTheBinding() throws IOException {
         List<String> onInterfaces = new ArrayList<>();

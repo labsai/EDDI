@@ -5,6 +5,7 @@
 package ai.labs.eddi.ui;
 
 import ai.labs.eddi.configs.branding.BrandRequest;
+import ai.labs.eddi.engine.org.OrgRequest;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
@@ -42,17 +43,20 @@ public class BrandedShellRoute {
             "/chat.html", BrandedShell.CHAT);
 
     private final BrandedShellRenderer renderer;
+    private final OrgRequest orgRequest;
 
     @Inject
-    public BrandedShellRoute(BrandedShellRenderer renderer) {
+    public BrandedShellRoute(BrandedShellRenderer renderer, OrgRequest orgRequest) {
         this.renderer = renderer;
+        this.orgRequest = orgRequest;
     }
 
     void register(@Observes Router router) {
         for (var entry : PATHS.entrySet()) {
             BrandedShell shell = entry.getValue();
             router.route(entry.getKey()).order(ORDER).method(HttpMethod.GET).method(HttpMethod.HEAD)
-                    .blockingHandler(context -> handle(context, shell));
+                    // a raw Vert.x route runs outside any resource method's org binding (plan §6.2)
+                    .blockingHandler(context -> orgRequest.runBound(() -> handle(context, shell)));
         }
     }
 

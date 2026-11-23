@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security.spaces.directory;
 
+import ai.labs.eddi.engine.org.OrgContext;
+import ai.labs.eddi.engine.org.OrgId;
 import ai.labs.eddi.engine.security.spaces.CallerSpaces;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
@@ -11,6 +13,9 @@ import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.json.JsonValue;
 import jakarta.ws.rs.BadRequestException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.junit.jupiter.api.BeforeEach;
@@ -382,6 +387,28 @@ class UserDirectoryTest {
             assertEquals("alice@example.com", recorded.email());
             assertTrue(recorded.emailVerified());
             assertEquals(List.of(Subjects.team("engineering")), recorded.teams());
+        }
+
+        @Test
+        @DisplayName("the write on the executor thread runs bound to the caller's org (plan §6.3)")
+        void theAsyncWriteCarriesTheCallersOrg() throws Exception {
+            signedInAs("alice", "alice@example.com", Boolean.TRUE);
+            // a real other thread, so a missing hand-off would leave the write unbound
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                doAnswer(invocation -> pool.submit(invocation.<Runnable>getArgument(0)).get()).when(executor).execute(any());
+                AtomicReference<Optional<OrgId>> boundOrg = new AtomicReference<>();
+                doAnswer(invocation -> {
+                    boundOrg.set(OrgContext.current());
+                    return null;
+                }).when(store).upsert(any());
+
+                OrgContext.runAs(OrgId.DEFAULT, directory::recordCurrentCaller);
+
+                assertEquals(Optional.of(OrgId.DEFAULT), boundOrg.get());
+            } finally {
+                pool.shutdownNow();
+            }
         }
 
         @Test

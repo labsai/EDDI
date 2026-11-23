@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.hitl.oversight.rest;
 import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import ai.labs.eddi.engine.hitl.oversight.OversightWriteGuard;
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.core.Response;
@@ -29,6 +30,7 @@ import java.util.regex.Pattern;
  * @since 6.7.0
  */
 @Provider
+@OrgNeutral("refuses agent-originated writes by path and header; reads no stored data")
 public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
 
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");

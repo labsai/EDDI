@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.tenancy.rest;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -37,6 +38,7 @@ import java.util.Map;
  * @since 6.0.0
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class QuotaAccountingUnavailableExceptionMapper implements ExceptionMapper<QuotaAccountingUnavailableException> {
 
     @Override

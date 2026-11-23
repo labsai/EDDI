@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.rest.interceptors;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.container.PreMatching;
@@ -56,6 +57,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  */
 @PreMatching
 @Provider
+@OrgNeutral("rewrites legacy request paths; reads no data")
 public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     private static final Logger LOGGER = Logger.getLogger(LegacyPathRewriteFilter.class);
 

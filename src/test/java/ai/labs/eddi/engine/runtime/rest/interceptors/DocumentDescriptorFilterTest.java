@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.runtime.rest.interceptors;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgContext;
+import ai.labs.eddi.engine.org.OrgId;
+import ai.labs.eddi.engine.org.OrgTestRequests;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
@@ -15,6 +18,8 @@ import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.core.UriInfo;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -25,7 +30,9 @@ import java.lang.reflect.Method;
 import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.doAnswer;
 
 /**
  * Unit tests for {@link DocumentDescriptorFilter}.
@@ -48,7 +55,8 @@ class DocumentDescriptorFilterTest {
         // the ownership stamping it would otherwise apply has its own tests.
         resourceAccessGuard = mock(ResourceAccessGuard.class);
         when(resourceAccessGuard.stampNewDescriptor(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        filter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore, resourceAccessGuard);
+        filter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore, resourceAccessGuard,
+                OrgTestRequests.singleMode());
 
         // Inject UriInfo
         Field uriInfoField = DocumentDescriptorFilter.class.getDeclaredField("uriInfo");
@@ -402,6 +410,28 @@ class DocumentDescriptorFilterTest {
     @Nested
     @DisplayName("filter — POST 201 creates descriptor")
     class PostCreatesDescriptor {
+
+        @Test
+        @DisplayName("writes the descriptor bound to the request's org (a response filter runs outside the resource's binding)")
+        void writesTheDescriptorUnderTheRequestOrg() throws Exception {
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(response.getStatus()).thenReturn(201);
+            when(request.getMethod()).thenReturn("POST");
+            when(response.getHeaderString("Location")).thenReturn("eddi://ai.labs.agent/agentstore/agents/abcdef1234567890ab?version=1");
+            when(documentDescriptorStore.readDescriptor("abcdef1234567890ab", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("Not found"));
+            AtomicReference<Optional<OrgId>> boundOrg = new AtomicReference<>();
+            doAnswer(invocation -> {
+                boundOrg.set(OrgContext.current());
+                return null;
+            }).when(documentDescriptorStore).createDescriptor(any(), anyInt(), any());
+
+            filter.filter(request, response);
+
+            assertEquals(Optional.of(OrgId.DEFAULT), boundOrg.get());
+            assertEquals(Optional.empty(), OrgContext.current(), "the binding ends with the filter");
+        }
 
         @Test
         @DisplayName("should create descriptor for new resource on POST 201")

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.tenancy.rest;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -16,6 +17,7 @@ import java.util.Map;
  * Maps {@link QuotaExceededException} to HTTP 429 Too Many Requests.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class QuotaExceededExceptionMapper implements ExceptionMapper<QuotaExceededException> {
 
     private static final int TOO_MANY_REQUESTS = 429;

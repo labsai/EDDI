@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -30,6 +31,7 @@ import jakarta.ws.rs.ext.Provider;
  * An exception that already carries an entity is passed through untouched.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class ClientErrorExceptionMapper implements ExceptionMapper<ClientErrorException> {
 
     @Override

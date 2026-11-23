@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import ai.labs.eddi.integrations.channels.HmacSignatures;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.inject.Inject;
@@ -53,6 +54,7 @@ import java.util.List;
  * @since 6.1.0
  */
 @Provider
+@OrgNeutral("compares the bearer with the configured /v1 key; reads no stored data (per-org keys: plan §7.1)")
 public class OpenAiAuthFilter implements ContainerRequestFilter {
 
     private static final Logger LOGGER = Logger.getLogger(OpenAiAuthFilter.class);

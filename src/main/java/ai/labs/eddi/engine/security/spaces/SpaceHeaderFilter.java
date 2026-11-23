@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -30,6 +31,7 @@ import java.util.Map;
  * — or transfer it — deliberately.
  */
 @Provider
+@OrgNeutral("checks the X-EDDI-Space header against the caller's token; reads no stored data")
 public class SpaceHeaderFilter implements ContainerRequestFilter {
 
     private final SpaceContext spaceContext;

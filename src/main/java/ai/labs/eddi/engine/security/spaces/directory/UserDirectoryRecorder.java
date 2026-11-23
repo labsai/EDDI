@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.directory;
 
+import ai.labs.eddi.engine.org.OrgRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -22,14 +23,18 @@ import jakarta.ws.rs.ext.Provider;
 public class UserDirectoryRecorder implements ContainerRequestFilter {
 
     private final UserDirectory directory;
+    private final OrgRequest orgRequest;
 
     @Inject
-    public UserDirectoryRecorder(UserDirectory directory) {
+    public UserDirectoryRecorder(UserDirectory directory, OrgRequest orgRequest) {
         this.directory = directory;
+        this.orgRequest = orgRequest;
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        directory.recordCurrentCaller();
+        // a request filter runs before the resource method's org binding (plan §6.2);
+        // UserDirectory carries the binding on to its write executor
+        orgRequest.runBound(directory::recordCurrentCaller);
     }
 }

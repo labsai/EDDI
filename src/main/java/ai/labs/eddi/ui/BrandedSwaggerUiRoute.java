@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.branding.BrandingService;
 import ai.labs.eddi.configs.branding.model.BrandAsset;
 import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import ai.labs.eddi.configs.branding.model.ResolvedBrand;
+import ai.labs.eddi.engine.org.OrgRequest;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.vertx.core.buffer.Buffer;
@@ -69,14 +70,17 @@ public class BrandedSwaggerUiRoute {
     }
 
     private final BrandingService branding;
+    private final OrgRequest orgRequest;
     private final String root;
     private final Cache<Key, String> rendered = Caffeine.newBuilder().maximumSize(8).build();
 
     @Inject
     public BrandedSwaggerUiRoute(BrandingService branding,
             @ConfigProperty(name = "quarkus.swagger-ui.path", defaultValue = "swagger-ui") String swaggerPath,
-            @ConfigProperty(name = "quarkus.http.non-application-root-path", defaultValue = "q") String nonApplicationRoot) {
+            @ConfigProperty(name = "quarkus.http.non-application-root-path", defaultValue = "q") String nonApplicationRoot,
+            OrgRequest orgRequest) {
         this.branding = branding;
+        this.orgRequest = orgRequest;
         this.root = swaggerRoot(swaggerPath, nonApplicationRoot);
     }
 
@@ -101,7 +105,8 @@ public class BrandedSwaggerUiRoute {
 
     private void route(Router router, String path, String file) {
         router.route(path).order(BrandedShellRoute.ORDER).method(HttpMethod.GET).method(HttpMethod.HEAD)
-                .blockingHandler(context -> handle(context, file));
+                // a raw Vert.x route runs outside any resource method's org binding (plan §6.2)
+                .blockingHandler(context -> orgRequest.runBound(() -> handle(context, file)));
     }
 
     void handle(RoutingContext context, String file) {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -28,6 +29,7 @@ import java.util.Map;
  * @since 6.0.0
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class ProcessingRestrictionUnavailableExceptionMapper implements ExceptionMapper<ProcessingRestrictionUnavailableException> {
 
     @Override

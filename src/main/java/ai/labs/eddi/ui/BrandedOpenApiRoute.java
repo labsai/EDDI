@@ -7,6 +7,7 @@ package ai.labs.eddi.ui;
 import ai.labs.eddi.configs.branding.BrandRequest;
 import ai.labs.eddi.configs.branding.BrandingService;
 import ai.labs.eddi.configs.branding.model.ResolvedBrand;
+import ai.labs.eddi.engine.org.OrgRequest;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,20 +67,24 @@ public class BrandedOpenApiRoute {
             new YAMLFactory().disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER).enable(YAMLGenerator.Feature.MINIMIZE_QUOTES));
 
     private final BrandingService branding;
+    private final OrgRequest orgRequest;
     private final String path;
 
     @Inject
     public BrandedOpenApiRoute(BrandingService branding,
             @ConfigProperty(name = "quarkus.smallrye-openapi.path", defaultValue = "openapi") String openApiPath,
-            @ConfigProperty(name = "quarkus.http.non-application-root-path", defaultValue = "q") String nonApplicationRoot) {
+            @ConfigProperty(name = "quarkus.http.non-application-root-path", defaultValue = "q") String nonApplicationRoot,
+            OrgRequest orgRequest) {
         this.branding = branding;
+        this.orgRequest = orgRequest;
         this.path = BrandedSwaggerUiRoute.swaggerRoot(openApiPath, nonApplicationRoot);
     }
 
     void register(@Observes Router router) {
         for (String suffix : List.of("", ".json", ".yaml", ".yml")) {
             router.route(path + suffix).order(BrandedShellRoute.ORDER).method(HttpMethod.GET).method(HttpMethod.HEAD)
-                    .blockingHandler(this::handle);
+                    // a raw Vert.x route runs outside any resource method's org binding (plan §6.2)
+                    .blockingHandler(context -> orgRequest.runBound(() -> handle(context)));
         }
     }
 

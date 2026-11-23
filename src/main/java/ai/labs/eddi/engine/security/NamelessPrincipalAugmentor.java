@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.security.AuthenticationFailedException;
 import io.quarkus.security.identity.AuthenticationRequestContext;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -54,6 +55,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * throttled like the one above.
  */
 @ApplicationScoped
+@OrgNeutral("fills in a missing principal name; reads no stored data")
 public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
 
     private static final Logger LOGGER = Logger.getLogger(NamelessPrincipalAugmentor.class);

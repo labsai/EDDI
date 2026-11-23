@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.exception;
 
 import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -25,6 +26,7 @@ import jakarta.ws.rs.ext.Provider;
  * </p>
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class ConversationNotFoundExceptionMapper implements ExceptionMapper<ConversationNotFoundException> {
     @Override
     public Response toResponse(ConversationNotFoundException exception) {
