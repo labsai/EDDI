@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Scope;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -129,5 +131,14 @@ class PostgresAttachmentQuotaTest {
         assertTrue(sql.stream().noneMatch(statement -> statement.contains("pg_advisory")), sql.toString());
         verify(connection, never()).setAutoCommit(false);
         verify(preparedStatement).setString(4, "u1");
+    }
+
+    @Test
+    void theLockKeysAreTheOnesEveryReleaseUses() {
+        // An older node serializes on these exact keys; a changed spelling would let
+        // it and this one admit the same quota twice.
+        assertEquals("eddi-attachments-quota:conversation:c1", PostgresAttachmentStore.lockKey(new Lock(Scope.CONVERSATION, "c1")));
+        assertEquals("eddi-attachments-quota:user:u1", PostgresAttachmentStore.lockKey(new Lock(Scope.USER, "u1")));
+        assertEquals("eddi-attachments-source:r1", PostgresAttachmentStore.lockKey(new Lock(Scope.SOURCE, "r1")));
     }
 }
