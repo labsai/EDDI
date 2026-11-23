@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatUpcomingTime,
   toIsoWithOffset,
   zonedLocalInputToIso,
   isoToZonedLocalInput,
@@ -45,5 +46,28 @@ describe("toIsoWithOffset", () => {
   it("is empty for a missing or invalid timestamp", () => {
     expect(toIsoWithOffset(undefined)).toBe("");
     expect(toIsoWithOffset("garbage")).toBe("");
+  });
+});
+
+describe("formatUpcomingTime", () => {
+  const time = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  it("gives the time alone when it is today", () => {
+    const now = new Date(2026, 10, 21, 10, 0);
+    const later = new Date(2026, 10, 21, 14, 32);
+    expect(formatUpcomingTime(later, now)).toBe(time(later));
+  });
+
+  it("adds the date when it is not today, so tomorrow morning is not read as this morning", () => {
+    const now = new Date(2026, 10, 21, 22, 0);
+    const tomorrow = new Date(2026, 10, 22, 9, 0);
+    const text = formatUpcomingTime(tomorrow, now);
+    expect(text).not.toBe(time(tomorrow));
+    expect(text).toContain("22");
+  });
+
+  it("says nothing usable about nothing", () => {
+    expect(formatUpcomingTime(null)).toBe("—");
+    expect(formatUpcomingTime("not a date")).toBe("—");
   });
 });

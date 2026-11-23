@@ -788,6 +788,15 @@ public class ScheduleFireExecutor {
                     return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, null, 0.0,
                             false);
                 }
+                if (report.outcome() == IngestionReport.Outcome.THROTTLED && report.runId() == null) {
+                    // Held back by the throttle gate: nothing ran and nothing failed. The
+                    // reason goes into the fire log's text, as an email poll's outage does,
+                    // so the fire log says why this fire did no work.
+                    LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
+                            schedule.getName(), schedule.getId(), report.message());
+                    return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status,
+                            report.message(), 0.0, false);
+                }
                 if (!report.isSuccess()) {
                     LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
                             schedule.getName(), schedule.getId(), report.message());
@@ -885,7 +894,11 @@ public class ScheduleFireExecutor {
      */
     private static boolean isBenignOutcome(IngestionReport report) {
         var outcome = report.outcome();
-        return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
+        // THROTTLED: the embedding provider's quota stopped the run, which says
+        // nothing about the schedule. Not benign, every throttled run would add a
+        // FAILED row to the fire log (and a synchronous fire would count as failed).
+        return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED
+                || outcome == IngestionReport.Outcome.THROTTLED;
     }
 
     /**

@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.llm.impl.ThrottledEmbeddingModel;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
@@ -29,6 +30,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -44,6 +46,12 @@ import java.util.concurrent.locks.ReentrantLock;
 public class RagIngestionService {
 
     private static final Logger LOGGER = Logger.getLogger(RagIngestionService.class);
+
+    /**
+     * How long one direct ingestion may wait out the embedding provider's rate
+     * limit, in total, before it fails as throttled.
+     */
+    static final Duration DIRECT_INGESTION_MAX_WAIT = Duration.ofMinutes(10);
 
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
@@ -187,7 +195,12 @@ public class RagIngestionService {
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
-            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
+            // Bound to a deadline of its own: this runs on its own virtual thread, not a
+            // request thread, so it may wait out a provider's rate limit for longer than
+            // an unbound caller is allowed to.
+            EmbeddingModel model = ThrottledEmbeddingModel.boundTo(
+                    embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT),
+                    Instant.now().plus(DIRECT_INGESTION_MAX_WAIT));
             // For writing: an in-memory store built under another embedding
             // configuration is replaced rather than mixed with these vectors.
             EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);

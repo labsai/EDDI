@@ -14,12 +14,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -363,7 +369,10 @@ class EmbeddingModelFactoryTest {
 
             EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
 
-            assertFalse(model instanceof InputTypedEmbeddingModel,
+            // Unwrapped: the throttle decorator is always outermost on the ingestion
+            // side, and an instanceof on it would pass whatever is underneath.
+            EmbeddingModel underneath = assertInstanceOf(ThrottledEmbeddingModel.class, model).delegate();
+            assertFalse(underneath instanceof InputTypedEmbeddingModel,
                     "a pinned SEMANTIC_SIMILARITY must reach the provider, so no role may be attached");
         }
 
@@ -420,7 +429,8 @@ class EmbeddingModelFactoryTest {
 
             EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
 
-            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model);
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class,
+                    assertInstanceOf(ThrottledEmbeddingModel.class, model).delegate());
             assertEquals(EmbeddingInputType.DOCUMENT, typed.inputType());
         }
 
@@ -437,6 +447,143 @@ class EmbeddingModelFactoryTest {
                     "taskType is a Gemini parameter; it must not disable the role anywhere else");
             assertEquals(EmbeddingInputType.QUERY, typed.inputType());
         }
+    }
+
+    @Nested
+    @DisplayName("provider throttling is waited out on the ingestion side only")
+    class Throttling {
+
+        @Test
+        @DisplayName("the DOCUMENT role is wrapped outside the role decorator, with the default five retries")
+        void documentRoleWaitsOnThrottles() {
+            var config = createConfig("gemini", Map.of("apiKey", "test-key", "model", "gemini-embedding-2"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+
+            var throttled = assertInstanceOf(ThrottledEmbeddingModel.class, model);
+            assertEquals(ThrottledEmbeddingModel.DEFAULT_MAX_RETRIES, throttled.maxRetries());
+            assertTrue(throttled.retriesTransientFailures(), "Gemini's own retries are off, so the decorator retries");
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, throttled.delegate());
+            assertEquals(EmbeddingInputType.DOCUMENT, typed.inputType());
+            assertEquals(EmbeddingInputType.DOCUMENT, model.defaultRequestParameters().inputType(),
+                    "the role still reaches every request through the decorator");
+        }
+
+        @Test
+        @DisplayName("the QUERY role never waits on a throttle")
+        void queryRoleIsNotWrapped() {
+            var config = createConfig("gemini", Map.of("apiKey", "test-key", "model", "gemini-embedding-2"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            assertFalse(model instanceof ThrottledEmbeddingModel, "a user is waiting for this answer");
+            assertEquals(EmbeddingInputType.QUERY, assertInstanceOf(InputTypedEmbeddingModel.class, model).inputType());
+        }
+
+        @Test
+        @DisplayName("a configured maxRetries is the decorator's, not the provider's, for ingestion")
+        void configuredRetriesMoveToTheDecorator() {
+            var config = createConfig("gemini", Map.of("apiKey", "test-key", "maxRetries", "7"));
+
+            var throttled = assertInstanceOf(ThrottledEmbeddingModel.class,
+                    factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+
+            assertEquals(7, throttled.maxRetries());
+        }
+
+        @Test
+        @DisplayName("the provider is built with maxRetries 0 for ingestion and unchanged for queries")
+        void providerRetriesOffForIngestionOnly() {
+            Map<String, String> params = Map.of("apiKey", "k", "maxRetries", "7");
+
+            assertEquals("0", EmbeddingModelFactory.providerParameters("gemini", params, EmbeddingInputType.DOCUMENT)
+                    .get("maxRetries"));
+            assertEquals("0", EmbeddingModelFactory.providerParameters("openai", Map.of("apiKey", "k"),
+                    EmbeddingInputType.DOCUMENT).get("maxRetries"), "set even when nothing was configured");
+            assertSame(params, EmbeddingModelFactory.providerParameters("gemini", params, EmbeddingInputType.QUERY));
+        }
+
+        /**
+         * The client the factory really builds, not the parameter map: the provider's
+         * own {@code maxRetries} field is 0 for ingestion, and the configured value for
+         * queries. A provider dropped from the set the decorator owns fails here.
+         */
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("ai.labs.eddi.modules.llm.impl.EmbeddingModelFactoryTest#langchain4jClientProviders")
+        @DisplayName("a factory-built DOCUMENT client has its own retries off; the QUERY client keeps them")
+        void builtDocumentClientHasRetriesOff(String provider, Map<String, String> params) throws Exception {
+            var withRetries = new HashMap<>(params);
+            withRetries.put("maxRetries", "4");
+            var config = createConfig(provider, withRetries);
+
+            EmbeddingModel document = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel query = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            assertEquals(0, providerMaxRetries(document), provider + " ingestion client retries");
+            assertEquals(4, providerMaxRetries(query), provider + " query client retries");
+            assertEquals(4, assertInstanceOf(ThrottledEmbeddingModel.class, document).maxRetries(),
+                    "the configured retries are the decorator's");
+        }
+
+        @Test
+        @DisplayName("the unbound wait and the batch size reach the decorator")
+        void configuredWaitAndBatchSize() {
+            factory.unboundMaxWait = Duration.ofSeconds(3);
+            factory.embedBatchSize = 25;
+
+            var throttled = assertInstanceOf(ThrottledEmbeddingModel.class, factory.getOrCreate(
+                    createConfig("gemini", Map.of("apiKey", "test-key")), EmbeddingInputType.DOCUMENT));
+
+            assertEquals(Duration.ofSeconds(3), throttled.unboundMaxWait());
+            assertEquals(25, throttled.batchSize());
+        }
+
+        @Test
+        @DisplayName("a provider whose SDK retries by itself keeps its retries, and the decorator adds none for outages")
+        void sdkProvidersKeepTheirRetries() {
+            Map<String, String> params = Map.of("project", "p", "maxRetries", "4");
+            assertSame(params, EmbeddingModelFactory.providerParameters("vertex", params, EmbeddingInputType.DOCUMENT));
+
+            var throttled = assertInstanceOf(ThrottledEmbeddingModel.class,
+                    factory.getOrCreate(createConfig("cohere", Map.of("apiKey", "test-key")), EmbeddingInputType.DOCUMENT));
+            assertFalse(throttled.retriesTransientFailures());
+        }
+    }
+
+    static Stream<Arguments> langchain4jClientProviders() {
+        return Stream.of(
+                Arguments.of("openai", Map.of("apiKey", "test-key", "model", "text-embedding-3-small")),
+                Arguments.of("ollama", Map.of("model", "nomic-embed-text")),
+                Arguments.of("mistral", Map.of("apiKey", "test-key")));
+    }
+
+    /**
+     * The {@code maxRetries} the provider's langchain4j client was built with, read
+     * from its private field under every EDDI decorator.
+     */
+    private static int providerMaxRetries(EmbeddingModel model) throws ReflectiveOperationException {
+        EmbeddingModel current = model;
+        while (current instanceof ThrottledEmbeddingModel || current instanceof InputTypedEmbeddingModel) {
+            current = current instanceof ThrottledEmbeddingModel throttled
+                    ? throttled.delegate()
+                    : (EmbeddingModel) readField(current, "delegate");
+        }
+        Object value = readField(current, "maxRetries");
+        assertNotNull(value, current.getClass().getSimpleName() + " carries no maxRetries");
+        return (Integer) value;
+    }
+
+    private static Object readField(Object target, String name) throws ReflectiveOperationException {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException e) {
+                // Declared further up.
+            }
+        }
+        throw new NoSuchFieldException(name + " on " + target.getClass().getName());
     }
 
     private RagConfiguration createConfig(String provider, Map<String, String> params) {

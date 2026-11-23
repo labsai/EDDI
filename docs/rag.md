@@ -1076,11 +1076,80 @@ embedding call each, while the document listing returns only ingestion state and
 
 Each run row carries, besides its counters, **why it stopped** (`stopReason`: `COMPLETED`, or the limit
 it hit — `PAGE_LIMIT`, `FETCH_LIMIT`, `BYTE_LIMIT`, `TIME_LIMIT` — or `CANCELLED`, which also covers a
-run that was superseded or reached its chunk budget), **what started it** (`trigger`: `MANUAL` or
+run that was superseded or reached its chunk budget, or `THROTTLED`, below), **what started it** (`trigger`: `MANUAL` or
 `SCHEDULED`; absent on rows written before it was recorded) and how many documents were **skipped** for
 having no text worth embedding. A running run writes its counters every couple of seconds
 (`IIngestionStateStore.reportProgress`), fenced on the row still being `RUNNING`, so a late write can
 neither reopen nor overwrite a finished run. A run cancelled at shutdown keeps the counters it had got to.
+
+#### When the embedding provider throttles
+
+An embedding provider's quota belongs to its project, not to any document: once a free-tier Gemini key
+has spent its 100 requests a minute, every call fails until the window turns. Ingestion therefore treats
+a provider's "slow down" (HTTP 429) as a reason to **wait**, or to **stop and come back**, never as a
+failed document. Retrieval is not affected: a query embedding answers a user who is waiting, so it keeps
+the provider client's short retry and never sleeps on a throttle.
+
+- **The delay is the provider's.** Gemini says how long in its error body (`RetryInfo.retryDelay`,
+  for example `26s`); OpenAI and Gemini also write "retry in 13s" into the message, which is read when
+  there is no `RetryInfo`. With nothing to read, the wait is 30 seconds. An HTTP `Retry-After` header
+  is not available: the provider clients EDDI builds on keep the body of an error response, not its
+  headers.
+- **Minute or day.** Gemini names the quota that ran out
+  (`EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier`, `…PerDay…`). A per-minute quota
+  is waited out, up to the embedding model's `maxRetries` times per call (default 5), as long as the
+  wait ends before the run's time budget does. A wait is never shorter than one second. A per-day
+  quota and — when no quota is named — any delay over 5 minutes stop the run at once.
+- **In batches.** A document is embedded in batches of at most `eddi.ingestion.embed-batch-size`
+  segments (default 100, the size Gemini takes per request), and each batch is waited out on its
+  own. A refused batch is the only thing sent again, so a document larger than one minute's quota
+  still finishes; it is stored only once all its batches are embedded.
+- **A spent balance is not a throttle.** OpenAI's `insufficient_quota` (or `billing_hard_limit_reached`)
+  means the account is out of credit, which no wait refills. The run stops at the first such answer as
+  `FAILED`, with an error that says to check the provider account's plan and billing; no document is
+  counted as failed.
+- **Stopping is not failing.** A run that cannot wait ends with `stopReason: THROTTLED` (the REST
+  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit,
+  and any the source still hands over before it notices the stop (the rest of a Drive listing page,
+  for example), are counted in `documentsThrottled` — not in `documentsFailed` — and are not sent to
+  the provider again during the run. It is not a count of everything still to do: documents the
+  source never listed are not counted. The run's coverage is partial, so **nothing is
+  tombstoned**, and documents already in the knowledge base keep their chunks. A document that has not
+  changed still counts as unchanged after the stop: it needs no provider call.
+- **`resumeAfter`** records when the provider takes calls again. For a rate limit it is the delay the
+  provider named, and absent when it named none (the 30 s fallback wait is a guess and is not
+  recorded). For a daily quota it is the provider's documented reset — Gemini's daily quotas reset at
+  midnight Pacific time — or, for a provider whose reset is not known, the delay it named or
+  `eddi.ingestion.throttle.daily-cooldown` (default 1 hour) from the stop. A stop judged daily only
+  because the provider asked for more than 5 minutes, naming no quota, keeps that delay.
+- **Scheduled runs wait for it.** Before a scheduled fire claims a run, lists the source or calls the
+  provider, it looks at the source's last run: if that run stopped `THROTTLED` and `resumeAfter` is
+  still ahead, the fire does nothing and its fire-log entry is `COMPLETED` with a note saying until
+  when (not a failure, so the schedule is never dead-lettered for it). A throttled run without a
+  `resumeAfter` holds scheduled runs for `eddi.ingestion.throttle.cooldown` (default 1 minute) from
+  when it finished. Without this a cron firing every ten minutes re-listed the whole source and spent
+  the provider's quota again on every fire, only to stop once more. **Run now** is an operator's
+  explicit choice and is not held back — it runs, and stops again if the provider still refuses.
+- **The next run picks up the rest.** There is no automatic retry run: the source's next scheduled run
+  after `resumeAfter`, or the next **Run now**, lists the source again and finds the documents left
+  over as new or changed. A source without a `cron` waits for a manual run. A scheduled fire whose run
+  is throttled writes no failed entry to the schedule's fire log.
+- **A cancelled run is not a throttled one.** A run interrupted while it waits — a shutdown, for
+  example — ends `CANCELLED`, not `THROTTLED`.
+- **Outside a source run.** An ingestion embedding call that has no run deadline of its own waits at
+  most `eddi.ingestion.throttle.unbound-max-wait` (default 10 s) in total, because it may be holding a
+  request thread; a REST request that meets the throttle answers `429 Too Many Requests` with a
+  `Retry-After` header. Direct ingestion (`POST /ragstore/rags/{id}/ingest`) runs on its own thread and
+  waits up to 10 minutes per document.
+
+For the providers whose client is langchain4j's own (`openai`, `ollama`, `mistral`, `gemini`), the
+ingestion-side model is built with the provider's own retries off and EDDI does the retrying —
+including a short backoff after a 5xx or a timeout — because langchain4j's retry waits half a second
+and ignores the delay the provider asked for. `azure-openai`, `vertex`, `bedrock` and `cohere` keep
+their SDK's retries; a throttle EDDI recognises after them is still waited out or stopped on as above.
+
+Two meters show it: `eddi.ingestion.throttled` counts documents left for later (tags `knowledgeBase`,
+`source`), and `eddi.provider.throttle.wait` times each wait (tag `provider`).
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
 the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
@@ -1395,6 +1464,10 @@ tighten it.
 - **`model` and `modelName` are the same parameter** — LLM tasks call it `modelName`, so either is
   accepted. Setting both to different values is refused.
 - **`timeout` is in milliseconds**, as it is for LLM tasks.
+- **`maxRetries` means two things.** For retrieval it is the provider client's own retry count. For
+  ingestion it is how often EDDI repeats one embedding call after a rate limit or a transient failure
+  (default 5), waiting as long as the provider asks — see
+  [When the embedding provider throttles](#when-the-embedding-provider-throttles).
 - **Every value may be a vault reference** (`${vault:…}`) or a global variable; both are resolved when
   the model is built, and an unresolvable reference fails the build rather than reaching the provider.
 - **An endpoint the provider cannot honour is an error, not a silent fallback.** Until 6.6 the

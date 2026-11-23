@@ -2634,6 +2634,10 @@
       "stopByteLimit": "Parou no limite de tamanho — nada foi tratado como excluído",
       "stopTimeLimit": "Parou no orçamento de tempo — nada foi tratado como excluído",
       "stopCancelled": "Parou antes — cancelada, substituída ou atingiu o orçamento de fragmentos",
+      "throttled": "Aguardando (limite de taxa)",
+      "throttledCount": "{{waiting}} aguardando",
+      "stopThrottled": "Pausada pela cota do provedor. A próxima execução processa o restante; nada foi tratado como falha ou excluído",
+      "stopThrottledUntil": "Pausada pelo limite de taxa do provedor — ele volta a aceitar solicitações a partir das {{time}}. A próxima execução processa o restante; nada foi tratado como falha ou excluído",
       "hoursMinutes": "{{hours}} h {{minutes}} min",
       "minutesSeconds": "{{minutes}} min {{seconds}} s",
       "seconds": "{{seconds}} s"

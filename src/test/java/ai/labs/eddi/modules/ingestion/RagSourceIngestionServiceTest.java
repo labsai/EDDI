@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -714,6 +715,23 @@ class RagSourceIngestionServiceTest {
     @Nested
     @DisplayName("scheduled fire")
     class ScheduledFire {
+
+        @Test
+        @DisplayName("held back while the last run's throttle lasts: no run claimed, nothing listed")
+        void heldBackByTheThrottleGate() throws Exception {
+            var source = source("*/10 * * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            Instant until = Instant.parse("2026-11-22T08:00:00Z");
+            when(pipeline.throttledUntil(eq(KB_ID), any(IngestionSource.class))).thenReturn(Optional.of(until));
+
+            IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+
+            assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+            assertNull(report.runId(), "no run was started");
+            assertEquals(until, report.resumeAfter());
+            verify(pipeline, never()).reserveRun(anyString(), any());
+            verify(pipeline, never()).run(anyString(), any(), any(), any(), anyString(), any());
+        }
 
         @Test
         @DisplayName("loads the knowledge base, claims a run and starts it on its own worker")

@@ -9,11 +9,13 @@ import {
   ChevronDown,
   Hand,
   Loader2,
+  PauseCircle,
 } from "lucide-react";
 import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
 import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import type { IngestionRun } from "@/lib/api/ingestion-sources";
+import { formatUpcomingTime } from "@/lib/date-format";
 
 /** How many runs the history shows before "Show more". */
 const COLLAPSED_RUNS = 5;
@@ -225,7 +227,7 @@ function RunDetails({ run, testId }: { run: IngestionRun; testId: string }) {
         {run.stopReason && (
           <Detail
             label={t("ragEditor.runs.stopReason", "How it ended")}
-            value={stopReasonText(t, run.stopReason)}
+            value={stopReasonText(t, run.stopReason, run.resumeAfter)}
             testId={`${testId}-stop-reason`}
           />
         )}
@@ -260,6 +262,12 @@ function RunCounters({ run }: { run: IngestionRun }) {
       />
       <Counter label={t("ragEditor.runs.removed", "Removed")} value={run.documentsTombstoned} />
       <Counter label={t("ragEditor.runs.chunks", "Chunks stored")} value={run.segmentsStored} />
+      {(run.documentsThrottled ?? 0) > 0 && (
+        <Counter
+          label={t("ragEditor.runs.throttled", "Waiting (rate limit)")}
+          value={run.documentsThrottled ?? 0}
+        />
+      )}
     </dl>
   );
 }
@@ -292,6 +300,10 @@ function StatusIcon({ run }: { run: IngestionRun }) {
   }
   if (run.status === "CANCELLED") {
     return <Ban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+  }
+  if (run.status === "COMPLETED" && run.stopReason === "THROTTLED") {
+    // Paused by the provider, not failed: the rest waits for the next run.
+    return <PauseCircle className="h-3.5 w-3.5 shrink-0 text-warn-600 dark:text-warn-400" />;
   }
   if (run.status === "COMPLETED") {
     // A completed run that lost documents is not the same green tick as a clean one.
@@ -330,13 +342,18 @@ function summaryOf(t: TFunction, run: IngestionRun): string {
     ingested: run.documentsIngested,
     unchanged: run.documentsUnchanged,
   });
-  return run.documentsFailed > 0
-    ? `${base} · ${t("ragEditor.runs.failedCount", "{{failed}} failed", { failed: run.documentsFailed })}`
-    : base;
+  const withFailed =
+    run.documentsFailed > 0
+      ? `${base} · ${t("ragEditor.runs.failedCount", "{{failed}} failed", { failed: run.documentsFailed })}`
+      : base;
+  const waiting = run.documentsThrottled ?? 0;
+  return waiting > 0
+    ? `${withFailed} · ${t("ragEditor.runs.throttledCount", "{{waiting}} waiting", { waiting })}`
+    : withFailed;
 }
 
 /** The crawler's stop reasons, said as what they mean for the knowledge base. */
-function stopReasonText(t: TFunction, reason: string): string {
+function stopReasonText(t: TFunction, reason: string, resumeAfter?: string | null): string {
   switch (reason) {
     case "COMPLETED":
       return t("ragEditor.runs.stopCompleted", "Covered the whole source");
@@ -353,6 +370,22 @@ function stopReasonText(t: TFunction, reason: string): string {
         "ragEditor.runs.stopCancelled",
         "Stopped early — cancelled, superseded, or its chunk budget was reached",
       );
+    case "THROTTLED": {
+      // No automatic resume: the next run is the source's schedule, which waits for
+      // this time, or a manual one. The date is shown when it is not today: a daily
+      // quota usually comes back tomorrow.
+      const resume = resumeAfter ? Date.parse(resumeAfter) : NaN;
+      return Number.isFinite(resume)
+        ? t(
+            "ragEditor.runs.stopThrottledUntil",
+            "Paused by the provider's rate limit — it takes requests again from {{time}}. The next run picks up the rest; nothing was treated as failed or deleted",
+            { time: formatUpcomingTime(resume) },
+          )
+        : t(
+            "ragEditor.runs.stopThrottled",
+            "Paused by the provider's quota. The next run picks up the rest; nothing was treated as failed or deleted",
+          );
+    }
     default:
       return reason;
   }

@@ -512,6 +512,36 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a throttled run keeps how many documents it left and when the provider takes calls again")
+    default void throttledRunKeepsItsDeferral() {
+        String runId = openRun(SOURCE);
+        store().reportProgress(new IngestionRun(runId, SOURCE, IngestionRun.Status.RUNNING, null, null,
+                5, 2, 0, 0, 0, 8, 0.0, null, 0, null, IngestionRun.Trigger.SCHEDULED, 3, null));
+        assertEquals(3, store().activeRun(SOURCE).orElseThrow().documentsThrottled());
+
+        Instant resumeAfter = Instant.parse("2026-11-21T14:32:00Z");
+        store().finishRun(new IngestionRun(runId, SOURCE, IngestionRun.Status.COMPLETED, null, Instant.now(),
+                5, 2, 0, 0, 0, 8, 0.0, null, 0, "THROTTLED", null, 3, resumeAfter));
+
+        IngestionRun run = store().listRuns(SOURCE, 10).get(0);
+        assertEquals("THROTTLED", run.stopReason());
+        assertEquals(3, run.documentsThrottled());
+        assertEquals(resumeAfter, run.resumeAfter());
+        assertEquals(0, run.documentsFailed());
+    }
+
+    @Test
+    @DisplayName("a run recorded without throttling reads zero throttled and no resume time")
+    default void unthrottledRunReadsNoDeferral() {
+        String runId = openRun(SOURCE);
+        closeRun(runId, SOURCE, IngestionRun.Status.COMPLETED);
+
+        IngestionRun run = store().listRuns(SOURCE, 10).get(0);
+        assertEquals(0, run.documentsThrottled());
+        assertNull(run.resumeAfter());
+    }
+
+    @Test
     @DisplayName("finishing without a trigger keeps the one progress recorded")
     default void finishKeepsTheRecordedTrigger() {
         String runId = openRun(SOURCE);

@@ -2688,6 +2688,10 @@
       "stopByteLimit": "Stopped at the size limit — nothing was treated as deleted",
       "stopTimeLimit": "Stopped at its time budget — nothing was treated as deleted",
       "stopCancelled": "Stopped early — cancelled, superseded, or its chunk budget was reached",
+      "throttled": "Waiting (rate limit)",
+      "throttledCount": "{{waiting}} waiting",
+      "stopThrottled": "Paused by the provider's quota. The next run picks up the rest; nothing was treated as failed or deleted",
+      "stopThrottledUntil": "Paused by the provider's rate limit — it takes requests again from {{time}}. The next run picks up the rest; nothing was treated as failed or deleted",
       "hoursMinutes": "{{hours}} h {{minutes}} min",
       "minutesSeconds": "{{minutes}} min {{seconds}} s",
       "seconds": "{{seconds}} s"

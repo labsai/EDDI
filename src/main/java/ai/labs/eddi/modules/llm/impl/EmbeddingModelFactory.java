@@ -25,15 +25,18 @@ import dev.langchain4j.model.mistralai.MistralAiEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.vertexai.VertexAiEmbeddingModel;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -92,6 +95,46 @@ public class EmbeddingModelFactory {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Times the waits {@link ThrottledEmbeddingModel} sits out. Field-injected for
+     * the same reason as {@link #vaultHostAllowlist}; null in tests that construct
+     * the factory directly, which then records nothing.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
+
+    /**
+     * The longest an ingestion call with no deadline of its own waits on a
+     * provider's rate limit, in total. Short by default: such a caller may be a
+     * request thread. A background caller binds its own deadline instead
+     * ({@link ThrottledEmbeddingModel#boundTo}). Field-injected with its default
+     * for tests that construct the factory directly.
+     */
+    @ConfigProperty(name = "eddi.ingestion.throttle.unbound-max-wait", defaultValue = "10s")
+    Duration unboundMaxWait = ThrottledEmbeddingModel.DEFAULT_UNBOUND_MAX_WAIT;
+
+    /**
+     * The most segments one ingestion call sends to the provider. Each batch is
+     * throttled on its own, so a retry repeats only the batch the provider refused.
+     */
+    @ConfigProperty(name = "eddi.ingestion.embed-batch-size", defaultValue = "100")
+    int embedBatchSize = ThrottledEmbeddingModel.DEFAULT_BATCH_SIZE;
+
+    /**
+     * The providers whose client is langchain4j's own HTTP client, so a 429 reaches
+     * {@link ThrottledEmbeddingModel} as a {@code RateLimitException} carrying the
+     * response body. For these the provider's retries are switched off on the
+     * ingestion side and the decorator does the retrying, because langchain4j's
+     * retry ignores the provider's {@code retryDelay}: the defect behind 49 of 68
+     * documents failing on a free-tier quota.
+     * <p>
+     * Not Azure, Vertex, Bedrock or Cohere: their SDKs retry in their own way (the
+     * Azure SDK honours {@code Retry-After}, which langchain4j's client cannot see)
+     * and do not all surface a throttle the decorator can read. They keep their
+     * retries; the decorator still waits out a throttle it recognises after them.
+     */
+    private static final Set<String> RETRIES_OWNED_BY_DECORATOR = Set.of("openai", "ollama", "mistral", "gemini");
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -201,6 +244,10 @@ public class EmbeddingModelFactory {
         }
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
+        boolean ingestion = inputType == EmbeddingInputType.DOCUMENT;
+        int ingestionRetries = ingestion ? ingestionMaxRetries(params) : 0;
+        params = providerParameters(provider, params, inputType);
+
         EmbeddingModel model = switch (provider) {
             case "openai" -> buildOpenAi(params);
             case "azure-openai" -> buildAzureOpenAi(params);
@@ -213,12 +260,48 @@ public class EmbeddingModelFactory {
             default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
 
+        EmbeddingModel typed;
         if (pinsNonRetrievalTaskType(provider, params)) {
             LOGGER.infof("Embedding provider %s pins taskType=%s; leaving the %s role unset so the configured task type stands",
                     provider, params.get("taskType"), inputType);
-            return model;
+            typed = model;
+        } else {
+            typed = InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
         }
-        return InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
+        // Outside the role decorator, and for ingestion only: a query answers a user
+        // who is waiting, so retrieval never sleeps on a throttle.
+        return ingestion
+                ? ThrottledEmbeddingModel.wrap(typed, provider, ingestionRetries,
+                        RETRIES_OWNED_BY_DECORATOR.contains(provider), meterRegistry, unboundMaxWait, embedBatchSize)
+                : typed;
+    }
+
+    /**
+     * The retries {@link ThrottledEmbeddingModel} allows one ingestion call: the
+     * configured {@code maxRetries}, or
+     * {@link ThrottledEmbeddingModel#DEFAULT_MAX_RETRIES}.
+     */
+    private int ingestionMaxRetries(Map<String, String> params) {
+        return Math.max(0, parseIntParam(params, "maxRetries", ThrottledEmbeddingModel.DEFAULT_MAX_RETRIES));
+    }
+
+    /**
+     * The parameters the provider's builder is given for a role. For ingestion on a
+     * provider whose retries the decorator takes over, {@code maxRetries} is
+     * {@code 0}: langchain4j would otherwise spend the quota on retries half a
+     * second apart before the decorator could wait for the delay the provider asked
+     * for. The query role gets the configuration unchanged.
+     * <p>
+     * Package-private and static so it is graded without building a client.
+     */
+    static Map<String, String> providerParameters(String provider, Map<String, String> params,
+                                                  EmbeddingInputType inputType) {
+        if (inputType != EmbeddingInputType.DOCUMENT || !RETRIES_OWNED_BY_DECORATOR.contains(provider)) {
+            return params;
+        }
+        Map<String, String> withoutRetries = new HashMap<>(params);
+        withoutRetries.put("maxRetries", "0");
+        return withoutRetries;
     }
 
     /**

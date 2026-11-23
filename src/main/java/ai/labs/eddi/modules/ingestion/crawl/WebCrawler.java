@@ -1120,7 +1120,13 @@ public class WebCrawler {
          * The queue emptied — the whole scope was covered. Also the reason reported for
          * an unusable seed URL (see {@link CrawlSummary#coveredWholeSource()}).
          */
-        COMPLETED, PAGE_LIMIT, FETCH_LIMIT, BYTE_LIMIT, TIME_LIMIT, CANCELLED
+        COMPLETED, PAGE_LIMIT, FETCH_LIMIT, BYTE_LIMIT, TIME_LIMIT, CANCELLED,
+        /**
+         * Never set by the crawler: the pipeline reports it when the embedding
+         * provider's rate limit stopped the run. Kept here so the two stop-reason enums
+         * stay one list.
+         */
+        THROTTLED
     }
 
     /**
