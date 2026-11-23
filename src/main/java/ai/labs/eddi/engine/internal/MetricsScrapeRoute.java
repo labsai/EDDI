@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.org.PlatformPlane;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.prometheus.client.exporter.common.TextFormat;
 import io.quarkus.arc.Arc;
@@ -43,6 +44,7 @@ import java.util.concurrent.TimeUnit;
  * to Quarkus.
  */
 @ApplicationScoped
+@PlatformPlane("the metrics scrape endpoint is platform plane (plan §9.3, §11.5)")
 public class MetricsScrapeRoute {
     private static final Logger LOGGER = Logger.getLogger(MetricsScrapeRoute.class);
 

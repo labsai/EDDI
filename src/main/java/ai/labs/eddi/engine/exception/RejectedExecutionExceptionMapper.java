@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -27,6 +28,7 @@ import java.util.concurrent.RejectedExecutionException;
  * @since 6.0.2
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class RejectedExecutionExceptionMapper implements ExceptionMapper<RejectedExecutionException> {
 
     @Override

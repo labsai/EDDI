@@ -10,6 +10,8 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
+import ai.labs.eddi.engine.org.OrgRequest;
+import ai.labs.eddi.engine.org.OrgResolutionException;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.RestUtilities;
@@ -47,6 +49,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
+    private final OrgRequest orgRequest;
 
     private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
 
@@ -55,15 +58,34 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
 
     @Inject
     public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard, OrgRequest orgRequest) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.orgRequest = orgRequest;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
+        int httpStatus = contextResponse.getStatus();
+        var method = contextRequest.getMethod();
+        if (httpStatus < 200 || httpStatus >= 300 || !(isPUT(method) || isPATCH(method) || isPOST(method) || isDELETE(method))) {
+            return; // nothing to write, so no org to resolve
+        }
+        // a response filter runs after the resource method, outside its org binding
+        // (plan §6.2)
+        try {
+            orgRequest.runBound(() -> writeDescriptors(contextRequest, contextResponse));
+        } catch (OrgResolutionException e) {
+            // The request resolves the same way every time, so an org-plane resource
+            // method that succeeded had an org. No org means a platform-plane endpoint,
+            // which writes no descriptors; the response it already committed stands.
+            log.debugf("No org for %s %s; no descriptors to write", method, uriInfo.getPath());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void writeDescriptors(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
         try {
             int httpStatus = contextResponse.getStatus();
 

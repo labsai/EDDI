@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
@@ -28,6 +29,7 @@ import jakarta.ws.rs.ext.Provider;
  * mapper.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class UnreadableBodyExceptionMapper implements ExceptionMapper<WebApplicationException> {
     @Context
     UriInfo uriInfo;

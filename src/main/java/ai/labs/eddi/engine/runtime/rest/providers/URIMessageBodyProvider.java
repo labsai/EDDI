@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.rest.providers;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
@@ -19,6 +20,7 @@ import java.lang.reflect.Type;
 import java.net.URI;
 
 @Provider
+@OrgNeutral("converts a URI to and from a body; reads no org data")
 public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBodyWriter<URI> {
     @Override
     public boolean isReadable(Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {

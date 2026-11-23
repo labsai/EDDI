@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.exception;
 
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -25,6 +26,7 @@ import jakarta.ws.rs.ext.Provider;
  * end user who has to act on them and deliberately never quote a credential.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class ConnectionExceptionMapper implements ExceptionMapper<ConnectionException> {
 
     @Override

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
+import ai.labs.eddi.engine.org.OrgRequest;
 import io.quarkus.security.Authenticated;
 import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
@@ -103,13 +104,15 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
     private static final Map<Method, Boolean> ADMIN_ONLY = new ConcurrentHashMap<>();
 
     private final AdminActionRecorder recorder;
+    private final OrgRequest orgRequest;
 
     @Context
     ResourceInfo resourceInfo;
 
     @Inject
-    public AdminActionAuditFilter(AdminActionRecorder recorder) {
+    public AdminActionAuditFilter(AdminActionRecorder recorder, OrgRequest orgRequest) {
         this.recorder = recorder;
+        this.orgRequest = orgRequest;
     }
 
     @Override
@@ -128,7 +131,11 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
             if (!isAdministrative(path) && !adminOnly(resourceMethod)) {
                 return;
             }
-            recorder.record(request.getMethod(), path, request.getUriInfo().getPathParameters(), resource, response.getStatus());
+            String recorded = resource;
+            // a response filter runs after the resource method, outside its org binding
+            // (plan §6.2)
+            orgRequest.runBound(
+                    () -> recorder.record(request.getMethod(), path, request.getUriInfo().getPathParameters(), recorded, response.getStatus()));
         } catch (Exception e) {
             // Recording an action must never change its outcome. The recorder never
             // throws; this guards the request-side lookups above.

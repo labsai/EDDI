@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
  * — is left exactly as {@link ClientErrorExceptionMapper} answers it.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class ParameterConversionExceptionMapper implements ExceptionMapper<NotFoundException> {
 
     /** Class the framework raises parameter-conversion 404s from. */

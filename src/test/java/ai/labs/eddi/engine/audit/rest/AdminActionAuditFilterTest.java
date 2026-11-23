@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.audit.rest;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.internal.RestAgentEngine;
+import ai.labs.eddi.engine.org.OrgTestRequests;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -100,7 +101,7 @@ class AdminActionAuditFilterTest {
         // A real recorder over a mocked ledger: what the filter decides to record is
         // read off the entries the ledger receives. The entry itself is
         // AdminActionRecorderTest's subject.
-        filter = new AdminActionAuditFilter(new AdminActionRecorder(ledgerInstance, identityInstance, true));
+        filter = new AdminActionAuditFilter(new AdminActionRecorder(ledgerInstance, identityInstance, true), OrgTestRequests.singleMode());
         resourceInfo = mock(ResourceInfo.class);
         Method method = AdminActionAuditFilterTest.class.getMethod("deleteUserData");
         when(resourceInfo.getResourceMethod()).thenReturn(method);
@@ -265,7 +266,8 @@ class AdminActionAuditFilterTest {
     @DisplayName("switched off by eddi.audit.admin-actions.enabled=false, before any per-request work")
     @SuppressWarnings("unchecked")
     void canBeSwitchedOff() {
-        var off = new AdminActionAuditFilter(new AdminActionRecorder(mock(Instance.class), mock(Instance.class), false));
+        var off = new AdminActionAuditFilter(new AdminActionRecorder(mock(Instance.class), mock(Instance.class), false),
+                OrgTestRequests.singleMode());
         off.resourceInfo = resourceInfo;
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn("/agentstore/agents");

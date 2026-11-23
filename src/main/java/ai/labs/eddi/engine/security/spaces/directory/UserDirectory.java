@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.directory;
 
+import ai.labs.eddi.engine.org.OrgPropagation;
 import ai.labs.eddi.engine.security.spaces.CallerSpaces;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
@@ -162,7 +163,8 @@ public class UserDirectory {
         }
         recorded.put(observed.principal(), fingerprint);
         try {
-            executor.execute(() -> write(observed));
+            // the write runs later on another thread: carry the caller's org binding there
+            executor.execute(OrgPropagation.wrap(() -> write(observed)));
         } catch (RuntimeException e) {
             // A rejected task is not worth failing a request over; forget the
             // fingerprint so the next request tries again.

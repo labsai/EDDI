@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
@@ -73,6 +74,7 @@ import java.util.Locale;
  * </p>
  */
 @Provider
+@OrgNeutral("parses a request body against a configuration model; reads no org data")
 public class StrictConfigurationBodyInterceptor implements ReaderInterceptor {
 
     /**

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,6 +22,7 @@ import jakarta.enterprise.event.Observes;
  * for a worker thread before the 60 s turn timeout was even armed.
  */
 @ApplicationScoped
+@OrgNeutral("stamps the request arrival time; reads no data")
 public class RequestArrivalStamp {
 
     /** Key of the arrival time (epoch milliseconds) in the routing context. */

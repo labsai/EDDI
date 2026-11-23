@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.exception;
 
 import ai.labs.eddi.engine.api.IConversationService.InputTooLargeException;
+import ai.labs.eddi.engine.org.OrgNeutral;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -20,6 +21,7 @@ import java.util.Map;
  * exception never reaches an {@link ExceptionMapper}.
  */
 @Provider
+@OrgNeutral("maps an exception to an HTTP response; reads no org data")
 public class InputTooLargeExceptionMapper implements ExceptionMapper<InputTooLargeException> {
 
     public static final String ERROR_CODE = "input_too_large";

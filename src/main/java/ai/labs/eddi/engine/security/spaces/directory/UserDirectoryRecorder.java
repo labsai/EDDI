@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security.spaces.directory;
 
+import ai.labs.eddi.engine.org.OrgRequest;
+import ai.labs.eddi.engine.org.OrgResolutionException;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -22,14 +24,26 @@ import jakarta.ws.rs.ext.Provider;
 public class UserDirectoryRecorder implements ContainerRequestFilter {
 
     private final UserDirectory directory;
+    private final OrgRequest orgRequest;
 
     @Inject
-    public UserDirectoryRecorder(UserDirectory directory) {
+    public UserDirectoryRecorder(UserDirectory directory, OrgRequest orgRequest) {
         this.directory = directory;
+        this.orgRequest = orgRequest;
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        directory.recordCurrentCaller();
+        if (!directory.isActive()) {
+            return;
+        }
+        // a request filter runs before the resource method's org binding (plan §6.2);
+        // UserDirectory carries the binding on to its write executor
+        try {
+            orgRequest.runBound(directory::recordCurrentCaller);
+        } catch (OrgResolutionException e) {
+            // no org for this caller, so nothing to record in one; the resource method
+            // answers the request itself (a platform-plane endpoint runs unbound)
+        }
     }
 }

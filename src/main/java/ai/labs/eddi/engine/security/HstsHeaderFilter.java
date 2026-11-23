@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,6 +29,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * Set them at the proxy if the whole domain is https-only.
  */
 @ApplicationScoped
+@OrgNeutral("adds a response header from deployment config; reads no org data")
 public class HstsHeaderFilter {
 
     static final String HEADER = "Strict-Transport-Security";
