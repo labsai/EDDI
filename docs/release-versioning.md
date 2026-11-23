@@ -220,7 +220,9 @@ CVE scan, a secret leak, a CodeQL finding, a coverage shortfall or a failing end
 own. The diagram above shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `coverage-gate` is the only
 job that enforces the JaCoCo 90/80 coverage gate, on the execution data both test jobs hand it.
 
-**`ci-gate` (CI Gate) is the check that says a commit may land.** It needs everything `docker`
+**`ci-gate` (CI Gate) is the check that says a commit may land** — meant to be the required
+status check and what the merge queue waits for, once the repository settings make it so
+(until then `Build & Test` and `CodeQL Analysis` are the required checks). It needs everything `docker`
 needs plus shell-lint, manifest-lint and release-pointers, runs on every event (`if: always()`),
 and fails when any of them failed or was cancelled, or when a job the change required did not
 succeed (on a merge-queue run, every job is required). A `merge_group` run — the merge queue
@@ -233,12 +235,12 @@ testing `main` plus the queued PR(s) — takes the full pipeline and publishes n
 | **build-and-test** | Every push/PR/tag | On a push, when changed paths match the `code` filter (`detect-changes` in `ci.yml`: `src/**`, `pom.xml`, `.github/workflows/**`, Dockerfiles, compose files, `ui/**`, `k8s/**`, `helm/**`, `keycloak/**`, the Maven wrapper, the style configs and more); on a PR, when they match the `backend` filter (the same minus `ui/**`) or the operator docs the tests read (`README.md`, `docs/kubernetes.md`, `docs/security.md`, `docs/monitoring/**`, `docs/metrics.md`); always on tags | ~6-9 min |
 | **integration-test** | `code` filter (and `backend` on a PR) | Runs `mvnw verify -DskipITs=false -DskipUTs=true` beside build-and-test and hands its JaCoCo data to coverage-gate | ~13-15 min |
 | **coverage-gate** | Where integration-test runs | Merges the unit and integration JaCoCo data and enforces the 90/80 gate; blocks `docker` | ~2-3 min |
-| **ci-gate** | Every run (`always()`) | The aggregate verdict (above); the required status check and what the merge queue waits for | seconds |
+| **ci-gate** | Every run (`always()`) | The aggregate verdict (above); intended as the required status check and the merge queue's | seconds |
 | **codeql** | Every push/PR/tag | SAST build + analysis of the Java backend (`codeql-ui` covers the UIs, when `ui/**` changed); blocks `docker` | ~8-12 min |
 | **trivy-scan** | `code` filter | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
 | **gitleaks** | Every push/PR/tag | Secret scanning; blocks `docker` | ~1 min |
 | **sbom** | Pushes on the `code` filter | CycloneDX SBOM; does not block `docker` | ~2 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate and ui-gate | ~3-4 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate and ui-gate | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **release** | Tag pushes only, after `docker` | GitHub release with the signed `SHA256SUMS`; a pre-release for an RC tag | — |
 | **post-release** | Stable tags only, after `docker`, `smoke-test` and `release` | Calls `post-release.yml` ([After a GA Release](#after-a-ga-release)) | — |

@@ -34,10 +34,10 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <quarkus-mcp-server.version>2.0.4</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
-        <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
-             unit-test coverage data Build & Test already produced (target/jacoco.exec)
-             instead of running ~20k unit tests a second time before the merged
-             coverage gate. It follows skipTests, so -DskipTests still skips both. -->
+        <!-- skipUTs skips surefire alone, so CI's Integration Tests job does not run
+             the ~37k unit tests a second time: Build & Test runs them beside it, and
+             CI's Coverage Gate job merges both jobs' JaCoCo data for the merged gate.
+             It follows skipTests, so -DskipTests still skips both. -->
         <skipTests>false</skipTests>
         <skipUTs>${skipTests}</skipUTs>
         <!-- How many JVMs run the unit tests in parallel. 1 locally, where other
@@ -1047,8 +1047,10 @@
                          left jacoco.exec as the sole input and graded unit-test-only
                          coverage against a threshold that assumes both suites — so a
                          clean tree with every test green failed the build at 89%. The
-                         gate now runs exactly where the data it grades is produced: the
-                         CI integration job, which passes -DskipITs=false. -->
+                         gate runs only where both suites' data is at hand: CI's
+                         Coverage Gate job, which invokes jacoco:check@merged-check with
+                         -DskipITs=false (Integration Tests runs verify with
+                         -Djacoco.haltOnFailure=false, having no unit-test data). -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>

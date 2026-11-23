@@ -633,7 +633,7 @@ class BuildQualityGatesTest {
         assertTrue(check.contains(SKIP_ITS_DISABLED),
                 "the merged-check invocation must pass " + SKIP_ITS_DISABLED + ": the execution carries"
                         + " <skip>${skipITs}</skip>, so without it the gate skips itself. Found: " + check);
-        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests")) {
+        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests", "|| true", "|| :")) {
             assertFalse(check.contains(relaxation),
                     "the merged-check invocation must not pass " + relaxation + ", which turns the gate into a"
                             + " report: " + check);
@@ -650,6 +650,8 @@ class BuildQualityGatesTest {
                 gateJob + " must need build-and-test and integration-test, whose execution data it merges: "
                         + gateNeeds);
         String gateBlock = jobs.get(gateJob);
+        assertFalse(gateBlock.contains("continue-on-error"),
+                gateJob + " must not use continue-on-error: it turns a failed coverage check into a green job");
         for (String data : List.of("target/jacoco.exec", "target/jacoco-it.exec", "target/jacoco-quarkus.exec")) {
             assertTrue(gateBlock.contains(data),
                     gateJob + " must check that " + data + " is present before merging: JaCoCo skips a missing"
@@ -1577,8 +1579,12 @@ class BuildQualityGatesTest {
         assertEquals("always()", ciJobCondition(jobs.get("ci-gate")).strip(),
                 "ci-gate must be `if: always()`: a skipped required check counts as passed");
         String gate = jobs.get("ci-gate");
-        assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] || [ \"$required\" = \"true\" ]"),
-                "ci-gate must require every job on a merge_group run, whatever the path filters said");
+        assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] && [ \"$r\" = \"skipped\" ]"),
+                "ci-gate must fail on ANY skipped need on a merge_group run, not only on the jobs it names one by"
+                        + " one: every job is forced to run there, so a skip means it was never graded");
+        assertTrue(gate.contains("[ \"$(output gitleaks pr_config_scan)\" = \"true\" ]"),
+                "ci-gate may tolerate a pull-request Secret Scanning failure only when the re-scan with the PR's own"
+                        + " gitleaks config passed, or a secret riding along with a config edit merges");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
                 CI_WORKFLOW + " no longer triggers on merge_group, so the merge queue would wait for checks forever");
     }

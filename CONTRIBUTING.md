@@ -252,7 +252,7 @@ Every PR runs through these automated gates:
 
 | Check                 | What It Does                                         | Must Pass?     |
 | --------------------- | ---------------------------------------------------- | -------------- |
-| **CI Gate**           | The aggregate verdict: fails when any check below that the change required failed, was cancelled or did not run (every check, in the merge queue) | ✅ Yes         |
+| **CI Gate**           | The aggregate verdict: fails when any check below that the change required failed, was cancelled or did not run (every check, in the merge queue) | Intended as the required check (repository setting) |
 | **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests, three forks in CI) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
 | **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers), beside Build + Tests — on backend changes | Blocks publishing |
 | **Coverage Gate**     | Merges the unit and integration JaCoCo data and enforces the 90% instruction / 80% branch gate | Blocks publishing |

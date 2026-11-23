@@ -31,6 +31,7 @@ import static org.mockito.Mockito.when;
  * @since 6.0.0
  */
 @DisplayName("RestImportService Helpers")
+@SharedWorkingDirTmp
 class RestImportServiceHelpersTest {
 
     // Use reflection to invoke private methods on RestImportService

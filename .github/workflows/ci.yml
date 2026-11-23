@@ -2165,6 +2165,10 @@ jobs:
   gitleaks:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    # Read by CI Gate: "true" when a pull request that changes the gitleaks config
+    # passes a re-scan with that config (see the last step).
+    outputs:
+      pr_config_scan: ${{ steps.pr_config.outputs.passed }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2265,6 +2269,34 @@ jobs:
           fi
 
           ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="$LOG_OPTS" .
+
+      # The scan above used the BASE branch's config, so a pull request that
+      # allowlists a test fixture fails it by design. When — and only when — the
+      # PR changes .gitleaksignore or .gitleaks.toml, scan the same range again with
+      # the PR's own config. CI Gate tolerates the failure above only if this one
+      # passes, so a real secret riding along with an unrelated config edit still
+      # blocks. The check itself stays red, for the reviewer to read.
+      - name: Re-scan with this pull request's gitleaks config
+        id: pr_config
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet "$PR_BASE" "$PR_HEAD" -- .gitleaksignore .gitleaks.toml; then
+            echo "this pull request does not change the gitleaks config; nothing to re-scan"
+            exit 0
+          fi
+          for f in .gitleaksignore .gitleaks.toml; do
+            if git cat-file -e "$PR_HEAD:$f" 2> /dev/null; then
+              git show "$PR_HEAD:$f" > "$f"
+            else
+              rm -f "$f"
+            fi
+          done
+          ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="--no-merges $PR_BASE..$PR_HEAD" .
+          echo "passed=true" >> "$GITHUB_OUTPUT"
 
   # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
   sbom:
@@ -3149,7 +3181,8 @@ jobs:
   # The exception: on a pull request, Secret Scanning reads the gitleaks config
   # from the base branch, so a PR that allowlists a fixture cannot pass it. That
   # failure is tolerated, loudly, only when the PR changes .gitleaksignore or
-  # .gitleaks.toml; the merge-queue run scans with the PR's config and blocks.
+  # .gitleaks.toml AND a re-scan with the PR's own config passes (Secret
+  # Scanning's pr_config_scan output); otherwise it blocks.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
@@ -3179,14 +3212,21 @@ jobs:
           GITLEAKS_CONFIG=$(output detect-changes gitleaks_config)
           echo "event=$EVENT code=$CODE backend=$BACKEND operator_docs=$OPERATOR_DOCS scripts=$SCRIPTS release_pointers=$RELEASE_POINTERS gitleaks_config=$GITLEAKS_CONFIG"
 
-          # 1. Nothing failed or was cancelled.
+          # 1. Nothing failed or was cancelled — and on a merge-queue run nothing was
+          #    skipped either: every job is forced to run there, so a skip means an
+          #    upstream failed or the forcing broke. This holds for every need, not
+          #    only the ones step 2 names.
           for job in $(jq -r 'keys[]' <<< "$NEEDS"); do
             r=$(result "$job")
+            if [ "$EVENT" = "merge_group" ] && [ "$r" = "skipped" ]; then
+              fail "$job was skipped on a merge-queue run, where every job has to run"
+              continue
+            fi
             case "$r" in
               success | skipped) ;;
               *)
-                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ]; then
-                  echo "::warning::Secret Scanning failed with the BASE branch's gitleaks config, and this PR changes .gitleaksignore/.gitleaks.toml. Tolerated here because the PR's own allowlist entry cannot apply until it merges; the merge-queue run scans with the PR's config and blocks. Review the allowlist change itself."
+                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ] && [ "$(output gitleaks pr_config_scan)" = "true" ]; then
+                  echo "::warning::Secret Scanning failed with the BASE branch's gitleaks config but passed with this PR's own .gitleaksignore/.gitleaks.toml. Tolerated, because the PR's allowlist entry cannot apply until it merges. Review the allowlist change itself; the merge-queue run scans with the merged config again."
                 else
                   fail "$job=$r"
                 fi

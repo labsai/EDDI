@@ -96,3 +96,22 @@ data.
    open PR would wait on a check that never comes.
 4. After the first runs: compare the PR run's unit-test count (1,958 classes) and merged
    coverage counts against `main`'s, and the new critical path against ~30 min.
+
+### Review fixes (independent review before push)
+
+- **Gitleaks tolerance tightened.** A PR-level Secret Scanning failure is tolerated only when the
+  PR changes the gitleaks config **and** a new step that re-scans the same range with the PR's own
+  `.gitleaksignore`/`.gitleaks.toml` passes (`pr_config_scan` job output). A real secret riding
+  along with an unrelated config edit now blocks.
+- **Queue strictness holds for every need.** On `merge_group` CI Gate fails on any skipped need,
+  not only the jobs it names; re-simulated across 18 outcomes.
+- **Shared-tmp guard.** Recognises reflective construction and service-typed fields
+  (`@InjectMocks`), which flagged two more classes (now annotated), ignores mentions in comments,
+  and requires the annotation on its own line above the top-level class; it tests its own matcher.
+  Mutation-checked again.
+- **Lock** released by the extension store as well, should `afterAll` not run.
+- **Coverage guard** also rejects `continue-on-error`, `|| true` and `|| :`.
+- Docs said CI Gate *is* the required check (it becomes one only via the repository setting) and
+  `release-versioning.md`'s docker row lacked `coverage-gate`; two `pom.xml` comments still placed
+  the gate in Integration Tests. Fixed.
+- **Verification:** full local unit suite with three forks: 40,817 tests, 0 failures, 1,959 classes.

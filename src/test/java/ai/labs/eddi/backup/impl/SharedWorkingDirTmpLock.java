@@ -55,10 +55,23 @@ final class SharedWorkingDirTmpLock implements BeforeAllCallback, AfterAllCallba
         }
     }
 
-    private record Held(FileChannel channel, FileLock lock) {
+    /**
+     * AutoCloseable so the extension store releases it when the class's context
+     * closes, even if afterAll never ran: a lock leaked in a fork would make the
+     * next annotated class in that JVM fail with OverlappingFileLockException
+     * instead of waiting. Idempotent, because both paths may run.
+     */
+    private record Held(FileChannel channel, FileLock lock) implements AutoCloseable {
         void release() throws IOException {
+            close();
+        }
+
+        @Override
+        public void close() throws IOException {
             try {
-                lock.release();
+                if (lock.isValid()) {
+                    lock.release();
+                }
             } finally {
                 channel.close();
             }
