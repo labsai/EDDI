@@ -168,6 +168,10 @@ public class SecretResolver {
             if (settled(cacheKey, generation)) {
                 return generation;
             }
+            Runnable hook = awaitingInvalidationHook;
+            if (hook != null) {
+                hook.run();
+            }
             if (System.nanoTime() - deadline > 0) {
                 return -1;
             }
@@ -190,6 +194,13 @@ public class SecretResolver {
      * production.
      */
     volatile Runnable invalidationStartedHook;
+
+    /**
+     * Test seam: runs each time a resolution finds an invalidation of its secret in
+     * progress and waits for it, so a test can prove the overlap. Never set in
+     * production.
+     */
+    volatile Runnable awaitingInvalidationHook;
 
     private void invalidationStarted() {
         Runnable hook = invalidationStartedHook;

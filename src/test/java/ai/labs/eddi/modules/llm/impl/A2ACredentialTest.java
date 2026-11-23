@@ -25,9 +25,12 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -209,6 +212,7 @@ class A2ACredentialTest {
         assertFalse(manager.publishCard(AGENT_URL, card, generation));
         assertEquals(0, manager.getActiveConnectionCount(), "never readable by another caller, not even briefly");
         assertTrue(manager.publishCard(AGENT_URL, card, manager.cardGeneration()), "a fetch with no eviction across it is cached");
+        assertNotNull(manager.cachedCard(AGENT_URL), "and readable: published under the current generation, not the default");
     }
 
     @Test
@@ -224,5 +228,28 @@ class A2ACredentialTest {
         listener.getValue().accept(new SecretReference("default", "peer-key"));
 
         assertEquals(0, manager.getActiveConnectionCount());
+    }
+
+    @Test
+    @DisplayName("a card that slipped in between an eviction's counter bump and its clear is never read (#1179)")
+    void cardInsertedDuringAnEvictionIsNotRead() throws Exception {
+        var manager = manager();
+        long before = manager.cardGeneration();
+        Field cacheField = A2AToolProviderManager.class.getDeclaredField("agentCache");
+        cacheField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var cache = (Map<String, A2AToolProviderManager.CachedAgentInfo>) cacheField.get(manager);
+        var seen = new AtomicReference<A2AToolProviderManager.CachedAgentInfo>();
+        manager.evictionStartedHook = () -> {
+            // The interleaving: a publication whose generation check passed before the
+            // bump lands now, and another caller reads before the clear.
+            cache.put(AGENT_URL, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "old secret's card"),
+                    System.currentTimeMillis(), before));
+            seen.set(manager.cachedCard(AGENT_URL));
+        };
+
+        manager.evictCards();
+
+        assertNull(seen.get(), "the card was published under the generation the eviction retired");
     }
 }

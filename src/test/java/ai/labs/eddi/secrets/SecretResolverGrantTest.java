@@ -224,22 +224,23 @@ class SecretResolverGrantTest {
             when(provider.resolve(KEY)).thenReturn("sk-new");
             var outcome = new AtomicReference<Object>();
             var executor = Executors.newSingleThreadExecutor();
-            var resolving = new CountDownLatch(1);
+            var waiting = new CountDownLatch(1);
+            resolver.awaitingInvalidationHook = waiting::countDown;
             try {
                 resolver.invalidationStartedHook = () -> {
                     // The value is evicted, the old grant (A) is still cached: A resolves now,
                     // on another thread. Without the wait it pairs that grant with sk-new.
                     executor.submit(() -> {
-                        resolving.countDown();
                         try {
                             outcome.set(resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
                         } catch (RuntimeException e) {
                             outcome.set(e);
                         }
                     });
+                    // Released only once the resolver has seen this invalidation in progress
+                    // and is waiting for it: the overlap is established, not timed.
                     try {
-                        assertTrue(resolving.await(10, TimeUnit.SECONDS));
-                        Thread.sleep(200);
+                        assertTrue(waiting.await(10, TimeUnit.SECONDS), "the resolution never waited for the invalidation");
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }

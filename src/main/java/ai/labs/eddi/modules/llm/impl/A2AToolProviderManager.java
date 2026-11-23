@@ -118,7 +118,17 @@ public class A2AToolProviderManager {
      */
     private final AtomicLong cardInvalidations = new AtomicLong();
 
-    record CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
+    /**
+     * A cached card and the eviction generation it was published under. A reader
+     * uses it only while that generation is current: {@code get} takes no lock, so
+     * a card that slipped in between an eviction's counter bump and its clear could
+     * otherwise be read in that window.
+     */
+    record CachedAgentInfo(Map<String, Object> agentCard, long timestamp, long generation) {
+
+        CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
+            this(agentCard, timestamp, 0);
+        }
     }
 
     /** Circuit breaker state — tracks consecutive failures per agent URL. */
@@ -710,8 +720,8 @@ public class A2AToolProviderManager {
         // Check cache (5 min TTL)
         String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
         long generation = cardInvalidations.get();
-        CachedAgentInfo cached = agentCache.get(cacheKey);
-        if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < 300_000) {
+        CachedAgentInfo cached = cachedCard(cacheKey);
+        if (cached != null) {
             return cached.agentCard();
         }
 
@@ -741,10 +751,32 @@ public class A2AToolProviderManager {
      * @return whether the card was cached
      */
     boolean publishCard(String cacheKey, CachedAgentInfo card, long generation) {
+        var tagged = new CachedAgentInfo(card.agentCard(), card.timestamp(), generation);
         CachedAgentInfo stored = agentCache.compute(cacheKey,
-                (key, previous) -> cardInvalidations.get() == generation ? card : previous);
-        return stored == card;
+                (key, previous) -> cardInvalidations.get() == generation ? tagged : previous);
+        return stored == tagged;
     }
+
+    /**
+     * The cached card for {@code cacheKey} when it is within its five-minute TTL
+     * and was published under the current eviction generation; otherwise null. The
+     * generation is read after the entry, so an eviction that started before this
+     * read always rejects a card published before it.
+     */
+    CachedAgentInfo cachedCard(String cacheKey) {
+        CachedAgentInfo cached = agentCache.get(cacheKey);
+        if (cached == null || cached.generation() != cardInvalidations.get()
+                || System.currentTimeMillis() - cached.timestamp() >= 300_000) {
+            return null;
+        }
+        return cached;
+    }
+
+    /**
+     * Test seam: runs inside {@link #evictCards}, between the counter bump and the
+     * clear. Never set in production.
+     */
+    volatile Runnable evictionStartedHook;
 
     /**
      * The current value of {@link #cardInvalidations}, for {@link #publishCard}.
@@ -756,6 +788,10 @@ public class A2AToolProviderManager {
     /** Drops every cached card; see {@link #cardInvalidations}. */
     void evictCards() {
         cardInvalidations.incrementAndGet();
+        Runnable hook = evictionStartedHook;
+        if (hook != null) {
+            hook.run();
+        }
         agentCache.clear();
     }
 
