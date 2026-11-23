@@ -964,6 +964,9 @@ class AgentOrchestratorTest {
         assertEquals("/orders/{orderId}", AgentOrchestrator.normalizeEndpointPath("https://shop.example.com/orders/{orderId}"));
         assertEquals("/orders/{orderId}", AgentOrchestrator.normalizeEndpointPath("https://{host}/orders/{orderId}?x={y}"));
         assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://{host}"));
+        // A '/' inside the query or fragment is not a path.
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://{host}?next=/orders"));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://{host}#/orders"));
     }
 
     @Test

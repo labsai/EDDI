@@ -5641,7 +5641,7 @@
       "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos.",
       "approvalPolicyNone": "Guardado, mas um destino cujo agente pode agir não tem política de aprovação: o e-mail usa as suas ferramentas apenas sob as aprovações próprias do agente. Considere «Aprovar cada ação».",
       "ruleCallsRefused": "Guardado. Um destino com política de aprovação tem chamadas HTTP ou MCP guiadas por regras: um turno de e-mail recusa-as, a menos que Ferramentas somente leitura as nomeie.",
-      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura. As aprovações de ferramentas do próprio agente continuam a valer."
+      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda a aprovação do portão de e-mail. Nomeie antes as ferramentas somente leitura. As aprovações de ferramentas do próprio agente continuam a valer."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5690,7 +5690,7 @@
         "everyTurn": "Cada e-mail aguarda um aprovador antes de o agente agir; o e-mail rejeitado recebe a resposta abaixo."
       },
       "readOnlyLabel": "Ferramentas somente leitura",
-      "readOnlyHint": "Padrões de aprovação de ferramentas que um e-mail pode usar sem aprovação, como http.get:* ou lookup_order. O EDDI não sabe o que altera algo: liste apenas ferramentas que não alteram nada. As aprovações de ferramentas do próprio agente continuam a valer.",
+      "readOnlyHint": "Padrões de aprovação de ferramentas que um e-mail pode usar sem a aprovação do portão de e-mail, como http.get:* ou lookup_order. O EDDI não sabe o que altera algo: liste apenas ferramentas que não alteram nada. As aprovações de ferramentas do próprio agente continuam a valer.",
       "rejectedReplyLabel": "Resposta quando rejeitado",
       "rejectedReplyPlaceholder": "O seu pedido não foi aprovado.",
       "rejectedReplyHint": "Enviada apenas no modo conversa; o modo gatilho nunca responde."

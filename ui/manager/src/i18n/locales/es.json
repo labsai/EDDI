@@ -5641,7 +5641,7 @@
       "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas.",
       "approvalPolicyNone": "Guardado, pero un destino cuyo agente puede actuar no tiene política de aprobación: el correo usa sus herramientas solo bajo las aprobaciones propias del agente. Considere «Aprobar cada acción».",
       "ruleCallsRefused": "Guardado. Un destino con política de aprobación tiene llamadas HTTP o MCP guiadas por reglas: un turno de correo las rechaza salvo que Herramientas de solo lectura las nombre.",
-      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera aprobación. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes."
+      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera la aprobación de la compuerta de correo. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5690,7 +5690,7 @@
         "everyTurn": "Cada correo espera a un aprobador antes de que actúe el agente; el correo rechazado recibe la respuesta de abajo."
       },
       "readOnlyLabel": "Herramientas de solo lectura",
-      "readOnlyHint": "Patrones de aprobación de herramientas que un correo puede usar sin aprobación, como http.get:* o lookup_order. EDDI no sabe qué cambia algo: indique solo herramientas que no cambian nada. Las aprobaciones de herramientas del propio agente siguen vigentes.",
+      "readOnlyHint": "Patrones de aprobación de herramientas que un correo puede usar sin la aprobación de la compuerta de correo, como http.get:* o lookup_order. EDDI no sabe qué cambia algo: indique solo herramientas que no cambian nada. Las aprobaciones de herramientas del propio agente siguen vigentes.",
       "rejectedReplyLabel": "Respuesta si se rechaza",
       "rejectedReplyPlaceholder": "Su solicitud no fue aprobada.",
       "rejectedReplyHint": "Solo se envía en modo conversación; el modo disparador nunca responde."

@@ -5638,7 +5638,7 @@
         "everyTurn": "Every mail waits for an approver before the agent runs; rejected mail is answered with the reply below."
       },
       "readOnlyLabel": "Read-only tools",
-      "readOnlyHint": "Tool-approval patterns a mail may use without approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not. The agent's own tool approvals still apply.",
+      "readOnlyHint": "Tool-approval patterns a mail may use without the email gate's approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not. The agent's own tool approvals still apply.",
       "rejectedReplyLabel": "Reply when rejected",
       "rejectedReplyPlaceholder": "Your request was not approved.",
       "rejectedReplyHint": "Sent in conversation mode only; trigger mode never replies."

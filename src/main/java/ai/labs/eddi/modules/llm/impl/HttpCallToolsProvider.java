@@ -919,8 +919,13 @@ public class HttpCallToolsProvider implements ToolSourceProvider {
                 // The executor renders templates before it parses the URL, so a templated
                 // absolute URL addresses the same endpoint as its rendered form: keep the
                 // path after the authority, as the URI branch above does.
-                int authorityEnd = path.indexOf('/', path.indexOf("://") + 3);
-                if (authorityEnd < 0) {
+                // The authority ends at the first '/', '?' or '#'; a '/' inside a query
+                // string is not a path.
+                int authorityEnd = path.indexOf("://") + 3;
+                while (authorityEnd < path.length() && "/?#".indexOf(path.charAt(authorityEnd)) < 0) {
+                    authorityEnd++;
+                }
+                if (authorityEnd >= path.length() || path.charAt(authorityEnd) != '/') {
                     path = "/";
                 } else {
                     String rest = path.substring(authorityEnd);

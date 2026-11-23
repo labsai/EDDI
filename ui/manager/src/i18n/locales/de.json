@@ -5589,7 +5589,7 @@
       "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen.",
       "approvalPolicyNone": "Gespeichert, aber ein Ziel, dessen Agent handeln kann, hat keine Freigaberichtlinie: Mails nutzen seine Tools nur unter den eigenen Tool-Freigaben des Agenten. Erwägen Sie „Jede Aktion freigeben“.",
       "ruleCallsRefused": "Gespeichert. Ein Ziel mit Freigaberichtlinie hat regelgesteuerte HTTP- oder MCP-Aufrufe: Ein Mail-Turn verweigert sie, sofern „Nur lesende Tools“ sie nicht nennt.",
-      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf Freigabe. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin."
+      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf die Freigabe des E-Mail-Gates. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5638,7 +5638,7 @@
         "everyTurn": "Jede Mail wartet auf eine Freigabe, bevor der Agent läuft; abgelehnte Mails erhalten die Antwort unten."
       },
       "readOnlyLabel": "Nur lesende Tools",
-      "readOnlyHint": "Tool-Freigabe-Muster, die eine Mail ohne Freigabe nutzen darf, etwa http.get:* oder lookup_order. EDDI erkennt nicht, was etwas verändert: Listen Sie nur Tools, die nichts ändern. Die eigenen Tool-Freigaben des Agenten gelten weiterhin.",
+      "readOnlyHint": "Tool-Freigabe-Muster, die eine Mail ohne Freigabe des E-Mail-Gates nutzen darf, etwa http.get:* oder lookup_order. EDDI erkennt nicht, was etwas verändert: Listen Sie nur Tools, die nichts ändern. Die eigenen Tool-Freigaben des Agenten gelten weiterhin.",
       "rejectedReplyLabel": "Antwort bei Ablehnung",
       "rejectedReplyPlaceholder": "Ihre Anfrage wurde nicht freigegeben.",
       "rejectedReplyHint": "Wird nur im Konversationsmodus gesendet; der Trigger-Modus antwortet nie."
