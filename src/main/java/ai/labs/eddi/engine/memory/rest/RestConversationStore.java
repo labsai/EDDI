@@ -21,6 +21,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.org.OrgBound;
+import ai.labs.eddi.engine.org.PlatformPlane;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationPurgeService;
@@ -84,6 +86,7 @@ import static java.lang.String.format;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestConversationStore implements IRestConversationStore {
     public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
 
@@ -1063,6 +1066,7 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Scheduled(every = "24h")
+    @PlatformPlane("a cleanup job across all conversations, not a request: binds per item later (plan §7.4)")
     public void deleteEndedConversationsOlderThanXDays() {
         if (deleteEndedConversationsOnceOlderThanDays == null || deleteEndedConversationsOnceOlderThanDays < MIN_RETENTION_DAYS) {
             log.debugf("Ended-conversation retention sweep disabled (deleteEndedConversationsOnceOlderThanDays < %d)", MIN_RETENTION_DAYS);
@@ -1147,6 +1151,7 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Scheduled(every = "24h", delayed = "2m")
+    @PlatformPlane("a cleanup job across all user memories, not a request: binds per item later (plan §7.4)")
     void cleanupOldUserMemories() {
         if (deleteMemoriesOlderThanDays == null || deleteMemoriesOlderThanDays <= 0) {
             return; // Disabled

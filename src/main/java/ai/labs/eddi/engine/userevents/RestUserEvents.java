@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.userevents;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -36,6 +37,7 @@ import java.util.Map;
  * administrator.
  */
 @ApplicationScoped
+@OrgBound
 public class RestUserEvents implements IRestUserEvents {
 
     private static final Logger LOGGER = Logger.getLogger(RestUserEvents.class);

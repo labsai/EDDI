@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
@@ -95,6 +96,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * </ul>
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngineStreaming.class);

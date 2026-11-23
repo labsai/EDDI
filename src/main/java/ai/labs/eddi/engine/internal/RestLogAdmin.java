@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IRestLogAdmin;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
@@ -36,6 +37,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestLogAdmin implements IRestLogAdmin {
 
     private static final Logger log = Logger.getLogger(RestLogAdmin.class);

@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -64,6 +65,7 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestAgentStore implements IRestAgentStore {
     private static final String WORKFLOW_URI = IRestWorkflowStore.resourceURI;
     private static final String SIGNING_KEYS_PATH = "/agentstore/agents/{id}/signing-keys";

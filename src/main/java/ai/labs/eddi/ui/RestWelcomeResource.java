@@ -5,6 +5,7 @@
 package ai.labs.eddi.ui;
 
 import ai.labs.eddi.configs.branding.BrandRequest;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -15,6 +16,7 @@ import jakarta.ws.rs.core.Response;
  * /welcome/** paths. React Router handles client-side routing from there.
  */
 @ApplicationScoped
+@OrgBound
 public class RestWelcomeResource implements IRestWelcomeResource {
 
     private final BrandedShellRenderer shellRenderer;

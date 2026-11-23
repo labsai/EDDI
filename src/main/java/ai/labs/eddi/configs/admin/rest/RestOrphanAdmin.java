@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -62,6 +63,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     private static final Logger log = Logger.getLogger(RestOrphanAdmin.class);

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetAccountingUnavailableException;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetMonth;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +26,7 @@ import java.util.Map;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestGroupBudget implements IRestGroupBudget {
 
     private final TeamBudgetService service;

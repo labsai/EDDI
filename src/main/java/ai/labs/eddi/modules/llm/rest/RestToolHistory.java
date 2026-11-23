@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
 import ai.labs.eddi.modules.llm.impl.ToolOutcomeClassifier;
@@ -54,6 +55,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 @Tag(name = "Tools / Tool History", description = "Tool execution history, cache, rate limits, and cost tracking")
 @RolesAllowed("eddi-admin")
 @ApplicationScoped
+@OrgBound
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
 

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceRefusals;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
@@ -40,6 +41,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestSpaceResources
  */
 @ApplicationScoped
+@OrgBound
 public class RestSpaceResources implements IRestSpaceResources {
 
     private static final Logger LOGGER = Logger.getLogger(RestSpaceResources.class);

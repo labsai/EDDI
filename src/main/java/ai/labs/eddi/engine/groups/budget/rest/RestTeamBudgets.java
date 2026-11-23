@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.groups.budget.TeamBudgetAccountingUnavailableExceptio
 import ai.labs.eddi.engine.groups.budget.TeamBudgetMonth;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetSnapshot;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -30,6 +31,7 @@ import java.util.Set;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestTeamBudgets implements IRestTeamBudgets {
 
     private final TeamBudgetService service;

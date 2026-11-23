@@ -17,8 +17,12 @@ import org.jboss.logging.Logger;
  * Binds the request's org around a method of an {@link OrgBound} bean.
  * <p>
  * It runs at {@code PLATFORM_BEFORE}, outermost, so every other interceptor and
- * the method itself already see the binding. When the same org is already bound
- * it adds nothing.
+ * the method itself already see the binding. When an org is already bound, it
+ * is kept and nothing is resolved ({@link OrgRequest#callBound}). A method that
+ * carries {@link PlatformPlane} itself, a {@code @Scheduled} job on an
+ * org-plane resource, runs without a binding. Only that method: ArC intercepts
+ * self-invocation, so a non-private method of the same bean that the job calls
+ * is bound as usual.
  * <p>
  * The binding ends when the method returns. Work that outlives it
  * ({@code AsyncResponse}, {@code StreamingOutput}, SSE, LLM streaming
@@ -60,8 +64,18 @@ public class OrgBoundInterceptor {
 
     @AroundInvoke
     Object bind(InvocationContext context) throws Exception {
+        if (context.getMethod().isAnnotationPresent(PlatformPlane.class)) {
+            // not request work, such as a @Scheduled job
+            return context.proceed();
+        }
         try {
-            return orgRequest.callBound(context::proceed);
+            return orgRequest.callBound(() -> {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debugf("Org %s bound for %s.%s", OrgContext.current().map(OrgId::value).orElse("-"),
+                            context.getMethod().getDeclaringClass().getSimpleName(), context.getMethod().getName());
+                }
+                return context.proceed();
+            });
         } catch (OrgResolutionException e) {
             LOGGER.warnf("[SECURITY] org resolution refused %s.%s: %s", context.getMethod().getDeclaringClass().getSimpleName(),
                     context.getMethod().getName(), e.detail());

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.updatecheck;
 
+import ai.labs.eddi.engine.org.PlatformPlane;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -11,6 +12,7 @@ import jakarta.ws.rs.BadRequestException;
 
 /** REST implementation of {@link IRestUpdateCheck}. */
 @ApplicationScoped
+@PlatformPlane("release update notices are for the platform team (plan §9.6)")
 public class RestUpdateCheck implements IRestUpdateCheck {
 
     private final UpdateCheckService service;

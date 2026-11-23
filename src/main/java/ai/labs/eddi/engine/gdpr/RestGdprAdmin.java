@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -20,6 +21,7 @@ import org.jboss.logging.Logger;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestGdprAdmin implements IRestGdprAdmin {
 
     private static final Logger LOGGER = Logger.getLogger(RestGdprAdmin.class);

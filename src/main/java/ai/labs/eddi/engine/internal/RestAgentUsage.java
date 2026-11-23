@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.api.IRestAgentUsage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore.ConversationUsage;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -16,6 +17,7 @@ import jakarta.inject.Inject;
  * @see IRestAgentUsage
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentUsage implements IRestAgentUsage {
 
     private final ResourceAccessGuard accessGuard;

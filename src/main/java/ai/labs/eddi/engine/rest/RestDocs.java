@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.rest;
 
 import ai.labs.eddi.engine.api.IRestDocs;
 import ai.labs.eddi.engine.docs.DocsService;
+import ai.labs.eddi.engine.org.PlatformPlane;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -19,6 +20,7 @@ import java.util.List;
  * guard.
  */
 @ApplicationScoped
+@PlatformPlane("the documentation catalog is platform content (plan §10.1)")
 public class RestDocs implements IRestDocs {
 
     private final DocsService docsService;

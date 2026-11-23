@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -38,6 +39,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard accessGuard;

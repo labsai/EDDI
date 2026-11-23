@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -54,6 +55,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.1.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestChannelIntegrationStore implements IRestChannelIntegrationStore {
     private static final Logger LOG = Logger.getLogger(RestChannelIntegrationStore.class);
 

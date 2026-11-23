@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.CallerSpaces;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -38,6 +39,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestWorkspaces implements IRestWorkspaces {
 
     private static final Logger LOGGER = Logger.getLogger(RestWorkspaces.class);

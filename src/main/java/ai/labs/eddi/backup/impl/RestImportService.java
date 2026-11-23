@@ -33,6 +33,7 @@ import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
@@ -129,6 +130,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestImportService extends AbstractBackupService implements IRestImportService {
     private final RagSourceIngestionService ragSourceIngestionService;
 

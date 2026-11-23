@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkiverse.mcp.server.Tool;
@@ -45,6 +46,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpMemoryTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpMemoryTools.class);

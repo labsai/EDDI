@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -45,6 +46,7 @@ import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
+@OrgBound
 public class RestAgentManagement implements IRestAgentManagement {
     public static final String KEY_LANG = "lang";
     /**

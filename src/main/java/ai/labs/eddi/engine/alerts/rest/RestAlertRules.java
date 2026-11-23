@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.api.IRestAlertRules;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -40,6 +41,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestAlertRules
  */
 @ApplicationScoped
+@OrgBound
 public class RestAlertRules implements IRestAlertRules {
 
     private static final Logger LOGGER = Logger.getLogger(RestAlertRules.class);

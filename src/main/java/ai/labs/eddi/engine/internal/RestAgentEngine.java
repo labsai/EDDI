@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -90,6 +91,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * operations use only conversationId.
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;

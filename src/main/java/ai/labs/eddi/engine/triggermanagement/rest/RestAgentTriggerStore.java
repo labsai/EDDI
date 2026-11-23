@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.triggermanagement.rest;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -29,6 +30,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     private static final String CACHE_NAME = "agentTriggers";
     private final IAgentTriggerStore agentTriggerStore;

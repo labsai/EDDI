@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -47,6 +48,7 @@ import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestSemanticParser implements IRestSemanticParser {
 
     /**

@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.branding.KeycloakThemeExport;
 import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import ai.labs.eddi.configs.branding.model.BrandUpdate;
 import ai.labs.eddi.configs.branding.model.BrandingView;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,6 +30,7 @@ import java.util.function.Supplier;
  * and, for a revision conflict, the {@code currentRevision}.
  */
 @ApplicationScoped
+@OrgBound
 public class RestBrandingAdmin implements IRestBrandingAdmin {
 
     /** The download's file name: the theme inside is called {@code brand}. */

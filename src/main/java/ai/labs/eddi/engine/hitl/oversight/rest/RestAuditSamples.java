@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import ai.labs.eddi.engine.hitl.oversight.samples.AuditSample;
 import ai.labs.eddi.engine.hitl.oversight.samples.AuditSampleService;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampleFilter;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -17,6 +18,7 @@ import java.util.Locale;
  * @see IRestAuditSamples
  */
 @ApplicationScoped
+@OrgBound
 public class RestAuditSamples implements IRestAuditSamples {
 
     static final int MAX_PAGE_SIZE = 100;

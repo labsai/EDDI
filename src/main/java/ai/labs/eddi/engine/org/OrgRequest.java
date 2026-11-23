@@ -26,10 +26,20 @@ public class OrgRequest {
     }
 
     /**
-     * Runs {@code work} bound to the request's org; a no-op rebind when it is
-     * already bound.
+     * Runs {@code work} bound to the request's org.
+     * <p>
+     * When an org is already bound, it is kept and nothing is resolved. That covers
+     * an in-process call into an {@link OrgBound} bean from code that bound its org
+     * itself: a background job processing one org's item (plan §7.4), deployment, a
+     * nested resource call. Resolving again there would fail on a thread without a
+     * request, or name a different org than the one already bound. Inside
+     * {@link OrgScope#platform} the request's org is resolved and bound, as
+     * platform-to-org is allowed.
      */
     public <T> T callBound(Callable<T> work) throws Exception {
+        if (OrgContext.current().isPresent()) {
+            return work.call();
+        }
         return OrgContext.callAs(resolution.resolve(), work);
     }
 
@@ -38,6 +48,10 @@ public class OrgRequest {
      * exception.
      */
     public void runBound(Runnable work) {
+        if (OrgContext.current().isPresent()) {
+            work.run();
+            return;
+        }
         OrgContext.runAs(resolution.resolve(), work);
     }
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.parser.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
@@ -32,6 +33,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestParserStore implements IRestParserStore {
     private static final Logger log = Logger.getLogger(RestParserStore.class);
 

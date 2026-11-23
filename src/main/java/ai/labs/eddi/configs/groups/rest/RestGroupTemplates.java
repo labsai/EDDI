@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestGroupTemplates;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,6 +30,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestGroupTemplates implements IRestGroupTemplates {
 
     private static final Logger LOG = Logger.getLogger(RestGroupTemplates.class);

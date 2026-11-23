@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.audit.rest.AdminActionRecorder;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -33,6 +34,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpGdprTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGdprTools.class);

@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.properties.rest;
 import ai.labs.eddi.configs.properties.IRestPropertiesStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -26,6 +27,7 @@ import java.util.Map;
  * this endpoint is a write primitive into someone else's system prompt.
  */
 @ApplicationScoped
+@OrgBound
 public class RestPropertiesStore implements IRestPropertiesStore {
     private final IUserMemoryStore userMemoryStore;
     private final SecurityIdentity identity;

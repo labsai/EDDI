@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.MethodRef;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -92,6 +93,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Integrations / A2A Protocol", description = "Agent-to-Agent protocol endpoints")
 @ApplicationScoped
+@OrgBound
 public class RestA2AEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(RestA2AEndpoint.class);

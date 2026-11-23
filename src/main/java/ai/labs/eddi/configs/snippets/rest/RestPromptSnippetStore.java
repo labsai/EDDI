@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.snippets.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
@@ -29,6 +30,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     private final IPromptSnippetStore snippetStore;
     private final RestVersionInfo<PromptSnippet> restVersionInfo;

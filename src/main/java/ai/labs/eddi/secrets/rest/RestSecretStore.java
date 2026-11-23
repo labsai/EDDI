@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -47,6 +48,7 @@ import java.util.regex.Pattern;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestSecretStore implements IRestSecretStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestSecretStore.class);

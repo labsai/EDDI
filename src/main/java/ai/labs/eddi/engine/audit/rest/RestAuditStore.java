@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.model.AuditVerificationReport;
 import ai.labs.eddi.engine.audit.model.AuditVerificationReport.ChainStatus;
 import ai.labs.eddi.engine.audit.model.AuditVerificationReport.EntryProblem;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -30,6 +31,7 @@ import org.jboss.logging.Logger;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestAuditStore implements IRestAuditStore {
 
     /** Hard ceiling on one verification sweep, whatever the caller asks for. */

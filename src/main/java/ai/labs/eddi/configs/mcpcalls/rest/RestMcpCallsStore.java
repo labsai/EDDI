@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.mcpcalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
@@ -44,6 +45,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * REST implementation for MCP Calls configuration store.
  */
 @ApplicationScoped
+@OrgBound
 public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestMcpCallsStore.class);

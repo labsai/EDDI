@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -77,6 +78,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);

@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.groups.lessons.ILessonHistoryStore;
 import ai.labs.eddi.engine.groups.lessons.LessonService;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.LessonConsolidationService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -37,6 +38,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestGroupLessons
  */
 @ApplicationScoped
+@OrgBound
 public class RestGroupLessons implements IRestGroupLessons {
 
     private static final Logger LOG = Logger.getLogger(RestGroupLessons.class);

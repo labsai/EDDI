@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.tenancy.rest;
 
+import ai.labs.eddi.engine.org.PlatformPlane;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
@@ -20,6 +21,7 @@ import java.util.List;
  * REST implementation for tenant quota management.
  */
 @ApplicationScoped
+@PlatformPlane("quota administration addresses any tenant by id (plan §9.3, §12)")
 public class RestTenantQuota implements IRestTenantQuota {
 
     private final ITenantQuotaStore quotaStore;

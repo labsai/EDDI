@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.org.PlatformPlane;
 import ai.labs.eddi.engine.runtime.BuildInfo;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -25,6 +26,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
  */
 @McpErrorResults
 @ApplicationScoped
+@PlatformPlane("build metadata only; reads no data")
 public class McpVersionTools {
 
     private final BuildInfo buildInfo;
