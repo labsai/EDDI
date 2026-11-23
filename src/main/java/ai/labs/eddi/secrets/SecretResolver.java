@@ -165,6 +165,10 @@ public class SecretResolver {
         long deadline = System.nanoTime() + INVALIDATION_WAIT_NANOS;
         while (true) {
             long generation = generationOf(cacheKey);
+            Runnable sampled = generationSampledHook;
+            if (sampled != null) {
+                sampled.run();
+            }
             if (settled(cacheKey, generation)) {
                 return generation;
             }
@@ -201,6 +205,13 @@ public class SecretResolver {
      * production.
      */
     volatile Runnable awaitingInvalidationHook;
+
+    /**
+     * Test seam: runs between sampling a secret's generation and comparing it with
+     * the finished count, so a test can start an invalidation exactly there. Never
+     * set in production.
+     */
+    volatile Runnable generationSampledHook;
 
     private void invalidationStarted() {
         Runnable hook = invalidationStartedHook;
@@ -693,7 +704,10 @@ public class SecretResolver {
                     throw new SecretChangingException(changing + ", so it is refused. Retry shortly.");
                 }
                 // Warn mode refuses nothing; it says that the check it made is not bound.
-                LOGGER.warnf("%s; under eddi.vault.grant-enforcement=warn it is checked against the grant read now", changing);
+                // Names the reference only, never the caller-supplied usage text.
+                LOGGER.warnf("Vault reference %s is being changed, so its grant check is not bound to a settled state; under "
+                        + "eddi.vault.grant-enforcement=warn it is checked against the grant read now",
+                        SecretReference.describe(ref.toReferenceString()));
                 admitted = grantAdmits(ref, asking, usedFor);
             }
             if (!admitted) {

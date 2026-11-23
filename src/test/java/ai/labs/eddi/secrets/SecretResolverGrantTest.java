@@ -306,6 +306,52 @@ class SecretResolverGrantTest {
         }
 
         @Test
+        @DisplayName("an invalidation that starts between the generation sample and the settled comparison does not admit on the old grant")
+        void invalidationStartingAfterTheSampleIsCaught() throws Exception {
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)), "value and grant (A) now cached");
+            grant(List.of(AGENT_B)); // what the invalidation below makes current
+            var inside = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var invalidator = Executors.newSingleThreadExecutor();
+            try {
+                resolver.invalidationStartedHook = () -> {
+                    // On the invalidating thread: value evicted, old grant still cached.
+                    inside.countDown();
+                    try {
+                        release.await(10, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                };
+                var firstSample = new boolean[]{true};
+                resolver.generationSampledHook = () -> {
+                    if (firstSample[0]) {
+                        firstSample[0] = false;
+                        // The generation is sampled; the invalidation starts now and stops
+                        // between its two evictions, before the comparison runs.
+                        invalidator.submit(() -> resolver.invalidateLocal(KEY));
+                        try {
+                            assertTrue(inside.await(10, TimeUnit.SECONDS));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                };
+                // Once the resolver sees the invalidation in progress, it may finish.
+                resolver.awaitingInvalidationHook = release::countDown;
+
+                var refused = assertThrows(SecretResolver.SecretNotGrantedException.class,
+                        () -> resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "A2A agent at test"),
+                        "A must not be admitted on the grant cached before the invalidation");
+                assertFalse(refused instanceof SecretResolver.SecretChangingException, "refused by the settled grant (B only)");
+            } finally {
+                release.countDown();
+                invalidator.shutdown();
+                assertTrue(invalidator.awaitTermination(10, TimeUnit.SECONDS));
+            }
+        }
+
+        @Test
         @DisplayName("a vault that changes during every attempt leaves the reference unresolved")
         void vaultChangingOnEveryAttemptIsRefused() throws Exception {
             when(provider.resolve(KEY)).thenAnswer(invocation -> {
