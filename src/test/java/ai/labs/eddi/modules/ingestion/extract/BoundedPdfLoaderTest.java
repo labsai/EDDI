@@ -71,6 +71,22 @@ class BoundedPdfLoaderTest {
     }
 
     @Test
+    @DisplayName("a table that breaks partway is rebuilt and counted once, not refused for the entries read before the break")
+    void lenientRebuildCountsAgainFromZero() throws IOException {
+        // Five entries are stored, then a corrupt sixth line makes PDFBox give up on
+        // the table and rebuild it from the five objects it finds. Ten calls in all;
+        // the rebuild holds five.
+        byte[] pdf = fiveObjectPdf(true);
+
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                IOUtils.createMemoryOnlyStreamCache(), 5, true)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+        }
+        assertThrows(UnreadableDocumentException.class, () -> BoundedPdfLoader
+                .load(new RandomAccessReadBuffer(pdf), IOUtils.createMemoryOnlyStreamCache(), 4, true));
+    }
+
+    @Test
     @DisplayName("an ordinary PDF loads under the default cap and reads as before")
     void ordinaryPdfLoads() throws IOException {
         try (PDDocument document = BoundedPdfLoader.load(fiveObjectPdf(), IOUtils.createMemoryOnlyStreamCache())) {
@@ -86,6 +102,16 @@ class BoundedPdfLoaderTest {
      * table is exact and PDFBox has nothing to repair.
      */
     static byte[] fiveObjectPdf() {
+        return fiveObjectPdf(false);
+    }
+
+    /**
+     * @param corruptSixthEntry
+     *            whether the table declares a sixth entry whose type is neither
+     *            {@code n} nor {@code f}, which PDFBox reads as a broken table and,
+     *            leniently, rebuilds by scanning the file
+     */
+    static byte[] fiveObjectPdf(boolean corruptSixthEntry) {
         String content = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";
         List<String> objects = List.of(
                 "<</Type/Catalog/Pages 2 0 R>>",
@@ -101,9 +127,13 @@ class BoundedPdfLoaderTest {
             write(out, (i + 1) + " 0 obj\n" + objects.get(i) + "\nendobj\n");
         }
         int xref = out.size();
-        var table = new StringBuilder("xref\n0 ").append(objects.size() + 1).append("\n0000000000 65535 f \n");
+        int declared = objects.size() + 1 + (corruptSixthEntry ? 1 : 0);
+        var table = new StringBuilder("xref\n0 ").append(declared).append("\n0000000000 65535 f \n");
         for (long offset : offsets) {
             table.append(String.format("%010d 00000 n \n", offset));
+        }
+        if (corruptSixthEntry) {
+            table.append("0000000009 00000 x \n");
         }
         table.append("trailer<</Size ").append(objects.size() + 1).append("/Root 1 0 R>>\nstartxref\n").append(xref)
                 .append("\n%%EOF\n");

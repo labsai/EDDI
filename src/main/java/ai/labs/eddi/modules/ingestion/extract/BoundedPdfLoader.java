@@ -23,12 +23,19 @@ import java.io.IOException;
  * PDFBox bounds it. A large table of {@code 0000000000 00000 n} lines, or about
  * 150 bytes of cross-reference stream with {@code /W [0 0 0]} and a
  * {@code /Size} of two billion, fills the heap before a page is read: the
- * second exhausts a 256 MB heap in a few seconds. Every entry, from a table or
- * a stream, in strict or lenient parsing, goes through
- * {@link XrefTrailerResolver#setXRef}, so the parser's own resolver is replaced
- * by one that counts the calls and stops the parse when they pass the cap. That
- * is exact whatever the file's syntax, which a separate pre-scan of the
- * cross-reference sections could not be.
+ * second exhausts a 256 MB heap in a few seconds. Every entry read from a table
+ * or a stream, and every object a lenient rebuild hands back to the resolver,
+ * goes through {@link XrefTrailerResolver#setXRef}, so the parser's own
+ * resolver is replaced by one that counts the calls and stops the parse when
+ * they pass the cap. That holds whatever the file's syntax, which a separate
+ * pre-scan of the cross-reference sections could not.
+ *
+ * <p>
+ * Not covered: a lenient rebuild first collects the objects it finds in maps of
+ * its own, and only then passes them to the resolver, so a damaged file made of
+ * many tiny {@code N 0 obj} markers is held there before the cap refuses it.
+ * That costs a multiple of the file's size, not anything the file merely
+ * declares, so the upload size limit bounds it.
  *
  * <p>
  * Every PDF EDDI reads from untrusted bytes is opened here, never with
@@ -109,7 +116,18 @@ public final class BoundedPdfLoader {
         }
     }
 
-    /** Counts entries; past the cap it throws instead of storing. */
+    /**
+     * Counts entries; past the cap it throws instead of storing.
+     *
+     * <p>
+     * It counts calls, which is at least what PDFBox stores: a key already in the
+     * current section (a hybrid file lists objects in its table and again in its
+     * {@code /XRefStm}) is counted but not stored again, so such a file reaches the
+     * cap at fewer objects than a plain one, never more. A lenient rebuild clears
+     * every section through {@link #reset()} and refills it from the objects it
+     * found, so the count starts again there; otherwise a file whose table broke
+     * partway would be counted twice and refused where {@code Loader} repaired it.
+     */
     private static final class CountingResolver extends XrefTrailerResolver {
         private final long maxEntries;
         private long entries;
@@ -124,6 +142,12 @@ public final class BoundedPdfLoader {
                 throw new XrefLimitExceeded();
             }
             super.setXRef(objKey, offset);
+        }
+
+        @Override
+        protected void reset() {
+            super.reset();
+            entries = 0;
         }
     }
 

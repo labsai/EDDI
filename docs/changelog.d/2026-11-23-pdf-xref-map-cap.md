@@ -13,16 +13,19 @@ help, because nothing is decoded.
 
 - **New `BoundedPdfLoader`** (`modules/ingestion/extract`). It opens a PDF the way `Loader.loadPDF(byte[], …)` does
   (a `RandomAccessReadBuffer`, lenient parsing, no password). Its `PDFParser` subclass replaces the parser's
-  `xrefTrailerResolver` with a counting one that throws past **500,000** entries. Every entry, whether from a classic
-  table, a cross-reference stream or a lenient repair, goes through `setXRef`, so the count is exact. The exception
+  `xrefTrailerResolver` with a counting one that throws past **500,000** entries. Every entry from a classic table or
+  a cross-reference stream goes through `setXRef`. The resolver counts calls, which is at least what PDFBox stores (a
+  hybrid file's duplicates count twice), and restarts the count when a lenient rebuild clears the table, so a file
+  whose table broke partway is not counted twice and refused where `Loader` repaired it. The exception
   is deliberately not an `IllegalArgumentException`, because PDFBox catches that around `setXRef`. It becomes an
   `UnreadableDocumentException`: *"This PDF declares more than 500000 objects…"*.
-- **Both in-memory loads use it:** `PdfTextExtractor` (document ingestion) and `AttachmentTextExtractor`, which
+- **Both loads from a byte array use it:** `PdfTextExtractor` (document ingestion) and `AttachmentTextExtractor`, which
   `PdfReaderTool`, `readAttachment` and the attachment forwarder read through. No `Loader.loadPDF` call remains in
   `src/main/java`. The class is public because the attachment extractor is in another package.
 - **Tests:** `BoundedPdfLoaderTest` sends the 150-byte bomb through the loader and through `PdfTextExtractor`. It
   also has an exact-count test: a hand-written classic table with five in-use entries loads at cap 5 and is refused
-  at cap 4, in both strict and lenient mode. `AttachmentTextExtractorTest.CrossReferenceBomb` covers all three of
+  at cap 4, in both strict and lenient mode. A table that breaks after five entries is rebuilt and still loads at
+  cap 5. `AttachmentTextExtractorTest.CrossReferenceBomb` covers all three of
   that extractor's public PDF methods. Each bomb test asserts the specific message, not only the exception type.
 - **Docs:** [security](../security.md#uploaded-pdfs-cross-reference-entries).
 
@@ -32,8 +35,11 @@ help, because nothing is decoded.
   The constant name and the message are kept identical, so that branch can drop its private copy and call
   `BoundedPdfLoader.load(source, cache, max, lenient)` with its file-backed source and strict flag. Whichever branch
   lands second adopts the other's class.
-- The cap counts stored entries rather than pre-scanning the cross-reference sections. Two reviews of WP-4.2 showed
-  that a regex pre-scan could be bypassed in many ways.
+- The cap counts entries as PDFBox stores them rather than pre-scanning the cross-reference sections. Two reviews
+  of WP-4.2 showed that a regex pre-scan could be bypassed in many ways.
+- **Residual, not fixed here:** a lenient rebuild of a damaged file collects the `N 0 obj` markers it finds in
+  PDFBox's own maps before the resolver sees them. That costs a multiple of the file's size, which the upload size
+  limit bounds, not the two-billion blow-up a declared `/Size` allowed.
 
 ```decision-log
 | 2026-11-23 | Every PDF read from untrusted bytes goes through `BoundedPdfLoader` (500,000 cross-reference entries), never `Loader.loadPDF` | PDFBox's cross-reference map is unbounded; a 150-byte xref stream OOMs a 256 MB heap | A regex pre-scan of the cross-reference sections (bypassable) |
