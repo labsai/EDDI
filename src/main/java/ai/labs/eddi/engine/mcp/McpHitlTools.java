@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.hitl.HitlPlanBinding;
 import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
@@ -337,6 +338,10 @@ public class McpHitlTools {
                     + "\",\"verdict\":\"" + parsed.name() + "\"}";
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call needs a mandatory approval this caller cannot give; the pause is
+            // untouched. Fixed text.
+            return errorJson(e.getMessage(), "FORBIDDEN", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Conversation not found", "NOT_FOUND", null);
         } catch (IConversationService.PlanMismatchException e) {

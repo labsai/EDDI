@@ -69,6 +69,11 @@ public abstract class PostgresTestBase {
         return new SimpleDataSourceInstance(ds);
     }
 
+    /** The same minimal wrapper over a DataSource of the caller's. */
+    protected static Instance<DataSource> instanceOf(DataSource ds) {
+        return new SimpleDataSourceInstance(ds);
+    }
+
     /**
      * Truncates the given tables to ensure test isolation between methods.
      */

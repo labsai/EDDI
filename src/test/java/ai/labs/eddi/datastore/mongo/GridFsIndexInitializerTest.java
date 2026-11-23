@@ -32,6 +32,7 @@ class GridFsIndexInitializerTest {
         new GridFsIndexInitializer(instance, "mongodb").onStart(mock(StartupEvent.class));
 
         verify(store).ensureIndexes();
+        verify(store).ensureReservationIndexes();
     }
 
     @Test

@@ -20,10 +20,12 @@ import ai.labs.eddi.configs.variables.mongo.GlobalVariableStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.GridFsAttachmentStore;
+import ai.labs.eddi.datastore.mongo.GridFsBlobBackend;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
 import ai.labs.eddi.datastore.postgres.PostgresBrandingStore;
 import ai.labs.eddi.datastore.postgres.PostgresAttachmentStore;
+import ai.labs.eddi.datastore.postgres.PgChunksBlobBackend;
 import ai.labs.eddi.datastore.postgres.PostgresConversationCheckpointStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
@@ -66,7 +68,10 @@ import ai.labs.eddi.engine.hitl.oversight.samples.mongo.MongoAuditSampleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
+import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.blob.BlobBackend;
+import ai.labs.eddi.engine.attachments.blob.BlobBackendSelector;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MongoConversationCheckpointStore;
@@ -138,7 +143,11 @@ import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * CDI producer that selects the correct datastore implementation at
@@ -383,6 +392,36 @@ public class DataStoreProducers {
     public IAttachmentStore attachmentStore(
                                             Instance<GridFsAttachmentStore> mongo,
                                             Instance<PostgresAttachmentStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    /**
+     * The blob backend large attachments are written to, and read back by locator.
+     * Only this database's backend is listed, and it is created on first use, so
+     * the other database's bean is never touched. An impossible
+     * {@code eddi.attachments.blob.backend} throws here, which
+     * {@code BlobBackendStartupCheck} turns into a failed startup.
+     */
+    @Produces
+    @Singleton
+    public BlobBackendSelector blobBackendSelector(
+                                                   @ConfigProperty(name = "eddi.attachments.blob.backend",
+                                                                   defaultValue = BlobBackendSelector.AUTO) String configured,
+                                                   Instance<GridFsBlobBackend> gridFs,
+                                                   Instance<PgChunksBlobBackend> pgChunks) {
+        String writeBackend = BlobBackendSelector.resolve(configured, datastoreType);
+        Map<String, Supplier<BlobBackend>> available = isPostgres()
+                ? Map.of(BlobBackendSelector.PG_CHUNKS, pgChunks::get)
+                : Map.of(BlobBackendSelector.GRIDFS, gridFs::get);
+        return new BlobBackendSelector(writeBackend, available);
+    }
+
+    /** The active attachment store, as the grant backfill sees it. */
+    @Produces
+    @ApplicationScoped
+    public IAttachmentGrantMigration attachmentGrantMigration(
+                                                              Instance<GridFsAttachmentStore> mongo,
+                                                              Instance<PostgresAttachmentStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
