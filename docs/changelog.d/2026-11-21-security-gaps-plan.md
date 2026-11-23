@@ -41,8 +41,6 @@ marked *Second review* in the plan:
 
 The design gaps it found are listed in a new "Second review" section, undecided:
 
-- `call`-scope canaries are disarmed after a pause;
-- one leaked marker poisons every conversation under `agent` scope;
 - a more specific approval rule drops step-up for that call;
 - step-up must follow per-call decisions;
 - changing a connection to token exchange re-points existing editor-authored references.
@@ -54,8 +52,14 @@ The design gaps it found are listed in a new "Second review" section, undecided:
 ### Design decisions
 
 - The canary marker goes at the tail of the final system message, after the cap and the
-  rolling summary. It is kept in the pause transcript. Its only blocking action is `block`;
-  the INPUT entry is `warn`.
+  rolling summary, in a fixed frame (`[[eddi-canary:<token>]]`). It is kept in the pause
+  transcript. Its only blocking action is `block`; the INPUT entry is `warn`.
+- The user decided the four canary gaps on 2026-11-23: the detector reads the marker from
+  the prompt the model received (no `canaryToken` field, nothing recomputed, so `call`
+  scope, degraded resume and key rotation are settled); all three scopes ship, with
+  `conversation` recommended and the `agent`-scope poisoning risk documented;
+  `AUDIT_COMPILED_PROMPT` records the final prompt with the marker as `[canary]`; the INPUT
+  `warn` event is recorded once per message.
 - The role filter applies only to `TOOLS_LIST`. In quarkus-mcp-server, `tools/call`
   goes through the same filter, so filtering there would turn `FORBIDDEN` into
   "not found". The filter fails closed.
@@ -72,5 +76,6 @@ The design gaps it found are listed in a new "Second review" section, undecided:
 ### What's next
 
 Item 1 of the suggested order, `McpToolTiers`, is built on `refactor/mcp-tool-tiers`
-(not yet merged), and item 3, the role-aware `tools/list`, is in progress stacked on it.
+(not yet merged), item 3, the role-aware `tools/list`, is in progress stacked on it, and
+item 2, the canary guardrail, is in progress on `feat/canary-guardrail`.
 The others wait on the gates and open gaps the plan lists.
