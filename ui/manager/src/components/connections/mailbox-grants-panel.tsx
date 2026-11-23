@@ -10,6 +10,7 @@ import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { GrantStatusBadge } from "@/components/connections/connection-badges";
 import { navigateAway } from "@/lib/navigate-away";
+import { rememberPendingMailboxLink } from "@/lib/pending-mailbox-link";
 import { isSafeAuthorizationUrl } from "@/lib/authorization-url";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { authorizeMailbox, unlinkMailbox } from "@eddi/app-kit/lib/api/connections";
@@ -82,6 +83,7 @@ export function MailboxGrantsPanel({
         toast.error(t("connections.mailbox.saveFirst", "Save or discard your changes first: linking leaves this page."));
         return;
       }
+      rememberPendingMailboxLink(connectionName, target);
       navigateAway(authorizationUrl);
     } catch (err) {
       setLeaving(false);

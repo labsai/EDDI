@@ -62,6 +62,8 @@ describe("MailboxGrantsPanel", () => {
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?state=x"));
     expect(body).toEqual({ address: "support@company.example" });
+    // Remembered for the return trip, where the link result checks this mailbox's grant.
+    expect(sessionStorage.getItem("eddi.mailboxLink.gws")).toBe("support@company.example");
   });
 
   it("returns to the same version: the page's query survives in returnTo, an old outcome does not", async () => {

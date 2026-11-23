@@ -11,6 +11,7 @@ import {
 } from "@eddi/app-kit/lib/api/connections";
 import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
 import { mailboxGrantsKey } from "@/hooks/use-mailbox-grants";
+import { normalizeMailboxAddress, takePendingMailboxLink } from "@/lib/pending-mailbox-link";
 
 /**
  * What the browser came back from the provider carrying.
@@ -82,11 +83,16 @@ export function useConnectionLinkResult(): LinkOutcome {
             defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
           }),
         );
+      const pending = takePendingMailboxLink(mailboxLinked);
       void queryClient
         .fetchQuery({ queryKey: mailboxGrantsKey(mailboxLinked), queryFn: () => listMailboxGrants(mailboxLinked), staleTime: 0 })
         .then(
           (grants) => {
-            if (grants.some((g) => g.usable)) announce();
+            // The mailbox this tab started linking, when it is known: another
+            // mailbox's usable grant does not confirm this link.
+            const linked = (g: { address: string; usable: boolean }) =>
+              g.usable && (pending === null || normalizeMailboxAddress(g.address) === pending);
+            if (grants.some(linked)) announce();
           },
           () => announce(),
         );
