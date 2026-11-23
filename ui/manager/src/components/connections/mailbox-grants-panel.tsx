@@ -61,7 +61,16 @@ export function MailboxGrantsPanel({
     if (!target || leaving || unsavedRef.current) return;
     setLeaving(true);
     try {
-      const { authorizationUrl } = await authorizeMailbox(connectionName, target, location.pathname);
+      // Keep the page's own query (the selected ?version=) so the browser comes back to
+      // the same version; an earlier link's outcome parameters are dropped, the
+      // callback appends this one's.
+      const query = new URLSearchParams(location.search);
+      query.delete("mailboxLinked");
+      query.delete("connected");
+      query.delete("error");
+      const search = query.toString();
+      const returnTo = location.pathname + (search ? `?${search}` : "");
+      const { authorizationUrl } = await authorizeMailbox(connectionName, target, returnTo);
       if (!isSafeAuthorizationUrl(authorizationUrl)) {
         setLeaving(false);
         toast.error(t("connections.mailbox.linkStartFailed", "Could not start linking the mailbox."));

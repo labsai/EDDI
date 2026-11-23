@@ -64,6 +64,25 @@ describe("MailboxGrantsPanel", () => {
     expect(body).toEqual({ address: "support@company.example" });
   });
 
+  it("returns to the same version: the page's query survives in returnTo, an old outcome does not", async () => {
+    let returnTo: string | null = null;
+    server.use(
+      http.get("*/connections/gws/mailbox-grants", () => HttpResponse.json([])),
+      http.post("*/connections/gws/mailbox-grants/authorize", ({ request }) => {
+        returnTo = new URL(request.url).searchParams.get("returnTo");
+        return HttpResponse.json({ authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=x" });
+      }),
+    );
+    renderWithProviders(<MailboxGrantsPanel connectionName="gws" />, {
+      initialRoute: "/manage/connections/abc?version=2&error=mailbox_account_mismatch",
+    });
+
+    await userEvent.type(await screen.findByTestId("mailbox-grant-address"), "eddi@eddi.solutions");
+    await userEvent.click(screen.getByTestId("mailbox-grant-link"));
+
+    await waitFor(() => expect(returnTo).toBe("/manage/connections/abc?version=2"));
+  });
+
   it("does not leave the page while the editor holds unsaved changes", async () => {
     server.use(http.get("*/connections/gws/mailbox-grants", () => HttpResponse.json([])));
     renderWithProviders(<MailboxGrantsPanel connectionName="gws" unsavedChanges />);
