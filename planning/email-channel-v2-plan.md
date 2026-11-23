@@ -545,7 +545,7 @@ MCP, ingestion or LLM tools; linking a mailbox whose Google account differs from
 | Key | Default | Meaning / validation |
 |---|---|---|
 | `replyAudience` | `sender` | `sender`: today. `thread`: also Cc the answered mail's other To/Cc recipients that pass §9.3. Requires `actWhen: addressed` and non-empty `replyAllowedRecipients`, else refused at save. Warning `email.reply-audience-thread` |
-| `replyIncludeNewReaders` | `false` | `false`: a recipient who has not been on the thread before (not the From, or a delivered To/Cc, of an earlier mail of this conversation, §9.5) is **not** Cc'd; row note `new_reader_skipped`. `true`: a new reader is Cc'd too; the sender is then deliberately sharing the thread, and the warning `email.reply-new-readers` says the answer can draw on earlier mails that reader never received |
+| `replyIncludeNewReaders` | `false` | `false`: a recipient who has not been on **every** earlier mail of this conversation (as its From, or a delivered To/Cc, §9.3/§9.5) is **not** Cc'd; row note `new_reader_skipped`. `true`: a new reader is Cc'd too; the sender is then deliberately sharing the thread, and the warning `email.reply-new-readers` says the answer can draw on earlier mails that reader never received |
 | `replyAllowedRecipients` | empty | `SenderPatterns` syntax (`*@company.com`, `*@*.company.com`, exact addresses), max 50. Only recipients matching one are Cc'd |
 | `maxReplyRecipients` | `10` | 1–50, total Cc count. Over it → reply to the sender only, row note `cc_capped` |
 | `listAddresses` | empty | Patterns never Cc'd (distribution lists, groups) |
@@ -581,11 +581,13 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
   EDDI mail an internal person the attacker chose. Test exactly that case.
 - `cc` = (stepMail.to ∪ stepMail.cc), normalised, minus own addresses/aliases, minus `to`, minus anything matching
   `listAddresses`, keeping only addresses matching `replyAllowedRecipients`, header order, deduplicated; then, unless
-  `replyIncludeNewReaders: true`, minus every address that is not already a participant of this conversation (the
-  From of an inbound row, or a `delivered=true` To/Cc of an earlier SENT reply, §9.5) — a colleague the sender added
-  in this very mail is skipped; capped (`maxReplyRecipients` → empty cc + `cc_capped`). The turn reads the whole
-  conversation, so this is what keeps earlier mails from reaching someone who never received them. Test: a participant
-  adds an allowed colleague in Cc on a later mail → the reply goes to the sender only.
+  `replyIncludeNewReaders: true`, minus every address that has not been on **every** earlier mail of this
+  conversation — as the From of an inbound row, or as a `delivered=true` To/Cc of a SENT reply (§9.5), per message.
+  Being a participant is not enough: A mails privately without B, then adds B in Cc, and B must not get an answer
+  that draws on that private mail. A colleague the sender added in this very mail is skipped; capped (`maxReplyRecipients` → empty cc + `cc_capped`). The turn reads the whole
+  conversation, so this is what keeps earlier mails from reaching someone who never received them. Tests: a participant
+  adds an allowed colleague in Cc on a later mail → the reply goes to the sender only; B received an earlier reply
+  but not A's private mail, A then Cc's B → B is skipped.
 - Used in **two** places with identical input: the inbound processor (to put `mail.audience = {to, cc}` into the
   turn context **before** the turn runs, so the agent knows who will read the answer) and `EmailReplyRecipients`
   at every send attempt.
