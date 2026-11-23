@@ -1427,4 +1427,92 @@ class RagSourceIngestionServiceTest {
             assertTrue(service.sourceHoldingDocument(KB_ID, new RagConfiguration(), "pricing.md").isEmpty());
         }
     }
+
+    @Nested
+    @DisplayName("a continuation fire")
+    class ContinuationFires {
+
+        private final List<Instant> armed = new ArrayList<>();
+
+        private RagConfiguration knowledgeBase(boolean enabled) throws Exception {
+            var source = source(null);
+            source.setEnabled(enabled);
+            var kb = new RagConfiguration();
+            kb.setName("kb");
+            kb.setSources(List.of(source));
+            var current = mock(IResourceStore.IResourceId.class);
+            when(current.getVersion()).thenReturn(3);
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(current);
+            when(ragStore.read(KB_ID, 3)).thenReturn(kb);
+            service.continuations = new RagIngestionContinuations(scheduleStore) {
+                @Override
+                public void arm(String ragConfigId, String sourceId, Instant at) {
+                    armed.add(at);
+                }
+            };
+            return kb;
+        }
+
+        private void queueWork() {
+            String key = IngestionPipeline.stateKey(KB_ID, source(null));
+            String run = stateStore.startRun(key).orElseThrow();
+            stateStore.enqueueWork(key, run, new IngestionWorkQueue.WorkRequest("doc", "v1", "{}"), Instant.now());
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(run, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(), 0, 0, 0, 0, 0, 0, 0.0,
+                    null));
+        }
+
+        @Test
+        @DisplayName("starts no run when nothing is queued")
+        void nothingQueuedStartsNothing() throws Exception {
+            knowledgeBase(true);
+
+            IngestionReport report = service.processContinuationFire(KB_ID, SOURCE_ID, r -> {
+            });
+
+            assertEquals(IngestionReport.Outcome.SKIPPED, report.outcome());
+            verify(pipeline, never()).reserveRun(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("skips a disabled source")
+        void disabledSourceIsSkipped() throws Exception {
+            knowledgeBase(false);
+            queueWork();
+
+            assertEquals(IngestionReport.Outcome.SKIPPED,
+                    service.processContinuationFire(KB_ID, SOURCE_ID, r -> {
+                    }).outcome());
+        }
+
+        @Test
+        @DisplayName("held by the throttle gate, arms itself again for when the gate opens")
+        void heldFireIsArmedAgain() throws Exception {
+            knowledgeBase(true);
+            queueWork();
+            Instant until = Instant.now().plusSeconds(600);
+            when(pipeline.throttledUntil(eq(KB_ID), any())).thenReturn(Optional.of(until));
+
+            IngestionReport report = service.processContinuationFire(KB_ID, SOURCE_ID, r -> {
+            });
+
+            assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+            assertEquals(List.of(until), armed, "the only wake-up of a source without a cron is not lost");
+        }
+
+        @Test
+        @DisplayName("drains under the current version, as a CONTINUATION run")
+        void startsAContinuationRun() throws Exception {
+            RagConfiguration kb = knowledgeBase(true);
+            queueWork();
+            when(pipeline.throttledUntil(eq(KB_ID), any())).thenReturn(Optional.empty());
+
+            IngestionReport report = service.processContinuationFire(KB_ID, SOURCE_ID, r -> {
+            });
+
+            assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
+            verify(pipeline, timeout(5000)).run(eq(KB_ID), eq(kb), any(), eq(Mode.INGEST), anyString(),
+                    eq(IIngestionStateStore.IngestionRun.Trigger.CONTINUATION));
+        }
+    }
 }

@@ -1605,6 +1605,36 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_ragIngestionContinuation_drainsInsteadOfListing() throws Exception {
+        var schedule = makeIngestionSchedule("rag-cont", "kb-1", 1, "src-1");
+        schedule.setName(RagIngestionSchedules.continuationName("kb-1", "src-1"));
+        schedule.setMetadata(RagIngestionSchedules.continuationMetadata("kb-1", "src-1"));
+        when(ragSourceIngestionService.processContinuationFire(eq("kb-1"), eq("src-1"), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport("run-9", "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                        false, false, null, Duration.ZERO, "Run run-9 started"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+        verify(ragSourceIngestionService).processContinuationFire(eq("kb-1"), eq("src-1"), any());
+        verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_ragIngestionContinuation_underTheCronsNameIsRefused() throws Exception {
+        // Continuation metadata on a row named like the cron: not written by the
+        // pipeline, so it is refused rather than drained.
+        var schedule = makeIngestionSchedule("rag-forged", "kb-1", 1, "src-1");
+        schedule.setMetadata(RagIngestionSchedules.continuationMetadata("kb-1", "src-1"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), log.status());
+        verify(ragSourceIngestionService, never()).processContinuationFire(any(), any(), any());
+    }
+
+    @Test
     void fire_ragIngestion_aStartedRunIsACompletedFire() throws Exception {
         // The fire starts the run on its own worker and returns, so the lease can
         // never cancel a crawl. What the run then does is in the source's run history.

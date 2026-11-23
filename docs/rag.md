@@ -1138,8 +1138,9 @@ Existing rows read as having no work; the columns are added on startup.
   is due. Its fire drains under the knowledge base's current configuration and lists nothing; it starts
   no run when nothing is queued. The scheduler's cluster-wide claim decides which node fires it, so a
   backlog drains across the cluster, and a source without a `cron` still finishes what **Run now**
-  queued. Before the drain claims anything it also arms a continuation for after its claim lease, so a
-  node that dies mid-run is followed up. Disabling or removing the source withdraws its continuation;
+  queued. As soon as a listing queues its first document, the run also arms a continuation for after
+  its claim lease, so a node that dies while listing or draining is followed up once its run is
+  reaped. Disabling or removing the source withdraws its continuation;
   a purge removes the table with the rest of the source's state. One run per source works at a time.
 - **The orphan sweep waits** for a run that leaves nothing queued, deferred or failed: a queued document
   still has only its old chunks, which the sweep would otherwise remove.

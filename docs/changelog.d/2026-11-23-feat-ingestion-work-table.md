@@ -34,7 +34,8 @@ deploy lost everything the run had not finished.
   processed again after a crash is unchanged by its recorded version, so it is not embedded twice.
 - **Continuations.** A run that leaves work arms a one-shot schedule,
   `rag-ingestion:{kb}:{source}:cont` (`RagIngestionContinuations`), for when the next row is due — and,
-  before its first claim, one for after its claim lease, so a dead node is followed up. Its fire
+  at the first queued document (and the drain's first claim), one for after the claim lease, so a node
+  that dies while listing or draining is followed up. Its fire
   (`RagSourceIngestionService.processContinuationFire`, routed by `ScheduleFireExecutor`) drains under
   the knowledge base's current version with the new trigger `CONTINUATION`, lists nothing, and starts no
   run when nothing is queued. Disabling or removing a source and purging it withdraw it. A budget stop
@@ -63,6 +64,15 @@ deploy lost everything the run had not finished.
 - **Operator** (revision 86): knows the work table, continuations and retry-failed. No endpoint was
   added to its allow-list.
 - **Docs:** `docs/rag.md` — the work table, the shared cooldown, Drive units, the two endpoints.
+
+### Behaviour changes
+
+- A `THROTTLED` run of a queued source (Drive, uploads) can now tombstone: its listing was complete,
+  so the documents that left the source are reconciled. The Manager's THROTTLED text and the operator
+  prompt still say nothing was deleted; that wording is not updated yet.
+- `documentsThrottled` counts the documents the provider actually refused; queued documents the drain
+  did not reach are not counted there but stay queued (`GET …/work`).
+- The three new properties are in `docs/configuration-reference.md`.
 
 ### Design decisions
 

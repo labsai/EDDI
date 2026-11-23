@@ -1256,6 +1256,10 @@ public class IngestionPipeline {
         collector.workOutcome = WorkOutcome.RELEASE;
         try {
             collector.process(item, connector, context);
+        } catch (IngestionStateStoreException e) {
+            // The state store is unwell, not the document: the run fails as it always
+            // has, and the claim is released by the drain without counting an attempt.
+            throw e;
         } catch (RuntimeException e) {
             // A failure of this document's processing, not of the run: counted against
             // the document, which is poisoned if it keeps doing this.
@@ -1972,6 +1976,14 @@ public class IngestionPipeline {
                     new WorkRequest(item.documentId(), item.versionToken(), payload), clock.get());
             if (outcome != EnqueueOutcome.FENCED) {
                 queued++;
+                if (queued == 1 && continuations != null) {
+                    // At the first document queued, not only at the drain's first claim:
+                    // should the node die while it is still listing, this wakes the drain
+                    // once the dead run has been reaped. The end of the run re-arms or
+                    // withdraws it.
+                    continuations.arm(ragConfigId, source.effectiveId(),
+                            clock.get().plus(staleRunThreshold(source)).plus(CONTINUATION_DELAY));
+                }
             }
             reportProgress(false);
             return true;

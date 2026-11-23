@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceException;
 import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.StopReason;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
@@ -53,6 +54,7 @@ import java.util.function.Predicate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -168,7 +170,31 @@ class IngestionWorkTableTest {
         pipeline.clock = () -> clock;
         pipeline.maxWorkAttempts = maxAttempts;
         pipeline.claimBatch = 2;
+        pipeline.continuations = continuations;
         return pipeline;
+    }
+
+    /**
+     * What the pipeline armed and withdrew, in order: an instant, or null for a
+     * withdrawal.
+     */
+    private final List<Instant> armed = new ArrayList<>();
+    private RagIngestionContinuations continuations = null;
+
+    private void recordContinuations() {
+        continuations = new RagIngestionContinuations(mock(IScheduleStore.class)) {
+            @Override
+            public void arm(String ragConfigId, String sourceId, Instant at) {
+                assertEquals(KB, ragConfigId);
+                assertEquals("src-1", sourceId);
+                armed.add(at);
+            }
+
+            @Override
+            public void disarm(String ragConfigId, String sourceId) {
+                armed.add(null);
+            }
+        };
     }
 
     private IngestionReport run(IngestionRun.Trigger trigger) {
@@ -373,6 +399,48 @@ class IngestionWorkTableTest {
         list("v1", "a", "b");
         pipeline().run(KB, knowledgeBase(), source(), Mode.PREVIEW);
         assertEquals(WorkCounts.NONE, counts());
+    }
+
+    @Test
+    @DisplayName("continuations: a safety net while listing, then withdrawn once nothing is left")
+    void continuationIsArmedAsASafetyNetThenWithdrawn() {
+        recordContinuations();
+        list("v1", "a", "b");
+
+        run();
+
+        assertTrue(armed.size() >= 2, String.valueOf(armed));
+        assertNotNull(armed.get(0), "armed at the first queued document, before any claim");
+        assertTrue(armed.get(0).isAfter(clock.plus(Duration.ofMinutes(10))), "for after the claim lease");
+        assertNull(armed.get(armed.size() - 1), "withdrawn: the drain finished everything");
+    }
+
+    @Test
+    @DisplayName("continuations: after a throttle, armed for when the provider takes calls again")
+    void continuationAfterAThrottleWaitsForTheProvider() {
+        recordContinuations();
+        list("v1", "a", "b");
+        throttles = id -> id.equals("a");
+
+        IngestionReport report = run();
+
+        Instant last = armed.get(armed.size() - 1);
+        assertNotNull(last, "work is left, so a continuation is armed");
+        assertEquals(report.resumeAfter(), last, "not before the provider's time: it would be refused again");
+    }
+
+    @Test
+    @DisplayName("continuations: none after a budget stop, which leaves the rest to the next run")
+    void noContinuationAfterABudgetStop() {
+        recordContinuations();
+        list("v1", "a", "b", "c");
+        IngestionSource budgeted = source();
+        budgeted.getSettings().setMaxSegmentsPerRun(1);
+
+        pipeline().run(KB, knowledgeBase(), budgeted, Mode.INGEST, null, IngestionRun.Trigger.MANUAL);
+
+        assertTrue(counts().outstanding() > 0, "the budget left work queued");
+        assertNull(armed.get(armed.size() - 1), "and the run withdrew its safety net instead of re-arming");
     }
 
     /** Stands for the JVM going away: not caught as a document failure. */
