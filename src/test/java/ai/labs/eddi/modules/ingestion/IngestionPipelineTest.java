@@ -1218,6 +1218,8 @@ class IngestionPipelineTest {
             IngestionReport report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
 
             assertTrue(String.valueOf(report.message()).contains("is not resolved for"), report.message());
+            // Pins the path: nothing was re-embedded, so the refusal came from the sweep.
+            assertEquals(0, report.documentsIngested());
             assertFalse(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(), "not swept without the grant");
         }
 

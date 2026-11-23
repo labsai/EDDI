@@ -248,7 +248,8 @@ class IngestionPipelineConnectorTest {
         assertEquals(0, report.documentsIngested());
         assertTrue(String.valueOf(report.message()).contains("could not be verified"), report.message());
         // Never re-checked against the fresh expansion in its place.
-        verify(storeFactory, never()).requireGranted(any(RagConfiguration.class), any(Map.class), any());
+        // any() matches a null binding too, the fallback this test exists to rule out.
+        verify(storeFactory, never()).requireGranted(any(RagConfiguration.class), any(), any());
     }
 
     @Test

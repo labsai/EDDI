@@ -333,8 +333,14 @@ class SecretGrantCallSitesTest {
                 String value = inv.getArgument(0);
                 Matcher level = VAR_LEVEL.matcher(value);
                 if (level.matches()) {
-                    int n = Integer.parseInt(level.group(1)); // digits only, by the pattern
-                    return n < 10 ? "${vars:var" + (n + 1) + "}" : REF;
+                    // The pattern admits ASCII digits only, so this cannot throw; the catch
+                    // is there for the code scanner, which does not read the pattern.
+                    try {
+                        int n = Integer.parseInt(level.group(1));
+                        return n < 10 ? "${vars:var" + (n + 1) + "}" : REF;
+                    } catch (NumberFormatException e) {
+                        return value;
+                    }
                 }
                 return value;
             });

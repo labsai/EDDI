@@ -1138,20 +1138,28 @@ public class IngestionPipeline {
          * expansion.
          */
         void acquireStore() {
-            store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+            EmbeddingStore<TextSegment> acquired = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase,
+                    RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             // What the store was built with, read from the factory's own cache key: a
             // second expansion could differ from the one the store's credential came from.
-            storeBinding = requireBinding(embeddingStoreFactory.bindingOf(store), embeddingStoreFactory.credentialBinding(knowledgeBase),
-                    "vector store");
+            // Both fields are set only once the binding is known, so a refused acquisition
+            // never leaves a held store without its binding.
+            Map<String, String> binding = requireBinding(embeddingStoreFactory.bindingOf(acquired),
+                    embeddingStoreFactory.credentialBinding(knowledgeBase), "vector store");
+            storeBinding = binding;
+            store = acquired;
         }
 
         private EmbeddingModel model() {
             if (model == null) {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
-                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
-                modelBinding = requireBinding(embeddingModelFactory.bindingOf(model), embeddingModelFactory.credentialBinding(knowledgeBase),
-                        "embedding model");
+                EmbeddingModel acquired = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT,
+                        RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+                Map<String, String> binding = requireBinding(embeddingModelFactory.bindingOf(acquired),
+                        embeddingModelFactory.credentialBinding(knowledgeBase), "embedding model");
+                modelBinding = binding;
+                model = acquired;
             } else {
                 embeddingModelFactory.requireGranted(knowledgeBase, modelBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
@@ -1533,6 +1541,8 @@ public class IngestionPipeline {
          * repointed meanwhile would name another secret than the client uses. A client
          * whose parameters name nothing (an in-memory store, a model without
          * credentials) has nothing to check, so an empty current expansion is accepted.
+         * Any non-empty one is refused, secret or not: the read-back fails only in a
+         * race with a cache invalidation, and the next run starts clean.
          */
         private Map<String, String> requireBinding(Map<String, String> builtWith, Map<String, String> current, String what) {
             if (builtWith != null) {
