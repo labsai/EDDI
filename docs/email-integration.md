@@ -40,13 +40,16 @@ Credentials never sit in the integration. It names an EDDI [connection](connecti
 thereby allowed to log in to a mailbox. The connection must be bound `SERVICE`: a poll runs as no verified user, so a
 `PER_USER` connection is refused at save time.
 
+Which providers work, with each one's hosts, ports, permissions, sending limits and DKIM behaviour and the
+provider's own documentation for every value, is on [Email Providers](email-providers.md).
+
 #### Exchange Online (OAuth client credentials)
 
 Basic authentication is retired on Exchange Online; IMAP uses OAuth 2.0 client credentials and SASL `XOAUTH2`.
 
 1. In Microsoft Entra ID, register an application and create a client secret.
-2. Add the API permission **Office 365 Exchange Online → Application permissions → `IMAP.AccessAsApp`** and grant
-   admin consent.
+2. Add the API permission **Office 365 Exchange Online → Application permissions → `IMAP.AccessAsApp`** — and, for
+   [conversation mode](#conversation-mode), **`SMTP.SendAsApp`** — and grant admin consent.
 3. In Exchange Online PowerShell, register the app's service principal and give it access to **this mailbox only**:
 
    ```powershell
@@ -76,6 +79,15 @@ Basic authentication is retired on Exchange Online; IMAP uses OAuth 2.0 client c
 
 EDDI logs in with the integration's `address` as the user and the token as the secret.
 
+Use a **licensed user mailbox**. An unlicensed shared mailbox is the obvious choice for a process address, but
+whether an app-only token can open one is not confirmed, and Microsoft requires a licensed mailbox for SMTP
+submission ([Email Providers → Shared mailboxes](email-providers.md#shared-mailboxes)).
+
+**Senders in your own tenant.** Microsoft 365 does not DKIM-sign mail between senders of the same organisation, so a
+colleague's mail arrives unsigned and is refused as `unauthenticated:none` while `requireAuthentication` is on (always,
+in conversation mode). Mail from outside the tenant is not affected. Details:
+[Email Providers → Microsoft 365](email-providers.md#microsoft-365--exchange-online).
+
 #### Any other IMAP host (app password)
 
 Create an app password at the provider (or a dedicated mailbox password), store it in the vault, and use a `BASIC`
@@ -101,12 +113,16 @@ therefore refused at save: `platformConfig.connection` fails the check above wit
 poll runs as no verified user".
 
 An **app password** over `BASIC`, with `imaps://imap.gmail.com` in the connection's allowlist (and
-`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not blocked by any code path — but it is **untested** with
-Gmail, and Google Workspace administrators commonly disable app passwords and IMAP access, so do not plan on it.
+`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not
+blocked by any code path. For **personal Gmail** that is the supported route, best effort: it needs 2-Step
+Verification, and EDDI has not tested it against a real mailbox. For **Google Workspace** it depends on the
+administrator, who controls IMAP access, and an app password may not be offered for an organisation account
+([Email Providers → Google Workspace](email-providers.md#google-workspace)).
 
-What is planned: an admin-linked `SERVICE` grant (an administrator consents once for the integration's mailbox) and
-Workspace **domain-wide delegation**. Until then, Gmail and Drive work as **conversation tools** on each signed-in
-user's own account — see [Google Workspace](google-workspace.md).
+What is planned for Workspace: a **dedicated mailbox** linked once by an administrator through a grant scoped to that
+mailbox and usable only by the mail transport ([PR #1476](https://github.com/labsai/EDDI/pull/1476), open). There
+will be no grant on a person's own mailbox and **no domain-wide delegation**. Gmail and Drive as **conversation
+tools** on each signed-in user's own account already work — see [Google Workspace](google-workspace.md).
 
 ### 2. The integration
 
@@ -368,6 +384,9 @@ so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` 
 | `eddi.email.dns.cache-max-entries`, `eddi.email.dns.cache-max-ttl` | `10000`, `1h` | The DNS answer cache; each record's TTL is honoured up to the cap |
 | `eddi.email.dkim.max-delivery-age` | `7d` | How far back the server's delivery time may date a DKIM check, so a short signature expiry still verifies for mail that waited |
 
+On **Windows**, set `eddi.email.dns.servers`: without it the DNS client takes every resolver the system reports,
+including those of disconnected adapters, and on a development machine every DKIM lookup then failed temporarily.
+
 A failed poll (connection, login, folder) is logged at WARN with its category, recorded on the mailbox state, and
 backs off `pollSeconds × 2^(failures−1)`, up to an hour; the schedule itself is never dead-lettered by a mail server
 outage, and the fire log carries the reason. The poll schedule is managed by the integration: editing or firing it
@@ -420,17 +439,24 @@ Integrations row.
 }
 ```
 
+The allowlist's `*@contoso.com` entry admits colleagues, but on Microsoft 365 a colleague in the same tenant sends
+**unsigned** mail, which this mode refuses ([Senders in your own tenant](#exchange-online-oauth-client-credentials)).
+In practice this example answers `partner.example` only.
+
 ### Before you switch it on
 
 - **DKIM and DMARC for the mailbox's domain.** EDDI submits the reply to `smtpHost`; it does not sign it. The mail
   server must sign outgoing mail with DKIM for the domain of `address`, and that domain should publish DMARC —
   otherwise replies land in spam or are rejected, and the people you answer cannot tell your mail from a forgery.
-  Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.
+  Neither Microsoft 365 nor Google Workspace signs with your own domain until an administrator turns it on for that
+  domain ([Email Providers](email-providers.md)).
 - **SMTP submission for the connection.** The same connection logs in to IMAP and SMTP, so its `baseUrlAllowlist`
   must also name `smtp://<smtpHost>:587` (STARTTLS, the default) or `smtps://<smtpHost>` (port 465). Exchange Online:
-  add `smtps://smtp.office365.com` or `smtp://smtp.office365.com:587` to the allowlist, and allow SMTP AUTH for the
-  mailbox (`Set-CASMailbox -SmtpClientAuthenticationDisabled $false`); the token's scope
-  `https://outlook.office365.com/.default` covers both. `smtpHost` passes the same socket policy as `host`.
+  keep `smtpPort` at `587` and add `smtp://smtp.office365.com:587` to the allowlist — Microsoft documents port 587 (or
+  25) for client submission and says a client that defaults to 465 lacks the TLS it requires. Give the app
+  `SMTP.SendAsApp` and allow SMTP AUTH for the mailbox (`Set-CASMailbox -SmtpClientAuthenticationDisabled $false`);
+  with Entra ID security defaults on, SMTP AUTH stays off. The token's scope `https://outlook.office365.com/.default`
+  covers IMAP and SMTP. `smtpHost` passes the same socket policy as `host`.
 - **The agent.** It now writes to people. Everything under [Security](#security) applies, and tool approvals matter
   more: an approved tool's result can end up in a reply.
 
