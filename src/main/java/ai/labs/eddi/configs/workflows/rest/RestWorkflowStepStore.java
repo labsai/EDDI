@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 @ApplicationScoped
+@OrgBound
 public class RestWorkflowStepStore implements IRestWorkflowStepStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
 

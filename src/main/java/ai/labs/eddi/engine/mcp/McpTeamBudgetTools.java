@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.groups.budget.rest.IRestGroupBudget;
 import ai.labs.eddi.engine.groups.budget.rest.IRestGroupBudget.CapRequest;
 import ai.labs.eddi.engine.groups.budget.rest.IRestTeamBudgets;
 import ai.labs.eddi.engine.groups.budget.rest.IRestTeamBudgets.TransferRequest;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -44,6 +45,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpTeamBudgetTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpTeamBudgetTools.class);

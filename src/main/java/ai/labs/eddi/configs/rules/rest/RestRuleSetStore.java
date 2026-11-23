@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -25,6 +26,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestRuleSetStore implements IRestRuleSetStore {
     private final IRuleSetStore behaviorStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

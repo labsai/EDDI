@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.configs.rag.IRestRagIngestion;
@@ -43,6 +44,7 @@ import java.util.Set;
  * {@link RagIngestionService} for async processing.
  */
 @ApplicationScoped
+@OrgBound
 public class RestRagIngestion implements IRestRagIngestion {
 
     private static final Logger LOGGER = Logger.getLogger(RestRagIngestion.class);

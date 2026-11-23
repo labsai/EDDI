@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionResponse;
 import ai.labs.eddi.integrations.openai.model.ChatMessage;
@@ -62,6 +63,7 @@ import java.util.concurrent.Semaphore;
 // quarkus.security.jaxrs.deny-unannotated-endpoints an unannotated adapter
 // would be refused to every caller.
 @PermitAll
+@OrgBound
 public class RestOpenAiAdapter {
 
     /** Response header correlating an OpenAI request with an EDDI conversation. */

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.pricing.model.ModelPriceEntry;
 import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
 import ai.labs.eddi.engine.spendcontrol.SpendControlChangeService;
@@ -59,6 +60,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpSpendControlTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSpendControlTools.class);

@@ -61,7 +61,13 @@ public class OrgBoundInterceptor {
     @AroundInvoke
     Object bind(InvocationContext context) throws Exception {
         try {
-            return orgRequest.callBound(context::proceed);
+            return orgRequest.callBound(() -> {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debugf("Org %s bound for %s.%s", OrgContext.current().map(OrgId::value).orElse("-"),
+                            context.getMethod().getDeclaringClass().getSimpleName(), context.getMethod().getName());
+                }
+                return context.proceed();
+            });
         } catch (OrgResolutionException e) {
             LOGGER.warnf("[SECURITY] org resolution refused %s.%s: %s", context.getMethod().getDeclaringClass().getSimpleName(),
                     context.getMethod().getName(), e.detail());

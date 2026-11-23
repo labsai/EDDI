@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomySchedules;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -62,6 +63,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestScheduleStore implements IRestScheduleStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestScheduleStore.class);

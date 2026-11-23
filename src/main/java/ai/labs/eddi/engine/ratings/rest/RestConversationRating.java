@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.ratings.ConversationRatingMetrics;
 import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
@@ -58,6 +59,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestConversationRating
  */
 @ApplicationScoped
+@OrgBound
 public class RestConversationRating implements IRestConversationRating {
 
     private static final Logger LOGGER = Logger.getLogger(RestConversationRating.class);

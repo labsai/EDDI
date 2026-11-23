@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.docs.DocsService;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -42,6 +43,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpDocTools {
 
     private final DocsService docsService;

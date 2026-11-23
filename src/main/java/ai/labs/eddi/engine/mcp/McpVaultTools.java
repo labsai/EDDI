@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.rest.IRestSecretStore;
 import io.quarkiverse.mcp.server.Tool;
@@ -37,6 +38,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpVaultTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpVaultTools.class);

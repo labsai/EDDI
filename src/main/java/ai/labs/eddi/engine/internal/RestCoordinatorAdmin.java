@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.org.PlatformPlane;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import jakarta.ws.rs.core.Response;
@@ -48,6 +49,7 @@ import java.util.concurrent.TimeUnit;
  * @since 6.0.0
  */
 @ApplicationScoped
+@PlatformPlane("the conversation coordinator's queues are cluster-wide (plan §8.9)")
 public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
 
     private static final Logger log = Logger.getLogger(RestCoordinatorAdmin.class);

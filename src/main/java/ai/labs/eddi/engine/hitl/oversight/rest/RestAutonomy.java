@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.oversight.rest;
 
 import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyService;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -13,6 +14,7 @@ import jakarta.inject.Inject;
  * @see IRestAutonomy
  */
 @ApplicationScoped
+@OrgBound
 public class RestAutonomy implements IRestAutonomy {
 
     static final int MAX_STATES = 1000;

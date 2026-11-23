@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import java.util.List;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -48,6 +49,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestGroupWorkspace implements IRestGroupWorkspace {
 
     private static final Logger LOG = Logger.getLogger(RestGroupWorkspace.class);

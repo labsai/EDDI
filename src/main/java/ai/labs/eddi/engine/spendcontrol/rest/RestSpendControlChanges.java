@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.spendcontrol.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.spendcontrol.SpendControlChangeService;
 import ai.labs.eddi.engine.spendcontrol.SpendControlException;
 import ai.labs.eddi.engine.spendcontrol.model.SpendControlChange.Status;
@@ -23,6 +24,7 @@ import java.util.function.Supplier;
  * defaults to the pending changes, the inbox an administrator works.
  */
 @ApplicationScoped
+@OrgBound
 public class RestSpendControlChanges implements IRestSpendControlChanges {
 
     private final SpendControlChangeService service;

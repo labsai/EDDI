@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
@@ -33,6 +34,7 @@ import java.util.Map;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestOutputActions implements IRestOutputActions {
     private final IWorkflowStore workflowStore;
     private final IRuleSetStore behaviorStore;

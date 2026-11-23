@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
 import ai.labs.eddi.configs.groups.IRestTeamHandoffs.AcceptRequest;
 import ai.labs.eddi.configs.groups.IRestTeamHandoffs.DeclineRequest;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -43,6 +44,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpTeamHandoffTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpTeamHandoffTools.class);

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -66,6 +67,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentAdministration implements IRestAgentAdministration, IDeploymentStatusReader, IPromotionImpactReader {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;

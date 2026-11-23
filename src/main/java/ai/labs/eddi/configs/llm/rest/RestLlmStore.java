@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.llm.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -31,6 +32,7 @@ import java.util.Set;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestLlmStore implements IRestLlmStore {
     private static final Logger LOGGER = Logger.getLogger(RestLlmStore.class);
 

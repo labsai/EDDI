@@ -23,6 +23,7 @@ import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -79,6 +80,7 @@ import java.util.Map;
  * </ul>
  */
 @ApplicationScoped
+@OrgBound
 public class RestConnectionAuthorization implements IRestConnectionAuthorization {
 
     private static final Logger LOGGER = Logger.getLogger(RestConnectionAuthorization.class);

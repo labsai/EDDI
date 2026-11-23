@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
@@ -46,6 +47,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentGroupStore implements IRestAgentGroupStore {
     private static final Logger LOG = Logger.getLogger(RestAgentGroupStore.class);
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import java.time.Instant;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
@@ -62,6 +63,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpGroupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGroupTools.class);

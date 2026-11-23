@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.agenttests.AgentTestService;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -27,6 +28,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpAgentTestTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAgentTestTools.class);

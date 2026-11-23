@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.dictionary.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
@@ -31,6 +32,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestDictionaryStore implements IRestDictionaryStore {
     private final IDictionaryStore regularDictionaryStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

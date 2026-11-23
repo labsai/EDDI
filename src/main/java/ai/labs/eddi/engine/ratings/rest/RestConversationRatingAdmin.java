@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.api.IRestConversationRatingAdmin;
 import ai.labs.eddi.engine.api.RatingQueryParams;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.ratings.model.RatingFilter;
@@ -47,6 +48,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestConversationRatingAdmin
  */
 @ApplicationScoped
+@OrgBound
 public class RestConversationRatingAdmin implements IRestConversationRatingAdmin {
 
     private static final Logger LOGGER = Logger.getLogger(RestConversationRatingAdmin.class);

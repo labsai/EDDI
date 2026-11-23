@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.variables.rest;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.connections.model.ConnectionReference;
@@ -38,6 +39,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestGlobalVariableStore implements IRestGlobalVariableStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestGlobalVariableStore.class);

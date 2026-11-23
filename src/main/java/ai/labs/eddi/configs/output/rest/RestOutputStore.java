@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.output.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -28,6 +29,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestOutputStore implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

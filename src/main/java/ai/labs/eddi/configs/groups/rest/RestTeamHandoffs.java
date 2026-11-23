@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffIntake;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -31,6 +32,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link RestGroupWorkspace}).
  */
 @ApplicationScoped
+@OrgBound
 public class RestTeamHandoffs implements IRestTeamHandoffs {
 
     private static final Logger LOG = Logger.getLogger(RestTeamHandoffs.class);

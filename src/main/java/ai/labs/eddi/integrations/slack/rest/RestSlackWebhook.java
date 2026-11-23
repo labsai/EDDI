@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
@@ -66,6 +67,7 @@ import java.util.Set;
 // policy permits the path). quarkus.security.jaxrs.deny-unannotated-endpoints
 // denies anything unannotated.
 @PermitAll
+@OrgBound
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);

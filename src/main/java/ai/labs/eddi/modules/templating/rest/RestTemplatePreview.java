@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -34,6 +35,7 @@ import java.util.*;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestTemplatePreview implements IRestTemplatePreview {
 
     private static final Logger LOGGER = Logger.getLogger(RestTemplatePreview.class);

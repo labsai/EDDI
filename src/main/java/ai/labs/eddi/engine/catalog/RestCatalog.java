@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.catalog;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -13,6 +14,7 @@ import java.util.List;
  * @see IRestCatalog
  */
 @ApplicationScoped
+@OrgBound
 public class RestCatalog implements IRestCatalog {
 
     private final CatalogService catalogService;

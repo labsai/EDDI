@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.agenttests.AgentTestService;
 import ai.labs.eddi.engine.agenttests.IRestAgentTestRuns;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.agenttests.model.StartRunRequest;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -23,6 +24,7 @@ import java.util.List;
  * @since 6.5.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentTestRuns implements IRestAgentTestRuns {
 
     private final AgentTestService service;

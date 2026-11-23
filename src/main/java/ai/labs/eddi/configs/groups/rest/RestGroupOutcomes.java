@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestGroupOutcomes;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.groups.outcomes.OutcomeEvent;
 import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -27,6 +28,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestGroupOutcomes
  */
 @ApplicationScoped
+@OrgBound
 public class RestGroupOutcomes implements IRestGroupOutcomes {
 
     private static final Logger LOG = Logger.getLogger(RestGroupOutcomes.class);

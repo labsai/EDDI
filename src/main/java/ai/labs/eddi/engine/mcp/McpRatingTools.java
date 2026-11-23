@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestConversationRatingAdmin;
 import ai.labs.eddi.engine.api.IRestConversationRatingAdmin.ReviewRequest;
 import ai.labs.eddi.engine.api.RatingQueryParams;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -46,6 +47,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  */
 @ApplicationScoped
 @McpErrorResults
+@OrgBound
 public class McpRatingTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpRatingTools.class);

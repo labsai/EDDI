@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.ForbiddenException;
@@ -59,6 +60,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 @Path("/conversations")
 @Tag(name = "Conversations / Attachments", description = "Upload and manage binary conversation attachments")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
+@OrgBound
 public class RestAttachmentUpload {
 
     private static final Logger LOGGER = Logger.getLogger(RestAttachmentUpload.class);

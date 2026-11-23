@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.api.IRestAgentProfile;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -25,6 +26,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestAgentProfile
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentProfile implements IRestAgentProfile {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentProfile.class);

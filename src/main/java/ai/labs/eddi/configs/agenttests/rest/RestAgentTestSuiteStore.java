@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,6 +25,7 @@ import java.util.List;
  * @since 6.5.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentTestSuiteStore implements IRestAgentTestSuiteStore {
     private final IAgentTestSuiteStore suiteStore;
     private final RestVersionInfo<AgentTestSuite> restVersionInfo;

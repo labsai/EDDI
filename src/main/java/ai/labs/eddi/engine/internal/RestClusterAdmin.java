@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.model.ClusterAdminModels.DeadLetterSummary;
 import ai.labs.eddi.engine.model.ClusterAdminModels.Diagnosis;
 import ai.labs.eddi.engine.model.ClusterAdminModels.LeasePage;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ReleaseRequest;
+import ai.labs.eddi.engine.org.PlatformPlane;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -53,6 +54,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
  * the activity SSE stream.
  */
 @ApplicationScoped
+@PlatformPlane("cluster administration spans every org (plan §8.9)")
 public class RestClusterAdmin implements IRestClusterAdmin {
 
     private static final Logger LOGGER = Logger.getLogger(RestClusterAdmin.class);

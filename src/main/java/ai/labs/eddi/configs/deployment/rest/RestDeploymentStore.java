@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.deployment.IRestDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -24,6 +25,7 @@ import java.util.Map;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
     private final ResourceAccessGuard accessGuard;

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
@@ -43,6 +44,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * REST implementation for RAG (Knowledge Base) configuration store.
  */
 @ApplicationScoped
+@OrgBound
 public class RestRagStore implements IRestRagStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestRagStore.class);

@@ -10,6 +10,7 @@ import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.settings.ConnectionSettingsView.Setting;
 import ai.labs.eddi.connections.settings.ConnectionSettingsView.Source;
 import ai.labs.eddi.connections.settings.IConnectionSettingsStore.StoredConnectionSettings;
+import ai.labs.eddi.engine.org.OrgBound;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -42,6 +43,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * only a bad <em>pinned</em> value.
  */
 @ApplicationScoped
+@OrgBound
 public class RestConnectionSettings implements IRestConnectionSettings {
 
     private static final Logger LOGGER = Logger.getLogger(RestConnectionSettings.class);

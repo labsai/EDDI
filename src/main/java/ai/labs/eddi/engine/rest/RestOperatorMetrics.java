@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
 import ai.labs.eddi.engine.api.model.OperatorSelfUrl;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.SelfUrlResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -37,6 +38,7 @@ import java.util.Map;
  * which answers directly from the agent store and the gate.
  */
 @ApplicationScoped
+@OrgBound
 public class RestOperatorMetrics implements IRestOperatorMetrics {
 
     private final OperatorMetricsService operatorMetricsService;

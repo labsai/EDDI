@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.branding.BrandRequest;
 import ai.labs.eddi.configs.branding.BrandingService;
 import ai.labs.eddi.configs.branding.model.BrandAsset;
 import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -27,6 +28,7 @@ import java.util.Optional;
  * (plan R10).
  */
 @ApplicationScoped
+@OrgBound
 public class RestBranding implements IRestBranding {
 
     static final String SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";

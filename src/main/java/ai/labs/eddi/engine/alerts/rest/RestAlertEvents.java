@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.alerts.model.AlertEventFilter;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.api.AlertEventQueryParams;
 import ai.labs.eddi.engine.api.IRestAlertEvents;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -33,6 +34,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @see IRestAlertEvents
  */
 @ApplicationScoped
+@OrgBound
 public class RestAlertEvents implements IRestAlertEvents {
 
     private static final Logger LOGGER = Logger.getLogger(RestAlertEvents.class);

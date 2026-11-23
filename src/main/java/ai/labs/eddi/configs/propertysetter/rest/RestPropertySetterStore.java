@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.propertysetter.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
@@ -25,6 +26,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

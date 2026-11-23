@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security.spaces.rest;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceSharingService;
 import ai.labs.eddi.engine.security.spaces.Subjects;
@@ -23,6 +24,7 @@ import java.util.Map;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestResourceSharing implements IRestResourceSharing {
 
     private final ResourceSharingService sharingService;

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.workflows.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.runtime.IWorkflowFactory;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -42,6 +43,7 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 @ApplicationScoped
+@OrgBound
 public class RestWorkflowStore implements IRestWorkflowStore {
     private static final String KEY_CONFIG = "config";
     private static final String KEY_URI = "uri";

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.rest;
 
 import ai.labs.eddi.engine.api.IRestAgentSetup;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupForbiddenException;
@@ -30,6 +31,7 @@ import org.jboss.logging.Logger;
  * @author ginccc
  */
 @ApplicationScoped
+@OrgBound
 public class RestAgentSetup implements IRestAgentSetup {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentSetup.class);

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.utils.PageBounds;
@@ -30,6 +31,7 @@ import java.util.Map;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     private final IUserMemoryStore userMemoryStore;

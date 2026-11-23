@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.pricing.rest;
 
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogException;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogService;
 import ai.labs.eddi.engine.pricing.UnpricedSightings;
@@ -26,6 +27,7 @@ import java.util.Optional;
  * {@code currentRevision}.
  */
 @ApplicationScoped
+@OrgBound
 public class RestModelPriceCatalog implements IRestModelPriceCatalog {
 
     private final ModelPriceCatalogService service;

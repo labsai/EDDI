@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -80,6 +81,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 
 @ApplicationScoped
+@OrgBound
 public class RestExportService extends AbstractBackupService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IAgentStore agentStore;

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.configs.agents.IRestCapabilityRegistry;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,6 +25,7 @@ import java.util.function.Predicate;
  * @since 6.0.0
  */
 @ApplicationScoped
+@OrgBound
 public class RestCapabilityRegistry implements IRestCapabilityRegistry {
 
     private final CapabilityRegistryService registryService;

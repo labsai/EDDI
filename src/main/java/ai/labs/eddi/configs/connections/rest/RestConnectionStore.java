@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
 import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore.NameClaim;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -49,6 +50,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * REST implementation for the connection store.
  */
 @ApplicationScoped
+@OrgBound
 public class RestConnectionStore implements IRestConnectionStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestConnectionStore.class);

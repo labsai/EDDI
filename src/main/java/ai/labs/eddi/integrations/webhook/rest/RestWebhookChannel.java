@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.webhook.rest;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
+import ai.labs.eddi.engine.org.OrgBound;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.webhook.WebhookEventHandler;
 import ai.labs.eddi.integrations.webhook.WebhookEventHandler.Dispatch;
@@ -77,6 +78,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 // the path). quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
 // unannotated.
 @PermitAll
+@OrgBound
 public class RestWebhookChannel {
 
     private static final Logger LOGGER = Logger.getLogger(RestWebhookChannel.class);
