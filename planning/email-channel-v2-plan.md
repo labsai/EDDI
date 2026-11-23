@@ -60,7 +60,7 @@
 | D2 | Silently ignore mail where EDDI is not addressed? | **Yes, but with a trail.** → Phase 2 (mail log) before Phase 3 (addressing) |
 | D3 | A mention of another agent inside a running EDDI conversation? | **Consult the other agent, if the configuration (or an approver) allows it; never switch owner.** → Phase 6 |
 | D4 | App password vs OAuth for Gmail/Outlook.com? | **Whatever suits enterprise customers** → OAuth for Workspace, client credentials for M365; personal accounts best effort/unsupported |
-| D5 | Send as a person's own mailbox, or dedicated only? | **Dedicated mailboxes only**, enforced in code (§8) |
+| D5 | Send as a person's own mailbox, or dedicated only? | **Dedicated mailboxes only**, enforced as far as code can: the account must match the requested address, must not be the linking admin's, and the admin attests `confirmDedicated` (audited) — see §8 |
 
 ### 2.2 Amendments to `email-channel-plan.md` (binding decisions — record them)
 
@@ -604,9 +604,11 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
 - **The turn only sees what the sender could read.** Participation lets a sender continue the conversation, not read
   all of it: a recipient may have missed a later private mail. For a turn in thread mode, the history the model
   receives is filtered to the mails the current sender was on — From of an inbound row, or a `delivered=true` To/Cc
-  of a SENT reply (§9.5) — plus the sender's own mail. The conversation's first sender is on every mail by
-  definition. Stored memory is unchanged; only the context handed to the turn is narrowed. Test: A mails privately
+  of a SENT reply (§9.5) — plus the sender's own mail. The check applies to **every** sender, the conversation's
+  first sender included: a later participant may have mailed EDDI privately, and the first sender received none of
+  that. Stored memory is unchanged; only the context handed to the turn is narrowed. Tests: A mails privately
   without B, B (who got an earlier reply) replies to that earlier reply → the turn context does not contain A's
+  private mail; B mails EDDI privately, A (the first sender) continues → the turn context does not contain B's
   private mail.
 
 ### 9.5 Ledger and sending
@@ -783,6 +785,6 @@ Marked unverified during planning; check against current vendor docs or real ten
 | Mentions mis-route because quoting differs by client/language | Strict head-region extractor that stops early; mentions only add routing, never widen recipients; per-target `allowedSenders` |
 | Thread replies leak data to colleagues | Internal-only allowlist, list exclusion, cap, no long-term memory on such integrations, audience in the agent context, optional reply review (backlog 1) |
 | Mailbox grant used outside the mail transport | Resolver refuses MAILBOX everywhere else; reserved `mailbox:` principal; tests per entry point |
-| Grant linked to a person's own account | Provider account must equal the dedicated address; admin's own email refused; re-checked on refresh |
+| Grant linked to a person's own account | Provider account must equal the dedicated address; admin's own email refused; re-checked on refresh. A person's mailbox linked by an admin on that person's behalf cannot be told apart technically, so the link request carries the audited `confirmDedicated` attestation and D5 is the admin's responsibility |
 | Upgrade surprises | Every new behaviour is opt-in (`actWhen: always`, `replyAudience: sender` defaults); only F2's cap semantics change (stricter), with an upgrade note |
 | Consulted agent acts for the sender | No-memory delegate identity for email callers, depth 1, approval via existing `toolApprovals` |
