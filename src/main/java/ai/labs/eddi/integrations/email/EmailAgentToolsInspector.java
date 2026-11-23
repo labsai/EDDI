@@ -158,7 +158,15 @@ public class EmailAgentToolsInspector {
             if (workflowId == null || workflowId.getId() == null || workflowId.getVersion() == null) {
                 continue;
             }
-            WorkflowConfiguration workflow = workflowStore.read(workflowId.getId(), workflowId.getVersion());
+            WorkflowConfiguration workflow;
+            try {
+                workflow = workflowStore.read(workflowId.getId(), workflowId.getVersion());
+            } catch (Exception e) {
+                // an unreadable workflow must not erase what an earlier one established
+                LOGGER.debugf("Workflow %s of agent %s unreadable: %s", LogSanitizer.sanitize(workflowId.getId()),
+                        LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
+                continue;
+            }
             if (workflow == null || workflow.getWorkflowSteps() == null) {
                 continue;
             }
@@ -181,7 +189,14 @@ public class EmailAgentToolsInspector {
             }
             ruleCalls |= hasApiCalls || hasMcpCalls;
             for (URI uri : llmUris) {
-                LlmConfiguration llm = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                LlmConfiguration llm;
+                try {
+                    llm = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                } catch (Exception e) {
+                    LOGGER.debugf("LLM resource %s of agent %s unreadable: %s", LogSanitizer.sanitize(String.valueOf(uri)),
+                            LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
+                    continue;
+                }
                 if (llm == null || llm.tasks() == null) {
                     continue;
                 }

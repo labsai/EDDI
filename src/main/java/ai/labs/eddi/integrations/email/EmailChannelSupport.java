@@ -6,7 +6,6 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
-import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
@@ -176,10 +175,13 @@ public class EmailChannelSupport {
     }
 
     /**
-     * A tool name no configuration uses: a pattern that matches it matches every
-     * bare tool name, and every call carries one among its addresses.
+     * A pattern made only of wildcards ({@code *}, {@code **}) matches every tool
+     * name. A prefix such as {@code eddi*} does not: it is restricted, so it is not
+     * reported as universal.
      */
-    static final String ANY_TOOL_PROBE = "eddi-probe-any-tool-7f3c";
+    static boolean isUniversalPattern(String pattern) {
+        return !pattern.isEmpty() && pattern.chars().allMatch(c -> c == '*');
+    }
 
     /**
      * Names of the gated targets whose {@code readOnlyTools} hold a pattern that
@@ -197,7 +199,7 @@ public class EmailChannelSupport {
                 continue;
             }
             for (String pattern : target.getReadOnlyTools()) {
-                if (pattern != null && ToolApprovalPatterns.matches(pattern.trim(), ANY_TOOL_PROBE)) {
+                if (pattern != null && isUniversalPattern(pattern.trim())) {
                     names.add(target.getName());
                     break;
                 }
