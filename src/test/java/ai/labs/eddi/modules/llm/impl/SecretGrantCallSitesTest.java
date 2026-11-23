@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -85,6 +86,9 @@ class SecretGrantCallSitesTest {
         variables = mock(GlobalVariableResolver.class);
         when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         when(variables.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        // expandFully goes through the budgeted call; it answers as resolveValue is
+        // stubbed.
+        when(variables.resolveValueWithin(anyString(), anyInt())).thenAnswer(inv -> variables.resolveValue(inv.<String>getArgument(0)));
     }
 
     @Nested

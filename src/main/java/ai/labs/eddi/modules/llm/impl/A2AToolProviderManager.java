@@ -213,6 +213,12 @@ public class A2AToolProviderManager {
             // Connection writes are rare, so every card goes.
             connectionResolver.onConnectionChange(this::evictCards);
         }
+        if (secretResolver != null) {
+            // Likewise a card fetched with a ${vault:…} apiKey whose value was replaced:
+            // the key digests the reference, not the value. Grant-only writes fire no
+            // listener, so they keep the cards.
+            secretResolver.registerInvalidationListener(reference -> evictCards());
+        }
     }
 
     /**
@@ -720,14 +726,31 @@ public class A2AToolProviderManager {
             return null;
         }
 
-        agentCache.put(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()));
-        if (cardInvalidations.get() != generation) {
-            // A connection changed while this card was fetched: it may be the old
-            // binding's. Used for this call, not kept. The eviction bumps the counter
-            // BEFORE clearing, so either this check sees it or the clear lands after.
-            agentCache.remove(cacheKey);
-        }
+        publishCard(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()), generation);
         return card;
+    }
+
+    /**
+     * Caches a card fetched while the eviction counter stood at {@code generation},
+     * unless an eviction ran since: the card may then be the old binding's, and is
+     * used for the call that fetched it but never published to another. The check
+     * and the insertion are one atomic step on the map, which a concurrent
+     * {@link #evictCards} clear waits for, so no caller can read the card in
+     * between.
+     *
+     * @return whether the card was cached
+     */
+    boolean publishCard(String cacheKey, CachedAgentInfo card, long generation) {
+        CachedAgentInfo stored = agentCache.compute(cacheKey,
+                (key, previous) -> cardInvalidations.get() == generation ? card : previous);
+        return stored == card;
+    }
+
+    /**
+     * The current value of {@link #cardInvalidations}, for {@link #publishCard}.
+     */
+    long cardGeneration() {
+        return cardInvalidations.get();
     }
 
     /** Drops every cached card; see {@link #cardInvalidations}. */

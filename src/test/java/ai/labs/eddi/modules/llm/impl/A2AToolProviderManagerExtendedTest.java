@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -38,6 +39,10 @@ class A2AToolProviderManagerExtendedTest {
         when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        // expandFully goes through the budgeted call; it answers as resolveValue is
+        // stubbed.
+        when(globalVariableResolver.resolveValueWithin(anyString(), anyInt()))
+                .thenAnswer(inv -> globalVariableResolver.resolveValue(inv.<String>getArgument(0)));
         manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
     }
 

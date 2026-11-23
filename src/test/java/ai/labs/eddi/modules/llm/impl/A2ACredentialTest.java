@@ -13,17 +13,21 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -190,5 +195,34 @@ class A2ACredentialTest {
         registry.invalidateLocal();
 
         assertEquals(0, manager.getActiveConnectionCount(), "a card fetched under the old binding must not be served");
+    }
+
+    @Test
+    @DisplayName("a card fetched across an eviction is not published to other callers (#1179)")
+    void cardFetchedAcrossAnEvictionIsNotPublished() {
+        var manager = manager();
+        long generation = manager.cardGeneration();
+        var card = new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "fetched with the old secret"), System.currentTimeMillis());
+
+        manager.evictCards(); // the connection changed while the card was being fetched
+
+        assertFalse(manager.publishCard(AGENT_URL, card, generation));
+        assertEquals(0, manager.getActiveConnectionCount(), "never readable by another caller, not even briefly");
+        assertTrue(manager.publishCard(AGENT_URL, card, manager.cardGeneration()), "a fetch with no eviction across it is cached");
+    }
+
+    @Test
+    @DisplayName("a replaced vault value evicts the cached Agent Cards (#1179)")
+    void secretValueChangeEvictsCachedCards() {
+        var manager = manager();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+        manager.publishCard(AGENT_URL, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "old"), System.currentTimeMillis()),
+                manager.cardGeneration());
+
+        listener.getValue().accept(new SecretReference("default", "peer-key"));
+
+        assertEquals(0, manager.getActiveConnectionCount());
     }
 }

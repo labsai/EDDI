@@ -22,6 +22,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -209,6 +213,46 @@ class SecretResolverGrantTest {
             });
             assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.outsideAgentGrants("test")));
             verify(provider, times(1)).resolve(KEY);
+        }
+
+        @Test
+        @DisplayName("a resolution during an invalidation waits for its evictions: the old grant is never paired with the new value")
+        void resolutionDuringAnInvalidationWaitsForIt() throws Exception {
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)), "value and grant now cached");
+            // The replacement: a new value, granted to B only.
+            grant(List.of(AGENT_B));
+            when(provider.resolve(KEY)).thenReturn("sk-new");
+            var outcome = new AtomicReference<Object>();
+            var executor = Executors.newSingleThreadExecutor();
+            var resolving = new CountDownLatch(1);
+            try {
+                resolver.invalidationStartedHook = () -> {
+                    // The value is evicted, the old grant (A) is still cached: A resolves now,
+                    // on another thread. Without the wait it pairs that grant with sk-new.
+                    executor.submit(() -> {
+                        resolving.countDown();
+                        try {
+                            outcome.set(resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
+                        } catch (RuntimeException e) {
+                            outcome.set(e);
+                        }
+                    });
+                    try {
+                        assertTrue(resolving.await(10, TimeUnit.SECONDS));
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                };
+                resolver.invalidateLocal(KEY);
+                resolver.invalidationStartedHook = null;
+                executor.shutdown();
+                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            } finally {
+                executor.shutdownNow();
+            }
+            assertTrue(outcome.get() instanceof SecretResolver.SecretNotGrantedException,
+                    "A must be refused by the new grant, got: " + outcome.get());
         }
 
         @Test

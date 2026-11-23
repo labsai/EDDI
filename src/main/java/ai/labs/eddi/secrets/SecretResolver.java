@@ -28,6 +28,7 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 /**
@@ -117,19 +118,84 @@ public class SecretResolver {
      */
     private final AtomicLongArray keyInvalidations = new AtomicLongArray(64);
 
+    /**
+     * The invalidations of {@link #keyInvalidations} that have finished evicting.
+     * An invalidation bumps its started count before it evicts and its finished
+     * count after, so while the two differ the caches are part-way through it: the
+     * value may be gone while the old grant is still cached. A resolution waits
+     * that out rather than pair the old grant with the new value.
+     */
+    private final AtomicLongArray keyInvalidationsFinished = new AtomicLongArray(64);
+
     /** Bumped by {@link #invalidateAllLocal}; see {@link #keyInvalidations}. */
     private final AtomicLong allInvalidations = new AtomicLong();
 
+    /** The finished half of {@link #allInvalidations}. */
+    private final AtomicLong allInvalidationsFinished = new AtomicLong();
+
     /**
-     * The generation of {@code cacheKey}: changes whenever an invalidation covers
-     * it.
+     * The generation of {@code cacheKey}: changes whenever an invalidation covering
+     * it starts.
      */
     private long generationOf(String cacheKey) {
         return allInvalidations.get() + keyInvalidations.get(stripeOf(cacheKey));
     }
 
-    private void bumpGenerationOf(String cacheKey) {
+    /**
+     * Whether every invalidation covering {@code cacheKey} that started up to
+     * {@code generation} has finished evicting. Started counts never trail finished
+     * ones, so the sums are equal exactly when both pairs are.
+     */
+    private boolean settled(String cacheKey, long generation) {
+        return allInvalidationsFinished.get() + keyInvalidationsFinished.get(stripeOf(cacheKey)) == generation;
+    }
+
+    /**
+     * How long a resolution waits for an invalidation in progress to finish
+     * evicting.
+     */
+    static final long INVALIDATION_WAIT_NANOS = 1_000_000_000L;
+
+    /**
+     * The generation of {@code cacheKey} once no invalidation of it is part-way
+     * through, or {@code -1} when one is still evicting after
+     * {@link #INVALIDATION_WAIT_NANOS}. The window is two cache evictions long.
+     */
+    private long settledGenerationOf(String cacheKey) {
+        long deadline = System.nanoTime() + INVALIDATION_WAIT_NANOS;
+        while (true) {
+            long generation = generationOf(cacheKey);
+            if (settled(cacheKey, generation)) {
+                return generation;
+            }
+            if (System.nanoTime() - deadline > 0) {
+                return -1;
+            }
+            LockSupport.parkNanos(50_000);
+        }
+    }
+
+    private void startInvalidationOf(String cacheKey) {
         keyInvalidations.incrementAndGet(stripeOf(cacheKey));
+    }
+
+    private void finishInvalidationOf(String cacheKey) {
+        keyInvalidationsFinished.incrementAndGet(stripeOf(cacheKey));
+    }
+
+    /**
+     * Test seam: runs inside an invalidation, after its start and (for a value
+     * invalidation) after the value's eviction but before the grant's, so a test
+     * can resolve while the caches are part-way through it. Never set in
+     * production.
+     */
+    volatile Runnable invalidationStartedHook;
+
+    private void invalidationStarted() {
+        Runnable hook = invalidationStartedHook;
+        if (hook != null) {
+            hook.run();
+        }
     }
 
     private int stripeOf(String cacheKey) {
@@ -473,7 +539,13 @@ public class SecretResolver {
         }
         String key = cacheKey(ref);
         for (int attempt = 0; attempt < GRANT_BINDING_ATTEMPTS; attempt++) {
-            long generation = generationOf(key);
+            // Not while an invalidation of this secret is part-way through: its value
+            // may already be evicted while its old grant is still cached, and the two
+            // would be read as one state.
+            long generation = settledGenerationOf(key);
+            if (generation < 0) {
+                continue;
+            }
             String resolved = resolveOnce(ref, fullMatch, access);
             if (generationOf(key) == generation) {
                 return resolved;
@@ -521,16 +593,14 @@ public class SecretResolver {
             // Leave the original reference in place if resolution failed
             return fullMatch;
         }
-        // Only cache successful resolutions — never cache failures
-        cache.put(cacheKey, resolved);
-        if (invalidations.get() != generationBefore) {
-            // An invalidation (a delete or rotation) ran while this value was being
-            // read, so it may be the old one. Without this, the put above re-inserted
-            // a deleted or rotated value that then lived for the whole TTL. The
-            // invalidation bumps the counter BEFORE evicting, so either this check
-            // sees it, or the eviction lands after the put.
-            cache.invalidate(cacheKey);
-        }
+        // Only cache successful resolutions — never cache failures. And not a value
+        // read while an invalidation (a delete or rotation) ran: it may be the old one,
+        // and would otherwise live for the whole TTL. The check and the insertion are
+        // one atomic step on the entry, which the invalidation's eviction of the same
+        // key waits for; the invalidation bumps the counter BEFORE evicting, so either
+        // the check sees it or the eviction lands after the insertion. A put followed
+        // by a check left the entry readable in between.
+        putUnlessInvalidated(cache, cacheKey, resolved, generationBefore);
         return resolved;
     }
 
@@ -672,12 +742,20 @@ public class SecretResolver {
             throw new ISecretProvider.SecretProviderException("No metadata returned for " + ref.toReferenceString());
         }
         grant = SecretMetadata.canonicalGrant(metadata.allowedAgents());
-        grantCache.put(key, grant);
-        if (invalidations.get() != generationBefore) {
-            // A grant write raced this read; the same rule as resolveReference's.
-            grantCache.invalidate(key);
-        }
+        // A grant write that raced this read keeps it out of the cache, by the same
+        // atomic rule as the value's: inserted and then removed, an old grant was
+        // readable in between, by a resolution that then read the new value.
+        putUnlessInvalidated(grantCache, key, grant, generationBefore);
         return grant;
+    }
+
+    /**
+     * Caches {@code value} under {@code key} unless an invalidation started since
+     * {@code generationBefore}; the check and the insertion are one atomic step on
+     * the entry.
+     */
+    private <V> void putUnlessInvalidated(Cache<String, V> target, String key, V value, long generationBefore) {
+        target.asMap().compute(key, (k, previous) -> invalidations.get() == generationBefore ? value : previous);
     }
 
     private static String cacheKey(SecretReference ref) {
@@ -748,9 +826,14 @@ public class SecretResolver {
     public void invalidateLocal(SecretReference reference) {
         String cacheKey = cacheKey(reference);
         invalidations.incrementAndGet();
-        bumpGenerationOf(cacheKey);
-        cache.invalidate(cacheKey);
-        grantCache.invalidate(cacheKey);
+        startInvalidationOf(cacheKey);
+        try {
+            cache.invalidate(cacheKey);
+            invalidationStarted();
+            grantCache.invalidate(cacheKey);
+        } finally {
+            finishInvalidationOf(cacheKey);
+        }
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
     }
@@ -786,8 +869,13 @@ public class SecretResolver {
         // The generation moves too, so a grant read racing this write is not kept
         // (see grantOf).
         invalidations.incrementAndGet();
-        bumpGenerationOf(cacheKey);
-        grantCache.invalidate(cacheKey);
+        startInvalidationOf(cacheKey);
+        try {
+            invalidationStarted();
+            grantCache.invalidate(cacheKey);
+        } finally {
+            finishInvalidationOf(cacheKey);
+        }
         LOGGER.infof("Grant cache invalidated for: %s", sanitize(cacheKey));
     }
 
@@ -805,8 +893,12 @@ public class SecretResolver {
     public void invalidateAllLocal() {
         invalidations.incrementAndGet();
         allInvalidations.incrementAndGet();
-        cache.invalidateAll();
-        grantCache.invalidateAll();
+        try {
+            cache.invalidateAll();
+            grantCache.invalidateAll();
+        } finally {
+            allInvalidationsFinished.incrementAndGet();
+        }
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);
     }

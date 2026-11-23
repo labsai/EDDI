@@ -126,18 +126,19 @@ public class GlobalVariableResolver {
      * left, or until a pass changes nothing (a missing variable, a cycle),
      * {@link #MAX_NESTING} passes have run, or a pass would grow it past
      * {@link #MAX_EXPANDED_LENGTH} — then the last expansion within the budget,
-     * which still holds a reference, is returned. {@link #resolveValue} makes one
-     * pass, so a variable holding {@code ${vars:inner}} would otherwise reach a
-     * caller with a reference still in it — and a caller that binds a cache entry
-     * or a grant check to the expansion must see the final credential, not an
-     * intermediate one (#1179). The result may still contain a reference; such a
-     * caller refuses it.
+     * which still holds a reference, is returned. The budget is enforced while a
+     * pass is built ({@link #resolveValueWithin}), not after it, so no pass
+     * allocates more than it. {@link #resolveValue} makes one pass, so a variable
+     * holding {@code ${vars:inner}} would otherwise reach a caller with a reference
+     * still in it — and a caller that binds a cache entry or a grant check to the
+     * expansion must see the final credential, not an intermediate one (#1179). The
+     * result may still contain a reference; such a caller refuses it.
      */
     public static String expandFully(GlobalVariableResolver resolver, String value) {
         String current = value;
         for (int pass = 0; pass < MAX_NESTING && containsReference(current); pass++) {
-            String next = resolver.resolveValue(current);
-            if (next == null || next.equals(current) || next.length() > MAX_EXPANDED_LENGTH) {
+            String next = resolver.resolveValueWithin(current, MAX_EXPANDED_LENGTH);
+            if (next == null || next.equals(current)) {
                 break;
             }
             current = next;
@@ -198,8 +199,22 @@ public class GlobalVariableResolver {
      * @return the value with references replaced by stored values
      */
     public String resolveValue(String value, String tenantId) {
+        return resolve(value, tenantId, Integer.MAX_VALUE);
+    }
+
+    /**
+     * {@link #resolveValue(String)} with a length budget: {@code null} as soon as
+     * the result being built would exceed {@code maxLength}, before it is allocated
+     * further. For {@link #expandFully}, where one pass over many references to a
+     * long variable could otherwise exhaust the heap.
+     */
+    public String resolveValueWithin(String value, int maxLength) {
+        return resolve(value, GlobalVariable.DEFAULT_TENANT, maxLength);
+    }
+
+    private String resolve(String value, String tenantId, int maxLength) {
         if (!containsReference(value)) {
-            return value;
+            return value == null || value.length() <= maxLength ? value : null;
         }
         if (tenantId == null) {
             tenantId = GlobalVariable.DEFAULT_TENANT;
@@ -220,6 +235,9 @@ public class GlobalVariableResolver {
             Map<String, String> variables = loadVariables(effectiveTenant);
             String resolved = variables.get(key);
             if (resolved != null) {
+                if ((long) result.length() + resolved.length() > maxLength) {
+                    return null;
+                }
                 substituted.add(resolved);
                 matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
             } else {
@@ -230,6 +248,9 @@ public class GlobalVariableResolver {
             }
         }
         matcher.appendTail(result);
+        if (result.length() > maxLength) {
+            return null;
+        }
         String out = result.toString();
         refuseAssembledReferences(value, substituted, out);
         return out;

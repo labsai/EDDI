@@ -94,6 +94,19 @@ class GlobalVariableResolverTest {
         }
 
         @Test
+        @DisplayName("a single pass stops building at the budget, before the result is allocated")
+        void singlePassStopsAtTheBudget() {
+            // One pass: 100 references to a 1,000-character variable would build 100,000.
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("long", "x".repeat(1000)));
+            String manyReferences = "${vars:long}".repeat(100);
+
+            assertNull(resolver.resolveValueWithin(manyReferences, 10_000));
+            assertEquals(100_000, resolver.resolveValue(manyReferences).length(), "the unbudgeted call is unchanged");
+            assertEquals(manyReferences, GlobalVariableResolver.expandFully(resolver, manyReferences),
+                    "expandFully keeps the reference rather than the over-long expansion");
+        }
+
+        @Test
         @DisplayName("nested variables expand to the final value")
         void nestedVariablesExpand() {
             when(store.getAll(DEFAULT)).thenReturn(Map.of("outer", "${vars:inner}", "inner", "sk-final"));
