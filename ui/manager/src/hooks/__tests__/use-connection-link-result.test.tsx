@@ -18,7 +18,9 @@ function Probe() {
   return null;
 }
 
-function grants(body: object[] | null) {
+type Grant = { address: string; status: string; usable: boolean };
+
+function grants(body: Grant[] | null) {
   server.use(
     http.get("*/connections/gws/mailbox-grants", () =>
       body === null ? new HttpResponse(null, { status: 403 }) : HttpResponse.json(body),

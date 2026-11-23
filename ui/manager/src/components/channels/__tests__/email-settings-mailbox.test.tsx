@@ -22,7 +22,9 @@ const MAILBOX_CONNECTION = {
   baseUrlAllowlist: ["imaps://imap.gmail.com", "https://gmail.googleapis.com"],
 };
 
-function mailboxConnection(grants: object[] | null, onList?: () => void, onRead?: () => void) {
+type Grant = { address: string; status: string; usable: boolean };
+
+function mailboxConnection(grants: Grant[] | null, onList?: () => void, onRead?: () => void) {
   server.use(
     http.get("*/connectionstore/connections/descriptors", () =>
       HttpResponse.json([
