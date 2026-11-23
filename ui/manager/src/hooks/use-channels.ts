@@ -8,8 +8,11 @@ import {
   duplicateChannel,
   getEmailSenders,
   updateEmailSenders,
+  getEmailRoles,
+  updateEmailRoles,
   type ChannelIntegrationConfiguration,
   type EmailSenderChange,
+  type EmailRolesChange,
 } from "@/lib/api/channels";
 
 const CHANNELS_KEY = ["channels"] as const;
@@ -115,6 +118,30 @@ export function useUpdateEmailSenders() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, change }: { id: string; change: EmailSenderChange }) => updateEmailSenders(id, change),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
+    },
+  });
+}
+
+// ─── Email sender roles ──────────────────────────────────────────
+
+export function useEmailRoles(id: string, enabled = true) {
+  return useQuery({
+    queryKey: [...CHANNELS_KEY, id, "email-roles"],
+    queryFn: () => getEmailRoles(id),
+    enabled: !!id && enabled,
+  });
+}
+
+/**
+ * A targeted sender-role change: a new version of the integration, so every
+ * channel query is stale afterwards (as for the sender lists).
+ */
+export function useUpdateEmailRoles() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, change }: { id: string; change: EmailRolesChange }) => updateEmailRoles(id, change),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
     },

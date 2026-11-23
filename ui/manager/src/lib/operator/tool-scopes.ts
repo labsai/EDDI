@@ -153,6 +153,10 @@ export const READ_ENDPOINTS: readonly string[] = [
   // credential included. The descriptors give the operator the id from a name.
   "GET /channelstore/channels/descriptors",
   "GET /channelstore/channels/{id}/email-senders",
+  // The sender roles of an email integration (email plan v3 §9), read only. Their
+  // PUT stays excluded: planning/operator-write-scope-plan.md allows exactly one
+  // channelstore write (the sender lists), and removing a role is a widening.
+  "GET /channelstore/channels/{id}/email-roles",
   // Agents
   "GET /agentstore/agents/descriptors",
   "GET /agentstore/agents/{id}",

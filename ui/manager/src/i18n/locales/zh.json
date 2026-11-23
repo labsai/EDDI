@@ -5665,6 +5665,24 @@
     "apply": "应用发件人更改",
     "discard": "放弃"
   },
+  "emailRoles": {
+    "loading": "正在加载发件人角色…",
+    "invalidJson": "角色必须是包含 senderRoles 和 rolePolicies 的 JSON 对象。",
+    "saved": "发件人角色已保存为版本 {{version}}。",
+    "nothingChanged": "没有任何更改。",
+    "conflict": "在此期间有人更改了此集成。角色已重新加载，请检查后再次应用。",
+    "title": "发件人角色",
+    "none": "没有角色：每个允许的发件人都可以使用代理自己的工具访问每个目标。",
+    "summary": "{{senders}} → 目标：{{targets}}；工具：{{tools}}",
+    "agentTools": "代理的工具",
+    "trust": "角色信任发件人的域签名（DKIM）：这取决于您的邮件服务商阻止一个人以他人身份发信（别名、共享邮箱、“代表发送”）。请运行自检以检查该域。",
+    "editLabel": "角色和策略（JSON）",
+    "hint": "第一个匹配的角色生效。角色只授予经过身份验证的发件人；未经验证的邮件为 'anonymous'，不获得任何工具。角色只能收窄：目标、工具和更低的 maxTurnsPerSenderPerDay。由电子邮件发起的对话永远无法更改这些角色。",
+    "saveFirst": "请先保存或放弃您的其他更改；发件人角色会单独应用。",
+    "reason": "原因（用于审计日志）",
+    "apply": "应用角色更改",
+    "discard": "放弃"
+  },
   "feedback": {
     "title": "反馈",
     "subtitle": "人们对您的智能体的评价，以及仍需查看的内容。",

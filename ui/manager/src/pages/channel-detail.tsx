@@ -25,6 +25,7 @@ import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-chan
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes, EmailTargetRules } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
+import { EmailSenderRolesEditor } from "@/components/channels/email-sender-roles";
 import {
   EMAIL_TARGET_RULE_FIELDS,
   emailConfigProblems,
@@ -573,15 +574,27 @@ export function ChannelDetailPage() {
               id && config?.channelType === "email" ? (
                 // A sender-list change is a new version: moving the URL to it
                 // reseeds the draft, so a later save cannot write the old lists back.
-                <EmailSenderListsEditor
-                  key={id}
-                  integrationId={id}
-                  disabled={isDirty}
-                  onChanged={(newVersion) => {
-                    setPendingSenderVersion(newVersion);
-                    setSearchParams({ version: String(newVersion) }, { replace: true });
-                  }}
-                />
+                <>
+                  <EmailSenderListsEditor
+                    key={id}
+                    integrationId={id}
+                    disabled={isDirty}
+                    onChanged={(newVersion) => {
+                      setPendingSenderVersion(newVersion);
+                      setSearchParams({ version: String(newVersion) }, { replace: true });
+                    }}
+                  />
+                  {/* Sender roles are a new version too, adopted the same way. */}
+                  <EmailSenderRolesEditor
+                    key={`${id}-roles`}
+                    integrationId={id}
+                    disabled={isDirty}
+                    onChanged={(newVersion) => {
+                      setPendingSenderVersion(newVersion);
+                      setSearchParams({ version: String(newVersion) }, { replace: true });
+                    }}
+                  />
+                </>
               ) : undefined
             }
           />

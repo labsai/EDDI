@@ -259,6 +259,9 @@ describe("tool-scopes", () => {
       const channelWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/channelstore/"));
       expect(channelWrites).toEqual(["POST /channelstore/channels/{id}/email-senders"]);
       expect(READ_ENDPOINTS).toContain("GET /channelstore/channels/{id}/email-senders");
+      // Sender roles are readable; their PUT is not a write the operator holds.
+      expect(READ_ENDPOINTS).toContain("GET /channelstore/channels/{id}/email-roles");
+      expect(WRITE_ENDPOINTS).not.toContain("PUT /channelstore/channels/{id}/email-roles");
       // The whole document, read by an admin, holds any plaintext credential as stored.
       expect(READ_ENDPOINTS).not.toContain("GET /channelstore/channels/{id}");
     });
