@@ -33,7 +33,7 @@ deploy lost everything the run had not finished.
   dead run's claims to pending at once, and an expired lease can be claimed regardless. A document
   processed again after a crash is unchanged by its recorded version, so it is not embedded twice.
 - **Continuations.** A run that leaves work arms a one-shot schedule,
-  `rag-ingestion:{kb}:{source}:cont` (`RagIngestionContinuations`), for when the next row is due — and,
+  `rag-ingestion-cont:{kb}:{source}` (`RagIngestionContinuations`), for when the next row is due — and,
   at the first queued document (and the drain's first claim), one for after the claim lease, so a node
   that dies while listing or draining is followed up. Its fire
   (`RagSourceIngestionService.processContinuationFire`, routed by `ScheduleFireExecutor`) drains under
@@ -61,18 +61,43 @@ deploy lost everything the run had not finished.
   done and failed counts and `nextAttemptAt`; `POST …/sources/{sourceId}/retry-failed` (EDIT) re-arms
   poisoned rows and wakes the drain. The Manager's source card shows the work queue with **Retry
   failed**, and a `Continued` badge for continuation runs, in all 11 locales.
-- **Operator** (revision 86): knows the work table, continuations and retry-failed. No endpoint was
+- **Operator** (revision 87): knows the work table, continuations and retry-failed. No endpoint was
   added to its allow-list.
 - **Docs:** `docs/rag.md` — the work table, the shared cooldown, Drive units, the two endpoints.
 
 ### Behaviour changes
 
-- A `THROTTLED` run of a queued source (Drive, uploads) can now tombstone: its listing was complete,
-  so the documents that left the source are reconciled. The Manager's THROTTLED text and the operator
-  prompt still say nothing was deleted; that wording is not updated yet.
+- A `THROTTLED` run of a queued source (Drive, uploads) can tombstone: a throttle only stops embedding,
+  and its listing was complete, so documents that left the source or its scope are removed. The Manager's
+  THROTTLED text (11 locales), the operator prompt (revision 87) and `docs/rag.md` say so.
 - `documentsThrottled` counts the documents the provider actually refused; queued documents the drain
   did not reach are not counted there but stay queued (`GET …/work`).
 - The three new properties are in `docs/configuration-reference.md`.
+
+### After review
+
+- A continuation that finds the run slot held (a run, or a file delete's maintenance claim) re-arms
+  itself 30 s later instead of being consumed.
+- A run releases its claims in `finishRun` too, and the owning run takes over any claim another run
+  holds, so a release that did not land strands nothing until the lease.
+- A listing writes the table a page (up to 1,000 documents) at a time: three batched statements on
+  PostgreSQL, one read and one unordered bulk write on MongoDB. MongoDB's `workCounts` is one
+  aggregation. Both claim indexes carry the `document_id` tiebreak (`idx_ingestion_work_due_v2`, the
+  old one is dropped).
+- A document never ingested whose work is done at the same version (a file with no text) is not
+  queued again, so it is not downloaded every run. Ingested documents are always re-queued when listed
+  as changed.
+- Continuations are named `rag-ingestion-cont:{kb}:{source}`, which no cron name can collide with.
+- The Drive quota key names the connection's tenant; cooldown reads are a bounded cache; passed
+  cooldown rows are removed (a TTL index on MongoDB, a delete on write on PostgreSQL); MongoDB's
+  `failWork` stores the error as a `$literal`; queued-only rows are left out of the document listing.
+
+### Rollout
+
+Run the new build on every node before relying on continuations. A node on the previous build that
+claims a `rag-ingestion-cont:` schedule refuses it (its name check knows only the cron name), logs the
+fire as failed and the one-shot is spent; the work stays queued and the source's next cron or **Run
+now** drains it.
 
 ### Design decisions
 
@@ -87,6 +112,11 @@ deploy lost everything the run had not finished.
 
 ### Not done (later in Q or after)
 
-`FileRef` streaming and the temp-disk quota; the global worker cap and round-robin fairness;
-`maxConcurrentSlices` above 1; optional `requestsPerMinute`/`tokensPerMinute` ceilings; a slice IT
-with two schedulers on one database.
+From §11's phase Q: slice fires inside the schedule lease (see the design decisions);
+`maxConcurrentSlices` above 1; the cluster-wide worker cap (`eddi.rag.ingestion.max-workers`, a slot
+table) and round-robin fairness across sources and tenants; `FileRef` streaming downloads with the
+temp-disk quota; run records aggregating their slices. From §3.3: the optional `requestsPerMinute` and
+`tokensPerMinute` ceilings. From §4.2: the `parent_id`, `in_scope` and `tenant_id` columns (phase L and
+multi-tenancy). From §12: a slice IT with two schedulers on one database and 5,000 files, and the
+pipeline scenarios on real databases (they run on the in-memory double; the store contract runs on
+both databases).

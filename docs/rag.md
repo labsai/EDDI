@@ -909,9 +909,11 @@ Drive's listing query; the connection name is held to the connections framework'
   folder ids it reads and excludes, and of `includeSubfolders`. When it differs from the signature the
   last completed reconciliation applied, the documents the complete listing did not see are removed at
   once rather than after `tombstoneAfterMissedRuns` runs: taking a folder out of the scope is a
-  configuration change, not an outage. A folder put into the scope is simply read. A run that stops
-  early — throttled, out of time, at `maxFiles` — removes nothing and leaves the change pending, and so
-  does a removal the vector store refuses. A rename is not a change; resolving a path to a different
+  configuration change, not an outage. A folder put into the scope is simply read. A run whose listing
+  stops early — Drive's own rate limit, out of time, at `maxFiles` — removes nothing and leaves the
+  change pending, and so does a removal the vector store refuses. The embedding provider's throttle
+  does not stop a Drive listing, only the embedding after it (see [the work table](#the-work-table)),
+  so it does not hold the removal back. A rename is not a change; resolving a path to a different
   folder is. A source whose state predates the signature records one on its first run without
   fast-tracking anything.
 - **Retrieval applies the scope at once.** Every chunk records the chain of folders above its file
@@ -1117,10 +1119,14 @@ Existing rows read as having no work; the columns are added on startup.
   outside the folder scope now); a partial one withdraws nothing.
 - **Queueing is idempotent.** A document already queued, in flight or failed under the same version
   keeps its row as it is — its `not_before` and attempt count included — so a cron listing the source
-  again does not undo a throttle's deferral. A new version re-queues it.
+  again does not undo a throttle's deferral. So does a document never ingested whose work is done at
+  that version (a file with no text): it is not downloaded again every run. A new version re-queues
+  it. A listing writes the table a page of up to 1,000 documents at a time.
 - **Claims are exclusive.** A claim is one atomic statement per row (`FOR UPDATE SKIP LOCKED` on
   PostgreSQL, `findOneAndUpdate` on MongoDB), so two nodes never process the same document, and only
-  the run that owns the source can claim. A claim's lease outlasts its run's stale deadline.
+  the run that owns the source can claim. A claim's lease outlasts its run's stale deadline; a run
+  releases its claims when it ends, and a claim held by any run other than the owning one is taken
+  over at once, so a release that did not land strands nothing.
 - **A crash loses a slice, not a run.** Whatever a run had not finished stays queued. When a dead run
   is reaped its claims go back to pending at once (and a claim whose lease has passed can be taken in
   any case). A document processed again after a crash is not embedded twice: its recorded version
@@ -1134,9 +1140,12 @@ Existing rows read as having no work; the columns are added on startup.
   good** until its version changes or **Retry failed** queues it again. A file that has no text is a
   verdict, not a failure, and is not retried.
 - **Continuations drain the rest.** When a run ends with work left, it arms the source's one-shot
-  **continuation** schedule, `rag-ingestion:{ragConfigId}:{sourceId}:cont`, for when the next document
+  **continuation** schedule, `rag-ingestion-cont:{ragConfigId}:{sourceId}`, for when the next document
   is due. Its fire drains under the knowledge base's current configuration and lists nothing; it starts
-  no run when nothing is queued. The scheduler's cluster-wide claim decides which node fires it, so a
+  no run when nothing is queued. A fire that finds the source's run slot held — by a run, or by a file
+  delete — arms the next one 30 seconds later, so it is never lost. Arming deletes the source's
+  continuation by name and writes the new one; two nodes arming at once can leave two one-shots, which
+  is harmless — the second finds the slot held or nothing queued. The scheduler's cluster-wide claim decides which node fires it, so a
   backlog drains across the cluster, and a source without a `cron` still finishes what **Run now**
   queued. As soon as a listing queues its first document, the run also arms a continuation for after
   its claim lease, so a node that dies while listing or draining is followed up once its run is
@@ -1176,13 +1185,16 @@ the provider client's short retry and never sleeps on a throttle.
   `FAILED`, with an error that says to check the provider account's plan and billing; no document is
   counted as failed.
 - **Stopping is not failing.** A run that cannot wait ends with `stopReason: THROTTLED` (the REST
-  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit is
+  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). A throttle only stops embedding:
+  for a queued source (Drive, uploads) the listing was complete, so documents that left the source or
+  its scope **were removed** as on any complete run, and a `THROTTLED` run can report removed
+  documents. The document that hit the limit is
   counted in `documentsThrottled` — not in `documentsFailed` — and deferred in the
   [work table](#the-work-table) to `resumeAfter`; the drain stops, and nothing more is sent to the
   provider during the run. Documents the drain did not reach stay queued. For a source processed where
   it is listed (a crawl), the documents the source hands over after the stop count as throttled too,
-  the run's coverage is partial and **nothing is tombstoned**. Documents already in the knowledge base
-  keep their chunks either way. A document that has not changed still counts as unchanged after the
+  the run's coverage is partial and **nothing is tombstoned**. Documents still in the source keep their
+  chunks either way. A document that has not changed still counts as unchanged after the
   stop: it needs no provider call.
 - **One cooldown for everyone on the quota.** The throttle is recorded in a shared cooldown row
   (`provider_cooldowns`, on both datastores) keyed by provider, endpoint host, model and credential

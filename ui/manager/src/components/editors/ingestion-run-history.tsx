@@ -423,7 +423,7 @@ export function WorkQueueStatus({
       <p className="text-[11px] text-muted-foreground">
         {t(
           "ragEditor.runs.workHint",
-          "Documents the last listing found, embedded in the background. A rate limit or an error makes a document wait; it is never failed or removed for that.",
+          "Documents the last listing found, embedded in the background. A rate limit only makes a document wait. An error counts an attempt; after 5 the document stays failed until it changes or is retried.",
         )}
       </p>
       {retryError && (
@@ -469,19 +469,19 @@ function stopReasonText(t: TFunction, reason: string, resumeAfter?: string | nul
         "Stopped early — cancelled, superseded, or its chunk budget was reached",
       );
     case "THROTTLED": {
-      // No automatic resume: the next run is the source's schedule, which waits for
-      // this time, or a manual one. The date is shown when it is not today: a daily
+      // A queued source resumes through its continuation at this time; a crawl at
+      // its next scheduled or manual run. The date is shown when it is not today: a daily
       // quota usually comes back tomorrow.
       const resume = resumeAfter ? Date.parse(resumeAfter) : NaN;
       return Number.isFinite(resume)
         ? t(
             "ragEditor.runs.stopThrottledUntil",
-            "Paused by the provider's rate limit — it takes requests again from {{time}}. The next run picks up the rest; nothing was treated as failed or deleted",
+            "Paused by the provider's rate limit — it takes requests again from {{time}}. The throttle only stops embedding; the rest is picked up later and nothing is failed for it. If the listing was complete, documents that left the source or its scope were removed",
             { time: formatUpcomingTime(resume) },
           )
         : t(
             "ragEditor.runs.stopThrottled",
-            "Paused by the provider's quota. The next run picks up the rest; nothing was treated as failed or deleted",
+            "Paused by the provider's quota. The throttle only stops embedding; the rest is picked up later and nothing is failed for it. If the listing was complete, documents that left the source or its scope were removed",
           );
     }
     default:
