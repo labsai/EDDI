@@ -21,6 +21,8 @@ test-results/
 test-results.json
 test-output*.txt
 vitest-results.json
+# Vitest blob reports (`--reporter=blob`, as CI's sharded unit-test jobs run it)
+.vitest/
 out.txt
 test_output.txt
 

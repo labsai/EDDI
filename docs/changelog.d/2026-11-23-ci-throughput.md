@@ -57,3 +57,14 @@ data.
   `BuildQualityGatesTest.ciGateBlocksWhateverBlocksPublishing` pins its needs against docker's,
   its `always()` and the merge-queue strictness; the `ciJobNeeds` helper no longer reads the words
   of a comment after a `needs:` list as job names (it reported docker as needing `pushed`/`tagged`).
+- **The Manager's Vitest suite runs in three shards.** It took 12–16 min inside UI Manager Checks.
+  `ui-manager-unit` (matrix 1–3) runs `vitest --shard=N/3 --reporter=default --reporter=blob
+  --coverage` with the coverage thresholds zeroed — a shard covers a third of the suite and would
+  fail them every time — and uploads `.vitest/blob/` (`include-hidden-files`; it is a dot-directory).
+  `ui-manager-unit-merge` ("UI Manager Unit Tests") refuses to run with fewer than three blobs, then
+  `vitest --merge-reports --coverage` reports every test and enforces the thresholds from
+  `vitest.config.ts` on the merged coverage. Verified locally on Vitest 5.1 over a subset (17 files,
+  555 tests across two shards): the merge summed both shards and exited 1 on the real thresholds,
+  0 with them zeroed. UI Manager Checks keeps audit, lint, i18n, typecheck, build and the bundle
+  budget; UI Gate now requires the shard and merge jobs too. `ui/manager/.gitignore` ignores
+  `.vitest/`.
