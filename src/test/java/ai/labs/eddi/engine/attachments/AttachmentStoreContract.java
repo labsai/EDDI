@@ -418,6 +418,40 @@ public interface AttachmentStoreContract {
     }
 
     @Test
+    default void aFailureOnAnEarlierStartKeepsTheSamePassIncomplete() throws Exception {
+        // The same grantee on every blob: which blob is on the first page depends on
+        // the store's key order.
+        for (int i = 0; i < 3; i++) {
+            seedLegacyGrant(upload(OWNER, "page " + i).storageRef(), STRANGER);
+        }
+        AttachmentGrantBackfill.GranteeCheck strangerUnreachable = id -> {
+            if (STRANGER.equals(id)) {
+                throw new IllegalStateException("database unreachable");
+            }
+            return true;
+        };
+
+        // The first start stops after one page; the failed lookup could be on it.
+        AttachmentGrantBackfill.Result first = backfill().run(strangerUnreachable, 1, 1);
+        assertFalse(first.complete());
+
+        // The next start finishes the pass with no failure of its own; the pass as a
+        // whole still missed a grant, so it is not complete.
+        AttachmentGrantBackfill.Result rest = backfill().run(id -> true, 1, 10);
+        assertEquals(0, rest.lookupsFailed());
+        assertEquals(2, rest.grantsCopied());
+        assertFalse(rest.complete(), "a lookup failed earlier in this pass");
+        assertFalse(marked());
+
+        // The pass after that starts over, copies the missed grant and completes.
+        AttachmentGrantBackfill.Result over = backfill().run(id -> true, 1, 10);
+        assertTrue(over.complete(), over.toString());
+        assertEquals(1, over.grantsCopied());
+        assertTrue(marked());
+        assertEquals(3, grantRowsHeldBy(STRANGER));
+    }
+
+    @Test
     default void aGranteeThatDisappearsDuringTheCopyIsTakenBack() throws Exception {
         String ref = upload(OWNER, "erased meanwhile").storageRef();
         seedLegacyGrant(ref, GRANTEE);
