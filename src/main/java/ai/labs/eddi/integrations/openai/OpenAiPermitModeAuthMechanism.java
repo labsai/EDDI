@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.security.identity.IdentityProviderManager;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.identity.request.AnonymousAuthenticationRequest;
@@ -92,6 +93,7 @@ import java.util.stream.Collectors;
  * @since 6.7.0
  */
 @ApplicationScoped
+@OrgNeutral("admits /v1 callers by deployment config; reads no org data")
 public class OpenAiPermitModeAuthMechanism implements HttpAuthenticationMechanism {
 
     /** The only path, and everything below it, this mechanism acts on. */

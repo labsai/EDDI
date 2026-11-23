@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.core.http.HttpServerRequest;
@@ -81,6 +82,7 @@ import java.util.regex.PatternSyntaxException;
  * {@code /q} routes and static assets.
  */
 @ApplicationScoped
+@OrgNeutral("checks hosts against deployment config; reads no org data")
 public class UnauthenticatedRequestGuard {
 
     private static final Logger LOGGER = Logger.getLogger(UnauthenticatedRequestGuard.class);

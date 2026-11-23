@@ -207,8 +207,9 @@ class OrgEntryPointBindingTest {
 
     /** Code that runs outside resource methods (plan Appendix A.12). */
     private static final Pattern OUTSIDE_RESOURCE_METHODS = Pattern.compile(
-            "implements[^{]*\\b(ContainerRequestFilter|ContainerResponseFilter|SecurityIdentityAugmentor|ExceptionMapper)\\b"
-                    + "|@Server(Request|Response)Filter|@ServerExceptionMapper|@Observes\\s+Router\\b|@Route\\(");
+            "implements[^{]*\\b(ContainerRequestFilter|ContainerResponseFilter|SecurityIdentityAugmentor|ExceptionMapper"
+                    + "|ReaderInterceptor|WriterInterceptor|MessageBodyReader|MessageBodyWriter|HttpAuthenticationMechanism)\\b"
+                    + "|@Server(Request|Response)Filter|@ServerExceptionMapper|@Observes\\s+(Router|Filters)\\b|@Route\\(");
     private static final Pattern BINDS_REQUEST = Pattern.compile("orgRequest\\.(runBound|callBound)\\(");
     private static final Pattern NEUTRAL = Pattern.compile("(?m)^@OrgNeutral\\(\"([^\"]+)\"\\)\\s*$");
 

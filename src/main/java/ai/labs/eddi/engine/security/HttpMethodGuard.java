@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,6 +32,7 @@ import java.util.Set;
  * and at a high priority so it runs before authentication and routing.
  */
 @ApplicationScoped
+@OrgNeutral("refuses HTTP methods from deployment config; reads no org data")
 public class HttpMethodGuard {
 
     /** Higher runs first; above the CSP and security-header filters. */

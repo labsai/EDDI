@@ -434,6 +434,42 @@ class DocumentDescriptorFilterTest {
         }
 
         @Test
+        @DisplayName("resolves no org for a response it writes nothing for (a read, a failure)")
+        void resolvesNoOrgWithoutDescriptorWork() throws Exception {
+            var refusing = OrgTestRequests.refusing();
+            var noOrgFilter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore, resourceAccessGuard, refusing);
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(request.getMethod()).thenReturn("GET");
+            when(response.getStatus()).thenReturn(200);
+            noOrgFilter.filter(request, response);
+            when(request.getMethod()).thenReturn("POST");
+            when(response.getStatus()).thenReturn(500);
+            noOrgFilter.filter(request, response);
+
+            assertEquals(0, refusing.resolutions());
+        }
+
+        @Test
+        @DisplayName("a caller without an org (a platform-plane endpoint) keeps its response and gets no descriptor")
+        void aCallerWithoutAnOrgKeepsItsResponse() throws Exception {
+            var refusing = OrgTestRequests.refusing();
+            var noOrgFilter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore, resourceAccessGuard, refusing);
+            Field uriInfoField = DocumentDescriptorFilter.class.getDeclaredField("uriInfo");
+            uriInfoField.setAccessible(true);
+            uriInfoField.set(noOrgFilter, uriInfo);
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(response.getStatus()).thenReturn(201);
+            when(request.getMethod()).thenReturn("POST");
+
+            assertDoesNotThrow(() -> noOrgFilter.filter(request, response));
+
+            assertEquals(1, refusing.resolutions());
+            verify(documentDescriptorStore, never()).createDescriptor(any(), anyInt(), any());
+        }
+
+        @Test
         @DisplayName("should create descriptor for new resource on POST 201")
         void createsDescriptor() throws Exception {
             var request = mock(ContainerRequestContext.class);

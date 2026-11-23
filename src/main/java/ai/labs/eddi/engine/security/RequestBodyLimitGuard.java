@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.org.OrgNeutral;
 import io.quarkus.runtime.configuration.MemorySize;
 import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.core.http.HttpHeaders;
@@ -70,6 +71,7 @@ import java.util.regex.Pattern;
  * body it has already refused.
  */
 @ApplicationScoped
+@OrgNeutral("caps request bodies from deployment config; reads no org data")
 public class RequestBodyLimitGuard {
 
     private static final Logger LOGGER = Logger.getLogger(RequestBodyLimitGuard.class);
