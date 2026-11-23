@@ -60,6 +60,24 @@ public class FakeChatChannelType implements ChannelTypeDescriptor {
         return appId == null || appId.isBlank() ? List.of("A fakechat integration requires platformConfig.appId.") : List.of();
     }
 
+    /**
+     * A variant whose application id must be its connection's OAuth client id, as
+     * Teams'.
+     */
+    public static class OwnedByClientId extends FakeChatChannelType {
+        public static final String OWNED_ID = "ownedchat";
+
+        @Override
+        public String id() {
+            return OWNED_ID;
+        }
+
+        @Override
+        public boolean applicationIdIsConnectionClientId() {
+            return true;
+        }
+    }
+
     /** The built-in types plus this one. */
     public static ChannelTypeRegistry registry() {
         return new ChannelTypeRegistry(List.of(new SlackChannelType(), new WebhookChannelType(), new EmailChannelType(),

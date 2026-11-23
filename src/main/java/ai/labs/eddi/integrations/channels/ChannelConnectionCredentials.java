@@ -5,17 +5,28 @@
 package ai.labs.eddi.integrations.channels;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
-import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
+import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.ForbiddenException;
+import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Credentials of a connection-backed channel type
@@ -23,87 +34,174 @@ import java.util.Map;
  * EDDI connection in {@code platformConfig.connection} and holds no secret
  * itself.
  * <p>
- * The credential is resolved through {@link ConnectionResolver} on every send,
- * with the real destination, so the connection's {@code baseUrlAllowlist} is
- * checked against where the token is actually going (a Teams {@code serviceUrl}
- * arrives with each activity). Nothing here caches a resolved value: the
+ * <b>At save time</b> ({@link #validateForSave}) the caller must be allowed to
+ * use the connection — a channel acts with its credential, so naming a
+ * connection is using it, exactly as aiming a channel at an agent is (see
+ * {@code RestChannelIntegrationStore.requireUseOnTargets}). A connection that
+ * does not exist and one the caller may not use get the same answer, so the
+ * check cannot be used to discover other people's connections. Then the
+ * connection must be {@code SERVICE}-bound, of an accepted auth type, allowed
+ * to reach the type's API origin and, for a type whose application id is its
+ * OAuth client id, be that application's.
+ * <p>
+ * <b>On every send</b> ({@link #resolve}) the credential is resolved through
+ * {@link ConnectionResolver#resolveService}, with the real destination and the
+ * binding and auth type re-checked: the connection may have been edited since
+ * the integration was saved, and nothing here caches a resolved value — the
  * connection layer already caches and refreshes tokens single-flight, and a
  * token kept next to the router's 60-second configuration cache would outlive a
- * rotation. The connection is bound {@code SERVICE} and resolved with no
- * principal — an inbound chat event runs as no verified EDDI user.
+ * rotation. It is resolved with no principal: an inbound chat event runs as no
+ * verified EDDI user.
  *
  * @since 6.7.0
  */
 @ApplicationScoped
 public class ChannelConnectionCredentials {
 
+    private static final Logger LOGGER = Logger.getLogger(ChannelConnectionCredentials.class);
+
+    /** One segment of a connection reference: a tenant id or a name. */
+    private static final Pattern SEGMENT = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+
+    private static final String REFERENCE_PREFIX = "${connection:";
+
     private final Instance<ConnectionResolver> connectionResolver;
+    private final ChannelTypeRegistry channelTypes;
+    private final IConnectionStore connectionStore;
+    private final ResourceAccessGuard accessGuard;
 
     @Inject
-    public ChannelConnectionCredentials(Instance<ConnectionResolver> connectionResolver) {
+    public ChannelConnectionCredentials(Instance<ConnectionResolver> connectionResolver, ChannelTypeRegistry channelTypes,
+            IConnectionStore connectionStore, ResourceAccessGuard accessGuard) {
         this.connectionResolver = connectionResolver;
+        this.channelTypes = channelTypes != null ? channelTypes : ChannelTypeRegistry.builtIns();
+        this.connectionStore = connectionStore;
+        this.accessGuard = accessGuard;
     }
 
     /**
-     * The {@code ${connection:name}} reference an integration's configuration
-     * names, or {@code null}.
+     * The connection {@code platformConfig.connection} names: a bare name,
+     * {@code tenant/name} for a workspace's connection, or the same wrapped as
+     * {@code ${connection:…}}. Empty when absent or malformed.
+     */
+    public static Optional<ConnectionReference> connectionOf(Map<String, String> platformConfig) {
+        String raw = platformConfig == null ? null : platformConfig.get(ChannelTypeDescriptor.KEY_CONNECTION);
+        if (raw == null) {
+            return Optional.empty();
+        }
+        String value = raw.trim();
+        if (value.startsWith(REFERENCE_PREFIX) && value.endsWith("}")) {
+            value = value.substring(REFERENCE_PREFIX.length(), value.length() - 1).trim();
+        }
+        String[] parts = value.split("/", -1);
+        if (parts.length > 2) {
+            return Optional.empty();
+        }
+        for (String part : parts) {
+            if (!SEGMENT.matcher(part).matches()) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(parts.length == 2
+                ? new ConnectionReference(parts[0], parts[1])
+                : new ConnectionReference(ConnectionReference.DEFAULT_TENANT, parts[0]));
+    }
+
+    /**
+     * The {@code ${connection:…}} reference an integration's configuration names,
+     * or {@code null}.
      */
     public static String connectionReference(Map<String, String> platformConfig) {
-        String raw = platformConfig == null ? null : platformConfig.get(ChannelTypeDescriptor.KEY_CONNECTION);
-        String name = EmailChannelSettings.connectionName(raw);
-        return name == null ? null : "${connection:" + name + "}";
+        return connectionOf(platformConfig).map(ConnectionReference::toReferenceString).orElse(null);
     }
 
     /**
-     * Save-time errors of a connection-backed integration's connection: it exists,
-     * is {@code SERVICE}-bound, has an auth type the channel type accepts and, when
-     * the type has a fixed {@link ChannelTypeDescriptor#apiOrigin()}, may be sent
-     * there. Empty for a type that is not connection-backed, or when the name
-     * itself is malformed (reported by
+     * Save-time errors of a connection-backed integration's connection (see the
+     * class comment). Empty for a type that is not connection-backed, or when the
+     * name itself is malformed (reported by
      * {@link ChannelTypeRegistry#validatePlatformConfig}).
      */
     public List<String> validateForSave(ChannelTypeDescriptor descriptor, Map<String, String> platformConfig) {
         if (!descriptor.connectionBacked()) {
             return List.of();
         }
-        String reference = connectionReference(platformConfig);
-        if (reference == null) {
+        Optional<ConnectionReference> parsed = connectionOf(platformConfig);
+        if (parsed.isEmpty()) {
             return List.of();
         }
+        ConnectionReference connection = parsed.get();
         if (connectionResolver == null || !connectionResolver.isResolvable()) {
-            return List.of("Connections are not available in this deployment, so platformConfig.connection cannot be checked.");
+            return reject(descriptor, "connections_unavailable",
+                    "Connections are not available in this deployment, so platformConfig.connection cannot be checked.");
         }
+        UseCheck usable = requireMayUse(connection);
+        if (usable.refusal() != null) {
+            return reject(descriptor, "connection_not_usable", usable.refusal());
+        }
+        Optional<String> applicationId = descriptor.applicationId(platformConfig).filter(id -> !id.isBlank());
+        boolean claimsApplication = applicationId.isPresent() && descriptor.routingKeys(null, platformConfig)
+                .contains(ChannelTypeDescriptor.applicationKey(applicationId.get()));
+        if (claimsApplication && !mayEdit(usable.connectionId())) {
+            // USE lets someone send through a shared connection; it must not let them
+            // take over the application's direct messages. Existence is no secret here:
+            // the caller already passed the USE check.
+            return reject(descriptor, "application_needs_edit",
+                    "platformConfig.connection: a channel-less integration answers application '" + applicationId.get()
+                            + "''s direct messages, which needs edit access to connection '" + connection.name()
+                            + "', not only use access.");
+        }
+        String reference = connection.toReferenceString();
         URI origin = descriptor.apiOrigin().orElse(null);
+        ConnectionResolver resolver = connectionResolver.get();
+        Optional<String> clientId;
         try {
-            connectionResolver.get().requireServiceTarget(reference, origin, descriptor.acceptedConnectionAuthTypes());
-            var identity = descriptor.requiredConnectionIdentity(platformConfig);
-            if (identity.isPresent()) {
-                ConnectionIdentityRequirement required = identity.get();
-                connectionResolver.get().proveServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
-            }
-            return List.of();
+            resolver.requireServiceTarget(reference, origin, descriptor.acceptedConnectionAuthTypes());
+            clientId = descriptor.applicationIdIsConnectionClientId() ? resolver.oauthClientIdOf(reference) : Optional.empty();
         } catch (ConnectionException e) {
             if (e.getReason() == ConnectionException.Reason.TARGET_NOT_ALLOWED && origin != null) {
-                return List.of("platformConfig.connection: " + e.getMessage() + " The connection's baseUrlAllowlist must contain " + origin
-                        + ".");
+                return reject(descriptor, "connection_target", "platformConfig.connection: " + e.getMessage()
+                        + " The connection's baseUrlAllowlist must contain " + origin + ".");
             }
-            return List.of("platformConfig.connection: " + e.getMessage());
+            return reject(descriptor, "connection_invalid", "platformConfig.connection: " + e.getMessage());
         }
+        // Compared ignoring case: the ids in question are GUIDs, which Entra shows in
+        // lower case and other tools in upper case.
+        if (descriptor.applicationIdIsConnectionClientId() && applicationId.isPresent()
+                && !clientId.filter(applicationId.get()::equalsIgnoreCase).isPresent()) {
+            // Not proof of the secret on its own — connection saves never test it — but
+            // the application id is tied to a connection an administrator configured
+            // with that client id, which this caller may use (and edit, when it claims
+            // DMs). A type with a requiredConnectionIdentity adds the proof below.
+            return reject(descriptor, "application_not_owned", "The " + descriptor.id() + " application id must be the OAuth client id "
+                    + "of the connection in platformConfig.connection.");
+        }
+        Optional<ConnectionIdentityRequirement> identity = descriptor.requiredConnectionIdentity(platformConfig);
+        if (identity.isPresent()) {
+            ConnectionIdentityRequirement required = identity.get();
+            try {
+                // Proof of possession: one token from the pinned endpoint with the
+                // connection's own secret or certificate.
+                resolver.proveServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
+            } catch (ConnectionException e) {
+                return reject(descriptor, "identity_not_proven", "platformConfig.connection: " + e.getMessage());
+            }
+        }
+        return List.of();
     }
 
     /**
      * Whether {@code integration}'s connection still holds the identity its type
      * demands ({@link ChannelTypeDescriptor#requiredConnectionIdentity}), checked
      * without a network call. An inbound adapter calls this before trusting the
-     * integration with a verified application's traffic: save validation is skipped
-     * by a ZIP import or a direct store write, and the connection can be edited
-     * after the save. {@code true} for a type that demands no identity.
+     * integration with a verified application's traffic: save validation is
+     * skipped by a ZIP import or a direct store write, and the connection can be
+     * edited after the save. {@code true} for a type that demands no identity.
      */
     public boolean holdsRequiredIdentity(ChannelTypeDescriptor descriptor, ChannelIntegrationConfiguration integration) {
         if (descriptor == null || integration == null) {
             return false;
         }
-        var identity = descriptor.requiredConnectionIdentity(integration.getPlatformConfig());
+        Optional<ConnectionIdentityRequirement> identity = descriptor.requiredConnectionIdentity(integration.getPlatformConfig());
         if (identity.isEmpty()) {
             return true;
         }
@@ -116,8 +214,64 @@ public class ChannelConnectionCredentials {
             connectionResolver.get().requireServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
             return true;
         } catch (ConnectionException e) {
+            channelTypes.recordCredentialRefused(descriptor.id(), "identity_mismatch");
             return false;
         }
+    }
+
+    /**
+     * The outcome of {@link #requireMayUse}: the connection's id when the caller
+     * may use it, else the refusal.
+     */
+    private record UseCheck(String connectionId, String refusal) {
+        static UseCheck refused(String refusal) {
+            return new UseCheck(null, refusal);
+        }
+    }
+
+    /**
+     * The connection's id when the caller may use it, else the one message a
+     * missing connection and a forbidden one share.
+     */
+    private UseCheck requireMayUse(ConnectionReference connection) {
+        String uniform = "platformConfig.connection: no usable connection '" + connection.name() + "' — it does not exist, or you "
+                + "may not use it. Ask its owner to share it with you, or create your own.";
+        String id;
+        try {
+            id = connectionStore == null ? null : connectionStore.idOfName(connection.tenantId(), connection.name());
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.warnf("Could not look up connection '%s' for a channel save: %s", sanitize(connection.name()), e.getMessage());
+            return UseCheck.refused("platformConfig.connection could not be checked right now. Please retry.");
+        }
+        if (id == null) {
+            return UseCheck.refused(uniform);
+        }
+        if (accessGuard != null) {
+            try {
+                accessGuard.requireUseAccess(id, "connection");
+            } catch (ForbiddenException e) {
+                return UseCheck.refused(uniform);
+            }
+        }
+        return new UseCheck(id, null);
+    }
+
+    /** Whether the caller holds EDIT on the connection with that id. */
+    private boolean mayEdit(String connectionId) {
+        if (accessGuard == null) {
+            return true;
+        }
+        try {
+            accessGuard.requireAccess(connectionId, AccessLevel.EDIT, "connection");
+            return true;
+        } catch (ForbiddenException e) {
+            return false;
+        }
+    }
+
+    private List<String> reject(ChannelTypeDescriptor descriptor, String reason, String message) {
+        channelTypes.recordRejected(descriptor.id(), reason);
+        return List.of(message);
     }
 
     /**
@@ -126,18 +280,33 @@ public class ChannelConnectionCredentials {
      * never store it.
      *
      * @throws ConnectionException
-     *             when the integration names no usable connection, the connection
-     *             may not be sent to {@code target}, or it cannot be resolved
+     *             when the integration is not of a connection-backed type, names no
+     *             usable connection, the connection is no longer
+     *             {@code SERVICE}-bound or of an accepted auth type, may not be
+     *             sent to {@code target}, or cannot be resolved
      */
     public ResolvedCredential resolve(ChannelIntegrationConfiguration integration, URI target) {
-        String reference = integration == null ? null : connectionReference(integration.getPlatformConfig());
-        if (reference == null) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "The channel integration names no connection in platformConfig.connection.");
+        if (integration == null) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "No channel integration to resolve for.");
         }
-        if (connectionResolver == null || !connectionResolver.isResolvable()) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "Connections are not available in this deployment.");
+        ChannelTypeDescriptor descriptor = channelTypes.find(integration.getChannelType())
+                .filter(ChannelTypeDescriptor::connectionBacked)
+                .orElseThrow(() -> new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Channel type '" + integration.getChannelType() + "' does not take its credential from a connection."));
+        try {
+            String reference = connectionReference(integration.getPlatformConfig());
+            if (reference == null) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "The channel integration names no connection in platformConfig.connection.");
+            }
+            if (connectionResolver == null || !connectionResolver.isResolvable()) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connections are not available in this deployment.");
+            }
+            return connectionResolver.get().resolveService(reference, target, descriptor.acceptedConnectionAuthTypes());
+        } catch (ConnectionException e) {
+            channelTypes.recordCredentialRefused(descriptor.id(), e.getReason().name().toLowerCase(Locale.ROOT));
+            throw e;
         }
-        return connectionResolver.get().resolve(reference, target, null);
     }
 }

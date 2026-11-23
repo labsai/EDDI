@@ -71,9 +71,11 @@ public class ChannelIntegrationConfiguration {
      * {@code signingSecret}</li>
      * <li><b>Connection-backed types</b> (new adapters, e.g. a future {@code teams}
      * or {@code discord}): ids and options only, exactly the keys the type's
-     * {@code ChannelTypeDescriptor} declares, plus {@code connection}, the EDDI
-     * connection that holds the credential. Any other key is refused at save time,
-     * a plaintext token as much as a {@code ${vault:...}} reference.</li>
+     * {@code ChannelTypeDescriptor} declares. That declaration must include
+     * {@code connection}, the EDDI connection that holds the credential, next to
+     * the adapter's own keys; the registry refuses a descriptor that omits it. Any
+     * other key is refused at save time, a plaintext token as much as a
+     * {@code ${vault:...}} reference.</li>
      * <li><b>webhook:</b> {@code signingSecret} (required, a vault reference),
      * {@code signatureScheme}, {@code signatureHeader}, {@code signatureEncoding},
      * {@code signaturePrefix}, {@code eventTypeHeader}, {@code eventTypePath},

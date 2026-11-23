@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -45,10 +46,11 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * <p>
  * Platform-agnostic: signing-secret aggregation and target resolution are keyed
  * by {@code channelType} so multiple platform adapters can coexist. Currently
- * {@code slack}, {@code webhook} and {@code email} are registered/validated
- * (see {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}); only
- * Slack also has legacy {@code ChannelConnector} entries. Platform-specific
- * adapters provide their own webhook and event-handler classes.
+ * {@code slack}, {@code webhook} and {@code email} are registered (see
+ * {@link ChannelTypeRegistry}, one {@link ChannelTypeDescriptor} per type);
+ * only Slack also has legacy {@code ChannelConnector} entries.
+ * Platform-specific adapters provide their own webhook and event-handler
+ * classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
  * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
@@ -79,7 +81,7 @@ public class ChannelTargetRouter {
     /**
      * Where a Slack bot token is sent - checked against the secret's allowedHosts.
      */
-    private static final String SLACK_API_DESTINATION = "https://slack.com/api/";
+    private static final String SLACK_API_DESTINATION = SlackChannelType.API_BASE;
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -154,6 +156,13 @@ public class ChannelTargetRouter {
      * warning every minute.
      */
     private final Set<String> unusableCredentialWarned = ConcurrentHashMap.newKeySet();
+    /**
+     * Dropped keys already counted, per integration version and key. Separate from
+     * {@link #unusableCredentialWarned}, which a vault change clears so rotated
+     * credentials warn again: a dropped key is no credential, and a vault change
+     * must not count it a second time.
+     */
+    private final Set<String> droppedKeyCounted = ConcurrentHashMap.newKeySet();
     private final AtomicInteger weakWebhookSecretWarnings = new AtomicInteger();
 
     /**
@@ -268,10 +277,17 @@ public class ChannelTargetRouter {
      * (lowest routing key first; the trigger syntax of
      * {@link #resolveFromIntegration} applies), falling back to the first legacy
      * Slack connector. Returns {@code null} if no integrations exist or the message
-     * is blank or "help".
+     * is blank or "help", and always for a connection-backed type, whose
+     * integrations may belong to different tenants (see
+     * {@link #resolveDefaultForOrigin}).
      */
     public ResolvedTarget resolveDefaultForDm(String channelType, String messageText) {
         refreshIfNeeded();
+        if (channelTypes.find(channelType).map(ChannelTypeDescriptor::connectionBacked).orElse(false)) {
+            // A connection-backed type's integrations may belong to different tenants:
+            // "the first one" is no owner. Its DMs go through resolveDefaultForOrigin.
+            return null;
+        }
         for (var integration : integrationsOf(channelType)) {
             return resolveFromIntegration(integration, messageText);
         }
@@ -357,8 +373,9 @@ public class ChannelTargetRouter {
     /**
      * {@link #threadCredentialsForDm(String, ChannelTarget, String)} for any
      * {@link InboundOrigin}: only an integration (lowest routing key first) the
-     * origin verifiably belongs to — the same signing secret, or the same
-     * application id — AND that has {@code lockedTarget} among its own targets
+     * origin verifiably belongs to — the same signing secret, or the verified
+     * application's channel-less integration (never a channel-bound one of the same
+     * application) — AND that has {@code lockedTarget} among its own targets
      * qualifies; for a Slack signing secret, the legacy connectors after that.
      *
      * @return the locked target with that owner's credentials, or {@code null}
@@ -393,11 +410,13 @@ public class ChannelTargetRouter {
 
     /**
      * Resolve a DM's (or any channel-less message's) default target from the
-     * integration its verified origin names: by integration name when the adapter
-     * knows it, else by verified application id, else (Slack) by the legacy
-     * connector holding the verifying secret. Fails closed: an application id no
-     * integration answers for, or an origin with no verified identity, resolves to
-     * nothing, never to some other integration of the type.
+     * integration its verified origin names. A verified application id resolves to
+     * that application's channel-less integration only, and a name given with it
+     * must name that same integration. A verified signing secret resolves to the
+     * named integration if it holds that secret, else (Slack) to the legacy
+     * connector holding it. Fails closed: an application id no integration answers
+     * for, a name with no secret or application id, or no verified identity at all
+     * resolves to nothing, never to some other integration of the type.
      *
      * @return the target, or {@code null} for help, a blank message or no owner
      */
@@ -405,16 +424,33 @@ public class ChannelTargetRouter {
         if (origin == null) {
             return null;
         }
-        if (origin.integrationName() != null) {
-            return resolveDefaultForDm(origin.channelType(), messageText, origin.integrationName());
+        String applicationId = origin.verifiedApplicationId();
+        if (applicationId != null && !applicationId.isBlank()) {
+            // The application's DMs belong to its channel-less integration alone. A
+            // name (which may come from a request body, a card action) can only
+            // confirm that integration, never pick a channel-bound one of the same
+            // application, which may be another tenant's.
+            var owner = getIntegrationForApplication(origin.channelType(), applicationId);
+            if (origin.integrationName() != null) {
+                owner = owner.filter(integration -> getIntegrationByName(origin.channelType(), origin.integrationName())
+                        .filter(named -> named == integration)
+                        .isPresent());
+            }
+            return owner.map(integration -> resolveFromIntegration(integration, messageText)).orElse(null);
         }
-        if (origin.verifiedApplicationId() != null) {
-            return getIntegrationForApplication(origin.channelType(), origin.verifiedApplicationId())
+        String signingSecret = origin.verifiedSigningSecret();
+        if (signingSecret == null || signingSecret.isBlank()) {
+            // A bare name proves nothing: it may come from a URL or a request body.
+            return null;
+        }
+        if (origin.integrationName() != null) {
+            return getIntegrationByName(origin.channelType(), origin.integrationName())
+                    .filter(integration -> belongsTo(integration, origin))
                     .map(integration -> resolveFromIntegration(integration, messageText))
                     .orElse(null);
         }
-        if (origin.verifiedSigningSecret() != null && CHANNEL_TYPE_SLACK.equalsIgnoreCase(origin.channelType())) {
-            return resolveLegacyDefaultForDm(messageText, origin.verifiedSigningSecret());
+        if (CHANNEL_TYPE_SLACK.equalsIgnoreCase(origin.channelType())) {
+            return resolveLegacyDefaultForDm(messageText, signingSecret);
         }
         // No verified identity this method can map to an owner: never "the first
         // integration of the type".
@@ -444,7 +480,16 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         // Re-checked rather than trusted from the key, so the answer is the
-        // integration that declares this application and nothing else.
+        // integration that declares this application and nothing else. A
+        // descriptor's routing keys are not proof of channel-lessness either: one
+        // that emits the application key for a channel-bound integration must not
+        // hand that channel's tenant the application's direct messages.
+        String boundChannel = direct.getPlatformConfig() == null
+                ? null
+                : direct.getPlatformConfig().get(ChannelTypeDescriptor.KEY_CHANNEL_ID);
+        if (boundChannel != null && !boundChannel.isBlank()) {
+            return Optional.empty();
+        }
         boolean declares = channelTypes.find(normalizedType)
                 .flatMap(descriptor -> descriptor.applicationId(direct.getPlatformConfig()))
                 .filter(applicationId::equals)
@@ -454,8 +499,11 @@ public class ChannelTargetRouter {
 
     /**
      * Whether {@code integration} is the one {@code origin} was verified for: the
-     * same signing secret (constant-time), or the same application id as its type's
-     * descriptor reads from its configuration.
+     * same signing secret (constant-time), or — for a verified application id —
+     * that application's channel-less integration
+     * ({@link #getIntegrationForApplication}). Not merely any integration that
+     * declares the application: channel-bound ones of one application may belong to
+     * different tenants, and nothing in a DM says which.
      */
     private boolean belongsTo(ChannelIntegrationConfiguration integration, InboundOrigin origin) {
         Map<String, String> platformConfig = integration.getPlatformConfig();
@@ -469,9 +517,8 @@ public class ChannelTargetRouter {
         if (applicationId == null || applicationId.isBlank()) {
             return false;
         }
-        return channelTypes.find(integration.getChannelType())
-                .flatMap(descriptor -> descriptor.applicationId(platformConfig))
-                .filter(applicationId::equals)
+        return getIntegrationForApplication(integration.getChannelType(), applicationId)
+                .filter(owner -> owner == integration)
                 .isPresent();
     }
 
@@ -1123,6 +1170,10 @@ public class ChannelTargetRouter {
 
         // 1. Load new-style ChannelIntegrationConfigurations
         try {
+            // Touch the registry outside the per-document catch: a registry that refuses
+            // to construct (a duplicate or malformed type id) must surface as the WARN
+            // below, not as one DEBUG "Skipping channel config" per document.
+            channelTypes.ids();
             var descriptors = descriptorStore.readDescriptors("ai.labs.channel",
                     "", 0, IDescriptorStore.NO_LIMIT, false);
             for (var descriptor : descriptors) {
@@ -1138,20 +1189,22 @@ public class ChannelTargetRouter {
                         // the resource id for a webhook (POST /integrations/webhook/{id},
                         // unique by construction), an application key for a channel-less
                         // integration of a type that declares one, none for email.
+                        var typeDescriptor = channelTypes.find(config.getChannelType());
+                        boolean connectionBacked = typeDescriptor.isPresent() && typeDescriptor.get().connectionBacked();
+                        var copy = deepCopyConfig(config);
+                        String integrationKey = resId.getId() + ":" + resId.getVersion();
+                        if (connectionBacked) {
+                            // Holds no secret: its credential is resolved per send from the
+                            // connection it names. Nothing is resolved from the vault, and keys
+                            // outside the type's allow-list are dropped BEFORE the routing keys
+                            // are read — save validation refuses them, but a direct store write
+                            // never ran it, and an undeclared key must not route either.
+                            keepAllowedKeysOnly(integrationKey, typeDescriptor.get(), copy);
+                        }
                         List<String> routingKeys = channelTypes.routingKeys(config.getChannelType(), resId.getId(),
-                                config.getPlatformConfig());
+                                copy.getPlatformConfig());
                         if (!routingKeys.isEmpty()) {
-                            var copy = deepCopyConfig(config);
-                            String integrationKey = resId.getId() + ":" + resId.getVersion();
-                            var typeDescriptor = channelTypes.find(config.getChannelType());
-                            if (typeDescriptor.isPresent() && typeDescriptor.get().connectionBacked()) {
-                                // Holds no secret: its credential is resolved per send from
-                                // the connection it names. Nothing is resolved from the vault,
-                                // and keys outside the type's allow-list are dropped — save
-                                // validation refuses them, but a ZIP import or a direct store
-                                // write never ran it.
-                                keepAllowedKeysOnly(integrationKey, typeDescriptor.get(), copy);
-                            } else {
+                            if (!connectionBacked) {
                                 resolvePlatformSecrets(integrationKey, copy);
                                 if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
                                     vetWebhookSigningSecret(integrationKey, config, copy);
@@ -1271,8 +1324,13 @@ public class ChannelTargetRouter {
         lowestKey.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue())
                 .forEach(entry -> {
+                    // The integration's own type, not a parse of the key: a stored type may
+                    // itself contain ':' (a fork's adapter), and splitting at the first one
+                    // would file it under the wrong type and hide it from every scan.
                     String key = entry.getValue();
-                    String type = key.substring(0, key.indexOf(':'));
+                    String type = entry.getKey().getChannelType() != null
+                            ? entry.getKey().getChannelType().toLowerCase(Locale.ROOT)
+                            : key.substring(0, key.indexOf(':'));
                     byType.computeIfAbsent(type, k -> new ArrayList<>()).add(entry.getKey());
                 });
         var frozen = new HashMap<String, List<ChannelIntegrationConfiguration>>();
@@ -1359,6 +1417,11 @@ public class ChannelTargetRouter {
                 kept.remove(key);
                 warnUnusable(integrationKey, key, "is not a " + descriptor.id() + " setting (" + descriptor.id()
                         + " credentials come from the named connection)", false);
+                // Counted once per integration version and key — not on every refresh,
+                // which would make the counter measure refresh frequency.
+                if (droppedKeyCounted.add(integrationKey + "/" + key)) {
+                    channelTypes.recordDroppedKey(descriptor.id());
+                }
             }
         }
         config.setPlatformConfig(kept);
@@ -1406,12 +1469,17 @@ public class ChannelTargetRouter {
      *            a refusal of a destination, tagged {@code [SECURITY]} for the
      *            operators who alert on it; an unresolved secret is a missing
      *            value, not that
+     * @return whether this was the first warning for that integration version and
+     *         key
      */
-    private void warnUnusable(String integrationKey, String key, String problem, boolean security) {
+    private boolean warnUnusable(String integrationKey, String key, String problem, boolean security) {
         if (unusableCredentialWarned.add(integrationKey + "/" + key)) {
+            // The key is the stored document's, not a constant: sanitized like the id.
             LOGGER.warnf("%sChannel integration %s: its %s %s - it is not used until that is fixed", security ? "[SECURITY] " : "",
-                    sanitize(integrationKey), key, problem);
+                    sanitize(integrationKey), sanitize(key), problem);
+            return true;
         }
+        return false;
     }
 
     /**

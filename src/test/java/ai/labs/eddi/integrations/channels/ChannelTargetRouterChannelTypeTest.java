@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,12 +26,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -39,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -98,6 +100,9 @@ class ChannelTargetRouterChannelTypeTest {
     }
 
     private static Map<String, String> pc(String... kv) {
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("pc(...) takes key/value pairs, got " + kv.length + " arguments");
+        }
         var map = new HashMap<String, String>();
         for (int i = 0; i < kv.length; i += 2) {
             map.put(kv[i], kv[i + 1]);
@@ -144,7 +149,7 @@ class ChannelTargetRouterChannelTypeTest {
     }
 
     @Test
-    @DisplayName("an integration without a channel is indexed under its application and routed by DM fallback and by name")
+    @DisplayName("an integration without a channel is indexed under its application and routed by its verified origin")
     void channelLessIntegrationRouted() throws Exception {
         var stored = store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1"));
 
@@ -155,7 +160,8 @@ class ChannelTargetRouterChannelTypeTest {
         assertTrue(router.getIntegrationByName(FakeChatChannelType.ID, "fake").isPresent());
         assertTrue(router.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").isPresent());
         assertTrue(router.hasAnyChannels(FakeChatChannelType.ID));
-        assertNotNull(router.resolveDefaultForDm(FakeChatChannelType.ID, "hello"));
+        assertNull(router.resolveDefaultForDm(FakeChatChannelType.ID, "hello"),
+                "'the first integration of the type' is no owner for a connection-backed type");
     }
 
     @Test
@@ -195,7 +201,67 @@ class ChannelTargetRouterChannelTypeTest {
         store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1"));
         assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, null, null, null), "hello"));
         assertNull(router.resolveDefaultForOrigin(InboundOrigin.signedBy(FakeChatChannelType.ID, null, "a-secret"), "hello"));
+        assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "fake", null, null), "hello"),
+                "a bare name may come from a URL or a request body: it proves nothing");
         assertNull(router.resolveDefaultForOrigin(null, "hello"));
+    }
+
+    @Test
+    @DisplayName("a named origin with a signing secret resolves only when the named integration holds that secret")
+    void namedOriginMustHoldTheSecret() throws Exception {
+        store("slack", "hub", pc("channelId", "C2", "botToken", "${vault:bot}", "signingSecret", "${vault:sig}"));
+        assertNotNull(router.resolveDefaultForOrigin(InboundOrigin.signedBy("slack", "hub", "resolved-sig"), "hello"));
+        assertNull(router.resolveDefaultForOrigin(InboundOrigin.signedBy("slack", "hub", "resolved-other"), "hello"),
+                "another app's secret must not reach this integration by naming it");
+    }
+
+    @Test
+    @DisplayName("a channel-bound integration of the same application is never the DM owner, by name or by thread")
+    void channelBoundOfSameApplicationIsNotTheOwner() throws Exception {
+        var owner = store(FakeChatChannelType.ID, "owner", pc("connection", "bot", "appId", "app-1"));
+        // A numeric channel id sorts before '@app:', so a lowest-key-first scan meets
+        // it first.
+        var tenantB = store(FakeChatChannelType.ID, "tenant-b", pc("connection", "bot", "appId", "app-1", "channelId", "111"));
+        tenantB.setTargets(owner.getTargets());
+        var locked = targetOf(owner);
+
+        assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "tenant-b", "app-1", null), "hi"),
+                "a name from a request body must not pick another tenant's channel-bound integration");
+        assertNotNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "owner", "app-1", null), "hi"));
+
+        var resolved = router.threadCredentialsForDm(locked, InboundOrigin.application(FakeChatChannelType.ID, "app-1"));
+        assertNotNull(resolved);
+        assertEquals("owner", resolved.integration().getName(), "a DM thread is the channel-less owner's, not tenant-b's");
+    }
+
+    @Test
+    @DisplayName("a registry that fails to construct stops the refresh before any document is read")
+    void brokenRegistrySurfaces() throws Exception {
+        ChannelTypeRegistry broken = mock(ChannelTypeRegistry.class);
+        when(broken.ids()).thenThrow(new IllegalStateException("Channel type 'x' is registered twice"));
+        var brokenRouter = routerWith(broken);
+        assertTrue(brokenRouter.getIntegrationByName(FakeChatChannelType.ID, "fake").isEmpty());
+        verify(descriptorStore, never()).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("a dropped key is counted once per integration version, not on every refresh")
+    void droppedKeyCountedOnce() throws Exception {
+        var meters = new SimpleMeterRegistry();
+        var counted = routerWith(new ChannelTypeRegistry(List.of(new FakeChatChannelType()), meters));
+        store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1", "channelId", "C1", "botToken", "x"));
+        assertTrue(counted.getIntegration(FakeChatChannelType.ID, "C1").isPresent());
+        var lastRefresh = ChannelTargetRouter.class.getDeclaredField("lastRefreshTime");
+        lastRefresh.setAccessible(true);
+        lastRefresh.set(counted, 0L);
+        // What a vault change does: credential warnings are re-armed for rotated
+        // secrets, which must not count the same dropped key again.
+        var warned = ChannelTargetRouter.class.getDeclaredField("unusableCredentialWarned");
+        warned.setAccessible(true);
+        ((Set<?>) warned.get(counted)).clear();
+        assertTrue(counted.getIntegration(FakeChatChannelType.ID, "C1").isPresent());
+        verify(descriptorStore, times(2)).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
+        assertEquals(1, meters.find("eddi_channel_config_keys_dropped_total").tags("type", FakeChatChannelType.ID).counter().count());
     }
 
     @Test
@@ -212,9 +278,10 @@ class ChannelTargetRouterChannelTypeTest {
 
         assertTrue(multiRouter.getIntegrationByName(FakeChatChannelType.ID, "fake").isPresent(),
                 "the name scan must not see one integration under two keys as two integrations");
-        assertSame(multiRouter.getIntegration(FakeChatChannelType.ID, "C1").orElseThrow(),
-                multiRouter.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").orElseThrow());
-        assertNotNull(multiRouter.resolveDefaultForOrigin(InboundOrigin.application(FakeChatChannelType.ID, "app-1"), "hi"));
+        assertTrue(multiRouter.getIntegration(FakeChatChannelType.ID, "C1").isPresent(), "its channel still routes");
+        assertTrue(multiRouter.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").isEmpty(),
+                "a channel-bound integration under its application key must not own the application's DMs");
+        assertNull(multiRouter.resolveDefaultForOrigin(InboundOrigin.application(FakeChatChannelType.ID, "app-1"), "hi"));
     }
 
     @Test
@@ -251,6 +318,9 @@ class ChannelTargetRouterChannelTypeTest {
     @Test
     @DisplayName("a webhook is still indexed by its resource id and an email integration not at all")
     void webhookAndEmailIndexing() throws Exception {
+        store("webhook", "hook", pc());
+        String webhookId = String.format("5262b802dc6c4008b5%02x", nextId - 1);
+        assertEquals("hook", router.getWebhookIntegration(webhookId).orElseThrow().getName());
         store("email", "mailbox", pc("connection", "exo"));
         assertTrue(router.getIntegrationByName("email", "mailbox").isEmpty(), "the poller finds email integrations itself");
         assertFalse(router.hasAnyChannels("email"));
@@ -263,5 +333,39 @@ class ChannelTargetRouterChannelTypeTest {
         assertFalse(origin.toString().contains("super-secret-value"));
         assertTrue(origin.isVerified());
         assertFalse(new InboundOrigin("slack", null, null, null).isVerified());
+        assertFalse(new InboundOrigin("slack", "hub", null, null).isVerified(), "a name alone is not a verified identity");
+    }
+
+    @Test
+    @DisplayName("a name in the origin counts only when that integration is the verified application's")
+    void namedOriginMustBelongToApplication() throws Exception {
+        store(FakeChatChannelType.ID, "app-one", pc("connection", "bot", "appId", "app-1"));
+        store(FakeChatChannelType.ID, "app-two", pc("connection", "bot", "appId", "app-2"));
+        assertNotNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "app-one", "app-1", null), "hi"));
+        assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "app-two", "app-1", null), "hi"),
+                "a name taken from a request body must not reach another application's integration");
+    }
+
+    @Test
+    @DisplayName("an integration of a stored type containing ':' is still found by the scans")
+    void typeWithColon() throws Exception {
+        store("acme:chat", "forked", pc("channelId", "C1"));
+        assertTrue(router.getIntegrationByName("acme:chat", "forked").isPresent());
+        assertTrue(router.hasAnyChannels("acme:chat"));
+    }
+
+    @Test
+    @DisplayName("an undeclared key cannot route a connection-backed integration that bypassed save validation")
+    void undeclaredKeyDoesNotRoute() throws Exception {
+        ChannelTypeDescriptor routedByUndeclared = new FakeChatChannelType() {
+            @Override
+            public List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
+                String guild = platformConfig.get("guildId");
+                return guild == null ? List.of() : List.of(guild);
+            }
+        };
+        var strict = routerWith(new ChannelTypeRegistry(List.of(routedByUndeclared)));
+        store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1", "guildId", "G1"));
+        assertTrue(strict.getIntegration(FakeChatChannelType.ID, "G1").isEmpty(), "guildId is not an allowed key, so it is dropped first");
     }
 }

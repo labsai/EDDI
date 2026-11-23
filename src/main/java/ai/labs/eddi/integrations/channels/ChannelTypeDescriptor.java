@@ -54,9 +54,11 @@ public interface ChannelTypeDescriptor {
 
     /**
      * Prefix of an application-level routing key. Channel ids of the supported
-     * platforms never start with {@code @}; a connection-backed type refuses one
-     * that does at save time, and the router never answers a channel lookup with an
-     * application key, so the two cannot collide.
+     * platforms never start with {@code @}. A connection-backed type refuses, at
+     * save time, a {@code channelId} that does and any routing key in this
+     * namespace other than the integration's own application key; the router never
+     * answers a channel lookup with an application key; and type ids may not
+     * contain {@code :}. So the two cannot collide.
      */
     String APPLICATION_KEY_PREFIX = "@app:";
 
@@ -125,11 +127,30 @@ public interface ChannelTypeDescriptor {
     }
 
     /**
-     * The OAuth identity the named connection must hold for this configuration —
-     * for a type that trusts an {@link #applicationId} verified on inbound
-     * requests, the proof that whoever saved the integration controls that
-     * application. Without it the first integration to name an application would
-     * own its channel-less messages. Empty for a type that binds no identity.
+     * Whether the {@link #applicationId} must equal the OAuth client id of the
+     * connection the integration names. This ties the application to a connection
+     * an administrator configured with that client id and the author may use; it
+     * does not prove the client secret, which connection saves never test. A
+     * channel-less integration, which claims the application's direct messages,
+     * additionally needs edit access to that connection. A Teams bot's app id IS
+     * its Entra client id; a type that proves its application another way (Discord
+     * verifies requests with the application's public key) leaves this
+     * {@code false} and must check ownership in its own {@link #validate}.
+     */
+    default boolean applicationIdIsConnectionClientId() {
+        return false;
+    }
+
+    /**
+     * What the named connection must hold beyond the client id of
+     * {@link #applicationIdIsConnectionClientId}: the exact token endpoint and a
+     * scope, and, at save time, proof of possession — one token obtained from that
+     * endpoint (see {@link ChannelConnectionCredentials#validateForSave}). Pinning
+     * the endpoint is what makes the proof worth anything: a connection pointed at
+     * the author's own server could "mint" for any client id. The client id, token
+     * endpoint and scope are re-checked without a network call on every inbound
+     * request ({@link ChannelConnectionCredentials#holdsRequiredIdentity}). Empty
+     * for a type that binds no identity this way.
      */
     default Optional<ConnectionIdentityRequirement> requiredConnectionIdentity(Map<String, String> platformConfig) {
         return Optional.empty();
@@ -143,11 +164,14 @@ public interface ChannelTypeDescriptor {
      * {@link #applicationId} — so an integration without a channel (a Teams bot
      * serving personal chats) is still routed — otherwise nothing, in which case
      * the integration is not indexed (a Slack integration without a channel, as
-     * before).
+     * before). A key in the {@link #APPLICATION_KEY_PREFIX} namespace other than
+     * this integration's own application key is refused at save time.
      *
      * @param resourceId
-     *            the integration's resource id; {@code null} for a create that has
-     *            none yet
+     *            the integration's resource id when the router indexes it;
+     *            {@code null} for the save-time uniqueness check, where a type
+     *            routed by its own resource id (webhook) has nothing to collide on
+     *            and must return no keys
      */
     default List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
         List<String> keys = new ArrayList<>(1);
@@ -160,8 +184,17 @@ public interface ChannelTypeDescriptor {
         return keys;
     }
 
-    /** The routing key of an application identity. */
+    /**
+     * The routing key of an application identity.
+     *
+     * @throws IllegalArgumentException
+     *             for a null or blank id, which would otherwise become the key
+     *             {@code @app:null} or {@code @app:}
+     */
     static String applicationKey(String applicationId) {
+        if (applicationId == null || applicationId.isBlank()) {
+            throw new IllegalArgumentException("An application key needs an application id.");
+        }
         return APPLICATION_KEY_PREFIX + applicationId;
     }
 
