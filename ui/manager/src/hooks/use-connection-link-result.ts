@@ -72,8 +72,9 @@ export function useConnectionLinkResult(): LinkOutcome {
       setOutcome({ kind: "mailboxLinked", connection: mailboxLinked });
       // As for `connected`: the refetch is the check. A hand-made URL, or a grant
       // unlinked before this page rendered, is met with silence rather than a
-      // success claim; when the list cannot be read (it is eddi-admin only), the
-      // toast still fires, an unverifiable success being far more likely real.
+      // success claim; when the list cannot be read (it is eddi-admin only) after a
+      // link this tab started, the toast still fires, an unverifiable success
+      // being far more likely real.
       // fetchQuery, not refetchQueries: the latter does nothing when no grants
       // query exists yet, and the toast would then fire unchecked.
       const announce = () =>
@@ -83,19 +84,23 @@ export function useConnectionLinkResult(): LinkOutcome {
             defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
           }),
         );
+      // The mailbox this tab started linking. The callback always returns to the
+      // tab that left, so nothing remembered means a hand-made URL, another tab or
+      // blocked storage: no claim is made then (another mailbox's grant would not
+      // confirm this link), and the panel's refreshed list shows the real state.
       const pending = takePendingMailboxLink(mailboxLinked);
-      void queryClient
-        .fetchQuery({ queryKey: mailboxGrantsKey(mailboxLinked), queryFn: () => listMailboxGrants(mailboxLinked), staleTime: 0 })
-        .then(
-          (grants) => {
-            // The mailbox this tab started linking, when it is known: another
-            // mailbox's usable grant does not confirm this link.
-            const linked = (g: { address: string; usable: boolean }) =>
-              g.usable && (pending === null || normalizeMailboxAddress(g.address) === pending);
-            if (grants.some(linked)) announce();
-          },
-          () => announce(),
-        );
+      if (pending === null) {
+        void queryClient.invalidateQueries({ queryKey: mailboxGrantsKey(mailboxLinked) });
+      } else {
+        void queryClient
+          .fetchQuery({ queryKey: mailboxGrantsKey(mailboxLinked), queryFn: () => listMailboxGrants(mailboxLinked), staleTime: 0 })
+          .then(
+            (grants) => {
+              if (grants.some((g) => g.usable && normalizeMailboxAddress(g.address) === pending)) announce();
+            },
+            () => announce(),
+          );
+      }
     } else if (connected !== null) {
       setOutcome({ kind: "connected", connection: connected });
 

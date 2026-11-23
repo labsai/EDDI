@@ -27,7 +27,7 @@ export function rememberPendingMailboxLink(connection: string, address: string):
   try {
     sessionStorage.setItem(keyOf(connection), normalizeMailboxAddress(address));
   } catch {
-    // Storage blocked: the handler falls back to "any usable grant".
+    // Storage blocked: the handler then makes no success claim; the list shows the state.
   }
 }
 

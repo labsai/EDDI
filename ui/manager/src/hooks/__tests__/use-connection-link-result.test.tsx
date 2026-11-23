@@ -9,7 +9,8 @@ import { rememberPendingMailboxLink } from "@/lib/pending-mailbox-link";
 
 /**
  * `?mailboxLinked=<connection>` is a plain URL parameter anyone can hand out, so
- * the success toast is claimed only when the refreshed grant list backs it.
+ * the success toast is claimed only for a link this tab started (its address is
+ * remembered) and only when the refreshed list holds that mailbox's usable grant.
  */
 
 const success = vi.spyOn(toast, "success");
@@ -37,9 +38,18 @@ beforeEach(() => {
 describe("useConnectionLinkResult — mailbox links", () => {
   it("announces a link the refreshed list confirms", async () => {
     grants([{ address: "eddi@eddi.solutions", status: "ACTIVE", usable: true }]);
+    rememberPendingMailboxLink("gws", "eddi@eddi.solutions");
     renderWithProviders(<Probe />, { initialRoute: "/manage/connections/x?mailboxLinked=gws" });
 
     await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+  });
+
+  it("claims nothing when this tab did not start the link, whatever the list holds", async () => {
+    grants([{ address: "eddi@eddi.solutions", status: "ACTIVE", usable: true }]);
+    renderWithProviders(<Probe />, { initialRoute: "/manage/connections/x?mailboxLinked=gws" });
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(success).not.toHaveBeenCalled();
   });
 
   it("stays silent when the refreshed list shows no usable grant", async () => {
@@ -50,6 +60,7 @@ describe("useConnectionLinkResult — mailbox links", () => {
         return HttpResponse.json([{ address: "eddi@eddi.solutions", status: "REFRESH_FAILED", usable: false }]);
       }),
     );
+    rememberPendingMailboxLink("gws", "eddi@eddi.solutions");
     renderWithProviders(<Probe />, { initialRoute: "/manage/connections/x?mailboxLinked=gws" });
 
     await waitFor(() => expect(listed).toBe(true));
