@@ -132,9 +132,21 @@ class PdfSliceBuilderTest {
             long size = Files.size(builder.slice(pdf, 2, 3, 10L * 1024 * 1024, workDir));
             Path dir = Files.createDirectory(workDir.resolve("again"));
 
-            Path slice = builder.slice(pdf, 2, 3, size + 512, dir);
+            Path slice = builder.slice(pdf, 2, 3, size, dir);
 
-            assertTrue(Files.size(slice) <= size + 512);
+            assertEquals(size, Files.size(slice));
+        }
+
+        @Test
+        void aSliceOneByteOverItsLimitIsRefused() throws IOException {
+            byte[] pdf = PdfFixtures.plain(4);
+            long size = Files.size(builder.slice(pdf, 2, 3, 10L * 1024 * 1024, workDir));
+            Path dir = Files.createDirectory(workDir.resolve("again"));
+
+            assertThrows(SliceTooLargeException.class, () -> builder.slice(pdf, 2, 3, size - 1, dir));
+            try (Stream<Path> files = Files.list(dir)) {
+                assertEquals(0, files.count(), "a slice work file was left behind");
+            }
         }
     }
 
@@ -145,8 +157,23 @@ class PdfSliceBuilderTest {
         void aFlateBombIsRefusedByThePreScanAndLeavesNoFile() {
             var tight = new PdfSliceBuilder(new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024));
 
-            assertThrows(UnreadableDocumentException.class,
+            var e = assertThrows(UnreadableDocumentException.class,
                     () -> tight.slice(PdfFixtures.flateBomb(8 * 1024 * 1024), 1, 1, 10L * 1024 * 1024, workDir));
+
+            // The pre-scan's own refusal, before any page is decoded.
+            assertTrue(e.getMessage().contains("compressed stream"), e.getMessage());
+            assertNoWorkFiles();
+        }
+
+        @Test
+        @Timeout(30)
+        void withoutThePreScanTheDecodeBudgetStillRefusesAFlateBomb() {
+            var tight = new PdfSliceBuilder(new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024));
+
+            var e = assertThrows(UnreadableDocumentException.class,
+                    () -> tight.slice(PdfFixtures.flateBomb(8 * 1024 * 1024), 1, 1, 10L * 1024 * 1024, workDir, false));
+
+            assertTrue(e.getMessage().contains("expands to more than"), e.getMessage());
             assertNoWorkFiles();
         }
 

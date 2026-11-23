@@ -37,10 +37,12 @@ import java.util.List;
  * ({@link SliceTooLargeException}), and the caller falls back to the pages'
  * text.
  * <p>
- * The source is read under the same bounds as every other PDF path: the
- * {@link PdfStreamBudget} pre-scan of the raw bytes, then a
- * {@link PdfDecodeBudget} armed on the <em>calling</em> thread for the whole
- * load, copy and save. Nothing here hands work to another thread.
+ * The source is read under the same decode bounds as every other PDF path: the
+ * {@link PdfStreamBudget} pre-scan of the raw bytes (the only step the time
+ * limit applies to), then a {@link PdfDecodeBudget} armed on the
+ * <em>calling</em> thread for the whole load, copy and save, which bounds what
+ * is decoded but not how long it takes. Nothing here hands work to another
+ * thread.
  * <p>
  * The slice is written to a temporary file in {@code workDir} (owner read/write
  * only where the file system supports POSIX permissions). The caller owns the

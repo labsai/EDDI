@@ -301,6 +301,60 @@ class AttachmentForwarderPartsTest {
             assertTrue(((TextContent) contents.get(1)).text().contains("not forwarded"));
             verify(store, never()).load(any(), any());
         }
+
+        @Test
+        void aCachedSliceOverTheLimitIsNeitherSentNorBuiltAgain() throws Exception {
+            when(store.findDerived(REF, Derivation.Kind.PDF_SLICE, "p3-5", CONV))
+                    .thenReturn(Optional.of(new IAttachmentStore.Attachment(SLICE_REF, "report (p3-5).pdf", "application/pdf",
+                            11 * MB, CONV)));
+            attach(part("3-5"));
+            List<ChatMessage> messages = question();
+
+            forwarder().forward(messages, memory, DOC_PROVIDER, DOC_MODEL);
+
+            assertOnlyRangeText(messages);
+            verify(store, never()).load(SLICE_REF, CONV);
+            verify(sliceBuilder, never()).slice(any(), anyInt(), anyInt(), anyLong(), any());
+        }
+
+        @Test
+        void aFallbackThatEndsInANoteIsNotReportedAsSentText() throws Exception {
+            // The slice fails (no page 4 or 5), and so does the text: neither was sent.
+            when(store.load(REF, CONV)).thenReturn(PdfFixtures.plain(3));
+            when(store.pageCount(REF, CONV)).thenReturn(3);
+            attach(part("2-5"));
+            List<ChatMessage> messages = question();
+
+            forwarder().forward(messages, memory, DOC_PROVIDER, DOC_MODEL);
+
+            assertTrue(((TextContent) contents(messages).get(1)).text().contains("not forwarded"));
+            assertTrue(errors().stream().noneMatch(e -> e.contains("was sent as text")), errors().toString());
+        }
+
+        @Test
+        void aFallbackThatSendsTextIsReported() {
+            doThrow(new UnreadableDocumentException("broken")).when(sliceBuilder).slice(any(), anyInt(), anyInt(), anyLong(), any());
+            attach(part("3-5"));
+
+            forwarder().forward(question(), memory, DOC_PROVIDER, DOC_MODEL);
+
+            assertTrue(errors().stream().anyMatch(e -> e.contains("was sent as text")), errors().toString());
+        }
+
+        @Test
+        void aPartOfAnythingButAPdfSendsNothingOfTheFile() throws Exception {
+            Attachment att = new Attachment("text/plain", "notes.txt", 10, REF);
+            att.getMetadata().putAll(new AttachmentSelector(REF, "1-1", null, null).toMetadata());
+            attach(att);
+            List<ChatMessage> messages = question();
+
+            forwarder().forward(messages, memory, DOC_PROVIDER, DOC_MODEL);
+
+            List<Content> contents = contents(messages);
+            assertEquals(2, contents.size(), contents.toString());
+            assertTrue(((TextContent) contents.get(1)).text().contains("not forwarded"));
+            verify(store, never()).load(any(), any());
+        }
     }
 
     @Nested

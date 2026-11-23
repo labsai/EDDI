@@ -440,6 +440,11 @@ public class AttachmentForwarder {
         // A part of a stored PDF is sent as that part, never as the whole file. Its
         // bytes are resolved and capped differently: the slice counts, not the file.
         AttachmentSelector selector = AttachmentSelector.fromAttachment(att);
+        if (!isPdf && DocumentForwardPlanner.isPart(selector)) {
+            // Only a PDF has pages to send. Intake refuses a part of anything else; a
+            // part that arrives another way still never becomes the whole file.
+            return List.of(partNote(errors, ConversationListing.partName(name, selector), "only a PDF can be sent in part"));
+        }
         if (isPdf && DocumentForwardPlanner.isPart(selector)) {
             var capabilities = new DocumentForwardPlanner.Capabilities(
                     capabilityService.supportsDocuments(provider, model, documentsOverride));
@@ -546,12 +551,17 @@ public class AttachmentForwarder {
                         LogSanitizer.sanitize(conversationId), e.getMessage());
                 reason = "a PDF of those pages could not be built";
             }
-            errors.add("Attachment '" + part + "' was sent as text: " + reason + ".");
         }
-        return List.of(rangeText(root, ref, range, part, conversationId, extracts, errors, reason));
+        // A fallback from a PDF is recorded only when the text was actually sent;
+        // a part that ends in a note records the note instead.
+        boolean fellBack = capabilities.documents();
+        return List.of(rangeText(root, ref, range, part, conversationId, extracts, errors, reason, fellBack));
     }
 
     private static String sliceTooLarge(long limit) {
+        if (limit <= 0) {
+            return "the attachment budget of this request is used up";
+        }
         return "the PDF of those pages is larger than the " + limit + " bytes one file may take in this request";
     }
 
@@ -572,7 +582,12 @@ public class AttachmentForwarder {
         } catch (IAttachmentStore.AttachmentStoreException | RuntimeException e) {
             LOGGER.debugf("No cached PDF slice could be looked up: %s", e.getClass().getSimpleName());
         }
-        if (cached != null && cached.isPresent() && cached.get().sizeBytes() <= limit) {
+        if (cached != null && cached.isPresent() && cached.get().sizeBytes() > limit) {
+            // The slice of these pages is deterministic: building it again cannot make
+            // it fit.
+            throw new SliceTooLargeException(limit);
+        }
+        if (cached != null && cached.isPresent()) {
             try {
                 byte[] bytes = attachmentStore.load(cached.get().storageRef(), conversationId);
                 if (bytes != null && bytes.length > 0 && bytes.length <= limit) {
@@ -618,7 +633,7 @@ public class AttachmentForwarder {
      * whole rest of the document.
      */
     private Content rangeText(byte[] root, String ref, SelectorResolver.PageRange range, String part, String conversationId,
-                              List<String> extracts, List<String> errors, String reason) {
+                              List<String> extracts, List<String> errors, String reason, boolean fellBack) {
         Integer pageCount = pageCount(root, ref, conversationId);
         if (pageCount == null) {
             return partNote(errors, part, "the PDF could not be read");
@@ -632,6 +647,9 @@ public class AttachmentForwarder {
                 return partNote(errors, part, "those pages have no extractable text");
             }
             extracts.add(part + ": " + text);
+            if (fellBack) {
+                errors.add("Attachment '" + part + "' was sent as text: " + reason + ".");
+            }
             return TextContent.from("[Attachment " + part + " (application/pdf) — text of pages " + pagesText(range)
                     + " only" + (reason != null ? "; " + reason : "") + "]\n" + text);
         } catch (AttachmentExtractionException e) {
