@@ -659,6 +659,16 @@ public class SecretResolver {
             if (SecretReference.isReservedKeyName(ref.keyName())) {
                 continue;
             }
+            // Not while an invalidation of this secret is part-way through: the value may
+            // already be evicted, and a caller fetching with it, while the old grant is
+            // still cached. Waited out, and refused under enforce if it does not settle
+            // (#1179): transient, so not counted as a grant refusal. Under warn the check
+            // goes on and logs, as any refusal there does.
+            if (settledGenerationOf(cacheKey(ref)) < 0 && grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
+                throw new SecretChangingException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
+                        + ", which is being changed; its grant cannot be checked for " + asking.describe()
+                        + " until the change has settled, so it is refused. Retry shortly.");
+            }
             if (!grantAdmits(ref, asking, usedFor)) {
                 // Not a grant refusal (not counted as one, refused under warn too): there
                 // is nothing to admit, and a cached client may still carry the old value.
@@ -792,6 +802,17 @@ public class SecretResolver {
      */
     public static class SecretMissingException extends SecretNotGrantedException {
         public SecretMissingException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A secret whose invalidation did not settle while its grant was to be checked:
+     * refused, but transient (a retry succeeds), so a REST caller gets 503 rather
+     * than 403 and the grant refusal counter is not touched (#1179).
+     */
+    public static class SecretChangingException extends SecretNotGrantedException {
+        public SecretChangingException(String message) {
             super(message);
         }
     }

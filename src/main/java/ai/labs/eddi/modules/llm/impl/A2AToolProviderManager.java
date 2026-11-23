@@ -359,13 +359,18 @@ public class A2AToolProviderManager {
                 // Settled, or -1 while an eviction runs: a grant read then may be the old
                 // binding's while the card comes from the new one.
                 long generation = cardGeneration();
+                // The binding the grant is checked for, to compare with the one in force
+                // once the card is in hand: a connection whose registry entry expired in
+                // between reloads another binding without any eviction (#1179).
+                String bindingChecked = cardKeyMaterial(config.getApiKey());
                 requireSecretGranted(config, access);
                 int specsBefore = toolSpecs.size();
                 Set<String> executorsBefore = new HashSet<>(executors.keySet());
                 Set<String> resolversBefore = new HashSet<>(requestResolvers.keySet());
                 try {
                     discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
-                    if (generation < 0 || cardGeneration() != generation) {
+                    if (generation < 0 || cardGeneration() != generation
+                            || !Objects.equals(bindingChecked, cardKeyMaterial(config.getApiKey()))) {
                         // A credential changed while the card was looked up or fetched, so it
                         // may be the new credential's: the grant is read again, for what is
                         // current now, before its tools are handed out (#1179). One
@@ -773,7 +778,7 @@ public class A2AToolProviderManager {
     private Map<String, Object> fetchAgentCard(String agentUrl, A2AAgentConfig config) throws Exception {
 
         // Check cache (5 min TTL)
-        String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
+        String cacheKey = cardCacheKey(agentUrl, cardKeyMaterial(config.getApiKey()));
         long generation = cardGeneration();
         CachedAgentInfo cached = cachedCard(cacheKey);
         if (cached != null) {
@@ -863,6 +868,20 @@ public class A2AToolProviderManager {
 
     private void finishEviction() {
         cardInvalidationsFinished.incrementAndGet();
+    }
+
+    /**
+     * What a card's cache key binds it to: the apiKey as configured, plus, for a
+     * {@code ${connection:…}} one, the credential references that connection names
+     * now. A connection rebound to another secret is then another key, also on a
+     * node that missed the change's event and reloaded the connection only when its
+     * registry entry expired (#1179).
+     */
+    String cardKeyMaterial(String apiKey) {
+        if (isNullOrEmpty(apiKey) || connectionResolver == null || !ConnectionResolver.containsReference(apiKey)) {
+            return apiKey;
+        }
+        return apiKey + "|" + connectionResolver.bindingFingerprint(apiKey);
     }
 
     /**

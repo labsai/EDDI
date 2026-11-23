@@ -119,6 +119,36 @@ public class ConnectionResolver {
         }
     }
 
+    /**
+     * The credential references the connection {@code reference} names now, as one
+     * string, or {@code ""} when it does not exist. Never a secret: references
+     * only. For a cache keyed on a {@code ${connection:…}} reference, so that a
+     * rebinding is a new key even on a node that never received the change's event
+     * and only reloaded the connection when its registry entry expired (#1179).
+     */
+    public String bindingFingerprint(String reference) {
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.find(ConnectionReference.parse(reference)).orElse(null);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        if (connection == null) {
+            return "";
+        }
+        StringBuilder fingerprint = new StringBuilder().append(connection.getAuthType()).append('|').append(connection.getBinding());
+        StaticAuth staticAuth = connection.getStaticAuth();
+        if (staticAuth != null) {
+            fingerprint.append('|').append(staticAuth.getValueTemplate()).append('|').append(staticAuth.getUsername()).append('|')
+                    .append(staticAuth.getPasswordRef());
+        }
+        if (connection.getOauth() != null) {
+            fingerprint.append('|').append(connection.getOauth().clientCredentialReference(connection.getAuthType()));
+        }
+        return fingerprint.toString();
+    }
+
     /** Whether a value carries a connection reference. */
     public static boolean containsReference(String value) {
         return ConnectionReference.contains(value);

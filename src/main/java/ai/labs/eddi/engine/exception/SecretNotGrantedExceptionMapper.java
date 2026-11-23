@@ -29,8 +29,17 @@ public class SecretNotGrantedExceptionMapper implements ExceptionMapper<SecretRe
         return Response.status(statusOf(exception)).type(MediaType.TEXT_PLAIN).entity(exception.getMessage()).build();
     }
 
-    /** 400 for a secret that does not exist, 403 for one the grant withholds. */
+    /**
+     * 400 for a secret that does not exist, 503 for one being changed right now,
+     * 403 for one the grant withholds.
+     */
     public static Response.Status statusOf(SecretResolver.SecretNotGrantedException exception) {
-        return exception instanceof SecretResolver.SecretMissingException ? Response.Status.BAD_REQUEST : Response.Status.FORBIDDEN;
+        if (exception instanceof SecretResolver.SecretMissingException) {
+            return Response.Status.BAD_REQUEST;
+        }
+        if (exception instanceof SecretResolver.SecretChangingException) {
+            return Response.Status.SERVICE_UNAVAILABLE;
+        }
+        return Response.Status.FORBIDDEN;
     }
 }

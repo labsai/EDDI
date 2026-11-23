@@ -257,6 +257,34 @@ class SecretResolverGrantTest {
         }
 
         @Test
+        @DisplayName("a pre-cache grant check between the value's eviction and the grant's refuses rather than read the old grant")
+        void requireGrantedDuringAnInvalidationRefuses() throws Exception {
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)), "value and grant (A) now cached");
+            grant(List.of(AGENT_B)); // the replacement excludes A
+            var outcome = new AtomicReference<Object>();
+            resolver.invalidationStartedHook = () -> {
+                // The value is evicted, the old grant (A) still cached: a caller about to
+                // fetch with the new value checks the grant now. This invalidation cannot
+                // finish while the hook runs, so the check must refuse, not read A's grant.
+                try {
+                    resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "A2A agent at test");
+                    outcome.set("admitted");
+                } catch (SecretResolver.SecretNotGrantedException e) {
+                    outcome.set(e);
+                }
+            };
+            resolver.invalidateLocal(KEY);
+            resolver.invalidationStartedHook = null;
+
+            assertTrue(outcome.get() instanceof SecretResolver.SecretChangingException, "got: " + outcome.get());
+            var settled = assertThrows(SecretResolver.SecretNotGrantedException.class,
+                    () -> resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "A2A agent at test"),
+                    "and once settled, the new grant refuses A");
+            assertFalse(settled instanceof SecretResolver.SecretChangingException);
+            assertFalse(settled instanceof SecretResolver.SecretMissingException);
+        }
+
+        @Test
         @DisplayName("a vault that changes during every attempt leaves the reference unresolved")
         void vaultChangingOnEveryAttemptIsRefused() throws Exception {
             when(provider.resolve(KEY)).thenAnswer(invocation -> {

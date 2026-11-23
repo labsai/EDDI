@@ -8,6 +8,8 @@ import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
@@ -16,6 +18,7 @@ import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.sun.net.httpserver.HttpServer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -432,5 +436,38 @@ class A2ACredentialTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    @DisplayName("a rebound connection is another card key, even on a node that only reloaded it when its entry expired (#1179)")
+    void reboundConnectionIsAnotherCardKey() throws Exception {
+        IConnectionStore store = mock(IConnectionStore.class);
+        var registry = new ConnectionRegistry(store);
+        var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                new ConnectionResolver(registry, null, null, new SimpleMeterRegistry(), null, false));
+        when(store.readByName("default", "peer")).thenReturn(staticConnection("${vault:key-a}"));
+        String boundToA = A2AToolProviderManager.cardCacheKey(AGENT_URL, manager.cardKeyMaterial("${connection:peer}"));
+        manager.publishCard(boundToA, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "fetched with secret A"),
+                System.currentTimeMillis()), manager.cardGeneration());
+
+        // Rebound to secret B. The registry entry is dropped without any event reaching
+        // this node's card cache: what an expiry does.
+        when(store.readByName("default", "peer")).thenReturn(staticConnection("${vault:key-b}"));
+        Field registryCache = ConnectionRegistry.class.getDeclaredField("cache");
+        registryCache.setAccessible(true);
+        ((Cache<?, ?>) registryCache.get(registry)).invalidateAll();
+        String boundToB = A2AToolProviderManager.cardCacheKey(AGENT_URL, manager.cardKeyMaterial("${connection:peer}"));
+
+        assertNotEquals(boundToA, boundToB);
+        assertNull(manager.cachedCard(boundToB), "A's card is not found under B's binding");
+    }
+
+    private static ConnectionConfiguration staticConnection(String valueTemplate) {
+        var auth = new StaticAuth();
+        auth.setValueTemplate(valueTemplate);
+        var connection = new ConnectionConfiguration();
+        connection.setName("peer");
+        connection.setStaticAuth(auth);
+        return connection;
     }
 }
