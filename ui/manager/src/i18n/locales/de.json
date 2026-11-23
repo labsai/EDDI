@@ -5585,13 +5585,21 @@
       "targetAddressInvalid": "Jede Zieladresse muss eine gültige E-Mail-Adresse sein.",
       "targetAddressNotReceived": "Eine Zieladresse muss einer der Aliase oder eine Plus-Adresse der Postfachadresse sein, damit das Postfach sie empfängt.",
       "targetAddressDuplicate": "Jede Zieladresse kann nur ein Ziel adressieren.",
-      "targetAllowedSendersInvalid": "Jeder erlaubte Absender eines Ziels muss user@domain, *@domain oder *@*.domain sein."
+      "targetAllowedSendersInvalid": "Jeder erlaubte Absender eines Ziels muss user@domain, *@domain oder *@*.domain sein.",
+      "consultableUnknown": "Jedes Ziel, das ein Ziel konsultieren darf, muss der Name eines anderen Ziels dieser Integration sein.",
+      "consultableSelf": "Ein Ziel kann seinen eigenen Agenten nicht konsultieren.",
+      "consultableNotAgent": "Nur Agenten-Ziele können konsultieren oder konsultiert werden; eine Gruppendiskussion konsultiert ihre eigenen Mitglieder.",
+      "consultableTooMany": "Ein Ziel kann höchstens {{max}} andere Ziele konsultieren.",
+      "consultableDuplicate": "Jedes Ziel, das ein Ziel konsultieren darf, kann nur einmal aufgeführt werden.",
+      "consultableObserver": "Ein Beobachter kann nicht konsultiert werden; nur ein adressierbares Ziel."
     },
     "warning": {
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
-      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
+      "consultNotEnabled": "Gespeichert, aber ein Ziel nennt Ziele, die es konsultieren darf, während sein Agent nicht delegieren kann: Schalten Sie die eingebauten Werkzeuge ein und nehmen Sie converse_with_agent in die Whitelist der eingebauten Werkzeuge des Agenten auf.",
+      "consultOwnerCannotUse": "Gespeichert, aber der Eigentümer der Integration darf den Agenten eines konsultierbaren Ziels nicht nutzen, daher wird diese Konsultation abgelehnt. Eine Admin-Rolle oder eine Team-Freigabe zählt für Mail nicht; geben Sie den Agenten direkt für den Eigentümer frei."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5637,7 +5645,9 @@
     "targetAddresses": "Adressen",
     "targetAddressesHint": "E-Mails an eine dieser Adressen in An oder Cc gehen zuerst hierher. Jede muss ein Alias der Integration oder eine Plus-Adresse ihres Postfachs sein (invoices+finance@…).",
     "targetAllowedSenders": "Erlaubte Absender für dieses Ziel",
-    "targetAllowedSendersHint": "Wenn gesetzt, erreichen nur authentifizierte Absender, die einem dieser Muster entsprechen, dieses Ziel — gleich, wie die E-Mail geleitet wurde. Alle anderen werden abgewiesen, nie stattdessen an das Standardziel geleitet."
+    "targetAllowedSendersHint": "Wenn gesetzt, erreichen nur authentifizierte Absender, die einem dieser Muster entsprechen, dieses Ziel — gleich, wie die E-Mail geleitet wurde. Alle anderen werden abgewiesen, nie stattdessen an das Standardziel geleitet.",
+    "targetConsultable": "Darf konsultieren",
+    "targetConsultableHint": "Namen anderer Agenten-Ziele. Nennt eine Mail, die dieser Agent beantwortet, zusätzlich eines davon (@legal), darf der Agent es fragen und beantwortet den Thread selbst. Der konsultierte Agent sieht nur die Frage, kein Gedächtnis des Absenders, und schreibt niemandem eine Mail. Der Agent braucht converse_with_agent in seinen eingebauten Werkzeugen."
   },
   "feedback": {
     "title": "Feedback",

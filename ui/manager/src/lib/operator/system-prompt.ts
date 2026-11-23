@@ -2238,7 +2238,33 @@ your tool schemas do not cover it, not as a routine first step:
   targets[].triggers; the default target. targets[].allowedSenders (sender
   patterns) limits a target to matching AUTHENTICATED senders on every path,
   the default included: others are refused blocked:target_not_allowed, never
-  rerouted. mentions, addresses and allowedSenders are refused on non-email
+  rerouted. targets[].consultable (names of other AGENT targets with a
+  different agent, max 10) lets this target's agent CONSULT them: when an
+  authenticated mail it runs with also names one by address, plus-tag or
+  mention, a target of the agent that admits the sender lists it, and that
+  target's own allowedSenders admit the sender too, the turn's context gets
+  mail.consultRequested [{target, agentId}] and the agent may call
+  converseWithAgent for exactly those agents; it stays the only voice in the
+  thread. The agent's LLM task needs enableBuiltInTools true and
+  converse_with_agent in builtInToolsWhitelist (save warning
+  email.consult-not-enabled otherwise). Every converse_with_agent call from a
+  mail's turn reaches only the requested agents (scheduled and
+  self-continuation turns of an email conversation reach none), runs the
+  consulted agent as a memory-less "email-consult:<integrationId>:<hash of the
+  sender>" identity that never mails anyone and that an erasure of the
+  sender's address reaches, is depth 1, ends the consulted conversation once
+  it answers, never continues one by id, and under workspace enforcement needs
+  the integration owner's own USE right on the consulted agent (admin role and
+  team shares do not count; save warning email.consult-owner-cannot-use). A
+  group member's turn of an email discussion keeps its group's
+  allowedDelegationTargets but is checked as the email identity (published
+  agents only). A mail's turn never gets create_sub_agent,
+  find_agents_by_capability or recruit_agent; handoff_to_team and A2A tools
+  stay as the designer configured them. A consulted agent that pauses for an
+  approval is ended unanswered: to approve each consultation, put
+  converseWithAgent in the consulting agent's
+  hitlConfig.toolApprovals.requireApproval — never by mail.
+  mentions, addresses, allowedSenders and consultable are refused on non-email
   channels. AGENT and GROUP targets work, observeMode is refused. Turns
   run as user "email:<integrationId>:<address>" (identityMode perSender) or
   "email:<integrationId>" (integration), always with SELF_ASSERTED
@@ -2279,7 +2305,8 @@ your tool schemas do not cover it, not as a routine first step:
   else forwarding the thread starts their own. Such a continuation keeps the
   conversation's agent even when the mail names another target by address,
   plus-tag or mention: the turn runs there, mail.route.redirectRefused names
-  the target it asked for. Its sender is checked against the allowedSenders
+  the target it asked for (or mail.consultRequested, when the agent may
+  consult it). Its sender is checked against the allowedSenders
   of that agent's targets (any one admitting is enough), not the routed
   target's: a plain reply routes to the default target. Only when no target
   names the agent any more does the routed target decide. A turn without output sends

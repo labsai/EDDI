@@ -5585,13 +5585,21 @@
       "targetAddressInvalid": "Each target address must be a valid email address.",
       "targetAddressNotReceived": "A target address must be one of the aliases or a plus-address of the mailbox address, so the mailbox receives it.",
       "targetAddressDuplicate": "Each target address can address one target only.",
-      "targetAllowedSendersInvalid": "Each allowed sender of a target must be user@domain, *@domain or *@*.domain."
+      "targetAllowedSendersInvalid": "Each allowed sender of a target must be user@domain, *@domain or *@*.domain.",
+      "consultableUnknown": "Each target a target can consult must be the name of another target of this integration.",
+      "consultableSelf": "A target cannot consult its own agent.",
+      "consultableNotAgent": "Only agent targets can consult or be consulted; a group discussion consults its own members.",
+      "consultableTooMany": "A target can consult at most {{max}} other targets.",
+      "consultableDuplicate": "Each target a target can consult can be listed once only.",
+      "consultableObserver": "An observer cannot be consulted; only an addressable target can."
     },
     "warning": {
       "openTrigger": "Saved, but anyone on the internet can make this agent run: there is no sender allowlist and unauthenticated mail is processed.",
       "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
       "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
-      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes."
+      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      "consultNotEnabled": "Saved, but a target lists targets it can consult while its agent cannot delegate: turn on built-in tools and add converse_with_agent to the agent's built-in tools whitelist.",
+      "consultOwnerCannotUse": "Saved, but the integration's owner may not use the agent of a target it can consult, so that consultation is refused. An admin role or a team share does not count for mail; share the agent with the owner directly."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5637,7 +5645,9 @@
     "targetAddresses": "Addresses",
     "targetAddressesHint": "Mail to one of these in To or Cc routes here first. Each must be an alias of the integration or a plus-address of its mailbox (invoices+finance@…).",
     "targetAllowedSenders": "Allowed senders for this target",
-    "targetAllowedSendersHint": "When set, only authenticated senders matching one of these reach this target, however the mail was routed. Anyone else is refused, never sent to the default target instead."
+    "targetAllowedSendersHint": "When set, only authenticated senders matching one of these reach this target, however the mail was routed. Anyone else is refused, never sent to the default target instead.",
+    "targetConsultable": "Can consult",
+    "targetConsultableHint": "Names of other agent targets. When a mail this agent answers also names one of them (@legal), the agent may ask it and answer the thread itself. The consulted agent sees only the question, no memory of the sender, and never mails anyone. The agent needs converse_with_agent in its built-in tools."
   },
   "feedback": {
     "title": "Feedback",

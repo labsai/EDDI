@@ -5637,13 +5637,21 @@
       "targetAddressInvalid": "Cada endereço de destino deve ser um endereço de e-mail válido.",
       "targetAddressNotReceived": "Um endereço de destino deve ser um dos aliases ou um endereço com + da caixa, para que a caixa o receba.",
       "targetAddressDuplicate": "Cada endereço de destino só pode endereçar um destino.",
-      "targetAllowedSendersInvalid": "Cada remetente permitido de um destino deve ser user@domain, *@domain ou *@*.domain."
+      "targetAllowedSendersInvalid": "Cada remetente permitido de um destino deve ser user@domain, *@domain ou *@*.domain.",
+      "consultableUnknown": "Cada destino que um destino pode consultar deve ser o nome de outro destino desta integração.",
+      "consultableSelf": "Um destino não pode consultar o seu próprio agente.",
+      "consultableNotAgent": "Apenas destinos de agente podem consultar ou ser consultados; uma discussão em grupo consulta os seus próprios membros.",
+      "consultableTooMany": "Um destino pode consultar no máximo {{max}} outros destinos.",
+      "consultableDuplicate": "Cada destino que um destino pode consultar só pode figurar uma vez.",
+      "consultableObserver": "Um observador não pode ser consultado; apenas um destino endereçável."
     },
     "warning": {
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
       "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
       "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
-      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta."
+      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta.",
+      "consultNotEnabled": "Guardado, mas um destino indica destinos que pode consultar enquanto o seu agente não pode delegar: ative as ferramentas integradas e adicione converse_with_agent à lista de ferramentas integradas permitidas do agente.",
+      "consultOwnerCannotUse": "Guardado, mas o proprietário da integração não pode usar o agente de um destino consultável, por isso essa consulta é recusada. Uma função de administrador ou uma partilha de equipa não conta para o e-mail; partilhe o agente diretamente com o proprietário."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5689,7 +5697,9 @@
     "targetAddresses": "Endereços",
     "targetAddressesHint": "E-mail para um destes em Para ou Cc vem para cá primeiro. Cada um deve ser um alias da integração ou um endereço com + da sua caixa (invoices+finance@…).",
     "targetAllowedSenders": "Remetentes permitidos para este destino",
-    "targetAllowedSendersHint": "Quando definido, apenas remetentes autenticados que correspondam a um destes chegam a este destino, seja qual for o encaminhamento. Os outros são recusados, nunca enviados ao destino padrão em seu lugar."
+    "targetAllowedSendersHint": "Quando definido, apenas remetentes autenticados que correspondam a um destes chegam a este destino, seja qual for o encaminhamento. Os outros são recusados, nunca enviados ao destino padrão em seu lugar.",
+    "targetConsultable": "Pode consultar",
+    "targetConsultableHint": "Nomes de outros destinos de agente. Quando um e-mail que este agente responde também nomeia um deles (@legal), o agente pode consultá-lo e responde ele próprio ao tópico. O agente consultado vê apenas a pergunta, nenhuma memória do remetente, e nunca envia e-mails. O agente precisa de converse_with_agent nas suas ferramentas integradas."
   },
   "feedback": {
     "title": "Avaliações",

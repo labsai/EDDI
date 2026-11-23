@@ -63,6 +63,8 @@ export const EMAIL_PORTS = ["993", "143"] as const;
 export const EMAIL_ACT_WHEN = ["always", "addressed"] as const;
 export const EMAIL_MAX_ALIASES = 20;
 export const EMAIL_MAX_MENTIONS_PER_TARGET = 10;
+/** Most targets one target may consult (`ChannelTarget.MAX_CONSULTABLE`). */
+export const EMAIL_MAX_CONSULTABLE_PER_TARGET = 10;
 export const EMAIL_IDENTITY_MODES = ["perSender", "integration"] as const;
 export const EMAIL_ATTACHMENT_MODES = ["drop", "metadata", "store"] as const;
 
@@ -212,7 +214,13 @@ export type EmailProblem =
   | "targetAddressInvalid"
   | "targetAddressNotReceived"
   | "targetAddressDuplicate"
-  | "targetAllowedSendersInvalid";
+  | "targetAllowedSendersInvalid"
+  | "consultableUnknown"
+  | "consultableSelf"
+  | "consultableNotAgent"
+  | "consultableTooMany"
+  | "consultableDuplicate"
+  | "consultableObserver";
 
 export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] {
   const problems: EmailProblem[] = [];
@@ -283,17 +291,51 @@ export function isPlusAddressOf(value: string, base: string): boolean {
 }
 
 /** The email-only rule fields of a target. */
-export const EMAIL_TARGET_RULE_FIELDS = ["mentions", "addresses", "allowedSenders"] as const;
+export const EMAIL_TARGET_RULE_FIELDS = ["mentions", "addresses", "allowedSenders", "consultable"] as const;
+
+/** The parts of a target the email rule checks read. */
+export interface EmailRuleTarget {
+  name?: string;
+  type?: string;
+  targetId?: string;
+  observeMode?: boolean;
+  mentions?: string[];
+  addresses?: string[];
+  allowedSenders?: string[];
+  consultable?: string[];
+}
+
+/**
+ * The problems of a target's `consultable` list (email v2 plan §10.1): each
+ * entry names another AGENT target of the integration with a different agent.
+ */
+function consultableProblems(target: EmailRuleTarget, targets: readonly EmailRuleTarget[]): EmailProblem[] {
+  const names = (target.consultable ?? []).map((n) => n.trim()).filter((n) => n.length > 0);
+  if (names.length === 0) return [];
+  const problems: EmailProblem[] = [];
+  if (names.length > EMAIL_MAX_CONSULTABLE_PER_TARGET) problems.push("consultableTooMany");
+  if (target.type === "GROUP") problems.push("consultableNotAgent");
+  const seen = new Set<string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) problems.push("consultableDuplicate");
+    seen.add(key);
+    const other = targets.find((candidate) => (candidate.name ?? "").toLowerCase() === key);
+    if (!other) problems.push("consultableUnknown");
+    else if (other === target || (other.targetId && other.targetId === target.targetId)) problems.push("consultableSelf");
+    else if (other.type === "GROUP") problems.push("consultableNotAgent");
+    else if (other.observeMode) problems.push("consultableObserver");
+  }
+  return problems;
+}
 
 /**
  * The problems of the targets' email rules (`mentions`, `addresses`,
- * `allowedSenders`) against the integration's `address` and `aliases` — the
- * backend's save-time rules, so the user hears before the round trip.
+ * `allowedSenders`, `consultable`) against the integration's `address` and
+ * `aliases` and the other targets — the backend's save-time rules, so the user
+ * hears before the round trip.
  */
-export function emailTargetProblems(
-  targets: readonly { mentions?: string[]; addresses?: string[]; allowedSenders?: string[] }[],
-  pc: Record<string, string>,
-): EmailProblem[] {
+export function emailTargetProblems(targets: readonly EmailRuleTarget[], pc: Record<string, string>): EmailProblem[] {
   const problems: EmailProblem[] = [];
   const address = (pc.address ?? "").trim();
   const aliases = new Set(splitList(pc.aliases).map((a) => a.toLowerCase()));
@@ -315,6 +357,7 @@ export function emailTargetProblems(
       addresses.add(value);
     }
     if (!(target.allowedSenders ?? []).every((s) => isSenderPattern(s.trim()))) problems.push("targetAllowedSendersInvalid");
+    problems.push(...consultableProblems(target, targets));
   }
   return [...new Set(problems)];
 }
@@ -323,7 +366,9 @@ export function emailTargetProblems(
  * `target` without its email-only fields — what a save of any other channel
  * type sends, since the backend refuses them there.
  */
-export function withoutEmailTargetRules<T extends { mentions?: string[]; addresses?: string[]; allowedSenders?: string[] }>(target: T): T {
+export function withoutEmailTargetRules<T extends { mentions?: string[]; addresses?: string[]; allowedSenders?: string[]; consultable?: string[] }>(
+  target: T,
+): T {
   const next = { ...target };
   for (const field of EMAIL_TARGET_RULE_FIELDS) delete next[field];
   return next;

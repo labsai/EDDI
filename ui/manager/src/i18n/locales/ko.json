@@ -5585,13 +5585,21 @@
       "targetAddressInvalid": "각 대상 주소는 올바른 이메일 주소여야 합니다.",
       "targetAddressNotReceived": "메일함이 받을 수 있도록 대상 주소는 별칭 중 하나이거나 메일함 주소의 플러스 주소여야 합니다.",
       "targetAddressDuplicate": "각 대상 주소는 하나의 대상만 가리킬 수 있습니다.",
-      "targetAllowedSendersInvalid": "대상의 각 허용 발신자는 user@domain, *@domain 또는 *@*.domain이어야 합니다."
+      "targetAllowedSendersInvalid": "대상의 각 허용 발신자는 user@domain, *@domain 또는 *@*.domain이어야 합니다.",
+      "consultableUnknown": "대상이 상담할 수 있는 각 대상은 이 통합의 다른 대상 이름이어야 합니다.",
+      "consultableSelf": "대상은 자신의 에이전트에게 상담할 수 없습니다.",
+      "consultableNotAgent": "에이전트 대상만 상담하거나 상담받을 수 있습니다. 그룹 토론은 자체 구성원에게 상담합니다.",
+      "consultableTooMany": "한 대상은 최대 {{max}}개의 다른 대상에게 상담할 수 있습니다.",
+      "consultableDuplicate": "상담 대상은 한 번만 지정할 수 있습니다.",
+      "consultableObserver": "관찰자에게는 상담할 수 없습니다. 지정 가능한 대상만 상담할 수 있습니다."
     },
     "warning": {
       "openTrigger": "저장했지만 인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 인증되지 않은 메일도 처리됩니다.",
       "toolsWithoutApprovals": "저장했지만 이 통합이 대상으로 하는 에이전트에 도구가 있고 도구 승인이 없습니다. 메일 내용은 신뢰할 수 없는 입력이므로, 무언가를 변경하는 도구에 hitlConfig.toolApprovals를 추가하세요.",
       "aiDisclosureDisabled": "저장했지만 답장에 더 이상 AI가 작성했다는 내용이 표시되지 않습니다. EU AI 법과 같은 투명성 규정은 사람들이 AI와 대화하고 있음을 알아야 한다고 요구합니다.",
-      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다."
+      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다.",
+      "consultNotEnabled": "저장했지만, 상담 대상을 지정한 대상의 에이전트가 위임할 수 없습니다. 기본 제공 도구를 켜고 에이전트의 기본 제공 도구 허용 목록에 converse_with_agent를 추가하세요.",
+      "consultOwnerCannotUse": "저장했지만 통합 소유자가 상담 대상의 에이전트를 사용할 수 없어 해당 상담은 거부됩니다. 메일에서는 관리자 역할이나 팀 공유가 인정되지 않으므로 에이전트를 소유자에게 직접 공유하세요."
     },
     "defaultTargetHint": "기본 대상은 플러스 태그(invoices+urgent@…)나 제목이 다른 대상의 트리거와 일치하지 않는 모든 메일을 받습니다. 생성 후 대상을 더 추가할 수 있습니다.",
     "triggerLabel": "플러스 태그 또는 제목 단어",
@@ -5637,7 +5645,9 @@
     "targetAddresses": "주소",
     "targetAddressesHint": "받는 사람(To) 또는 참조(Cc)에 이 주소 중 하나가 있는 메일은 가장 먼저 여기로 전달됩니다. 각 주소는 통합의 별칭이거나 메일함의 플러스 주소(invoices+finance@…)여야 합니다.",
     "targetAllowedSenders": "이 대상에 허용된 발신자",
-    "targetAllowedSendersHint": "설정하면 메일이 어떻게 전달되었든, 이 중 하나와 일치하는 인증된 발신자만 이 대상에 도달합니다. 그 밖의 발신자는 거부되며, 대신 기본 대상으로 보내지지 않습니다."
+    "targetAllowedSendersHint": "설정하면 메일이 어떻게 전달되었든, 이 중 하나와 일치하는 인증된 발신자만 이 대상에 도달합니다. 그 밖의 발신자는 거부되며, 대신 기본 대상으로 보내지지 않습니다.",
+    "targetConsultable": "상담 가능 대상",
+    "targetConsultableHint": "다른 에이전트 대상의 이름입니다. 이 에이전트가 답하는 메일이 그중 하나도 지목하면(@legal) 에이전트는 그 대상에게 물어보고 스레드에는 직접 답합니다. 상담받는 에이전트는 질문만 보며 발신자의 기억은 보지 못하고, 누구에게도 메일을 보내지 않습니다. 에이전트의 기본 제공 도구에 converse_with_agent가 있어야 합니다."
   },
   "feedback": {
     "title": "피드백",
