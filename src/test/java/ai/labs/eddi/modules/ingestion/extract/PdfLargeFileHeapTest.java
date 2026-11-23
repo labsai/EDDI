@@ -86,6 +86,30 @@ class PdfLargeFileHeapTest {
         assertTrue(result.lastLine().startsWith("OK pages=" + PAGES + " "), result.output());
     }
 
+    @Test
+    @DisplayName("-Xmx256m: a file declaring as many objects as allowed is read; one more is refused before parsing")
+    void crossReferenceCap() throws Exception {
+        // 500,000 entries, every one in the table, in a file above the strict-parse
+        // threshold: the most PDFBox will be asked to hold, in every window.
+        // Objects 1..5 are the page's; every object is one entry PDFBox stores.
+        int extra = (int) PdfWindowReader.DEFAULT_MAX_XREF_ENTRIES - 5;
+        Path atCap = PdfFixtures.manyObjectsTo(dir.resolve("objects.pdf"), extra);
+        assertTrue(Files.size(atCap) > PdfWindowReader.DEFAULT_LENIENT_PARSE_MAX_BYTES, "parsed strictly");
+        try {
+            ChildJvm.Result result = probe("-Xmx256m", atCap);
+            assertFalse(result.timedOut(), result.output());
+            assertEquals(0, result.exitCode(), result.output());
+            assertTrue(result.lastLine().startsWith("OK pages=1 "), result.output());
+
+            Path overCap = PdfFixtures.manyObjectsTo(dir.resolve("objects.pdf"), extra + 1);
+            ChildJvm.Result refused = probe("-Xmx256m", overCap);
+            assertEquals(1, refused.exitCode(), refused.output());
+            assertTrue(refused.output().contains("declares more than 500000 objects"), refused.output());
+        } finally {
+            Files.deleteIfExists(atCap);
+        }
+    }
+
     /** What one page of the fixture estimates, from a small copy read in memory. */
     private static int tokensPerPage() throws IOException {
         Path small = PdfFixtures.largeTo(dir.resolve("small.pdf"), 10, 100, 0);
@@ -96,8 +120,12 @@ class PdfLargeFileHeapTest {
     }
 
     private static ChildJvm.Result probe(String heap) throws Exception {
+        return probe(heap, pdf);
+    }
+
+    private static ChildJvm.Result probe(String heap, Path file) throws Exception {
         Path scratch = Files.createTempDirectory(dir, "scratch-");
         return ChildJvm.run(PdfLargeFileHeapProbe.class, List.of(heap, "-XX:+UseSerialGC"),
-                List.of(pdf.toString(), scratch.toString(), "50"), TIMEOUT);
+                List.of(file.toString(), scratch.toString(), "50"), TIMEOUT);
     }
 }

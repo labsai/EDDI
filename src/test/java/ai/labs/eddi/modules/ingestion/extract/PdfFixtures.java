@@ -341,12 +341,6 @@ public final class PdfFixtures {
         return rawPdf(objects.stream().map(o -> o.getBytes(StandardCharsets.US_ASCII)).toList());
     }
 
-    /** How many objects {@link #deepPageTree(int)} writes. */
-    public static int deepPageTreeObjects(int depth) {
-        String text = new String(deepPageTree(depth), StandardCharsets.ISO_8859_1);
-        return text.split(" 0 obj\n", -1).length - 1;
-    }
-
     /**
      * {@link #deepPageTree(int)} with its {@code startxref} pointing nowhere and
      * its cross-reference table unrecognisable, so PDFBox's parser rebuilds the
@@ -683,6 +677,14 @@ public final class PdfFixtures {
      *
      * @return {@code target}
      */
+    /**
+     * {@link #largeTo(Path, int, int, long)} with a chapter every 100 pages: the
+     * plan's signature.
+     */
+    public static Path largeTo(Path target, int pages, long targetBytes) {
+        return largeTo(target, pages, 100, targetBytes);
+    }
+
     public static Path largeTo(Path target, int pages, int pagesPerChapter, long targetBytes) {
         int chapters = pagesPerChapter > 0 ? (pages + pagesPerChapter - 1) / pagesPerChapter : 0;
         // 1 catalog, 2 page tree, 3 font, 4 outline root; then per page: page,
@@ -755,6 +757,11 @@ public final class PdfFixtures {
      *
      * @return {@code target}
      */
+    /** {@link #brokenXrefTo(Path, int)} with three pages: the plan's signature. */
+    public static Path brokenXrefTo(Path target) {
+        return brokenXrefTo(target, 3);
+    }
+
     public static Path brokenXrefTo(Path target, int pages) {
         String text = new String(plain(pages), StandardCharsets.ISO_8859_1);
         int at = text.lastIndexOf("startxref") + "startxref".length();
@@ -803,6 +810,40 @@ public final class PdfFixtures {
                 page.setContents(stream);
             }
         });
+    }
+
+    /**
+     * One text page and {@code extraObjects} tiny unreferenced objects, written
+     * straight to {@code target} with a classic cross-reference table that lists
+     * every one: a file whose table, not its pages, is what costs memory.
+     *
+     * @return {@code target}
+     */
+    public static Path manyObjectsTo(Path target, int extraObjects) {
+        int objectCount = 5 + extraObjects;
+        List<Long> offsets = new ArrayList<>(objectCount);
+        try (var out = new CountingOutput(new BufferedOutputStream(Files.newOutputStream(target), 1 << 16))) {
+            out.ascii("%PDF-1.4\n");
+            out.object(offsets, 1, "<</Type /Catalog /Pages 2 0 R>>");
+            out.object(offsets, 2, "<</Type /Pages /Count 1 /Kids [4 0 R]>>");
+            out.object(offsets, 3, "<</Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding>>");
+            out.object(offsets, 4, "<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources "
+                    + "<</Font <</F1 3 0 R>>>> /Contents 5 0 R>>");
+            byte[] content = ascii("BT /F1 9 Tf 40 740 Td (" + line(1, 1) + ") Tj ET");
+            out.object(offsets, 5, new String(stream("", content), StandardCharsets.ISO_8859_1));
+            for (int i = 6; i <= objectCount; i++) {
+                out.object(offsets, i, "<<>>");
+            }
+            long xref = out.count();
+            out.ascii("xref\n0 " + (objectCount + 1) + "\n0000000000 65535 f \n");
+            for (long offset : offsets) {
+                out.ascii(String.format("%010d 00000 n \n", offset));
+            }
+            out.ascii("trailer<</Size " + (objectCount + 1) + "/Root 1 0 R>>\nstartxref\n" + xref + "\n%%EOF\n");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return target;
     }
 
     /** Writes a fixture to a file. */

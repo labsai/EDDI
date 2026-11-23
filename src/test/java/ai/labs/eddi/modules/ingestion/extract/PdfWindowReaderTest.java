@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("PdfWindowReader — one window of a PDF file at a time")
@@ -153,7 +154,33 @@ class PdfWindowReaderTest {
     }
 
     @Test
-    @DisplayName("a strictly parsed file declaring more cross-reference entries than allowed is refused first")
+    @DisplayName("cross-reference entries are counted exactly as PDFBox stores them, strict or lenient")
+    void xrefEntriesCountedExactly() {
+        // Objects 1..5 in use: five entries stored; the free entry 0 is not.
+        Path pdf = PdfFixtures.writeTo(dir.resolve("table.pdf"), PdfFixtures.deepPageTree(3));
+        for (var options : new PdfWindowReader.Options[]{reader.options(),
+                reader.options().withLenientParseMaxBytes(16)}) {
+            new PdfWindowReader(options.withCaps(5, 1_000)).withWindow(pdf, 1, 1, (document, window) -> null);
+            var refused = assertThrows(UnreadableDocumentException.class,
+                    () -> new PdfWindowReader(options.withCaps(4, 1_000)).withWindow(pdf, 1, 1, (d, w) -> null));
+            assertTrue(refused.getMessage().contains("declares more than 4 objects"), refused.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("a tiny cross-reference stream declaring two billion entries is refused quickly, not parsed")
+    void xrefStreamBomb() {
+        String file = "%PDF-1.5\n1 0 obj\n<</Type /XRef /W [0 0 0] /Size 2000000000 /Length 1>>stream\nX\n"
+                + "endstream\nendobj\nstartxref\n9\n%%EOF\n";
+        Path pdf = PdfFixtures.writeTo(dir.resolve("bomb.pdf"), file.getBytes(StandardCharsets.ISO_8859_1));
+
+        var refused = assertTimeout(Duration.ofSeconds(30), () -> assertThrows(UnreadableDocumentException.class,
+                () -> reader.withWindow(pdf, 1, 1, (document, window) -> null)));
+        assertTrue(refused.getMessage().contains("declares more than"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("a file declaring more cross-reference entries than allowed is refused, whatever form its table takes")
     void xrefEntriesBounded() {
         // A hand-written file: a classic table. And one PDFBox saved, whatever form it
         // chose. Both have a handful of objects; the cap is set below that.
@@ -168,16 +195,6 @@ class PdfWindowReaderTest {
             assertTrue(refused.getMessage().contains("declares more than 2 objects"), refused.getMessage());
             roomy.withWindow(pdf, 1, 1, (document, window) -> text(document, window));
         }
-    }
-
-    @Test
-    @DisplayName("a classic table's declared entries are counted exactly")
-    void xrefSubsectionsSummed() {
-        Path table = PdfFixtures.writeTo(dir.resolve("table.pdf"), PdfFixtures.deepPageTree(3));
-        long entries = PdfFixtures.deepPageTreeObjects(3) + 1;
-
-        PdfXrefBound.requireWithin(table, entries);
-        assertThrows(UnreadableDocumentException.class, () -> PdfXrefBound.requireWithin(table, entries - 1));
     }
 
     @Test

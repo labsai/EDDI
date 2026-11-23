@@ -15,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -83,11 +84,11 @@ class DocumentWorkDirTest {
         @Test
         @DisplayName("startup empties this instance's own directory and leaves a peer's alone")
         void sweepsOnlyItsOwn() throws IOException {
-            Path own = Files.createDirectories(base.resolve("node-a"));
+            Path own = privateDir(base.resolve("node-a"));
             Path leftover = Files.writeString(own.resolve("eddi-blob-1.bin"), "left by the previous run");
             Path nested = Files.createDirectories(own.resolve("scratch"));
             Files.writeString(nested.resolve("PDFBox1.tmp"), "scratch");
-            Path peer = Files.createDirectories(base.resolve("node-b"));
+            Path peer = privateDir(base.resolve("node-b"));
             Path peersFile = Files.writeString(peer.resolve("eddi-blob-2.bin"), "the peer's, in use");
             Path shared = Files.writeString(base.resolve("someone-elses.tmp"), "not EDDI's");
 
@@ -116,7 +117,7 @@ class DocumentWorkDirTest {
         @Test
         @DisplayName("another node whose id extends this one's is never taken for a per-boot directory")
         void nodeIdPrefixIsNotAPerBootDirectory() throws IOException {
-            Path otherNode = Files.createDirectories(base.resolve("node-a-b"));
+            Path otherNode = privateDir(base.resolve("node-a-b"));
             Path othersFile = Files.writeString(otherNode.resolve("eddi-blob-1.bin"), "node a-b's, it is down");
 
             workDir("a", "boot1", 1024).directory();
@@ -125,9 +126,28 @@ class DocumentWorkDirTest {
         }
 
         @Test
+        @DisplayName("a link inside the directory is deleted as a link; what it points to is untouched")
+        void linksAreNotFollowed() throws IOException {
+            Path own = privateDir(base.resolve("node-a"));
+            Path outside = privateDir(base.resolve("outside"));
+            Path precious = Files.writeString(outside.resolve("precious.txt"), "not EDDI's");
+            Path link = own.resolve("link");
+            try {
+                Files.createSymbolicLink(link, outside);
+            } catch (IOException | UnsupportedOperationException noLinks) {
+                assumeTrue(false, "this file system or user cannot create links");
+            }
+
+            workDir("a", "boot1", 1024).directory();
+
+            assertFalse(Files.exists(link, LinkOption.NOFOLLOW_LINKS), "the link is gone");
+            assertTrue(Files.exists(precious), "its target is not");
+        }
+
+        @Test
         @DisplayName("a directory others may write to is refused, not swept (POSIX)")
         void sharedDirectoryRefused() throws IOException {
-            Path own = Files.createDirectories(base.resolve("node-a"));
+            Path own = privateDir(base.resolve("node-a"));
             assumeTrue(Files.getFileAttributeView(own, PosixFileAttributeView.class) != null, "POSIX only");
             Files.setPosixFilePermissions(own, PosixFilePermissions.fromString("rwxrwxrwx"));
             Path planted = Files.writeString(own.resolve("planted"), "someone else's");
@@ -140,7 +160,7 @@ class DocumentWorkDirTest {
         @Test
         @DisplayName("a per-boot directory whose owner is gone is removed; one whose owner lives is not")
         void abandonedPerBootDirectories() throws IOException {
-            Path abandoned = Files.createDirectories(base.resolve("node-a.boot-oldboot"));
+            Path abandoned = privateDir(base.resolve("node-a.boot-oldboot"));
             Files.writeString(abandoned.resolve("eddi-blob-1.bin"), "left behind");
             var live = workDir("a", "boot1", 1024);
             live.directory();
@@ -325,5 +345,17 @@ class DocumentWorkDirTest {
             });
             return store;
         }
+    }
+
+    /**
+     * A directory as this process would make it: owner-only where POSIX applies, so
+     * a test does not depend on the umask it runs under.
+     */
+    private static Path privateDir(Path dir) throws IOException {
+        Files.createDirectories(dir);
+        if (Files.getFileAttributeView(dir, PosixFileAttributeView.class) != null) {
+            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+        }
+        return dir;
     }
 }

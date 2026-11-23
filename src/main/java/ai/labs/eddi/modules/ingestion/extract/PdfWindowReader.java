@@ -5,11 +5,13 @@
 package ai.labs.eddi.modules.ingestion.extract;
 
 import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSObjectKey;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.io.RandomAccessReadBufferedFile;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdfparser.PDFParser;
+import org.apache.pdfbox.pdfparser.XrefTrailerResolver;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.ResourceCache;
 import org.apache.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
@@ -81,7 +83,7 @@ public final class PdfWindowReader {
      * {@code eddi.attachments.max-size-bytes}: a file at or below it may be held in
      * memory on today's path anyway, and is repaired there as it always was.
      */
-    public static final long DEFAULT_LENIENT_PARSE_MAX_BYTES = 20L * 1024 * 1024;
+    public static final long DEFAULT_LENIENT_PARSE_MAX_BYTES = 4L * 1024 * 1024;
 
     /**
      * Cross-reference entries a strictly parsed file may declare. PDFBox holds each
@@ -284,9 +286,6 @@ public final class PdfWindowReader {
                 if (!hasPdfHeader(pdf)) {
                     throw new UnreadableDocumentException(NOT_A_PDF);
                 }
-                // Before PDFBox builds its map of every entry, which strict parsing
-                // does not bound.
-                PdfXrefBound.requireWithin(pdf, options.maxXrefEntries());
             }
             source = new RandomAccessReadBufferedFile(pdf);
         } catch (IOException e) {
@@ -294,7 +293,12 @@ public final class PdfWindowReader {
         }
         try {
             // The document owns the source from here and closes it with itself.
-            return new PDFParser(source, "", null, null, streamCache).parse(lenient);
+            return new BoundedParser(source, streamCache, options.maxXrefEntries()).parse(lenient);
+        } catch (XrefLimitExceeded e) {
+            closeQuietly(source, e);
+            throw new UnreadableDocumentException("This PDF declares more than " + options.maxXrefEntries()
+                    + " objects, more than one document may have. If the file is genuine, split it into smaller "
+                    + "files and upload those.", e);
         } catch (InvalidPasswordException e) {
             closeQuietly(source, e);
             throw new UnreadableDocumentException(ENCRYPTED, e);
@@ -304,6 +308,58 @@ public final class PdfWindowReader {
         } catch (Error e) {
             closeQuietly(source, e);
             throw e;
+        }
+    }
+
+    /**
+     * A strict or lenient PDFBox parser whose cross-reference map refuses to grow
+     * past a cap.
+     *
+     * <p>
+     * PDFBox holds every cross-reference entry it reads in a map, and does so again
+     * in every window. Nothing in PDFBox bounds it: a large table of
+     * {@code 0000000000 00000 n} lines, or a few hundred bytes of cross-reference
+     * stream with {@code /W [0 0 0]} and a {@code /Size} of two billion, fills the
+     * heap before a page is read. Every entry, from a table or a stream, in strict
+     * or lenient parsing, goes through {@link XrefTrailerResolver#setXRef}, so the
+     * parser's own resolver is replaced by one that counts the calls and stops the
+     * parse when they pass the cap. That is exact whatever the file's syntax, which
+     * a separate pre-scan of the cross-reference sections could not be.
+     */
+    private static final class BoundedParser extends PDFParser {
+        BoundedParser(RandomAccessRead source, StreamCacheCreateFunction streamCache, long maxEntries)
+                throws IOException {
+            super(source, "", null, null, streamCache);
+            xrefTrailerResolver = new CountingResolver(maxEntries);
+        }
+    }
+
+    /** Counts entries; past the cap it throws instead of storing. */
+    private static final class CountingResolver extends XrefTrailerResolver {
+        private final long maxEntries;
+        private long entries;
+
+        CountingResolver(long maxEntries) {
+            this.maxEntries = maxEntries;
+        }
+
+        @Override
+        public void setXRef(COSObjectKey objKey, long offset) {
+            if (++entries > maxEntries) {
+                throw new XrefLimitExceeded();
+            }
+            super.setXRef(objKey, offset);
+        }
+    }
+
+    /**
+     * Thrown out of PDFBox's parser at the cap. Unchecked and not an
+     * {@link IllegalArgumentException}, the one exception PDFBox catches around
+     * {@code setXRef}, so nothing inside the parser absorbs it.
+     */
+    private static final class XrefLimitExceeded extends RuntimeException {
+        XrefLimitExceeded() {
+            super("cross-reference entries over the cap", null, false, false);
         }
     }
 

@@ -90,6 +90,11 @@ public class DocumentWorkDir {
     public static final long DEFAULT_MAX_BYTES = 4L * 1024 * 1024 * 1024;
 
     private final Path base;
+    /**
+     * Whether the base is the default under the shared temp directory, where any
+     * local user may have created it first: then it must be private too.
+     */
+    private final boolean sharedTempBase;
     private final String nodeId;
     private final String bootId;
     private final long maxBytes;
@@ -107,7 +112,7 @@ public class DocumentWorkDir {
             @ConfigProperty(name = "eddi.attachments.large.work-dir") Optional<String> configuredBase,
             @ConfigProperty(name = "eddi.attachments.large.work-dir-max-bytes", defaultValue = "4294967296") long maxBytes) {
         this(configuredBase.filter(value -> !value.isBlank()).map(Path::of).orElseGet(DocumentWorkDir::defaultBase),
-                node.nodeId(), node.bootId(), maxBytes);
+                node.nodeId(), node.bootId(), maxBytes, configuredBase.filter(value -> !value.isBlank()).isEmpty());
     }
 
     /**
@@ -119,6 +124,17 @@ public class DocumentWorkDir {
      *            new on every start
      */
     public DocumentWorkDir(Path base, String nodeId, String bootId, long maxBytes) {
+        this(base, nodeId, bootId, maxBytes, false);
+    }
+
+    /**
+     * @param sharedTempBase
+     *            whether {@code base} lies in a temp directory other users share:
+     *            it is then refused unless it is this process's and private. A
+     *            configured base is the operator's to protect (a Kubernetes
+     *            {@code emptyDir}, say, is world-writable but per pod)
+     */
+    DocumentWorkDir(Path base, String nodeId, String bootId, long maxBytes, boolean sharedTempBase) {
         if (maxBytes <= 0) {
             throw new IllegalArgumentException("eddi.attachments.large.work-dir-max-bytes must be positive");
         }
@@ -126,6 +142,7 @@ public class DocumentWorkDir {
         this.nodeId = fileNameToken(nodeId);
         this.bootId = fileNameToken(bootId);
         this.maxBytes = maxBytes;
+        this.sharedTempBase = sharedTempBase;
     }
 
     /**
@@ -141,13 +158,20 @@ public class DocumentWorkDir {
         return Path.of(System.getProperty("java.io.tmpdir"), "eddi-documents");
     }
 
+    /**
+     * Sweeps what a previous run of this node left, if it left a directory at all.
+     * A deployment that never reads a large document creates nothing: the directory
+     * is made on first use, which sweeps it too.
+     */
     void onStart(@Observes StartupEvent event) {
+        if (!Files.isDirectory(base.resolve(DIRECTORY_PREFIX + nodeId), LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
         try {
             directory();
         } catch (RuntimeException e) {
-            // Nothing reads large documents yet unless a later release switches it on;
-            // that code fails with the reason when it asks for the directory.
-            LOGGER.warnf("The document work directory under %s is not usable: %s", base, e.getMessage());
+            // Whatever reads a large document fails with the reason when it asks.
+            LOGGER.infof("The document work directory under %s is not usable: %s", base, e.getMessage());
         }
     }
 
@@ -171,6 +195,9 @@ public class DocumentWorkDir {
 
     private void start() throws IOException {
         createOwnerOnly(base);
+        if (sharedTempBase) {
+            requirePrivate(base);
+        }
         Path stable = base.resolve(DIRECTORY_PREFIX + nodeId);
         createOwnerOnly(stable);
         requirePrivate(stable);
@@ -248,6 +275,18 @@ public class DocumentWorkDir {
     static void sweep(Path dir) throws IOException {
         Files.walkFileTree(dir, new SimpleFileVisitor<>() {
             @Override
+            public FileVisitResult preVisitDirectory(Path visited, BasicFileAttributes attributes) {
+                // A link or another reparse point (a Windows junction) is deleted as
+                // the link it is; what it points to is never entered.
+                if (!visited.equals(dir) && (attributes.isSymbolicLink() || attributes.isOther()
+                        || Files.isSymbolicLink(visited))) {
+                    deleteQuietly(visited);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
                 if (!(file.getParent().equals(dir) && file.getFileName().toString().equals(LOCK_FILE))) {
                     deleteQuietly(file);
@@ -322,20 +361,24 @@ public class DocumentWorkDir {
             }
             PosixFileAttributes attributes = view.readAttributes();
             Set<PosixFilePermission> permissions = attributes.permissions();
-            if (permissions.contains(PosixFilePermission.GROUP_WRITE)
-                    || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+            // Owner-only: what this process puts here is no one else's to read either.
+            if (permissions.stream().anyMatch(permission -> !permission.name().startsWith("OWNER_"))) {
                 return false;
             }
-            // The owner this process gives new files: of a probe it creates in the
-            // temp directory, which works where no user name resolves (containers).
-            return attributes.owner().equals(processOwner());
+            return attributes.owner().equals(processOwner(dir));
         } catch (IOException e) {
             return false;
         }
     }
 
-    private static UserPrincipal processOwner() throws IOException {
-        Path probe = Files.createTempFile("eddi-owner-", ".probe");
+    /**
+     * The owner this process gives new files, on the file system of {@code dir}:
+     * the owner of a probe it creates there. That works where no user name resolves
+     * (containers) and where uids are mapped per file system. A directory this
+     * process cannot write to has no owner it can compare, and is not private.
+     */
+    private static UserPrincipal processOwner(Path dir) throws IOException {
+        Path probe = Files.createTempFile(dir, ".eddi-owner-", ".probe");
         try {
             return Files.getOwner(probe);
         } finally {
