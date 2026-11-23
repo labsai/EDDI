@@ -53,7 +53,8 @@ import java.util.function.Function;
  * <b>Cluster</b>: everything that removes a document's chunks by name — a
  * replacing ingestion, and a delete — runs under that document's lease (see
  * {@link #underDocumentLease}), which is cluster-wide in NATS mode, so two
- * instances sharing one vector store never interleave them.
+ * instances sharing one vector store do not interleave them while their leases
+ * are held (best-effort: see {@link #storeAndReplace}).
  */
 @ApplicationScoped
 public class RagIngestionService {
@@ -119,13 +120,17 @@ public class RagIngestionService {
 
     /**
      * Slack on top of a lease wait for the answer to come back: the lease manager
-     * enforces the wait itself, this only keeps a lost answer from blocking
-     * forever.
+     * enforces the wait itself, this only covers its scheduling. A manager that
+     * never answers is given up on at the wait plus this, not later.
      */
-    private static final Duration ACQUIRE_GRACE = Duration.ofSeconds(30);
+    private static final Duration ACQUIRE_SLACK = Duration.ofMillis(250);
 
-    /** How far past its wait a grant may arrive and still be taken (scheduling). */
-    private static final Duration LATE_GRANT_TOLERANCE = Duration.ofSeconds(1);
+    /**
+     * The least the lease wait is given, even when the lock wait used up the
+     * caller's time: one lease round trip, so a free lease is still granted. It is
+     * the most a caller's bound can be overshot by.
+     */
+    private static final Duration MIN_LEASE_WAIT = Duration.ofSeconds(1);
 
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory,
@@ -344,7 +349,7 @@ public class RagIngestionService {
      * table and their tag, and so must share the lease. A name is caller-chosen
      * text and never lands in a key in clear.
      */
-    static String documentLeaseKey(String kbId, String documentName) {
+    public static String documentLeaseKey(String kbId, String documentName) {
         return IConversationLeaseManager.RAG_DOCUMENT + KvKeys.hashed(kbId + "|" + documentName);
     }
 
@@ -384,8 +389,8 @@ public class RagIngestionService {
                     "Interrupted while waiting for document '" + sanitize(documentName) + "'");
         }
         try {
-            Duration remaining = Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
-            LeaseHandle lease = acquire(documentLeaseKey(kbId, documentName), remaining, deadline, documentName);
+            Duration remaining = Duration.ofNanos(Math.max(MIN_LEASE_WAIT.toNanos(), deadline - System.nanoTime()));
+            LeaseHandle lease = acquire(documentLeaseKey(kbId, documentName), remaining, documentName);
             try {
                 return work.apply(lease);
             } finally {
@@ -396,14 +401,14 @@ public class RagIngestionService {
         }
     }
 
-    private LeaseHandle acquire(String key, Duration maxWait, long deadlineNanos, String documentName) {
+    private LeaseHandle acquire(String key, Duration maxWait, String documentName) {
+        long deadlineNanos = System.nanoTime() + maxWait.toNanos();
         CompletableFuture<LeaseHandle> pending = leases.acquireKey(key, maxWait).toCompletableFuture();
         try {
-            LeaseHandle granted = pending.get(maxWait.plus(ACQUIRE_GRACE).toMillis(), TimeUnit.MILLISECONDS);
-            // The grace only keeps a lost answer from blocking forever; it is not extra
-            // time for the caller. A grant that came in well past the wait is refused,
-            // so a delete keeps its documented bound.
-            if (System.nanoTime() - deadlineNanos > LATE_GRANT_TOLERANCE.toNanos()) {
+            LeaseHandle granted = pending.get(maxWait.plus(ACQUIRE_SLACK).toMillis(), TimeUnit.MILLISECONDS);
+            // A grant that arrives after the wait is released unused, so a delete keeps
+            // its documented bound.
+            if (System.nanoTime() > deadlineNanos) {
                 leases.release(granted);
                 throw new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, null,
                         "Document '" + sanitize(documentName) + "' is being replaced or deleted on another instance");

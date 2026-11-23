@@ -280,15 +280,20 @@ class RagIngestionServiceClusterTest {
 
     @Test
     @DisplayName("a lease granted long after the delete's wait is refused: BUSY, nothing removed, the lease released")
-    void aLateGrantIsNotUsed() {
+    void aLateGrantIsNotUsed() throws Exception {
         store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
                 Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
         instanceA.deleteLockTimeout = Duration.ofMillis(50);
-        cluster.grantDelayMillis.set(1_500);
+        cluster.grantDelayMillis.set(2_000);
 
         assertEquals(DeleteOutcome.BUSY, instanceA.delete(RAG_ID, DOC, config));
 
         assertEquals(List.of("Refunds within 30 days."), storedTexts());
+        // The grant lands after the caller gave up; it is released the moment it does.
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (cluster.released.get() < 1 && System.nanoTime() < until) {
+            Thread.sleep(20);
+        }
         assertEquals(1, cluster.released.get(), "the late grant must not stay held");
     }
 

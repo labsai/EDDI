@@ -50,12 +50,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -113,11 +110,6 @@ class RagDocumentLeaseIT {
         final NatsConnectionManager connections;
         final NatsSharedStateFactory shared;
         KvLeaseManager leases;
-        /**
-         * The lease manager the service uses: every call is recorded, then passed on to
-         * {@link #leases}.
-         */
-        IConversationLeaseManager observed;
         RagIngestionService service;
 
         Instance(String id) throws InterruptedException {
@@ -165,8 +157,7 @@ class RagDocumentLeaseIT {
                         }
                     }, new SimpleMeterRegistry());
             leases.start();
-            observed = mock(IConversationLeaseManager.class, delegatesTo(leases));
-            service = new RagIngestionService(models(), stores(), sharedCaches(), observed);
+            service = new RagIngestionService(models(), stores(), sharedCaches(), leases);
             shared.provisionAll();
         }
 
@@ -254,9 +245,15 @@ class RagDocumentLeaseIT {
         assertTrue(embedding.await(10, TimeUnit.SECONDS), "A never started embedding");
 
         CompletableFuture<DeleteOutcome> delete = CompletableFuture.supplyAsync(() -> b.service.delete(RAG_ID, DOC, config));
-        // B has asked for the document's lease; only then does the TTL clock below mean
-        // something.
-        verify(b.observed, timeout(10_000)).acquireKey(anyString(), any());
+        // B's waiter marker is in the lease bucket: B is really waiting on A's lease,
+        // so
+        // the TTL clock below means something.
+        String leaseKey = RagIngestionService.documentLeaseKey(kbId, DOC);
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (a.leases.peekSnapshot(leaseKey).map(snapshot -> snapshot.waitingNode() == null).orElse(true)) {
+            assertTrue(System.nanoTime() < until, "B never showed up as waiting for A's lease");
+            Thread.sleep(50);
+        }
         // Twice the lease TTL: without the heartbeat renewing A's lease, B would have
         // taken it over by now.
         Thread.sleep(LEASE_TTL.toMillis() * 2);

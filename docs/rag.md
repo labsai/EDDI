@@ -281,7 +281,7 @@ ingestion still completes and the status response carries a `warning` saying the
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
 
 A replacement holds the document's **lease** from before it embeds until the previous version is
-removed, so two replacements of one name never interleave — and neither does a replacement and a
+removed, so two replacements of one name do not interleave — and neither does a replacement and a
 delete of that name. In a cluster the lease is cluster-wide (a `rag.<hash>` key in the `LEASES`
 bucket, see [clustering](clustering.md)), so this holds when several instances share one vector
 store: a replacement that arrives while another instance is replacing or deleting the same name waits
@@ -316,7 +316,7 @@ EDIT on the knowledge base, like ingesting, and it is synchronous.
 | `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement or delete of the same name — on this or another instance — still holds the document after 30 seconds, or its cluster lease cannot be taken (see above); nothing was removed, retry |
 | `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
 
-**A delete and a replacement of one name never interleave.** Both take the same per-document lease, so
+**A delete and a replacement of one name do not interleave, as far as the lease can guarantee it.** Both take the same per-document lease, so
 a delete waits for a replacement in flight and then removes its chunks too, rather than landing
 between the replacement's store and its cleanup. As with replacements, the lock is the document's cluster lease (see above), so this holds between
 instances sharing one vector store. An ingestion *without* `replace` takes no lease, so one still in
