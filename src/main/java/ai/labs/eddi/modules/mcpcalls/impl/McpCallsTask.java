@@ -405,9 +405,12 @@ public class McpCallsTask implements ILifecycleTask {
      * refuses or fails a call it never dispatched to the executor.
      */
     private static boolean isMeteringFailure(String wrappedResult, String toolName) {
+        // A guard refusal (escalation guard, sender-role tool ceiling) never ran the
+        // call: it must not be stored as a response with postResponse run on it.
         return wrappedResult != null
                 && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName)
-                        || ToolExecutionService.isInternalFailure(wrappedResult, toolName));
+                        || ToolExecutionService.isInternalFailure(wrappedResult, toolName)
+                        || ToolExecutionService.isGuardRefusal(wrappedResult));
     }
 
     /**

@@ -7,8 +7,10 @@ package ai.labs.eddi.engine.security;
 import ai.labs.eddi.engine.model.Context;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -52,9 +54,51 @@ public final class TurnToolCeiling {
         return principal == null ? null : principal.toolCeiling();
     }
 
+    /**
+     * Tools that hand work to somewhere the ceiling cannot follow: a group
+     * discussion or a team (whose members run their own tools), the team backlog
+     * (worked later by a cadence run), and EDDI's own MCP tools that start a
+     * conversation or a schedule over the API (the ceiling does not cross an HTTP
+     * hop, only the origin taint does). Under any ceiling they are refused, even
+     * when the role names them. Matched like {@link EscalationGuard}, also behind a
+     * namespace prefix. In-process delegation ({@code converseWithAgent}) and a
+     * follow-up ({@code scheduleFollowup}) are not listed: they carry the ceiling.
+     */
+    public static final Set<String> SPAWNING_TOOLS = Set.of(
+            // in-process LLM tools
+            "handoff_to_team", "addgrouptask",
+            // EDDI's MCP server, reached through an MCP client connection
+            "discuss_with_group", "start_group_discussion", "add_team_task", "create_schedule", "fire_schedule_now",
+            "retry_failed_schedule", "create_team_cadence", "schedule_lesson_consolidation", "chat_with_agent", "talk_to_agent",
+            "create_conversation", "accept_team_handoff");
+
+    /** Separators an MCP proxy or a tool namespace puts in front of a name. */
+    private static final String NAMESPACE_SEPARATORS = "_.:/-";
+
     /** Whether the turn on this thread may call {@code toolName}. */
     public static boolean permits(Set<String> ceiling, String toolName) {
-        return ceiling == null || (toolName != null && ceiling.contains(toolName.trim()));
+        if (ceiling == null) {
+            return true;
+        }
+        return toolName != null && ceiling.contains(toolName.trim()) && !isSpawning(toolName);
+    }
+
+    /**
+     * Whether {@code toolName} is, or ends in a namespaced, {@link #SPAWNING_TOOLS}
+     * name (case-insensitive).
+     */
+    public static boolean isSpawning(String toolName) {
+        if (toolName == null) {
+            return false;
+        }
+        String name = toolName.trim().toLowerCase(Locale.ROOT);
+        for (String spawning : SPAWNING_TOOLS) {
+            if (name.equals(spawning) || (name.endsWith(spawning) && name.length() > spawning.length()
+                    && NAMESPACE_SEPARATORS.indexOf(name.charAt(name.length() - spawning.length() - 1)) >= 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -62,7 +106,37 @@ public final class TurnToolCeiling {
      */
     public static Optional<String> refuseTool(String toolName) {
         Set<String> ceiling = current();
-        return permits(ceiling, toolName) ? Optional.empty() : Optional.of(refusal(toolName));
+        if (permits(ceiling, toolName)) {
+            return Optional.empty();
+        }
+        return Optional.of(isSpawning(toolName) ? spawningRefusal(toolName) : refusal(toolName));
+    }
+
+    /** The text a refused spawning call answers with. */
+    public static String spawningRefusal(String toolName) {
+        return "Refused: the tool '" + toolName + "' hands work to a group, a team or another conversation where the tool limits "
+                + "of this email's sender role would not apply, so it is never available under a sender role's tool limits.";
+    }
+
+    /**
+     * The ceiling a schedule's metadata carries in {@link #CONTEXT_KEY} (a
+     * check-back a turn under a ceiling booked), or {@code null}.
+     */
+    public static Set<String> fromMetadata(Map<String, Object> metadata) {
+        return metadata == null ? null : fromValue(metadata.get(CONTEXT_KEY));
+    }
+
+    /**
+     * {@code context} with {@link #CONTEXT_KEY} set to {@code ceiling}, as a new
+     * mutable map; the argument itself when {@code ceiling} is {@code null}.
+     */
+    public static Map<String, Context> withCeiling(Map<String, Context> context, Set<String> ceiling) {
+        if (ceiling == null) {
+            return context;
+        }
+        Map<String, Context> narrowed = context == null ? new LinkedHashMap<>() : new LinkedHashMap<>(context);
+        narrowed.put(CONTEXT_KEY, toContext(ceiling));
+        return narrowed;
     }
 
     /** The text a refused call answers with. */

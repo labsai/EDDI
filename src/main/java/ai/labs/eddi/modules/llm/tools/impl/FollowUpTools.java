@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfig;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -172,6 +175,12 @@ public class FollowUpTools {
             String origin = TurnOrigin.current();
             if (origin != null) {
                 metadata.put(TurnOrigin.CONTEXT_KEY, origin);
+            }
+            // ... and under the same email sender role's tool ceiling (§9), which a
+            // "new" conversation would otherwise not have.
+            Set<String> ceiling = TurnToolCeiling.current();
+            if (ceiling != null) {
+                metadata.put(TurnToolCeiling.CONTEXT_KEY, List.copyOf(new TreeSet<>(ceiling)));
             }
             if (ownConversation) {
                 schedule.setConversationStrategy("persistent");

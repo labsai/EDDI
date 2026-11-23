@@ -62,6 +62,26 @@ instance).
   a role's tools applies to new conversations.
 - **Tools are matched by the exact name the model calls**; rule-driven `httpcalls` by call name.
 
+### Review fixes
+
+- **Policies alone activate roles** (`EmailControl.isActive`): a lone `default`/`anonymous` policy was accepted and then
+  ignored, so every sender got every target and tool. Resolver, the `ROLES_DROPPED` save guard and the Manager summary
+  now use the same test.
+- **The ceiling at async hops.** A follow-up check-back carries it in the schedule's metadata into its fire, both
+  conversation strategies. Group discussions, team handoffs, backlog tasks (and the cadences that work them) and
+  EDDI's own MCP tools that start work over the API cannot carry it, so those tools
+  (`TurnToolCeiling.SPAWNING_TOOLS`) are refused under any ceiling, even when a role names them.
+- **Hidden tools:** the model is offered only the permitted tools; LAZY loading is off under a ceiling, so
+  `discover_tools` needs no exemption and advertises nothing hidden.
+- **`mcpcalls`:** an escalation-guard or ceiling refusal is a failure, no longer a stored response with `postResponse`.
+- **Groups:** a role with `tools` is refused at save when it reaches any GROUP target, `["*"]` and absent targets
+  included.
+- **Audit:** a changed policy records which fields changed (`policy~:customer[targets,tools,cap]`).
+- **Manager:** the roles editor is offered to editors only; switching a draft away from email drops `emailControl`.
+- **Not changed:** "an anonymous continuation strips a conversation's tools" does not occur — conversation mode
+  requires authentication, and thread correlation binds authenticated senders only; a test pins it.
+- **Deviation:** `anonymous` gets no tools (and, with roles active, no GROUP target) until C4 adds `readOnlyTools`.
+
 ### Verification
 
 Unit tests (JUnit 5 + Mockito) for the validation, the resolver, the processor (forged `From`, unauthenticated
@@ -70,7 +90,10 @@ mail, replay, target and cap narrowing, groups), the REST and MCP edits, the red
 and `ApiCallsTask`; container round trips on MongoDB and PostgreSQL. Each security link was mutation-checked one
 mutant at a time (a forged `From` gets the role, a role widens a target's rules or cap, unauthenticated mail
 inherits a role, a replayed mail reuses one, a tainted turn edits roles by tool or path, the ceiling is not
-enforced or not stored): every mutant fails a test that names it.
+enforced or not stored): every mutant fails a test that names it. The review fixes were checked the same way: policies
+alone ignored, the follow-up dropping the ceiling at booking or at fire, and spawning tools allowed under a ceiling are
+each killed by their own test; a mutant letting thread correlation admit unauthenticated mail is caught by the existing
+`unauthenticatedAnonymous` test (the user-id binding blocks it on its own as well).
 
 ### What's next
 

@@ -95,6 +95,30 @@ class ToolExecutionServiceSenderRoleTest {
     }
 
     @Test
+    @DisplayName("under a ceiling, a tool that hands work to a group, a team or the API is refused even when the role names it")
+    void spawningToolsRefusedUnderACeiling() {
+        principals.bind(new ResolutionPrincipal("email:x:ann@customer-a.com", Provenance.SELF_ASSERTED, TurnOrigin.EMAIL,
+                Set.of("handoff_to_team", "addGroupTask", "eddi_discuss_with_group", "converseWithAgent", "scheduleFollowup")));
+        var runs = new AtomicInteger();
+
+        String handoff = call("handoff_to_team", runs);
+        assertTrue(call("addGroupTask", runs).contains("hands work to"));
+        assertTrue(call("eddi_discuss_with_group", runs).contains("hands work to"), "behind an MCP namespace prefix too");
+        assertEquals(0, runs.get());
+        assertTrue(handoff.startsWith("Error: Refused") && handoff.contains("hands work to"), handoff);
+        // in-process delegation and a follow-up carry the ceiling, so they stay allowed
+        assertEquals("ran", call("converseWithAgent", runs));
+        assertEquals("ran", call("scheduleFollowup", runs));
+    }
+
+    @Test
+    @DisplayName("without a ceiling, the spawning tools are untouched")
+    void spawningToolsWithoutCeiling() {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, null));
+        assertEquals("ran", call("handoff_to_team", new AtomicInteger()));
+    }
+
+    @Test
     @DisplayName("without a ceiling nothing changes")
     void noCeiling() {
         principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, null));

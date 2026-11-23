@@ -96,6 +96,22 @@ class EmailSenderRoleResolverTest {
     }
 
     @Test
+    @DisplayName("policies without any role still apply: a lone anonymous policy restricts unauthenticated mail")
+    void policiesAloneActivate() {
+        var anonymousOnly = new EmailControl(null, Map.of("anonymous", new RolePolicy(List.of("support"), null, null, null, null)));
+        var unauthenticated = EmailSenderRoleResolver.resolve(anonymousOnly, "x@y.com", false, 50);
+        assertEquals("anonymous", unauthenticated.role());
+        assertEquals(Set.of(), unauthenticated.toolCeiling());
+        assertFalse(unauthenticated.allowsTarget(target("finance", ChannelTarget.TargetType.AGENT)));
+
+        var defaultOnly = new EmailControl(List.of(), Map.of("default", new RolePolicy(null, List.of("kb_search"), null, null, 5)));
+        var authenticated = EmailSenderRoleResolver.resolve(defaultOnly, "x@y.com", true, 50);
+        assertEquals("default", authenticated.role());
+        assertEquals(Set.of("kb_search"), authenticated.toolCeiling());
+        assertEquals(5, authenticated.maxTurnsPerSenderPerDay());
+    }
+
+    @Test
     @DisplayName("an unrestricted role still has no tool ceiling")
     void execUnrestricted() {
         var resolved = EmailSenderRoleResolver.resolve(CONTROL, "cfo@company.com", true, 50);

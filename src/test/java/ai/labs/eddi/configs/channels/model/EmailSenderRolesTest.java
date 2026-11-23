@@ -119,6 +119,25 @@ class EmailSenderRolesTest {
     }
 
     @Test
+    @DisplayName("a role with tools reaching a group through \"*\" or no targets is refused too")
+    void restrictedRoleNoGroupByWildcard() {
+        var roles = List.of(new SenderRole("customer", List.of("*@a.com")));
+        assertTrue(refusal(control(roles, Map.of("customer", policy(null, List.of("kb_search"), null)))).contains("is a group"));
+        assertTrue(refusal(control(roles, Map.of("customer", policy(List.of("*"), List.of("kb_search"), null)))).contains("is a group"));
+        // without tools a role may reach a group
+        EmailSenderRoles.validate(control(roles, Map.of("customer", policy(null, null, null))), TARGETS, 50);
+    }
+
+    @Test
+    @DisplayName("the audit diff names the changed fields of a policy, never an address")
+    void diffFields() {
+        var roles = List.of(new SenderRole("a", List.of("a@x.com")));
+        var changes = EmailSenderRoles.diff(control(roles, Map.of("a", policy(List.of("support"), null, 5))),
+                control(roles, Map.of("a", policy(List.of("finance"), List.of("kb"), 5))));
+        assertEquals(List.of("policy~:a[targets,tools]"), changes);
+    }
+
+    @Test
     @DisplayName("invalid patterns, duplicate roles and unknown policy keys are refused")
     void malformed() {
         assertTrue(refusal(control(List.of(new SenderRole("x", List.of("not-an-address"))), Map.of("x", policy(null, null, null))))
@@ -138,6 +157,6 @@ class EmailSenderRolesTest {
         var after = control(List.of(new SenderRole("a", List.of("a@x.com", "a2@x.com")), new SenderRole("c", List.of("c@x.com"))),
                 Map.of("a", policy(null, List.of("kb"), null), "c", policy(null, null, null)));
         List<String> changes = EmailSenderRoles.diff(before, after);
-        assertTrue(changes.containsAll(List.of("role~:a", "role+:c", "role-:b", "policy~:a", "policy+:c", "policy-:b")), changes.toString());
+        assertTrue(changes.containsAll(List.of("role~:a", "role+:c", "role-:b", "policy~:a[tools]", "policy+:c", "policy-:b")), changes.toString());
     }
 }

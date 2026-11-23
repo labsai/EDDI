@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.ArrayList;
@@ -65,9 +66,19 @@ public class EmailControl {
         this.rolePolicies = rolePolicies;
     }
 
-    /** Whether any sender role is configured; without one, roles change nothing. */
+    /** Whether any sender role is listed in {@link #getSenderRoles()}. */
     public boolean hasRoles() {
         return senderRoles != null && !senderRoles.isEmpty();
+    }
+
+    /**
+     * Whether roles apply at all: any sender role, or any policy — a policy for
+     * {@code default} or {@code anonymous} alone is a restriction too, and must
+     * never be accepted and then ignored.
+     */
+    @JsonIgnore
+    public boolean isActive() {
+        return hasRoles() || (rolePolicies != null && !rolePolicies.isEmpty());
     }
 
     /**

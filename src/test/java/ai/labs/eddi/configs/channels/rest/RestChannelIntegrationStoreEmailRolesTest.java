@@ -180,6 +180,15 @@ class RestChannelIntegrationStoreEmailRolesTest {
     }
 
     @Test
+    @DisplayName("a lone anonymous policy (no roles) is protected from a silent drop too")
+    void wholeSaveCannotDropPolicies() throws Exception {
+        stored = new EmailControl(null, Map.of("anonymous", new RolePolicy(List.of("support"), null, null, null, null)));
+
+        assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 3, null, email(null)));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
     @DisplayName("a whole-document save is validated like the targeted edit: a widening policy is refused")
     void wholeSaveValidates() {
         var widening = email(new EmailControl(List.of(new SenderRole("customer", List.of("*@customer-a.com"))),

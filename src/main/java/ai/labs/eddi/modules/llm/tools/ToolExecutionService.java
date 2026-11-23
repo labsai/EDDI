@@ -648,6 +648,18 @@ public class ToolExecutionService {
         return result != null && result.startsWith(internalFailurePrefix(toolName));
     }
 
+    /** What every guard refusal of {@link #executeToolWrapped} starts with. */
+    public static final String GUARD_REFUSAL_PREFIX = "Error: Refused";
+
+    /**
+     * Whether {@code result} is a refusal of the escalation guard or of an email
+     * sender role's tool ceiling — the call never ran, so a caller that stores the
+     * result (the {@code mcpcalls} task) must treat it as a failure.
+     */
+    public static boolean isGuardRefusal(String result) {
+        return result != null && result.startsWith(GUARD_REFUSAL_PREFIX);
+    }
+
     /** Longest argument-error detail handed back to the model. */
     private static final int MAX_ARGUMENT_ERROR_CHARS = 300;
 

@@ -220,14 +220,14 @@ public final class EmailSenderRoles {
             }
             tools = List.copyOf(names);
             // A group discussion runs its members' own tools; the restriction cannot be
-            // carried into it, so a restricted role must not name a group target.
-            if (targets != null && !allTargets) {
-                for (String name : targets) {
-                    ChannelTarget target = targetsByName.get(name.toLowerCase(Locale.ROOT));
-                    if (target != null && target.getType() == ChannelTarget.TargetType.GROUP) {
-                        errors.add(where + ": target '" + name + "' is a group, and a role with a tools restriction cannot reach a "
-                                + "group (its members use their own tools). Remove the target or the tools restriction.");
-                    }
+            // carried into it, so a restricted role must not reach a group target —
+            // named, or through "*" / no targets at all.
+            List<String> reachable = allTargets ? List.copyOf(targetsByName.keySet()) : targets;
+            for (String name : reachable) {
+                ChannelTarget target = targetsByName.get(name.toLowerCase(Locale.ROOT));
+                if (target != null && target.getType() == ChannelTarget.TargetType.GROUP) {
+                    errors.add(where + ": target '" + target.getName() + "' is a group, and a role with a tools restriction cannot reach "
+                            + "a group (its members use their own tools). Give the role targets without groups, or drop its tools.");
                 }
             }
         }
@@ -285,7 +285,7 @@ public final class EmailSenderRoles {
             if (old == null) {
                 changes.add("policy+:" + entry.getKey());
             } else if (!old.equals(entry.getValue())) {
-                changes.add("policy~:" + entry.getKey());
+                changes.add("policy~:" + entry.getKey() + changedFields(old, entry.getValue()));
             }
         }
         for (String name : oldPolicies.keySet()) {
@@ -294,6 +294,30 @@ public final class EmailSenderRoles {
             }
         }
         return changes;
+    }
+
+    /**
+     * Which fields of a policy changed, as {@code [targets,tools,cap]} — field
+     * names only: a policy holds target and tool names, never an address.
+     */
+    private static String changedFields(RolePolicy before, RolePolicy after) {
+        List<String> fields = new ArrayList<>();
+        if (!Objects.equals(before.targets(), after.targets())) {
+            fields.add("targets");
+        }
+        if (!Objects.equals(before.tools(), after.tools())) {
+            fields.add("tools");
+        }
+        if (!Objects.equals(before.maxTurnsPerSenderPerDay(), after.maxTurnsPerSenderPerDay())) {
+            fields.add("cap");
+        }
+        if (!Objects.equals(before.approvalPolicy(), after.approvalPolicy())) {
+            fields.add("approvalPolicy");
+        }
+        if (!Objects.equals(before.sendOut(), after.sendOut())) {
+            fields.add("sendOut");
+        }
+        return "[" + String.join(",", fields) + "]";
     }
 
     private static Map<String, SenderRole> rolesByName(EmailControl control) {

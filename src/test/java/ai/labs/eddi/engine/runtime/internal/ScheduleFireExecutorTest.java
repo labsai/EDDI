@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import java.util.Set;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
 import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -211,6 +213,32 @@ class ScheduleFireExecutorTest {
      * Email plan v3 §5.3: a check-back a mail-started turn booked fires into a
      * conversation that is just as tainted, the new one included.
      */
+    @Test
+    @SuppressWarnings("unchecked")
+    void fire_checkBackUnderACeiling_carriesTheCeilingIntoTheStartAndTheTurn() throws Exception {
+        // Email plan v3 §9: the ceiling a check-back was booked under holds in the
+        // conversation it starts and in the turn it submits.
+        var schedule = makeCronSchedule("sched-ceiling", "new");
+        schedule.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL, TurnToolCeiling.CONTEXT_KEY, List.of("kb_search"))));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-ceiling", null));
+        var done = new SimpleConversationMemorySnapshot();
+        done.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<Map<String, Context>> startContext = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), eq("agent-1"), eq("system:scheduler"), startContext.capture());
+        assertEquals(Set.of("kb_search"), TurnToolCeiling.fromContext(startContext.getValue()));
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+        assertEquals(Set.of("kb_search"), TurnToolCeiling.fromContext(input.getValue().getContext()));
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void fire_taintedCheckBack_carriesTheOriginIntoTheStartAndTheTurn() throws Exception {

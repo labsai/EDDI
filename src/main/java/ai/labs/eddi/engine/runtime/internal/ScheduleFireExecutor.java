@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -1132,6 +1133,8 @@ public class ScheduleFireExecutor {
         // A check-back a mail-started turn booked starts a conversation that is just as
         // tainted (email plan v3 §5.3).
         context = TurnOrigin.withOrigin(context, TurnOrigin.fromMetadata(schedule.getMetadata()));
+        // ... and under the sender role's tool ceiling it was booked under (§9).
+        context = TurnToolCeiling.withCeiling(context, TurnToolCeiling.fromMetadata(schedule.getMetadata()));
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, context);
 
@@ -1456,6 +1459,10 @@ public class ScheduleFireExecutor {
         String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
         if (origin != null) {
             contextMap.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, origin));
+        }
+        Set<String> ceiling = TurnToolCeiling.fromMetadata(schedule.getMetadata());
+        if (ceiling != null) {
+            contextMap.put(TurnToolCeiling.CONTEXT_KEY, TurnToolCeiling.toContext(ceiling));
         }
 
         inputData.setContext(contextMap);

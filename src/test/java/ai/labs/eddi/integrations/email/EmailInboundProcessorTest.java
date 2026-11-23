@@ -1357,6 +1357,42 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("an unauthenticated reply never enters an existing conversation, so it cannot strip that conversation's tools")
+        void anonymousReplyStartsItsOwnConversation() throws Exception {
+            // Trigger mode: the only one where unauthenticated mail runs at all
+            // (conversation mode forces requireAuthentication), with thread correlation.
+            var ctx = withRoles(Map.of("requireAuthentication", "false", "correlateThreads", "true"), Map.of());
+            String root = "<root-roles@supplier.com>";
+            processor.process(ctx, EmailTestMail.mail().from(CFO).messageId(root).polled(1), Instant.now());
+            handlers.get(0).onComplete(snapshot(ConversationState.READY, 0));
+
+            verdict = new MailAuthentication(MailAuthentication.Verdict.PASS_UNALIGNED, "bulkmailer.example");
+            processor.process(ctx, EmailTestMail.mail().from(CFO).header("In-Reply-To: " + root).header("References: " + root).polled(2),
+                    Instant.now());
+
+            assertEquals(List.of("conv-1", "conv-2"), sayConversations, "the forged reply runs in a conversation of its own");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Context>> starts = ArgumentCaptor.forClass(Map.class);
+            verify(conversations, times(2)).startConversation(any(), anyString(), anyString(), starts.capture());
+            assertNull(TurnToolCeiling.fromContext(starts.getAllValues().get(0)), "the CFO's conversation keeps its tools");
+            assertEquals(Set.of(), TurnToolCeiling.fromContext(starts.getAllValues().get(1)));
+        }
+
+        @Test
+        @DisplayName("roles are active with policies alone: a lone anonymous policy still applies, and no tool for unauthenticated mail")
+        void policiesWithoutRolesApply() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.NONE, null);
+            var configuration = integration(Map.of("requireAuthentication", "false"), target("intake", AGENT), finance);
+            configuration.setEmailControl(new EmailControl(null, Map.of("anonymous", new RolePolicy(List.of("intake"), null, null, null, null))));
+            var ctx = new IntegrationContext(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()), Set.of());
+            EmailTestMail toFinance = EmailTestMail.mail().subject("finance: wire 1M");
+
+            processor.process(ctx, toFinance.polled(1), Instant.now());
+
+            assertEquals("blocked:role_target_not_allowed", row(toFinance).lastError());
+        }
+
+        @Test
         @DisplayName("a role a stored document names without a policy refuses the mail (fail closed)")
         void roleWithoutPolicyFailsClosed() throws Exception {
             var ctx = withRoles(Map.of(), Map.of());

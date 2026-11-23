@@ -91,7 +91,7 @@ public final class EmailSenderRoleResolver {
      *            none
      */
     public static Resolved resolve(EmailControl control, String sender, boolean authenticated, int integrationCap) {
-        if (control == null || !control.hasRoles()) {
+        if (control == null || !control.isActive()) {
             // No roles configured: today's behaviour, exactly.
             return new Resolved(EmailSenderRoles.ROLE_DEFAULT, null, null, integrationCap, null);
         }
@@ -102,7 +102,7 @@ public final class EmailSenderRoleResolver {
             return narrowed(EmailSenderRoles.ROLE_ANONYMOUS, policy, Set.of(), integrationCap);
         }
         String role = EmailSenderRoles.ROLE_DEFAULT;
-        for (SenderRole entry : control.getSenderRoles()) {
+        for (SenderRole entry : control.hasRoles() ? control.getSenderRoles() : List.<SenderRole>of()) {
             if (entry != null && entry.role() != null && entry.senders() != null && sender != null
                     && SenderPatterns.matchesAny(sender, entry.senders())) {
                 role = entry.role();

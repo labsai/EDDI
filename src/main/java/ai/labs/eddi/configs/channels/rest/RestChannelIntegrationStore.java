@@ -337,7 +337,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
                 }
                 EmailControl storedControl = storedEmailControl(id, baseVersion);
-                if (!rolesEdit && storedControl != null && storedControl.hasRoles() && channelConfiguration.getEmailControl() == null) {
+                if (!rolesEdit && storedControl != null && storedControl.isActive() && channelConfiguration.getEmailControl() == null) {
                     throw new BadRequestException(ROLES_DROPPED);
                 }
                 roleChanges = EmailSenderRoles.diff(storedControl, channelConfiguration.getEmailControl());
