@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
+import ai.labs.eddi.engine.org.OrgContext;
+import ai.labs.eddi.engine.org.OrgId;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -13,8 +15,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -67,6 +71,59 @@ class InMemoryConversationCoordinatorTest {
     @Test
     void shouldStartWithEmptyQueueDepths() {
         assertTrue(coordinator.getQueueDepths().isEmpty());
+    }
+
+    // ==================== Org binding ====================
+
+    /**
+     * Plan §6.3: a queued turn is submitted later, from the thread that finished
+     * the one before it. It must be submitted under the binding of the thread that
+     * enqueued it, which the runtime then carries to the worker thread.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aQueuedTurnIsSubmittedUnderTheBindingOfItsEnqueuer() throws Exception {
+        Callable<Void> first = mock(Callable.class);
+        Callable<Void> second = mock(Callable.class);
+        Map<Callable<Void>, Optional<OrgId>> boundAtSubmission = new HashMap<>();
+        when(runtime.submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), isNull())).thenAnswer(i -> {
+            boundAtSubmission.put(i.getArgument(0), OrgContext.current());
+            return null;
+        });
+
+        coordinator.submitInOrder("conv-org", first); // unbound enqueuer
+        OrgContext.callAs(OrgId.DEFAULT, () -> {
+            coordinator.submitInOrder("conv-org", second);
+            return null;
+        });
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> firstDone = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(first), firstDone.capture(), isNull());
+        // the first turn finishes on an unbound thread, which submits the second
+        firstDone.getValue().onComplete(null);
+
+        assertEquals(Optional.empty(), boundAtSubmission.get(first));
+        assertEquals(Optional.of(OrgId.DEFAULT), boundAtSubmission.get(second));
+        assertEquals(Optional.empty(), OrgContext.current());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theRuntimeAndTheMarkerChecksSeeTheOriginalTask() {
+        IDiscardableTask discardable = mock(IDiscardableTask.class, withSettings().extraInterfaces(Callable.class));
+        Callable<Void> task = (Callable<Void>) discardable;
+        // the first turn is accepted; the queued one is refused when its turn comes
+        doReturn(null).doThrow(new RejectedExecutionException("full")).when(runtime).submitCallable(any(Callable.class),
+                any(IRuntime.IFinishedExecution.class), isNull());
+        Callable<Void> first = mock(Callable.class);
+        coordinator.submitInOrder("conv-marker", first);
+        coordinator.submitInOrder("conv-marker", task);
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> firstDone = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime, atLeastOnce()).submitCallable(eq(first), firstDone.capture(), isNull());
+        firstDone.getValue().onComplete(null);
+
+        verify(runtime).submitCallable(eq(task), any(IRuntime.IFinishedExecution.class), isNull());
+        verify(discardable).onDiscarded(any(RejectedExecutionException.class));
     }
 
     // ==================== Task Processing ====================

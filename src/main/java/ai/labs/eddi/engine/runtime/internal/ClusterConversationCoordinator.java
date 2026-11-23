@@ -245,10 +245,11 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         try {
             // Inside the guard: a bind that throws must still release the lease, answer the
             // caller and drain the queue — outside it, the conversation stayed wedged.
-            if (callable instanceof ILeaseAwareTask aware) {
+            if (OrgCapturedTask.original(callable) instanceof ILeaseAwareTask aware) {
                 aware.bindLease(lease);
             }
-            runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
+            // under the requester's binding, captured at enqueue
+            OrgCapturedTask.submitUnder(callable, () -> runtime.submitCallable(OrgCapturedTask.original(callable), new IRuntime.ITurnExecution<>() {
                 @Override
                 public void onComplete(Void result) {
                     totalProcessed.incrementAndGet();
@@ -265,7 +266,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                     totalProcessed.incrementAndGet();
                     submitNext(conversationId, queue);
                 }
-            }, null);
+            }, null));
         } catch (RuntimeException | Error e) {
             // The runtime refused the task after we obtained the lease. There is no
             // caller left to roll back to: dead-letter it, tell it it was dropped, and
@@ -275,7 +276,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                     sanitize(conversationId));
             routeToDeadLetter(conversationId, e, callable);
             totalProcessed.incrementAndGet();
-            if (callable instanceof IDiscardableTask discardable) {
+            if (OrgCapturedTask.original(callable) instanceof IDiscardableTask discardable) {
                 notifyDiscarded(conversationId, new DiscardedTask(discardable, e));
             }
             submitNext(conversationId, queue);
@@ -324,7 +325,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      */
     private void leaseNotObtained(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable, Throwable cause) {
         LOGGER.warnf("Turn of conversation %s not run: %s", sanitize(conversationId), cause.getMessage());
-        if (callable instanceof IDiscardableTask discardable) {
+        if (OrgCapturedTask.original(callable) instanceof IDiscardableTask discardable) {
             notifyDiscarded(conversationId, new DiscardedTask(discardable, cause));
         }
         submitNext(conversationId, queue);

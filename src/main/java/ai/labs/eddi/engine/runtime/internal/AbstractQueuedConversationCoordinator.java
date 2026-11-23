@@ -153,7 +153,10 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
     }
 
     @Override
-    public void submitInOrder(String conversationId, Callable<Void> callable) {
+    public void submitInOrder(String conversationId, Callable<Void> task) {
+        // the requester's org, captured now: the task is submitted later from another
+        // thread (plan §6.3)
+        final Callable<Void> callable = OrgCapturedTask.capture(task);
         final String safeConversationId = sanitize(conversationId);
         // Max-size check: only reject truly new conversations, not follow-up messages.
         // Note: this check is intentionally non-atomic (soft limit). Two threads
@@ -243,7 +246,8 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * A failed turn is dead-lettered once and the queue moves on.
      */
     protected void execute(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable) {
-        runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
+        // under the requester's binding, captured at enqueue
+        OrgCapturedTask.submitUnder(callable, () -> runtime.submitCallable(OrgCapturedTask.original(callable), new IRuntime.ITurnExecution<>() {
             @Override
             public void onComplete(Void result) {
                 totalProcessed.incrementAndGet();
@@ -259,7 +263,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                 totalProcessed.incrementAndGet();
                 submitNext(conversationId, queue);
             }
-        }, null);
+        }, null));
     }
 
     /**
@@ -334,7 +338,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * The replayable description of a task, or {@code null} when it carries none.
      */
     protected static Map<String, Object> describe(Callable<Void> task) {
-        if (task instanceof IDescribedTask described) {
+        if (OrgCapturedTask.original(task) instanceof IDescribedTask described) {
             try {
                 return described.describe();
             } catch (RuntimeException e) {
@@ -378,7 +382,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                         // runs. Tell the task so it can do that itself — otherwise
                         // dropping it here re-creates exactly the leak the release
                         // block exists to prevent, and the HTTP caller waits forever.
-                        if (next instanceof IDiscardableTask discardable) {
+                        if (OrgCapturedTask.original(next) instanceof IDiscardableTask discardable) {
                             if (discarded.isEmpty()) {
                                 discarded = new ArrayList<>(1);
                             }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -153,6 +154,63 @@ class OrgPropagationTest {
         Callable<Boolean> task = OrgScope.platform("test:propagation", () -> OrgPropagation.wrap((Callable<Boolean>) OrgContext::isPlatform));
 
         assertTrue(pool.submit(task).get());
+    }
+
+    @Test
+    void aCapturedBindingIsRestoredAroundWorkChosenLater() throws Exception {
+        OrgPropagation.Captured acme = OrgContext.callAs(ACME, OrgPropagation::capture);
+        AtomicReference<Optional<OrgId>> seen = new AtomicReference<>();
+
+        assertEquals(ACME, pool.submit(() -> acme.call(OrgContext::require)).get());
+        pool.submit(() -> acme.run(() -> seen.set(OrgContext.current()))).get();
+
+        assertEquals(Optional.of(ACME), seen.get());
+        assertEquals(Optional.empty(), pool.submit(OrgContext::current).get(), "the pooled thread keeps nothing");
+    }
+
+    @Test
+    void aCapturedBindingForOneOrgIsRefusedOnAThreadBoundToAnother() throws Exception {
+        OrgPropagation.Captured acme = OrgContext.callAs(ACME, OrgPropagation::capture);
+
+        assertThrows(OrgBindingException.class, () -> OrgContext.callAs(GLOBEX, () -> acme.call(OrgContext::require)));
+    }
+
+    // ---- two layers: the coordinator captures at enqueue, the runtime at
+    // submission
+
+    private <T> T twoLayers(Callable<Callable<T>> outerCapture) throws Exception {
+        Callable<T> outer = outerCapture.call();
+        return pool.submit(outer).get();
+    }
+
+    @Test
+    void anOrgCapturedInsideAnUnboundOuterLayerIsRestored() throws Exception {
+        Callable<OrgId> inner = OrgContext.callAs(ACME, () -> OrgPropagation.wrap((Callable<OrgId>) OrgContext::require));
+
+        assertEquals(ACME, twoLayers(() -> OrgPropagation.wrap(inner)));
+    }
+
+    @Test
+    void anOrgCapturedInsideAPlatformOuterLayerBindsItsOrg() throws Exception {
+        Callable<OrgId> inner = OrgContext.callAs(ACME, () -> OrgPropagation.wrap((Callable<OrgId>) OrgContext::require));
+
+        assertEquals(ACME, twoLayers(() -> OrgScope.platform("test:two-layers", () -> OrgPropagation.wrap(inner))));
+    }
+
+    @Test
+    void unboundWorkInsideAnOrgOuterLayerKeepsThatOrg() throws Exception {
+        Callable<Optional<OrgId>> inner = OrgPropagation.wrap((Callable<Optional<OrgId>>) OrgContext::current);
+
+        assertEquals(Optional.of(ACME), twoLayers(() -> OrgContext.callAs(ACME, () -> OrgPropagation.wrap(inner))));
+    }
+
+    @Test
+    void workForOneOrgInsideAnOuterLayerForAnotherIsRefused() throws Exception {
+        Callable<OrgId> inner = OrgContext.callAs(GLOBEX, () -> OrgPropagation.wrap((Callable<OrgId>) OrgContext::require));
+
+        ExecutionException e = assertThrows(ExecutionException.class,
+                () -> twoLayers(() -> OrgContext.callAs(ACME, () -> OrgPropagation.wrap(inner))));
+        assertTrue(e.getCause() instanceof OrgBindingException, String.valueOf(e.getCause()));
     }
 
     @Test

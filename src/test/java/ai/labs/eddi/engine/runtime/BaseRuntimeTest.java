@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.org.OrgContext;
+import ai.labs.eddi.engine.org.OrgId;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.Optional;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -307,6 +310,32 @@ class BaseRuntimeTest {
         }
         assertEquals(0.0, gauge(registry, "eddi.runtime.executor.active", "managed"));
         assertEquals(0.0, gauge(registry, "eddi.runtime.executor.queued", "managed"));
+    }
+
+    @Test
+    @DisplayName("the work and its completion callback run with the submitter's org, and the worker thread keeps none")
+    void submissionCarriesTheSubmittersOrg() throws Exception {
+        CompletableFuture<Optional<OrgId>> inCallback = new CompletableFuture<>();
+        Callable<Optional<OrgId>> work = OrgContext::current;
+        IRuntime.IFinishedExecution<Optional<OrgId>> callback = new IRuntime.IFinishedExecution<>() {
+            @Override
+            public void onComplete(Optional<OrgId> result) {
+                inCallback.complete(OrgContext.current());
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                inCallback.completeExceptionally(t);
+            }
+        };
+
+        Future<Optional<OrgId>> bound = OrgContext.callAs(OrgId.DEFAULT, () -> runtime.submitCallable(work, callback, null));
+
+        assertEquals(Optional.of(OrgId.DEFAULT), bound.get(5, TimeUnit.SECONDS), "the work sees the binding on the worker thread");
+        assertEquals(Optional.of(OrgId.DEFAULT), inCallback.get(5, TimeUnit.SECONDS), "so does the callback");
+        // the same single worker thread, now for an unbound submitter
+        assertEquals(Optional.empty(), runtime.submitCallable(work, null).get(5, TimeUnit.SECONDS),
+                "the binding ended with the task; the next task on the thread does not inherit it");
     }
 
     private static double gauge(SimpleMeterRegistry registry, String name, String pool) {
