@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.security.EmailReplyReview;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,9 +77,10 @@ public final class HitlDecisionValidator {
             // plain
             // approval), so it cannot carry a reason code either.
             HitlRevisionCandidate candidate = candidateOf(snapshot);
+            String replyDraft = EmailReplyReview.draftIn(snapshot);
+            String draft = replyDraft != null ? replyDraft : candidate != null ? candidate.getDraft() : null;
             boolean answerEdited = decision.getEditedAnswer() != null
-                    && EditMetrics.ofText(EditSummary.Kind.ANSWER, candidate != null ? candidate.getDraft() : null, decision.getEditedAnswer())
-                            .changed();
+                    && EditMetrics.ofText(EditSummary.Kind.ANSWER, draft, decision.getEditedAnswer()).changed();
             boolean explainsAChange = verdict == HitlVerdict.REJECTED || answerEdited || anyAmended || anyCallRejected(decision);
             if (!explainsAChange) {
                 throw new IllegalArgumentException("reasonCode explains a rejection or an edit; a plain approval takes none");
@@ -134,6 +137,20 @@ public final class HitlDecisionValidator {
         if (toolPause) {
             throw new IllegalArgumentException("editedAnswer applies to rule pauses; amend a tool call with "
                     + "toolDecisions[callId].amendedArguments instead");
+        }
+        // Reply review (email plan v3 §8.2): the edit replaces the whole reply, on
+        // every agent — what a person reviews before it is mailed is theirs to change,
+        // whatever the agent's own allowAnswerEdits says.
+        Map<String, Object> replyReview = EmailReplyReview.pendingIn(snapshot);
+        if (replyReview != null) {
+            String draft = (String) replyReview.get("draft");
+            validateText(decision.getEditedAnswer(), EmailReplyReview.maxEditChars(review, draft), "editedAnswer");
+            if (decision.getEditedAnswer().contains(SecretRedactionFilter.REDACTED)
+                    && (draft == null || !draft.contains(SecretRedactionFilter.REDACTED))) {
+                throw new IllegalArgumentException("editedAnswer still carries the redaction placeholder " + SecretRedactionFilter.REDACTED
+                        + " of the served draft: replace it with the text you mean, or approve without an edit");
+            }
+            return;
         }
         if (review == null || !review.answerEditsAllowed()) {
             throw new IllegalArgumentException("this agent does not allow approving with an edited answer "

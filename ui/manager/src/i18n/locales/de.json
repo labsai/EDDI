@@ -3637,7 +3637,9 @@
     "noReason": "Kein Grund",
     "reasonLabel": "Grund (für eine Ablehnung oder Änderung)",
     "reviewerEdit": "Änderung durch Prüfer",
-    "showOriginal": "Original anzeigen"
+    "showOriginal": "Original anzeigen",
+    "replyReviewTitle": "E-Mail-Antwort wartet auf Prüfung",
+    "replyReviewHint": "Dies ist die vollständige Antwort, die EDDI an den Absender der Mail sendet. Geben Sie sie frei, bearbeiten Sie sie und geben Sie sie frei, oder lehnen Sie sie ab; eine abgelehnte oder abgelaufene Prüfung sendet nichts. Empfänger und Betreff lassen sich nicht ändern."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -5589,7 +5591,8 @@
       "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen.",
       "approvalPolicyNone": "Gespeichert, aber ein Ziel, dessen Agent handeln kann, hat keine Freigaberichtlinie: Mails nutzen seine Tools nur unter den eigenen Tool-Freigaben des Agenten. Erwägen Sie „Jede Aktion freigeben“.",
       "ruleCallsRefused": "Gespeichert. Ein Ziel mit Freigaberichtlinie hat regelgesteuerte HTTP- oder MCP-Aufrufe: Ein Mail-Turn verweigert sie, sofern „Nur lesende Tools“ sie nicht nennt.",
-      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf die Freigabe des E-Mail-Gates. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin."
+      "readOnlyEverything": "Gespeichert, aber ein Muster unter „Nur lesende Tools“ eines Ziels mit Freigaberichtlinie passt auf jedes Tool (etwa *): Kein Tool-Aufruf eines Mail-Turns wartet auf die Freigabe des E-Mail-Gates. Nennen Sie stattdessen die nur lesenden Tools. Die eigenen Tool-Freigaben des Agenten gelten weiterhin.",
+      "replyReviewNoInternalDomains": "Gespeichert. Die Antwortprüfung gilt für externe Antworten, aber keine interne Domain ist eingetragen: Jede Antwort wartet auf Prüfung."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5642,6 +5645,26 @@
       "rejectedReplyLabel": "Antwort bei Ablehnung",
       "rejectedReplyPlaceholder": "Ihre Anfrage wurde nicht freigegeben.",
       "rejectedReplyHint": "Wird nur im Konversationsmodus gesendet; der Trigger-Modus antwortet nie."
+    },
+    "replyReview": {
+      "title": "Antwortprüfung",
+      "triggerNote": "Der Trigger-Modus antwortet nie, daher gibt es keine Antwort zu prüfen.",
+      "modeLabel": "Antworten vor dem Versand prüfen",
+      "mode": {
+        "never": "Nie",
+        "always": "Jede Antwort",
+        "firstContact": "Die Antwort auf die erste Mail eines Absenders",
+        "external": "Antworten an externe Adressen"
+      },
+      "hint": {
+        "never": "Antworten werden so gesendet, wie der Agent sie geschrieben hat.",
+        "always": "Jede Antwort wartet auf der Seite Freigaben, bis eine Person sie freigibt, bearbeitet oder ablehnt.",
+        "firstContact": "Die Antwort auf die erste Mail eines Absenders an ein Ziel wartet auf Prüfung; spätere Antworten werden direkt gesendet.",
+        "external": "Eine Antwort an eine Adresse außerhalb der internen Domains wartet auf Prüfung."
+      },
+      "internalDomainsLabel": "Interne Domains",
+      "internalDomainsHint": "Domains, deren Adressen als intern gelten, etwa contoso.com oder *.contoso.com (nur Subdomains). Ohne Eintrag ist jeder Empfänger extern.",
+      "internalDomainInvalid": "Geben Sie eine Domain wie contoso.com ein, oder *.contoso.com für ihre Subdomains."
     }
   },
   "emailSenders": {

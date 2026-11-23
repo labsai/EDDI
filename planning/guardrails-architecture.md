@@ -251,3 +251,11 @@ data: { "type": "prompt-injection", "phase": "input", "verdict": "BLOCK", "taskI
 | **[NEW]** `RegexFilterGuardrail.java` | Custom regex patterns |
 | **[NEW]** `CustomLlmGuardrail.java` | User-defined LLM prompt as guardrail |
 | `ConversationEventSink.java` | Add `onGuardrailTriggered()` event |
+
+## Open item: human-edited email replies (2026-11-22)
+
+Email reply review ([email-integration.md](../docs/email-integration.md#reply-review)) lets an approver replace a
+held reply as a whole. That text is sent without passing the agent's output guardrails, because none exist on that
+path yet. When output guardrails ship, the reply-review decision (`Conversation.decideReplyReview`) must screen an
+edited reply with the target agent's output guardrails before it is recorded as the text to send, as
+`review.screenEdits: OUTPUT_GUARDRAILS` already does for the LLM task's in-place edits.

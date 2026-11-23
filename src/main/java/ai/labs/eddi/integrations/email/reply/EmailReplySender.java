@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.reply;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -22,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.integrations.email.EmailApprovalNotes;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
@@ -273,13 +275,99 @@ public class EmailReplySender {
                     sanitize(conversationId), inbound.id());
             return Optional.empty();
         }
-        String text = EmailReplyThread.replyText(outputs, step);
+        String text = reviewedReplyText(outputs, step);
+        if (text == null) {
+            LOGGER.debugf("Email integration %s: the reply of conversation %s to mail %s has no approved review; nothing is sent",
+                    sanitize(integrationId), sanitize(conversationId), inbound.id());
+            return Optional.empty();
+        }
         if (text.isBlank()) {
             metrics.reply("no_output");
             return Optional.empty();
         }
-        return enqueue(new Request(integrationId, settings, inbound, conversationId, snapshot.getUserId(),
-                EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.REPLY, Integer.toString(step), text), now);
+        Request request = new Request(integrationId, settings, inbound, conversationId, snapshot.getUserId(),
+                EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.REPLY, Integer.toString(step), text);
+        String held = EmailReplyReview.stateOf(outputs.get(step)) == EmailReplyReview.State.NOT_ARMED ? reviewNowRequired(request) : null;
+        if (held != null) {
+            return hold(request, held, now);
+        }
+        return enqueue(request, now);
+    }
+
+    /**
+     * The {@code lastError} prefix of a reply held because it now needs a review.
+     */
+    static final String REVIEW_REQUIRED = "REVIEW_REQUIRED: ";
+
+    /**
+     * Why the reply of a turn that was not armed for review must not go out now, or
+     * null: the integration's reply review asks for one under the current settings
+     * - {@code always} since the mail arrived, or {@code external} and the
+     * recipient (under the current {@code honorReplyTo}) is outside the current
+     * {@code internalDomains}. Such a turn is over and cannot be reviewed any more,
+     * so its reply is recorded and not sent.
+     */
+    static String reviewNowRequired(Request request) {
+        EmailChannelSettings settings = request.settings();
+        EmailControl.ReplyReview mode = settings.replyReview();
+        if (mode == EmailControl.ReplyReview.ALWAYS) {
+            return REVIEW_REQUIRED + "always";
+        }
+        if (mode == EmailControl.ReplyReview.EXTERNAL) {
+            String sender = request.inbound().recipient();
+            String recipient = sender == null ? null : EmailReplyRecipients.recipientOf(settings, sender, request.stepMail());
+            if (recipient == null || !settings.isInternal(recipient)) {
+                return REVIEW_REQUIRED + "external";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Records {@code request} as a SUPPRESSED reply row with {@code reason}; sends
+     * nothing.
+     */
+    private Optional<LedgerEntry> hold(Request request, String reason, Instant now) {
+        EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
+                request.stepMail(), request.userId());
+        if (!decision.allowed()) {
+            return Optional.empty();
+        }
+        String key = idempotencyKey(request.conversationId(), request.inbound().id(), request.kind(), request.discriminator());
+        LedgerEntry suppressed = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT,
+                MessageIds.generate(IEmailSuppressionStore.domainOf(request.settings().address())), request.conversationId(),
+                sourceRef(request.inbound().id(), request.kind(), request.discriminator()), key, decision.recipient(), State.SUPPRESSED, 0, null,
+                null, null, reason, now, now, now.plus(retention));
+        if (ledger.insertIfAbsent(suppressed)) {
+            metrics.reply("review_required");
+            LOGGER.warnf("Email integration %s: the reply of conversation %s is not sent: the current reply review asks for one and its turn "
+                    + "was not reviewed (%s)", sanitize(request.integrationId()), sanitize(request.conversationId()), reason);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The text the reply to the mail of step {@code step} carries, or null when it
+     * must not be sent (email plan v3 §8.2): a turn armed for reply review sends
+     * only once its review was approved — the approver's text when they edited it,
+     * else the turn's — and nothing while it waits, after a rejection or an expiry,
+     * or when it ended undecided. A turn that was not armed sends what it wrote.
+     */
+    static String reviewedReplyText(List<? extends Map<String, Object>> outputs, int step) {
+        Map<String, Object> output = outputs.get(step);
+        if (EmailApprovalGate.REJECTED_OUTPUT_VALUE.equals(output.get(EmailApprovalGate.REJECTED_OUTPUT_KEY))) {
+            // Rejected before the agent ran: the step holds only the target's
+            // rejectedReply, which no agent wrote.
+            return EmailReplyThread.replyText(outputs, step);
+        }
+        return switch (EmailReplyReview.stateOf(output)) {
+            case NOT_ARMED -> EmailReplyThread.replyText(outputs, step);
+            case APPROVED -> {
+                String edited = EmailReplyReview.editedText(output);
+                yield edited != null ? edited : EmailReplyThread.replyText(outputs, step);
+            }
+            case UNDECIDED, PENDING, REJECTED -> null;
+        };
     }
 
     /**
@@ -291,6 +379,16 @@ public class EmailReplySender {
                                                   String groupConversationId,
                                                   String userId, Map<String, Object> mail, String synthesis, Instant now) {
         if (settings == null || !settings.replies() || synthesis == null || synthesis.isBlank() || inbound == null) {
+            return Optional.empty();
+        }
+        if (settings.replyReview() != EmailControl.ReplyReview.NEVER) {
+            // Reply review is refused with GROUP targets at save, but a document written
+            // another way can still hold both. A group's synthesis has no turn that could
+            // wait for review, so rather than go out unreviewed it is not sent.
+            ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REPLY_REVIEW_UNSUPPORTED, false, now);
+            metrics.reply("review_unsupported");
+            LOGGER.warnf("Email integration %s: replyReview is %s but mail %s went to a GROUP target, whose answer cannot wait for review; "
+                    + "no reply is sent", sanitize(integrationId), settings.replyReview().json(), inbound.id());
             return Optional.empty();
         }
         return enqueue(new Request(integrationId, settings, inbound, groupConversationId, userId, mail, ReplyKind.GROUP, "synthesis", synthesis),
@@ -338,14 +436,84 @@ public class EmailReplySender {
             return Optional.empty();
         }
         LedgerEntry inbound = located.get().inbound();
-        if (rejectedBeforeRun(snapshot.getConversationOutputs(), inbound.messageId())) {
+        Optional<LedgerEntry> reviewed = onReviewedTurnResumed(located.get(), snapshot, verdict, now);
+        if (reviewed != null) {
+            return reviewed;
+        }
+        boolean rejectedBeforeRun = rejectedBeforeRun(snapshot.getConversationOutputs(), inbound.messageId());
+        if (rejectedBeforeRun) {
             ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REJECTED, false, now);
-        } else if (verdict == HitlVerdict.APPROVED && snapshot.getConversationState() != ConversationState.ERROR
+        }
+        Optional<LedgerEntry> reply = resumeRequest(located.get(), snapshot, verdict == null ? "NONE" : verdict.name())
+                .flatMap(request -> enqueue(request, now));
+        if (reply.isPresent() && !rejectedBeforeRun && verdict == HitlVerdict.APPROVED && snapshot.getConversationState() != ConversationState.ERROR
                 && AWAITING_HUMAN_NOTE.equals(inbound.lastError())) {
-            // The turn ran after all: the mail is an answered contact now (firstContact).
+            // The turn ran after all and its answer has a reply row: an answered contact
+            // now (firstContact). A refused or throttled reply is none.
             ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, null, false, now);
         }
-        return resumeRequest(located.get(), snapshot, verdict == null ? "NONE" : verdict.name()).flatMap(request -> enqueue(request, now));
+        return reply;
+    }
+
+    /**
+     * A resume of a mail turn armed for reply review (email plan v3 §8.2), or null
+     * for any other turn. Never sends what the agent wrote unless the review
+     * approved it:
+     * <ul>
+     * <li>the review approved — the reply, as a {@link ReplyKind#REPLY} keyed by
+     * the mail's step, so a retry or an S/MIME hold re-reads the approved text and
+     * the reply goes once;</li>
+     * <li>the review rejected or expired — nothing; the mail's row notes
+     * {@link EmailApprovalNotes#REPLY_REJECTED};</li>
+     * <li>the review waits now (an earlier pause of the turn was approved and the
+     * turn reached its review) — nothing;</li>
+     * <li>the turn ended without reaching its review (a rejected step, nothing to
+     * send) — the notice of the decision without any agent text.</li>
+     * </ul>
+     */
+    private Optional<LedgerEntry> onReviewedTurnResumed(Located located, SimpleConversationMemorySnapshot snapshot, HitlVerdict verdict,
+                                                        Instant now) {
+        LedgerEntry inbound = located.inbound();
+        var outputs = snapshot.getConversationOutputs();
+        int step = EmailReplyThread.mailStep(outputs, inbound.messageId());
+        // A mail the email gate rejected before the agent ran is answered with the
+        // target's rejectedReply, which no agent wrote: the gate's own path.
+        if (step < 0 || rejectedBeforeRun(outputs, inbound.messageId())) {
+            return null;
+        }
+        EmailReplyReview.State review = EmailReplyReview.stateOf(outputs.get(step));
+        switch (review) {
+            case NOT_ARMED :
+                return null;
+            case APPROVED : {
+                metrics.reply("review_approved");
+                Optional<LedgerEntry> reply = replyRequest(located, snapshot, Integer.toString(step)).flatMap(request -> enqueue(request, now));
+                // An answered contact (firstContact) only once a reply row exists: a
+                // refused, suppressed or throttled reply, or nothing to send, is none.
+                if (reply.isPresent() && AWAITING_HUMAN_NOTE.equals(inbound.lastError())) {
+                    ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, null, false, now);
+                }
+                return reply;
+            }
+            case REJECTED : {
+                ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REPLY_REJECTED, false, now);
+                metrics.reply("review_rejected");
+                LOGGER.infof("Email integration %s: the reply of conversation %s to mail %s was rejected in review; nothing is sent",
+                        sanitize(inbound.integrationId()), sanitize(inbound.conversationId()), inbound.id());
+                return Optional.empty();
+            }
+            case PENDING :
+                return Optional.empty();
+            default : {
+                if (snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    return Optional.empty();
+                }
+                String text = resumeText(verdict == null ? "NONE" : verdict.name(), snapshot.getConversationState(), null);
+                String discriminator = (verdict == null ? "NONE" : verdict.name()) + "." + sha256(text).substring(0, 16);
+                return enqueue(new Request(inbound.integrationId(), located.settings(), inbound, inbound.conversationId(), snapshot.getUserId(),
+                        EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.RESUME, discriminator, text), now);
+            }
+        }
     }
 
     /** The note the inbound processor closes a paused mail's row with. */
@@ -566,8 +734,16 @@ public class EmailReplySender {
             // not answered yet, so there is no thread step to answer from.
             return Optional.empty();
         }
+        EmailReplyReview.State review = EmailReplyReview.stateOf(outputs.get(step));
+        if (review == EmailReplyReview.State.PENDING) {
+            // The reply itself waits for review (email plan v3 §8.2): the sender hears
+            // nothing until it is decided — the notice would carry the unreviewed draft.
+            return Optional.empty();
+        }
         String reason = pauseReason(inbound.conversationId(), pauseId);
-        String text = pauseNotice(EmailReplyThread.replyText(outputs, step), reason);
+        // A turn armed for reply review never mails what the agent wrote before its
+        // review: the notice carries no output, only that the turn waits.
+        String text = pauseNotice(review == EmailReplyReview.State.NOT_ARMED ? EmailReplyThread.replyText(outputs, step) : null, reason);
         return Optional.of(new Request(inbound.integrationId(), located.settings(), inbound, inbound.conversationId(), snapshot.getUserId(),
                 EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.PAUSE, pauseId, text));
     }
@@ -588,7 +764,13 @@ public class EmailReplySender {
                 return Optional.empty();
             }
         } else {
-            text = resumeText(verdict, snapshot.getConversationState(), EmailReplyThread.lastText(outputs));
+            // A turn armed for reply review never mails what the agent wrote through a
+            // continuation: only its approved review sends it (as a REPLY). Read again on
+            // every retry, so a row written with the neutral text stays neutral.
+            String continuation = EmailReplyReview.stateOf(outputs.get(step)) == EmailReplyReview.State.NOT_ARMED
+                    ? EmailReplyThread.lastText(outputs)
+                    : null;
+            text = resumeText(verdict, snapshot.getConversationState(), continuation);
         }
         String discriminator = verdict + "." + sha256(text).substring(0, 16);
         return Optional.of(new Request(inbound.integrationId(), located.settings(), inbound, inbound.conversationId(), snapshot.getUserId(),
@@ -943,6 +1125,12 @@ public class EmailReplySender {
             terminal(row, State.SUPPRESSED, kind == ReplyKind.PAUSE ? PAUSE_RESOLVED : CONTENT_UNAVAILABLE, "suppressed", now);
             return;
         }
+        if (kind == ReplyKind.RESUME && !request.get().discriminator().equals(ref[2])) {
+            // The row was written for another text than the conversation gives now (it
+            // moved on, or the turn is under reply review): never send a different one.
+            terminal(row, State.SUPPRESSED, CONTENT_UNAVAILABLE, "suppressed", now);
+            return;
+        }
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, inbound.get(), request.get().stepMail(),
                 request.get().userId());
         if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
@@ -975,8 +1163,10 @@ public class EmailReplySender {
             return Optional.empty();
         }
         Map<String, Object> mail = EmailReplyThread.mailOf(outputs.get(step));
-        String text = EmailReplyThread.replyText(outputs, step);
-        if (mail == null || text.isBlank()) {
+        // Every retry asks the review again: a row is only written after an approval,
+        // and what is sent is the approved text, re-read from the step.
+        String text = reviewedReplyText(outputs, step);
+        if (mail == null || text == null || text.isBlank()) {
             return Optional.empty();
         }
         LedgerEntry inbound = located.inbound();

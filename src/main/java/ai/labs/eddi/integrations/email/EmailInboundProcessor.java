@@ -7,6 +7,8 @@ package ai.labs.eddi.integrations.email;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
+import ai.labs.eddi.integrations.email.reply.EmailReplyRecipients;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
@@ -32,6 +34,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
@@ -453,6 +456,8 @@ public class EmailInboundProcessor {
                 || approvalPolicy == ChannelTarget.ApprovalPolicy.FIRST_CONTACT && isFirstContact(id, sender, authenticated, target, row));
         Context approvalGate = EmailApprovalGate.contextValue(approvalPolicy.json(), target.getReadOnlyTools(), preRun,
                 rejectedReply(target, settings), preRunReason(target, authenticated), preRun ? heldMailView(parsed) : null);
+        // Reply review (email plan v3 §8.2): decided per mail, armed on its turn only.
+        Context replyReview = replyReviewOf(id, settings, target, row, parsed, sender, authenticated);
 
         // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
@@ -513,6 +518,9 @@ public class EmailInboundProcessor {
             context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
             if (approvalGate != null) {
                 context.put(EmailApprovalGate.CONTEXT_KEY, approvalGate);
+            }
+            if (replyReview != null) {
+                context.put(EmailReplyReview.CONTEXT_KEY, replyReview);
             }
             input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true));
             InputData inputData = new InputData(input, context);
@@ -764,6 +772,59 @@ public class EmailInboundProcessor {
             }
         }
         return true;
+    }
+
+    /**
+     * The reply review of this mail's turn (email plan v3 §8.2), or null when its
+     * reply goes out unreviewed: conversation mode, an agent target, and
+     * {@code emailControl.replyReview} asking for it — {@code always};
+     * {@code firstContact} for a sender's first answered mail to the target
+     * ({@link #isFirstContact}); {@code external} when the reply's recipient (as
+     * {@link EmailReplyRecipients} chooses it, Reply-To included) is outside
+     * {@code internalDomains}. A recipient that cannot be chosen counts as
+     * external.
+     */
+    Context replyReviewOf(String integrationId, EmailChannelSettings settings, ChannelTarget target, LedgerEntry row, InboundMail parsed,
+                          String sender, boolean authenticated) {
+        if (!settings.replies() || target.getType() == ChannelTarget.TargetType.GROUP) {
+            return null;
+        }
+        EmailControl.ReplyReview mode = settings.replyReview();
+        boolean review = switch (mode) {
+            case NEVER -> false;
+            case ALWAYS -> true;
+            case FIRST_CONTACT -> isFirstContact(integrationId, sender, authenticated, target, row);
+            case EXTERNAL -> {
+                // The mail has not run yet, so the reply's checks cannot be asked; only
+                // where it would go — the sender, or its Reply-To under honorReplyTo.
+                String recipient;
+                try {
+                    recipient = sender == null ? null : EmailReplyRecipients.recipientOf(settings, sender, mailData(parsed, List.of(), false));
+                } catch (RuntimeException e) {
+                    recipient = null;
+                }
+                yield recipient == null || !settings.isInternal(recipient);
+            }
+        };
+        if (!review) {
+            return null;
+        }
+        return EmailReplyReview.contextValue(mode.json(), replyReviewReason(target, mode));
+    }
+
+    /**
+     * What the approver of a reply review is shown: the target and why it waits —
+     * never the recipient or the subject (the reason reaches the audit ledger).
+     */
+    static String replyReviewReason(ChannelTarget target, EmailControl.ReplyReview mode) {
+        String why = switch (mode) {
+            case FIRST_CONTACT -> "it answers a sender's first mail";
+            case EXTERNAL -> "it goes to an address outside the internal domains";
+            default -> "every reply is reviewed";
+        };
+        String text = "The reply to a mail to target '" + target.getName() + "' waits for review before it is sent: " + why
+                + ". Approve, edit or reject it; a rejected or expired review sends nothing.";
+        return text.length() > 500 ? text.substring(0, 497) + "..." : text;
     }
 
     /**

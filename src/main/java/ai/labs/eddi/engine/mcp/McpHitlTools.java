@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -238,6 +239,10 @@ public class McpHitlTools {
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
             // The same view REST serves: rendered once at pause commit, re-redacted now.
             summary.put("approvalContext", paused ? ApprovalContextViews.toView(snapshot.getHitlApprovalContext()) : null);
+            // Email reply review (email plan v3 §8.2): the pause holds a reply; its text is
+            // the approval context's "Reply" item, and resume_conversation's editedAnswer
+            // replaces it as a whole.
+            summary.put("replyReview", paused && EmailReplyReview.draftIn(snapshot) != null);
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);

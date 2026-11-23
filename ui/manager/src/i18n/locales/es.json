@@ -3670,7 +3670,9 @@
     "noReason": "Sin motivo",
     "reasonLabel": "Motivo (de un rechazo o un cambio)",
     "reviewerEdit": "Cambio del revisor",
-    "showOriginal": "Mostrar el original"
+    "showOriginal": "Mostrar el original",
+    "replyReviewTitle": "Respuesta por correo pendiente de revisión",
+    "replyReviewHint": "Esta es la respuesta completa que EDDI enviará al remitente del correo. Apruébela, edítela y apruébela, o recházela; una revisión rechazada o caducada no envía nada. El destinatario y el asunto no se pueden cambiar."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
@@ -5641,7 +5643,8 @@
       "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas.",
       "approvalPolicyNone": "Guardado, pero un destino cuyo agente puede actuar no tiene política de aprobación: el correo usa sus herramientas solo bajo las aprobaciones propias del agente. Considere «Aprobar cada acción».",
       "ruleCallsRefused": "Guardado. Un destino con política de aprobación tiene llamadas HTTP o MCP guiadas por reglas: un turno de correo las rechaza salvo que Herramientas de solo lectura las nombre.",
-      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera la aprobación de la compuerta de correo. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes."
+      "readOnlyEverything": "Guardado, pero un patrón de Herramientas de solo lectura de un destino con política de aprobación coincide con todas las herramientas (como *): ninguna llamada a herramienta de un turno de correo espera la aprobación de la compuerta de correo. Nombre en su lugar las herramientas de solo lectura. Las aprobaciones de herramientas del propio agente siguen vigentes.",
+      "replyReviewNoInternalDomains": "Guardado. La revisión se aplica a respuestas externas, pero no hay ningún dominio interno: cada respuesta espera revisión."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5694,6 +5697,26 @@
       "rejectedReplyLabel": "Respuesta si se rechaza",
       "rejectedReplyPlaceholder": "Su solicitud no fue aprobada.",
       "rejectedReplyHint": "Solo se envía en modo conversación; el modo disparador nunca responde."
+    },
+    "replyReview": {
+      "title": "Revisión de respuestas",
+      "triggerNote": "El modo disparador nunca responde, así que no hay respuesta que revisar.",
+      "modeLabel": "Revisar las respuestas antes de enviarlas",
+      "mode": {
+        "never": "Nunca",
+        "always": "Cada respuesta",
+        "firstContact": "La respuesta al primer correo de un remitente",
+        "external": "Respuestas a direcciones externas"
+      },
+      "hint": {
+        "never": "Las respuestas se envían tal como las escribió el agente.",
+        "always": "Cada respuesta espera en la página Aprobaciones hasta que una persona la apruebe, la edite o la rechace.",
+        "firstContact": "La respuesta al primer correo de un remitente a un destino espera revisión; las siguientes se envían directamente.",
+        "external": "Una respuesta a una dirección fuera de los dominios internos espera revisión."
+      },
+      "internalDomainsLabel": "Dominios internos",
+      "internalDomainsHint": "Dominios cuyas direcciones cuentan como internas, como contoso.com o *.contoso.com (solo subdominios). Sin ninguno, todo destinatario es externo.",
+      "internalDomainInvalid": "Introduzca un dominio como contoso.com, o *.contoso.com para sus subdominios."
     }
   },
   "emailSenders": {

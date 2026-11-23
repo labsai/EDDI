@@ -76,10 +76,38 @@ export function withoutEmailApproval(target: ChannelTarget): ChannelTarget {
   return copy;
 }
 
+/**
+ * Which replies of a conversation-mode email integration wait for review before
+ * they are sent: `never` (the default), `always`, `firstContact` (the reply to
+ * a sender's first mail to the target), `external` (a reply whose recipient is
+ * outside `internalDomains`; with none, every reply).
+ */
+export const REPLY_REVIEW_MODES = ["never", "always", "firstContact", "external"] as const;
+export type ReplyReviewMode = (typeof REPLY_REVIEW_MODES)[number];
+
+/**
+ * The typed settings of an email integration (`emailControl`). Only the fields
+ * the Manager edits are named; the rest (S/MIME) is kept as loaded.
+ */
+export interface EmailControl {
+  replyReview?: ReplyReviewMode;
+  internalDomains?: string[];
+  [key: string]: unknown;
+}
+
+/** `contoso.com` or `*.contoso.com`, as `emailControl.internalDomains` takes them. */
+const INTERNAL_DOMAIN = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function isInternalDomainPattern(value: string): boolean {
+  return INTERNAL_DOMAIN.test(value.trim().toLowerCase());
+}
+
 export interface ChannelIntegrationConfiguration {
   name: string;
   channelType: string;
   platformConfig: Record<string, string>;
+  /** Email integrations only; the backend refuses it on any other type. */
+  emailControl?: EmailControl;
   targets: ChannelTarget[];
   defaultTargetName: string;
 }

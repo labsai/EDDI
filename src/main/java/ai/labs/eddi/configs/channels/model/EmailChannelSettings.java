@@ -384,6 +384,66 @@ public record EmailChannelSettings(
     }
 
     /**
+     * {@code emailControl.replyReview} (plan §8.2), default
+     * {@link EmailControl.ReplyReview#NEVER}. Trigger mode never replies, so it is
+     * always {@code NEVER} there.
+     */
+    public EmailControl.ReplyReview replyReview() {
+        EmailControl.ReplyReview mode = emailControl == null ? null : emailControl.getReplyReview();
+        return mode == null || !replies() ? EmailControl.ReplyReview.NEVER : mode;
+    }
+
+    /**
+     * {@code emailControl.internalDomains}, normalised (lower case, blanks
+     * dropped).
+     */
+    public List<String> internalDomains() {
+        List<String> domains = new ArrayList<>();
+        if (emailControl != null && emailControl.getInternalDomains() != null) {
+            for (String entry : emailControl.getInternalDomains()) {
+                if (entry != null && !entry.isBlank()) {
+                    domains.add(entry.strip().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return domains;
+    }
+
+    /**
+     * Whether {@code address} is internal: its domain is one of
+     * {@code internalDomains}, or below a {@code *.domain} entry. Null, an address
+     * without a domain and every address when no internal domain is configured are
+     * external.
+     */
+    public boolean isInternal(String address) {
+        if (address == null) {
+            return false;
+        }
+        int at = address.lastIndexOf('@');
+        if (at < 0 || at == address.length() - 1) {
+            return false;
+        }
+        String domain = address.substring(at + 1).strip().toLowerCase(Locale.ROOT);
+        for (String pattern : internalDomains()) {
+            if (pattern.startsWith("*.")) {
+                if (domain.endsWith(pattern.substring(1))) {
+                    return true;
+                }
+            } else if (domain.equals(pattern)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Most {@code emailControl.internalDomains} entries. */
+    public static final int MAX_INTERNAL_DOMAINS = 100;
+
+    /** {@code example.com} or {@code *.example.com}: labels of a host name. */
+    private static final Pattern INTERNAL_DOMAIN = Pattern
+            .compile("^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
+
+    /**
      * Reads the settings of an email integration document: its
      * {@code platformConfig} and its {@code emailControl}. Every production reader
      * uses this form, so a typed setting cannot be read as its default by one path
@@ -564,7 +624,7 @@ public record EmailChannelSettings(
         if (conversation) {
             validateConversation(errors, pc);
         }
-        validateEmailControl(errors, emailControl);
+        validateEmailControl(errors, emailControl, conversation);
         booleanCheck(errors, pc, KEY_CORRELATE_THREADS);
         booleanCheck(errors, pc, KEY_STRIP_QUOTED_HISTORY);
         for (String key : List.of(KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST)) {
@@ -656,8 +716,28 @@ public record EmailChannelSettings(
      * certificate for {@code address} is checked against the deployment
      * ({@code EmailChannelSupport}).
      */
-    private static void validateEmailControl(List<String> errors, EmailControl emailControl) {
-        if (emailControl == null || emailControl.getSmime() == null) {
+    private static void validateEmailControl(List<String> errors, EmailControl emailControl, boolean conversation) {
+        if (emailControl == null) {
+            return;
+        }
+        EmailControl.ReplyReview replyReview = emailControl.getReplyReview();
+        if (!conversation && replyReview != null && replyReview != EmailControl.ReplyReview.NEVER) {
+            errors.add("emailControl.replyReview belongs to email conversation mode: a trigger-mode integration never replies, so there is "
+                    + "no reply to review. Remove it, or set mode 'conversation'.");
+        }
+        List<String> domains = emailControl.getInternalDomains();
+        if (domains != null) {
+            if (domains.size() > MAX_INTERNAL_DOMAINS) {
+                errors.add("emailControl.internalDomains holds at most " + MAX_INTERNAL_DOMAINS + " entries.");
+            }
+            for (int i = 0; i < domains.size(); i++) {
+                String entry = domains.get(i);
+                if (entry == null || !INTERNAL_DOMAIN.matcher(entry.strip().toLowerCase(Locale.ROOT)).matches()) {
+                    errors.add("emailControl.internalDomains entry " + (i + 1) + " must be a domain ('example.com') or '*.example.com'.");
+                }
+            }
+        }
+        if (emailControl.getSmime() == null) {
             return;
         }
         EmailControl.Smime smime = emailControl.getSmime();
@@ -721,6 +801,9 @@ public record EmailChannelSettings(
             if (settings.honorReplyTo()) {
                 warnings.add(WARNING_HONOR_REPLY_TO);
             }
+            if (settings.replyReview() == EmailControl.ReplyReview.EXTERNAL && settings.internalDomains().isEmpty()) {
+                warnings.add(WARNING_REPLY_REVIEW_NO_INTERNAL_DOMAINS);
+            }
         }
         if (settings.hasSmtp() && settings.smimeSign() == EmailControl.SignMode.TRUE && settings.smimeConnection() == null) {
             warnings.add(WARNING_SMIME_NO_CERTIFICATE);
@@ -759,6 +842,11 @@ public record EmailChannelSettings(
      * a mail authenticated by an allowed domain decides where the reply goes.
      */
     public static final String WARNING_HONOR_REPLY_TO = "email.honor-reply-to";
+    /**
+     * {@code replyReview: external} without {@code internalDomains}: every
+     * recipient is external, so every reply waits for review (plan §8.2).
+     */
+    public static final String WARNING_REPLY_REVIEW_NO_INTERNAL_DOMAINS = "email.reply-review-no-internal-domains";
 
     /**
      * Anyone on the internet can make the agent run: no allowlist, no

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import java.util.LinkedHashMap;
@@ -43,7 +44,17 @@ public final class HitlReviewDetails {
         details.put("approvalCategory", category.category());
         details.put("reasonCodes", ReasonCodes.asList(review != null ? review.getReasonCodes() : null));
         HitlRevisionCandidate candidate = HitlDecisionValidator.candidateOf(snapshot);
-        if (review != null && review.answerEditsAllowed() && candidate != null && candidate.getDraft() != null) {
+        String replyDraft = EmailReplyReview.draftIn(snapshot);
+        if (replyDraft != null) {
+            // Reply review (email plan v3 §8.2): the whole reply, editable on every
+            // agent; the recipient and the subject are not part of it.
+            var editable = new LinkedHashMap<String, Object>();
+            editable.put("draft", SecretRedactionFilter.redact(replyDraft));
+            editable.put("format", "text");
+            editable.put("maxChars", EmailReplyReview.maxEditChars(review, replyDraft));
+            details.put("editableAnswer", editable);
+            details.put("replyReview", true);
+        } else if (review != null && review.answerEditsAllowed() && candidate != null && candidate.getDraft() != null) {
             var editable = new LinkedHashMap<String, Object>();
             // Served through the current secret filter, like every model text an
             // approver reads off this endpoint.

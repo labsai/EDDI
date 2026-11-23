@@ -25,6 +25,7 @@ import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-chan
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
+import { EmailReplyReviewSection } from "@/components/channels/email-reply-review";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType, adoptStoredVersion, emptiesSenderAllowlist } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -438,6 +439,14 @@ export function ChannelDetailPage() {
         return;
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
+      // Trigger mode never replies: the backend refuses a reply review there, so a
+      // mode left over from conversation mode is dropped rather than saved.
+      if (emailMode(toSave.platformConfig) !== "conversation" && toSave.emailControl?.replyReview) {
+        const emailControl = { ...toSave.emailControl };
+        delete emailControl.replyReview;
+        toSave = { ...toSave, emailControl: Object.keys(emailControl).length > 0 ? emailControl : undefined };
+        if (!toSave.emailControl) delete toSave.emailControl;
+      }
       // Emptying a non-empty allowlist opens the integration to every sender: the
       // backend refuses that save unless it is confirmed, so ask first.
       if (!confirmOpen && emptiesSenderAllowlist(config?.platformConfig, toSave.platformConfig)) {
@@ -636,12 +645,15 @@ export function ChannelDetailPage() {
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
               // Approval fields belong to email targets only; the backend refuses them elsewhere.
-              setDraft({
+              const switched = {
                 ...draft,
                 channelType,
                 platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig),
                 ...(channelType !== "email" && draft.targets ? { targets: draft.targets.map(withoutEmailApproval) } : {}),
-              });
+              };
+              // emailControl is email-only: the backend refuses it on any other type.
+              if (channelType !== "email") delete switched.emailControl;
+              setDraft(switched);
             }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
@@ -720,6 +732,19 @@ export function ChannelDetailPage() {
         </div>
         )}
       </section>
+
+      {isEmail && (
+        <EmailReplyReviewSection
+          emailControl={draft.emailControl}
+          conversation={emailMode(draft.platformConfig ?? {}) === "conversation"}
+          onChange={(emailControl) => setDraft((prev) => {
+            if (!prev) return prev;
+            const next = { ...prev, emailControl };
+            if (emailControl === undefined) delete next.emailControl;
+            return next;
+          })}
+        />
+      )}
 
       {/* Email: no endpoint to show — EDDI polls the mailbox. */}
       {isEmail && (

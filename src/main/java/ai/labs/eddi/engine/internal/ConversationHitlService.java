@@ -56,6 +56,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
@@ -1715,6 +1716,11 @@ class ConversationHitlService {
      * null — read before the resume takes the candidate off the step.
      */
     static String ruleDraftOf(IConversationMemory memory) {
+        // A reply review's draft is the whole reply, which an edit replaces.
+        String reply = EmailReplyReview.draftOf(memory);
+        if (reply != null) {
+            return reply;
+        }
         try {
             var step = memory.getCurrentStep();
             var stored = step != null ? step.getLatestData(HitlRevisionCandidate.STEP_KEY) : null;
@@ -1992,6 +1998,7 @@ class ConversationHitlService {
      * without them.
      */
     static void addHeldMailContext(IConversationMemory memory) {
+        addReplyReviewContext(memory);
         try {
             var step = memory.getCurrentStep();
             if (step == null || step.getData(EmailApprovalGate.PRE_RUN_MARKER) == null) {
@@ -2020,6 +2027,40 @@ class ConversationHitlService {
             memory.setHitlApprovalContext(RenderedApprovalContext.of(items, rendered != null && rendered.isTruncated()));
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not add the held mail to the approval context of %s: %s", sanitize(memory.getConversationId()),
+                    sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * A reply waiting for review (email plan v3 §8.2) is shown to its approver as
+     * the first item of the pause's approval context, credential shapes redacted —
+     * for every surface, also one that cannot show {@code editableAnswer}. The
+     * pause reason stays without it.
+     */
+    static void addReplyReviewContext(IConversationMemory memory) {
+        try {
+            String draft = EmailReplyReview.draftOf(memory);
+            if (draft == null) {
+                return;
+            }
+            String redacted = SecretRedactionFilter.redact(draft);
+            boolean truncated = redacted.length() > MAX_HELD_MAIL_CONTEXT_CHARS;
+            if (truncated) {
+                int end = Character.isHighSurrogate(redacted.charAt(MAX_HELD_MAIL_CONTEXT_CHARS - 1))
+                        ? MAX_HELD_MAIL_CONTEXT_CHARS - 1
+                        : MAX_HELD_MAIL_CONTEXT_CHARS;
+                redacted = redacted.substring(0, end);
+            }
+            List<RenderedApprovalContext.Item> items = new ArrayList<>();
+            items.add(new RenderedApprovalContext.Item(EmailReplyReview.REPLY_LABEL, redacted, truncated, EmailReplyReview.REPLY_SOURCE, null,
+                    null));
+            RenderedApprovalContext rendered = memory.getHitlApprovalContext();
+            if (rendered != null && rendered.getItems() != null) {
+                items.addAll(rendered.getItems());
+            }
+            memory.setHitlApprovalContext(RenderedApprovalContext.of(items, rendered != null && rendered.isTruncated()));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not add the reply under review to the approval context of %s: %s", sanitize(memory.getConversationId()),
                     sanitize(e.getMessage()));
         }
     }
@@ -2061,6 +2102,14 @@ class ConversationHitlService {
      * without an email gate is left as it is.
      */
     static void applyEmailGateTimeout(IConversationMemory memory, String expiry) {
+        // Reply review (email plan v3 §8.2) whatever the target's approvalPolicy, so
+        // also under "none": an expired review sends nothing, never the draft.
+        if (EmailReplyReview.pending(memory)) {
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            memory.setHitlApprovalTimeout(expiry);
+            memory.setHitlPauseReason(EmailReplyReview.reasonOf(memory));
+            return;
+        }
         EmailApprovalGate.Policy gate = EmailApprovalGate.of(memory);
         if (gate == null) {
             return;

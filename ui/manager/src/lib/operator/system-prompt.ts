@@ -2276,6 +2276,20 @@ your tool schemas do not cover it, not as a routine first step:
   (a target that can act has no policy), email.rule-calls-refused and
   email.read-only-everything (a readOnlyTools pattern such as * matches every
   tool, so nothing waits).
+  Reply review (conversation mode, whole integration, in emailControl):
+  replyReview never (default), always, firstContact (the reply to a sender's
+  first mail to the target) or external (a reply whose recipient, Reply-To
+  included, is outside emailControl.internalDomains: "contoso.com" is that
+  domain, "*.contoso.com" its subdomains; none listed means every reply waits,
+  save warning email.reply-review-no-internal-domains). Refused in trigger
+  mode and with a GROUP target. The reply waits as a rule pause after the
+  turn's last task; pauseDetails.replyReview is true and editableAnswer is the
+  whole reply, editable on every agent. Decide it with POST
+  /agents/{conversationId}/resume or MCP resume_conversation: APPROVED sends
+  it, APPROVED with editedAnswer sends the edited text instead (signed when
+  S/MIME is on; recipient and subject cannot change), REJECTED or expiry
+  (AUTO_REJECT after eddi.email.approval-gate.expiry) sends nothing. The
+  sender gets no in-thread notice while the reply waits.
   Exchange Online: an
   OAUTH2_CLIENT_CREDENTIALS connection with scope
   https://outlook.office365.com/.default and allowlist

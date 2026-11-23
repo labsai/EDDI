@@ -3678,7 +3678,9 @@
     "noReason": "No reason",
     "reasonLabel": "Reason (for a rejection or an edit)",
     "reviewerEdit": "Reviewer edit",
-    "showOriginal": "Show the original"
+    "showOriginal": "Show the original",
+    "replyReviewTitle": "Email reply waiting for review",
+    "replyReviewHint": "This is the whole reply EDDI will send to the mail's sender. Approve it, edit it and approve, or reject it; a rejected or expired review sends nothing. The recipient and the subject cannot be changed."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -5589,7 +5591,8 @@
       "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
       "approvalPolicyNone": "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
       "ruleCallsRefused": "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
-      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. Name the read-only tools instead. The agent's own tool approvals still apply."
+      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. Name the read-only tools instead. The agent's own tool approvals still apply.",
+      "replyReviewNoInternalDomains": "Saved. Reply review is set to external replies, but no internal domain is listed: every reply waits for review."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5642,6 +5645,26 @@
       "rejectedReplyLabel": "Reply when rejected",
       "rejectedReplyPlaceholder": "Your request was not approved.",
       "rejectedReplyHint": "Sent in conversation mode only; trigger mode never replies."
+    },
+    "replyReview": {
+      "title": "Reply review",
+      "triggerNote": "Trigger mode never replies, so there is no reply to review.",
+      "modeLabel": "Review replies before they are sent",
+      "mode": {
+        "never": "Never",
+        "always": "Every reply",
+        "firstContact": "The reply to a sender's first mail",
+        "external": "Replies to external addresses"
+      },
+      "hint": {
+        "never": "Replies are sent as the agent wrote them.",
+        "always": "Every reply waits on the Approvals page until a person approves, edits or rejects it.",
+        "firstContact": "The reply to a sender's first mail to a target waits for review; later replies are sent directly.",
+        "external": "A reply to an address outside the internal domains waits for review."
+      },
+      "internalDomainsLabel": "Internal domains",
+      "internalDomainsHint": "Domains whose addresses count as internal, such as contoso.com or *.contoso.com (subdomains only). With none, every recipient is external.",
+      "internalDomainInvalid": "Enter a domain such as contoso.com, or *.contoso.com for its subdomains."
     }
   },
   "emailSenders": {

@@ -126,11 +126,21 @@ public final class EmailReplyRecipients {
                 && !EmailUserIdentity.perSender(integrationId, sender).equals(conversationUserId)) {
             return Decision.refuse("identity_mismatch");
         }
-        String recipient = settings.honorReplyTo() ? singleReplyTo(stepMail).orElse(sender) : sender;
+        String recipient = recipientOf(settings, sender, stepMail);
         if (recipient.equals(settings.address())) {
             return Decision.refuse("own_address");
         }
         return new Decision(recipient, null);
+    }
+
+    /**
+     * Where a reply to {@code sender}'s mail goes: the sender, or its single
+     * {@code Reply-To} under {@code honorReplyTo}. The address part of
+     * {@link #decide} alone, for a caller that knows the mail but not yet a turn
+     * (reply review's {@code external} test, email plan v3 §8.2).
+     */
+    public static String recipientOf(EmailChannelSettings settings, String sender, Map<String, Object> stepMail) {
+        return settings.honorReplyTo() ? singleReplyTo(stepMail).orElse(sender) : sender;
     }
 
     /**

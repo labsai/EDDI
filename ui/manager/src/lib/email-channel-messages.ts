@@ -127,6 +127,11 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.approvalPolicyNone",
         "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
       );
+    case "email.reply-review-no-internal-domains":
+      return t(
+        "emailChannel.warning.replyReviewNoInternalDomains",
+        "Saved. Reply review is set to external replies, but no internal domain is listed: every reply waits for review.",
+      );
     case "email.rule-calls-refused":
       return t(
         "emailChannel.warning.ruleCallsRefused",

@@ -16,10 +16,13 @@ import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext.Item;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EmailReplyReview;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.event.Event;
@@ -91,6 +94,30 @@ class ConversationHitlServiceApprovalContextTest {
         assertEquals("the draft", memory.getHitlApprovalContext().getItems().get(0).getText());
         assertEquals(HitlTimeoutPolicy.AUTO_REJECT, memory.getHitlTimeoutPolicy(), "the existing bookmark behaviour is unchanged");
         verify(renderer).renderForConversation(memory, blocks, null);
+    }
+
+    @Test
+    @DisplayName("a reply review pause: the commit makes it AUTO_REJECT after the email gate expiry and shows the reply first")
+    void replyReviewThroughThePauseCommit() throws Exception {
+        var agent = new AgentConfiguration();
+        var hitl = new AgentConfiguration.HitlConfig();
+        hitl.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+        hitl.setApprovalTimeout("PT1M");
+        hitl.setApprovalContext(List.of(new ApprovalContextBlock("Draft", "{x}", null)));
+        agent.setHitlConfig(hitl);
+        when(agentStore.read("agent-1", 3)).thenReturn(agent);
+        when(renderer.renderForConversation(any(), any(), any())).thenReturn(context("the agent's own block"));
+        memory.setOrigin(TurnOrigin.EMAIL);
+        memory.getCurrentStep().storeData(new Data<>(EmailReplyReview.STEP_KEY, EmailReplyReview.contextValue("always", "The reply waits.")));
+        memory.getCurrentStep().storeData(new Data<>(EmailReplyReview.MARKER, EmailReplyReview.marker("Your refund is on its way.")));
+
+        service.populateHitlTimeoutBookmark(memory);
+
+        assertEquals(HitlTimeoutPolicy.AUTO_REJECT, memory.getHitlTimeoutPolicy(), "an expired review sends nothing, never the draft");
+        assertEquals(ConversationHitlService.DEFAULT_EMAIL_GATE_EXPIRY, memory.getHitlApprovalTimeout());
+        assertEquals("The reply waits.", memory.getHitlPauseReason());
+        assertEquals(EmailReplyReview.REPLY_LABEL, memory.getHitlApprovalContext().getItems().get(0).getLabel());
+        assertEquals("the agent's own block", memory.getHitlApprovalContext().getItems().get(1).getText());
     }
 
     @Test

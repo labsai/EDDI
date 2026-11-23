@@ -43,13 +43,23 @@ public final class EmailApprovalNotes {
     public static final String START_CANCELLED = "email_gate:start_cancelled";
     /** The held conversation no longer exists. */
     public static final String CONVERSATION_GONE = "email_gate:conversation_gone";
+    /**
+     * The reply to the mail was rejected in review, or its review expired (email
+     * plan v3 §8.2): nothing was sent. Not a contact: no answer reached the sender.
+     */
+    public static final String REPLY_REJECTED = "email_gate:reply_rejected";
+    /**
+     * The mail went to a GROUP target while the integration's reply review is on: a
+     * group's answer cannot wait for review, so none was sent.
+     */
+    public static final String REPLY_REVIEW_UNSUPPORTED = "email_gate:reply_review_unsupported";
 
     /**
      * Notes of {@code DONE} rows whose mail did not (or not yet) run to an answer:
      * they are no earlier contact for {@code firstContact}.
      */
     public static final Set<String> NOT_A_CONTACT = Set.of(AWAITING_START, REJECTED, START_FAILED, START_CANCELLED, CONVERSATION_GONE,
-            "awaiting_human", "turn_skipped", "turn_failed");
+            REPLY_REJECTED, REPLY_REVIEW_UNSUPPORTED, "awaiting_human", "turn_skipped", "turn_failed");
 
     private EmailApprovalNotes() {
     }

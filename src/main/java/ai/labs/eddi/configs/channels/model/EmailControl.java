@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -48,12 +50,46 @@ import java.util.Objects;
 public class EmailControl {
 
     private Smime smime;
+    private ReplyReview replyReview;
+    private List<String> internalDomains;
 
     public EmailControl() {
     }
 
     public EmailControl(Smime smime) {
         this.smime = smime;
+    }
+
+    public EmailControl(Smime smime, ReplyReview replyReview, List<String> internalDomains) {
+        this.smime = smime;
+        this.replyReview = replyReview;
+        this.internalDomains = internalDomains;
+    }
+
+    /**
+     * {@code emailControl.replyReview} (plan §8.2, conversation mode): which
+     * replies wait for a person to approve, reject or edit them before they are
+     * sent. Absent reads as {@link ReplyReview#NEVER}.
+     */
+    public ReplyReview getReplyReview() {
+        return replyReview;
+    }
+
+    public void setReplyReview(ReplyReview replyReview) {
+        this.replyReview = replyReview;
+    }
+
+    /**
+     * {@code emailControl.internalDomains}: domain patterns ({@code example.com},
+     * {@code *.example.com}) whose addresses count as internal, for
+     * {@code replyReview: external} (plan §8.2).
+     */
+    public List<String> getInternalDomains() {
+        return internalDomains;
+    }
+
+    public void setInternalDomains(List<String> internalDomains) {
+        this.internalDomains = internalDomains;
     }
 
     /** S/MIME signing of the mail the integration sends (plan §6.2). */
@@ -67,17 +103,106 @@ public class EmailControl {
 
     /** A deep copy: changing the copy never changes this object. */
     public EmailControl copy() {
-        return new EmailControl(smime == null ? null : new Smime(smime.getSign(), smime.getConnection()));
+        return new EmailControl(smime == null ? null : new Smime(smime.getSign(), smime.getConnection()), replyReview,
+                internalDomains == null ? null : new ArrayList<>(internalDomains));
     }
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof EmailControl other && Objects.equals(smime, other.smime);
+        return o instanceof EmailControl other && Objects.equals(smime, other.smime) && replyReview == other.replyReview
+                && Objects.equals(internalDomains, other.internalDomains);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(smime);
+        return Objects.hash(smime, replyReview, internalDomains);
+    }
+
+    /**
+     * {@code emailControl.replyReview}: which replies of a conversation-mode
+     * integration wait for review before they are sent (plan §8.2).
+     * <p>
+     * <b>Strict on write, lenient on read</b>, like {@link SignMode}, except that a
+     * stored value EDDI does not know reads as {@link #ALWAYS}: a setting that
+     * cannot be read must not let a reply out unreviewed.
+     */
+    @JsonDeserialize(using = ReplyReviewDeserializer.class)
+    public enum ReplyReview {
+        /** No reply waits. The default. */
+        NEVER("never"),
+        /** Every reply waits. */
+        ALWAYS("always"),
+        /**
+         * The reply to a sender's first mail to the target waits (no earlier answered
+         * mail from that address; an unauthenticated sender is always new).
+         */
+        FIRST_CONTACT("firstContact"),
+        /**
+         * A reply whose recipient is outside {@code internalDomains} waits; with no
+         * internal domains, every reply.
+         */
+        EXTERNAL("external");
+
+        private final String json;
+
+        ReplyReview(String json) {
+            this.json = json;
+        }
+
+        /** The JSON value. */
+        @JsonValue
+        public String json() {
+            return json;
+        }
+
+        /**
+         * The mode named {@code value} (case-insensitive).
+         *
+         * @throws IllegalArgumentException
+         *             for anything else, naming the accepted values
+         */
+        public static ReplyReview fromJson(Object value) {
+            if (value instanceof String text) {
+                for (ReplyReview mode : values()) {
+                    if (mode.json.equalsIgnoreCase(text.trim())) {
+                        return mode;
+                    }
+                }
+            }
+            throw new IllegalArgumentException("emailControl.replyReview must be never, always, firstContact or external.");
+        }
+    }
+
+    /**
+     * Reads {@link ReplyReview}: an unknown value fails on the strict write mapper
+     * (a 400) and reads as {@link ReplyReview#ALWAYS}, logged, on every other.
+     */
+    static final class ReplyReviewDeserializer extends StdDeserializer<ReplyReview> {
+
+        private static final Logger LOGGER = Logger.getLogger(ReplyReviewDeserializer.class);
+
+        ReplyReviewDeserializer() {
+            super(ReplyReview.class);
+        }
+
+        @Override
+        public ReplyReview deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            JsonToken token = parser.currentToken();
+            Object value = parser.getText();
+            if (token != JsonToken.VALUE_STRING) {
+                parser.skipChildren();
+            }
+            try {
+                return ReplyReview.fromJson(value);
+            } catch (IllegalArgumentException e) {
+                if (context.isEnabled(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)) {
+                    throw InvalidFormatException.from(parser, e.getMessage(), value, ReplyReview.class);
+                }
+                LOGGER.warnf("emailControl.replyReview holds an unknown value; reading it as always (every reply waits for review). "
+                        + "Save the integration again to correct it.");
+                return ReplyReview.ALWAYS;
+            }
+        }
     }
 
     /**

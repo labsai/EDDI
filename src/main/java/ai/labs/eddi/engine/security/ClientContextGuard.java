@@ -74,6 +74,11 @@ public class ClientContextGuard {
      * tools, so only EDDI may set it.
      */
     public static final String KEY_EMAIL_APPROVAL = EmailApprovalGate.CONTEXT_KEY;
+    /**
+     * Written by the email channel on a mail turn whose reply waits for review
+     * ({@link EmailReplyReview}). Only EDDI decides which replies are reviewed.
+     */
+    public static final String KEY_EMAIL_REPLY_REVIEW = EmailReplyReview.CONTEXT_KEY;
 
     /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
@@ -84,7 +89,7 @@ public class ClientContextGuard {
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
             KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION,
-            KEY_TURN_ORIGIN, KEY_EMAIL_APPROVAL);
+            KEY_TURN_ORIGIN, KEY_EMAIL_APPROVAL, KEY_EMAIL_REPLY_REVIEW);
 
     private final Set<String> permittedReservedKeys;
 

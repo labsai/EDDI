@@ -215,6 +215,10 @@ audit trail → server log → the configuration that produced it. Follow
   ordinary approvals (`list_pending_approvals`, `resume_conversation`). Not on GROUP targets.
   Relay the warnings `email.approval-policy-none`, `email.rule-calls-refused` and
   `email.read-only-everything` (a `readOnlyTools` pattern such as `*` matches every tool).
+  Reply review (conversation mode, `emailControl.replyReview`: `never`, `always`, `firstContact`,
+  `external` with `emailControl.internalDomains`) holds a reply before it is sent. Its pause shows
+  `pauseDetails.replyReview: true` and the whole reply as its editable draft; decide it with
+  `resume_conversation` (`editedAnswer` sends the edited text instead; a rejection sends nothing).
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a
