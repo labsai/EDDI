@@ -704,10 +704,10 @@ public class SecretResolver {
                     throw new SecretChangingException(changing + ", so it is refused. Retry shortly.");
                 }
                 // Warn mode refuses nothing; it says that the check it made is not bound.
-                // Names the reference only, never the caller-supplied usage text.
-                LOGGER.warnf("Vault reference %s is being changed, so its grant check is not bound to a settled state; under "
-                        + "eddi.vault.grant-enforcement=warn it is checked against the grant read now",
-                        SecretReference.describe(ref.toReferenceString()));
+                // Names nothing taken from the reference or the caller (CodeQL treats both as
+                // sensitive); the grant warning the check below may log names the secret.
+                LOGGER.warn("A vault secret is being changed, so its grant check is not bound to a settled state; under "
+                        + "eddi.vault.grant-enforcement=warn it is checked against the grant read now");
                 admitted = grantAdmits(ref, asking, usedFor);
             }
             if (!admitted) {
