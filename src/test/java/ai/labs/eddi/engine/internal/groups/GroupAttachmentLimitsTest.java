@@ -30,6 +30,27 @@ class GroupAttachmentLimitsTest {
     }
 
     @Test
+    void decodedLength_matchesTheDecoderWithoutPadding() {
+        Base64.Encoder unpadded = Base64.getEncoder().withoutPadding();
+        for (int n = 0; n < 20; n++) {
+            String encoded = unpadded.encodeToString(new byte[n]);
+            assertEquals(n, Base64.getDecoder().decode(encoded).length, "decoder, length " + n);
+            assertEquals(n, GroupAttachmentLimits.decodedLength(encoded), "length " + n);
+        }
+    }
+
+    @Test
+    void anUnpaddedFileExactlyAtThePerFileLimit_isAccepted_oneByteMoreIsRefused() {
+        Base64.Encoder unpadded = Base64.getEncoder().withoutPadding();
+        String atLimit = unpadded.encodeToString(new byte[1000]);
+        String overLimit = unpadded.encodeToString(new byte[1001]);
+        assertNull(GroupAttachmentLimits.rejectionReason(
+                List.of(new AttachmentRef("application/octet-stream", atLimit, null, "f.bin")), 1000, 0, 0));
+        assertNotNull(GroupAttachmentLimits.rejectionReason(
+                List.of(new AttachmentRef("application/octet-stream", overLimit, null, "f.bin")), 1000, 0, 0));
+    }
+
+    @Test
     void withinEveryLimit_isAccepted() {
         assertNull(GroupAttachmentLimits.rejectionReason(List.of(inline(10), inline(10)), 10, 2, 20));
         assertNull(GroupAttachmentLimits.rejectionReason(null, 1, 1, 1));

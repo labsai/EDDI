@@ -94,8 +94,10 @@ public final class GroupAttachmentLimits {
 
     /**
      * The number of bytes a base64 string decodes to, computed from its length and
-     * padding without decoding it. Rounds a malformed length up, which can only
-     * make the check stricter; the decoder rejects such input later anyway.
+     * padding without decoding it. Padding is optional, as for the JDK's base64
+     * decoder: an unpadded final group of 2 or 3 characters carries 1 or 2 bytes. A
+     * malformed final group of 1 character counts as 1 byte, which can only make
+     * the check stricter; the decoder rejects such input later anyway.
      */
     public static long decodedLength(String base64) {
         long length = base64.length();
@@ -106,7 +108,9 @@ public final class GroupAttachmentLimits {
                 padding++;
             }
         }
-        return (length + 3) / 4 * 3 - padding;
+        long remainder = length % 4;
+        long tail = remainder == 0 ? 0 : Math.max(1, remainder - 1);
+        return length / 4 * 3 + tail - padding;
     }
 
     /**
