@@ -5,10 +5,12 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.modules.ingestion.extract.PdfWindowReader;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -107,5 +109,37 @@ public class DocumentSettings {
 
     private static long derived(Config config, String property, long fallback) {
         return config.getOptionalValue(property, Long.class).orElse(fallback);
+    }
+
+    // --- WP-4.2: windowed reading of large PDFs ---
+
+    /**
+     * Pages one window of a large PDF holds ({@code eddi.documents.structure.window-pages},
+     * default 50): the document is opened afresh per window, and a crash loses at
+     * most one. Values below 1 fall back to the default. Explicit settings return
+     * the default.
+     */
+    public int windowPages() {
+        if (bounds != null) {
+            return PdfWindowReader.DEFAULT_WINDOW_PAGES;
+        }
+        int pages = ConfigProvider.getConfig().getOptionalValue("eddi.documents.structure.window-pages", Integer.class)
+                .orElse(PdfWindowReader.DEFAULT_WINDOW_PAGES);
+        return pages > 0 ? pages : PdfWindowReader.DEFAULT_WINDOW_PAGES;
+    }
+
+    /**
+     * How long one window may take
+     * ({@code eddi.documents.structure.window-deadline-seconds}, default 90). Values
+     * below 1 fall back to the default. Explicit settings return the default.
+     */
+    public Duration windowDeadline() {
+        if (bounds != null) {
+            return PdfWindowReader.DEFAULT_WINDOW_DEADLINE;
+        }
+        long seconds = ConfigProvider.getConfig()
+                .getOptionalValue("eddi.documents.structure.window-deadline-seconds", Long.class)
+                .orElse(PdfWindowReader.DEFAULT_WINDOW_DEADLINE.toSeconds());
+        return seconds > 0 ? Duration.ofSeconds(seconds) : PdfWindowReader.DEFAULT_WINDOW_DEADLINE;
     }
 }

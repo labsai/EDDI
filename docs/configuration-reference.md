@@ -546,6 +546,15 @@ Per-source caps on **derived files** — the views EDDI stores of an uploaded fi
 | `eddi.attachments.derived.max-slices-per-source` | `20` | Page-range PDF slices of one uploaded file. A rebuildable cache: at the cap the least recently used slice is deleted to make room |
 | `eddi.attachments.derived.max-slice-bytes-per-source` | `52428800` (50 MB) | The same slices in bytes, evicted the same way; a single slice larger than this is refused |
 
+Reading **large PDFs** from disk, a window of pages at a time — the machinery later releases use for files above `eddi.attachments.max-size-bytes`. Nothing uses it yet: large uploads are switched on by a later release. See [attachments-guide.md → Large documents: how they are read](attachments-guide.md#large-documents-how-they-are-read).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.attachments.large.work-dir` | *(a subdirectory `eddi-documents` of `java.io.tmpdir`)* | Where a large file is copied while it is read. Each instance works only in its own subdirectory `node-<eddi.cluster.node-id>` and holds a lock on it, so instances may share the volume; at startup an instance empties its own subdirectory and nobody else's. Directories are created owner-only (`0700`) and files `0600` where the file system supports it |
+| `eddi.attachments.large.work-dir-max-bytes` | `4294967296` (4 GiB) | The most the instance's work directory may hold at once — copied files plus the PDF reader's scratch files. A read waits for space; one that could never fit is refused with this limit named. Size the volume (and in Kubernetes the pod's ephemeral storage) for at least this much |
+| `eddi.documents.structure.window-pages` | `50` | Pages per window: a large PDF is opened afresh for every window, so neither its object graph nor its fonts accumulate on the heap, and a crash loses at most one window |
+| `eddi.documents.structure.window-deadline-seconds` | `90` | How long one window may take; the decode budget (128 MB) also applies per window. A window that runs past either is refused with a message |
+
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.

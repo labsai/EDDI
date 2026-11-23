@@ -16,6 +16,8 @@ import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
@@ -26,11 +28,17 @@ import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPa
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.Deflater;
@@ -503,6 +511,186 @@ public final class PdfFixtures {
             return out.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    // --- WP-4.2: large files, written to disk ---
+
+    /**
+     * A large PDF written straight to {@code target}, never held in memory: text
+     * pages like {@link #plain(int)}'s (so each estimates {@link #TOKENS_PER_PAGE}),
+     * an outline with a chapter every {@code pagesPerChapter} pages, and each page
+     * padded with an unreferenced, unfiltered stream so the file reaches about
+     * {@code targetBytes}. Nothing reads the padding; it is there to make the file
+     * large without making it slow.
+     *
+     * @return {@code target}
+     */
+    public static Path largeTo(Path target, int pages, int pagesPerChapter, long targetBytes) {
+        int chapters = pagesPerChapter > 0 ? (pages + pagesPerChapter - 1) / pagesPerChapter : 0;
+        // 1 catalog, 2 page tree, 3 font, 4 outline root; then per page: page,
+        // content, padding; then one item per chapter.
+        int firstPage = 5;
+        int firstItem = firstPage + 3 * pages;
+        int objectCount = firstItem + chapters - 1;
+        long padding = Math.max(0, targetBytes / Math.max(1, pages) - 1_600);
+        List<Long> offsets = new ArrayList<>(objectCount);
+        try (var out = new CountingOutput(new BufferedOutputStream(Files.newOutputStream(target), 1 << 16))) {
+            out.ascii("%PDF-1.4\n");
+            out.object(offsets, 1, chapters > 0
+                    ? "<</Type /Catalog /Pages 2 0 R /Outlines 4 0 R>>"
+                    : "<</Type /Catalog /Pages 2 0 R>>");
+            StringBuilder kids = new StringBuilder("<</Type /Pages /Count ").append(pages).append(" /Kids [");
+            for (int i = 0; i < pages; i++) {
+                kids.append(firstPage + 3 * i).append(" 0 R ");
+            }
+            out.object(offsets, 2, kids.append("]>>").toString());
+            out.object(offsets, 3, "<</Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding>>");
+            out.object(offsets, 4, chapters > 0
+                    ? "<</Type /Outlines /First " + firstItem + " 0 R /Last " + (firstItem + chapters - 1)
+                            + " 0 R /Count " + chapters + ">>"
+                    : "<</Type /Outlines /Count 0>>");
+            byte[] filler = new byte[(int) Math.min(padding, 1 << 16)];
+            for (int i = 0; i < filler.length; i++) {
+                filler[i] = (byte) (i % 64 == 63 ? '\n' : 'x');
+            }
+            for (int p = 1; p <= pages; p++) {
+                int page = firstPage + 3 * (p - 1);
+                out.object(offsets, page, "<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources "
+                        + "<</Font <</F1 3 0 R>>>> /Contents " + (page + 1) + " 0 R>>");
+                StringBuilder text = new StringBuilder("BT /F1 9 Tf 12 TL 40 740 Td\n");
+                for (int line = 1; line <= LINES_PER_PAGE; line++) {
+                    text.append('(').append(line(p, line)).append(") Tj T*\n");
+                }
+                byte[] content = ascii(text.append("ET").toString());
+                out.object(offsets, page + 1, new String(stream("", content), StandardCharsets.ISO_8859_1));
+                offsets.add(out.count());
+                out.ascii((page + 2) + " 0 obj\n<</Length " + padding + ">>stream\n");
+                for (long left = padding; left > 0; left -= filler.length) {
+                    out.write(filler, 0, (int) Math.min(left, filler.length));
+                }
+                out.ascii("\nendstream\nendobj\n");
+            }
+            for (int c = 0; c < chapters; c++) {
+                int item = firstItem + c;
+                int page = firstPage + 3 * (c * pagesPerChapter);
+                out.object(offsets, item, "<</Title (Chapter " + (c + 1) + ") /Parent 4 0 R"
+                        + (c > 0 ? " /Prev " + (item - 1) + " 0 R" : "")
+                        + (c + 1 < chapters ? " /Next " + (item + 1) + " 0 R" : "")
+                        + " /Dest [" + page + " 0 R /Fit]>>");
+            }
+            long xref = out.count();
+            out.ascii("xref\n0 " + (objectCount + 1) + "\n0000000000 65535 f \n");
+            for (long offset : offsets) {
+                out.ascii(String.format("%010d 00000 n \n", offset));
+            }
+            out.ascii("trailer<</Size " + (objectCount + 1) + "/Root 1 0 R>>\nstartxref\n" + xref + "\n%%EOF\n");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return target;
+    }
+
+    /**
+     * {@link #plain(int)} written to {@code target} with its {@code startxref}
+     * pointing nowhere and its table unrecognisable: only PDFBox's lenient,
+     * brute-force rebuild of the cross-reference table can open it.
+     *
+     * @return {@code target}
+     */
+    public static Path brokenXrefTo(Path target, int pages) {
+        String text = new String(plain(pages), StandardCharsets.ISO_8859_1);
+        int at = text.lastIndexOf("startxref") + "startxref".length();
+        while (text.charAt(at) == '\r' || text.charAt(at) == '\n') {
+            at++;
+        }
+        int end = at;
+        while (Character.isDigit(text.charAt(end))) {
+            end++;
+        }
+        String broken = text.substring(0, at) + "999999999" + text.substring(end);
+        try {
+            Files.write(target, broken.replace("xref", "xrex").getBytes(StandardCharsets.ISO_8859_1));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return target;
+    }
+
+    /**
+     * Text pages like {@link #plain(int)}'s whose Flate content stream also carries
+     * {@code paddingBytes} of spaces: each page decodes to that much more, and the
+     * document to {@code pages} times it — a document that only fits a decode
+     * budget a window at a time.
+     */
+    public static byte[] heavyPages(int pages, int paddingBytes) {
+        return build(document -> {
+            var font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            byte[] padding = new byte[paddingBytes];
+            Arrays.fill(padding, (byte) ' ');
+            for (int p = 1; p <= pages; p++) {
+                var page = new PDPage();
+                document.addPage(page);
+                page.setResources(new PDResources());
+                COSName fontName = page.getResources().add(font);
+                var stream = new PDStream(document);
+                try (OutputStream out = stream.createOutputStream(COSName.FLATE_DECODE)) {
+                    StringBuilder text = new StringBuilder("BT /").append(fontName.getName())
+                            .append(" 9 Tf 12 TL 40 740 Td\n");
+                    for (int line = 1; line <= LINES_PER_PAGE; line++) {
+                        text.append('(').append(line(p, line)).append(") Tj T*\n");
+                    }
+                    out.write(ascii(text.append("ET\n").toString()));
+                    out.write(padding);
+                }
+                page.setContents(stream);
+            }
+        });
+    }
+
+    /** Writes a fixture to a file. */
+    public static Path writeTo(Path target, byte[] pdf) {
+        try {
+            return Files.write(target, pdf);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** An output stream that knows how many bytes went through it. */
+    private static final class CountingOutput extends FilterOutputStream {
+        private long count;
+
+        CountingOutput(OutputStream out) {
+            super(out);
+        }
+
+        long count() {
+            return count;
+        }
+
+        void ascii(String text) throws IOException {
+            write(text.getBytes(StandardCharsets.ISO_8859_1));
+        }
+
+        void object(List<Long> offsets, int number, String body) throws IOException {
+            if (offsets.size() != number - 1) {
+                throw new IllegalStateException("object " + number + " written out of order");
+            }
+            offsets.add(count);
+            ascii(number + " 0 obj\n" + body + "\nendobj\n");
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            count++;
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            out.write(bytes, offset, length);
+            count += length;
         }
     }
 
