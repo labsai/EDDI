@@ -19,8 +19,10 @@ import org.jboss.logging.Logger;
  * It runs at {@code PLATFORM_BEFORE}, outermost, so every other interceptor and
  * the method itself already see the binding. When an org is already bound, it
  * is kept and nothing is resolved ({@link OrgRequest#callBound}). A method that
- * carries {@link PlatformPlane} itself, such as a {@code @Scheduled} job on an
- * org-plane resource, runs without a binding.
+ * carries {@link PlatformPlane} itself, a {@code @Scheduled} job on an
+ * org-plane resource, runs without a binding. Only that method: ArC intercepts
+ * self-invocation, so a non-private method of the same bean that the job calls
+ * is bound as usual.
  * <p>
  * The binding ends when the method returns. Work that outlives it
  * ({@code AsyncResponse}, {@code StreamingOutput}, SSE, LLM streaming

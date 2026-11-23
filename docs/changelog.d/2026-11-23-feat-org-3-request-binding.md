@@ -33,14 +33,21 @@ method is not bound yet (see "Not in this package").
   a resource calling another — keep that org. Resolving again would fail on a thread without a
   request, or in multi mode name a different org. Inside `OrgScope.platform` the request's
   org is still resolved and bound, as platform-to-org is allowed.
-- **`@PlatformPlane` on a method opts it out.** `@Scheduled` methods of `@OrgBound` classes run
-  on scheduler threads with no request to resolve from. In multi mode they would fail closed
-  and stop working. These now carry method-level `@PlatformPlane`, which the interceptor honours
-  by running them unbound:
+- **`@PlatformPlane` on a method opts that method out.** `@Scheduled` methods of `@OrgBound`
+  classes run on scheduler threads with no request to resolve from. These now carry
+  method-level `@PlatformPlane`, and the interceptor runs exactly that method unbound:
   - `RestConversationStore`: the two cleanup jobs;
   - `RestExportService`: the archive retention sweep.
 
-  The background-binding package moves them to binding per item (plan §7.4).
+  The guard allows a method-level `@PlatformPlane` on `@Scheduled` methods only.
+
+  This is not yet enough for multi mode, which this release refuses at startup. ArC also
+  intercepts self-invocation, so non-private helpers the jobs call on their own class bind
+  again: `retentionHeldForV5Migration`, `countEndedConversationsOlderThan` and
+  `permanentlyDeleteEndedConversationLogs`, the last one on a `submitCallable` worker thread.
+  Those helpers would try to resolve an org from a request that does not exist. The
+  background-binding package moves the jobs off the `@OrgBound` classes and binds them per item
+  (plan §7.4).
 - **Diagnostics.** `OrgBoundInterceptor` logs each binding at DEBUG
   (`ai.labs.eddi.engine.org.OrgBoundInterceptor`). This costs nothing when DEBUG is off for
   that category.
@@ -51,7 +58,13 @@ method is not bound yet (see "Not in this package").
 - work that outlives a request (`AsyncResponse`, streaming, SSE) and executor hand-offs such as
   `submitCallable`;
 - `RestCoordinatorAdmin.replayDeadLetter`: it is platform plane, but replaying an entry must
-  bind that entry's org, which the NATS-header package adds.
+  bind that entry's org, which the NATS-header package adds;
+- anonymous callers of the shells. Binding the Manager, Welcome and HTML-chat shells also
+  binds their unauthenticated methods: the Manager's `__auth_config__.js` and static bundles,
+  which read no brand. So a multi-mode resolver must resolve an anonymous caller by host
+  (plan §7.1). An identity-only resolver would refuse the login page itself. The branded login
+  page needs that host resolution anyway; the multi-mode resolver package records it as a
+  requirement.
 
 Each follows in its own package.
 
@@ -63,7 +76,8 @@ Each follows in its own package.
   - a class has both;
   - an `IRest*` interface carries either;
   - the set of platform-plane entry points changes without the pinned list being updated;
-  - a `@Scheduled` method of an `@OrgBound` class lacks `@PlatformPlane`.
+  - a `@Scheduled` method of an `@OrgBound` class lacks `@PlatformPlane`;
+  - a method-level `@PlatformPlane` sits on anything but a `@Scheduled` method.
 
   The scan matches generic and package-private resource classes too.
 

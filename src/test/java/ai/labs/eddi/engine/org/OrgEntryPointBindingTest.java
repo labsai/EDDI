@@ -50,8 +50,10 @@ class OrgEntryPointBindingTest {
     private static final Pattern MCP_FEATURE = Pattern.compile("(?m)^\\s+@(Tool|Resource|ResourceTemplate|Prompt)\\(");
     private static final Pattern MCP_IMPORT = Pattern
             .compile("import io\\.quarkiverse\\.mcp\\.server\\.(\\*|Tool|Resource|ResourceTemplate|Prompt);");
-    private static final Pattern SCHEDULED = Pattern.compile("(?m)^\\s+@Scheduled\\b");
+    private static final Pattern SCHEDULED = Pattern.compile("(?m)^\\s+@(io\\.quarkus\\.scheduler\\.)?Scheduled\\b");
+    private static final Pattern METHOD_PLATFORM = Pattern.compile("(?m)^\\s+@(ai\\.labs\\.eddi\\.engine\\.org\\.)?PlatformPlane\\(");
     private static final Pattern METHOD_BODY = Pattern.compile("(?m)\\{\\s*$");
+    private static final Pattern MEMBER_END = Pattern.compile("(?m)[;{}]\\s*$");
     private static final Pattern PLATFORM = Pattern.compile("(?m)^@PlatformPlane\\(\"([^\"]+)\"\\)\\s*$");
 
     /** Classes that implement an IRest* interface without being a resource. */
@@ -154,17 +156,53 @@ class OrgEntryPointBindingTest {
             Matcher m = SCHEDULED.matcher(s.text());
             while (m.find()) {
                 scheduled++;
-                int from = Math.max(s.text().lastIndexOf(';', m.start()), s.text().lastIndexOf('}', m.start()));
-                // the method body's brace ends a line; one inside "${config}" does not
-                Matcher body = METHOD_BODY.matcher(s.text());
-                int to = body.find(m.end()) ? body.start() : s.text().length();
-                if (!s.text().substring(from + 1, to).contains("@PlatformPlane(")) {
+                if (!METHOD_PLATFORM.matcher(annotationsAround(s.text(), m)).find()) {
                     unmarked.add(s.name() + " at offset " + m.start());
                 }
             }
         }
         assertTrue(scheduled >= 3, "the scan found only " + scheduled + " @Scheduled methods on @OrgBound classes; the pattern is probably broken");
         assertTrue(unmarked.isEmpty(), "Mark each @Scheduled method of an @OrgBound class with @PlatformPlane(\"why\"): " + unmarked);
+    }
+
+    /**
+     * A method-level {@link PlatformPlane} makes {@link OrgBoundInterceptor} run
+     * the method unbound. That is meant for {@code @Scheduled} jobs only; on a REST
+     * or MCP method it would quietly take a request out of its org.
+     */
+    @Test
+    void aMethodLevelPlatformPlaneSitsOnAScheduledMethodOnly() throws IOException {
+        List<String> misplaced = new ArrayList<>();
+        int found = 0;
+        for (Source s : sources()) {
+            Matcher m = METHOD_PLATFORM.matcher(s.text());
+            while (m.find()) {
+                found++;
+                if (!SCHEDULED.matcher(annotationsAround(s.text(), m)).find()) {
+                    misplaced.add(s.name() + " at offset " + m.start());
+                }
+            }
+        }
+        assertTrue(found >= 3, "the scan found only " + found + " method-level @PlatformPlane; the pattern is probably broken");
+        assertTrue(misplaced.isEmpty(), "A method-level @PlatformPlane is for @Scheduled jobs only. A request method stays in its "
+                + "class's plane; move a platform-plane endpoint to a @PlatformPlane class: " + misplaced);
+    }
+
+    /**
+     * The annotations of the member whose annotation {@code at} matched: from the
+     * end of the previous member to the start of this one's body.
+     */
+    private static String annotationsAround(String text, Matcher at) {
+        // members end, and bodies start, with a ';', '{' or '}' that ends its line; a
+        // brace inside "${config}" does not
+        int from = 0;
+        Matcher end = MEMBER_END.matcher(text).region(0, at.start());
+        while (end.find()) {
+            from = end.end();
+        }
+        Matcher body = METHOD_BODY.matcher(text);
+        int to = body.find(at.end()) ? body.start() : text.length();
+        return text.substring(from, to);
     }
 
     @Test
