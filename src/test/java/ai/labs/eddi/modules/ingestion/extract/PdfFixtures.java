@@ -11,6 +11,7 @@ import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSString;
+import org.apache.pdfbox.pdmodel.PDDestinationNameTreeNode;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
@@ -21,12 +22,12 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
-import org.apache.pdfbox.pdmodel.PDDestinationNameTreeNode;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDNamedDestination;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+import org.apache.pdfbox.util.Matrix;
 
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -511,6 +512,156 @@ public final class PdfFixtures {
             return out.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    // --- WP-2b.1: positioned text
+
+    /** Body text size of {@link #headingsOnly()} and {@link #twoColumn()}. */
+    public static final float BODY_SIZE = 10f;
+
+    /**
+     * Six pages without an outline, structured by font size alone (body 10 pt):
+     * <ul>
+     * <li>page 1: the title "Annual Report 2026" (26 pt, the only one that size),
+     * four body lines, then "1 Introduction" (18 pt) and eight body lines;</li>
+     * <li>page 2: body;</li>
+     * <li>page 3: five body lines ending the introduction, then — mid-page — "2
+     * Market overview" (18 pt), body, "2.1 Europe" (13 pt), body;</li>
+     * <li>page 4: "2.2 Asia" (13 pt) at the top, body;</li>
+     * <li>page 5: "3 Outlook" (18 pt) at the top, body;</li>
+     * <li>page 6: body.</li>
+     * </ul>
+     * The 18 pt headings are set at font size 1 and scaled by the text matrix, as
+     * many producers write them.
+     */
+    public static byte[] headingsOnly() {
+        return build(document -> {
+            layoutPage(document, List.of(styled(26, "Annual Report 2026")), 4, 1,
+                    List.of(scaled(18, "1 Introduction")), 8, 5);
+            layoutPage(document, List.of(), 12, 13);
+            layoutPage(document, List.of(), 5, 25, List.of(scaled(18, "2 Market overview")), 4, 30,
+                    List.of(styled(13, "2.1 Europe")), 3, 34);
+            layoutPage(document, List.of(styled(13, "2.2 Asia")), 10, 37);
+            layoutPage(document, List.of(scaled(18, "3 Outlook")), 10, 47);
+            layoutPage(document, List.of(), 10, 57);
+        });
+    }
+
+    /**
+     * Page 1: a full-width heading, then two columns of twelve lines each, written
+     * right column first, the lines of both at the same heights ("Left n …" and
+     * "Right n …"). Page 2: one column, as {@link #plain(int)} has it.
+     */
+    public static byte[] twoColumn() {
+        return build(document -> {
+            var font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            var page = new PDPage();
+            document.addPage(page);
+            try (var content = new PDPageContentStream(document, page)) {
+                content.beginText();
+                content.setFont(font, 16);
+                content.newLineAtOffset(50, 740);
+                content.showText("Two columns");
+                content.endText();
+                for (String side : List.of("Right", "Left")) {
+                    content.beginText();
+                    content.setFont(font, BODY_SIZE);
+                    content.setLeading(14);
+                    content.newLineAtOffset("Left".equals(side) ? 50 : 320, 700);
+                    for (int line = 1; line <= 12; line++) {
+                        content.showText(side + " " + line + " short column text here");
+                        content.newLine();
+                    }
+                    content.endText();
+                }
+            }
+            addTextPages(document, 1);
+        });
+    }
+
+    /**
+     * Three pages without an outline: "1 First" at 18 pt on page 1 and "2 Second"
+     * at 17.5 pt on page 2, sizes a producer rounds differently but meant alike.
+     */
+    public static byte[] nearlyEqualHeadings() {
+        return build(document -> {
+            layoutPage(document, List.of(styled(18, "1 First")), 10, 1);
+            layoutPage(document, List.of(styled(17.5f, "2 Second")), 10, 11);
+            layoutPage(document, List.of(), 10, 21);
+        });
+    }
+
+    /**
+     * {@code pages} pages without an outline, each holding {@code perPage} 14 pt
+     * headings "Heading p.i", each followed by one body line.
+     */
+    public static byte[] manyHeadings(int pages, int perPage) {
+        return build(document -> {
+            for (int page = 1; page <= pages; page++) {
+                Object[] layout = new Object[perPage * 3];
+                for (int i = 0; i < perPage; i++) {
+                    layout[i * 3] = List.of(styled(14, "Heading " + page + "." + (i + 1)));
+                    layout[i * 3 + 1] = 1;
+                    layout[i * 3 + 2] = page * perPage + i;
+                }
+                layoutPage(document, layout);
+            }
+        });
+    }
+
+    /** A line of {@link #headingsOnly()} in a given size. */
+    private record Styled(float size, String text, boolean scaledByMatrix) {
+    }
+
+    private static Styled styled(float size, String text) {
+        return new Styled(size, text, false);
+    }
+
+    private static Styled scaled(float size, String text) {
+        return new Styled(size, text, true);
+    }
+
+    /**
+     * One page, top to bottom: alternating groups of headings and runs of body
+     * lines. {@code layout} is (headings, bodyLines, firstBodyNumber) repeated;
+     * body line n reads "Body line n: …".
+     */
+    @SuppressWarnings("unchecked")
+    private static void layoutPage(PDDocument document, Object... layout) throws IOException {
+        var font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+        var bold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+        var page = new PDPage();
+        document.addPage(page);
+        float y = 740;
+        try (var content = new PDPageContentStream(document, page)) {
+            for (int i = 0; i < layout.length; i += 3) {
+                for (Styled heading : (List<Styled>) layout[i]) {
+                    y -= heading.size() * 0.4f;
+                    content.beginText();
+                    if (heading.scaledByMatrix()) {
+                        content.setFont(bold, 1);
+                        content.setTextMatrix(new Matrix(heading.size(), 0, 0, heading.size(), 50, y));
+                    } else {
+                        content.setFont(bold, heading.size());
+                        content.newLineAtOffset(50, y);
+                    }
+                    content.showText(heading.text());
+                    content.endText();
+                    y -= heading.size() * 1.6f;
+                }
+                int lines = (Integer) layout[i + 1];
+                int number = (Integer) layout[i + 2];
+                for (int line = 0; line < lines; line++) {
+                    content.beginText();
+                    content.setFont(font, BODY_SIZE);
+                    content.newLineAtOffset(50, y);
+                    content.showText("Body line " + (number + line) + ": the quick brown fox jumps over the lazy dog.");
+                    content.endText();
+                    y -= BODY_SIZE * 1.4f;
+                }
+                y -= BODY_SIZE;
+            }
         }
     }
 
