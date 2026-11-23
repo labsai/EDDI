@@ -508,7 +508,26 @@ from:
 - **`STORED`** — changed at runtime; kept in the database.
 - **`DEFAULT`** — neither.
 
-Changes reach every node within seconds.
+Changes reach every node within seconds. A stored `legacy-visibility` other than
+`shared` or `admin-only` — the API refuses one, so only a direct database edit
+can store it — is ignored: the default applies, the setting reports `DEFAULT`,
+and a single `WARN` names the value.
+
+### Resources that predate ownership
+
+A resource created before ownership was recorded has a descriptor with no owner
+and no space. Under `legacy-visibility=shared` every user may **read, use, edit
+and deploy** it, so an upgrade hides nothing and stops no one's work. Nobody but
+an administrator **owns** it: deleting it, sharing it or revoking a share,
+changing its visibility (publishing it), moving it to another space, and reading
+its grant list all need `OWN`, so a non-admin is refused them and the Manager
+does not offer them. An absent owner is not a grant of ownership; otherwise any
+user could publish a colleague's pre-upgrade agent to anonymous callers, or move
+it into their own space and so take it from everyone else.
+
+An explicit share still counts in full: a user granted `OWN` on a legacy
+resource holds it. To hand a resource over for good, assign an owner with
+`PUT /descriptorstore/descriptors/{id}/shares/owner`.
 
 ### Resources with no descriptor at all
 
@@ -546,9 +565,12 @@ configuration would break every shared agent.
 2. Leave `eddi.workspaces.enabled=false`. New resources are attributed to their
    creators from this point on.
 3. Check the owners look right.
-4. Set `eddi.workspaces.enabled=true`.
-5. Optionally move to `legacy-visibility=admin-only` once the pre-existing
-   resources have been assigned owners with the ownership-transfer endpoint.
+4. Set `eddi.workspaces.enabled=true`. Pre-existing resources stay readable and
+   editable by everyone, but deleting, sharing, publishing or moving one is
+   admin-only until it has an owner — see
+   [Resources that predate ownership](#resources-that-predate-ownership).
+5. Assign owners to the pre-existing resources with the ownership-transfer
+   endpoint, then optionally move to `legacy-visibility=admin-only`.
 
 Rolling back is setting the flag to `false`. The recorded ownership is inert
 while enforcement is off.

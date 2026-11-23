@@ -420,9 +420,13 @@ public class IngestionPipeline {
         }
         if (!sourceRun.coveredWholeSource()) {
             collector.tombstoningSkipped = true;
-            LOGGER.infof("Not reconciling deletions for source '%s': the run stopped at %s rather than covering "
-                    + "the source", LogSanitizer.sanitize(source.getName()),
-                    sourceRun.summary().discoveryIncomplete() ? "incomplete sitemap discovery" : sourceRun.summary().stopReason());
+            // Discovery is incomplete when a sitemap was cut short or left unread, links
+            // were dropped for want of frontier room, or documents linked only through
+            // URLs too long to fetch could not all be reported.
+            LOGGER.infof("Not reconciling deletions for source '%s': %s rather than covering the source",
+                    LogSanitizer.sanitize(source.getName()), sourceRun.summary().discoveryIncomplete()
+                            ? "discovery was incomplete"
+                            : "the run stopped at " + sourceRun.summary().stopReason());
             return 0;
         }
         List<DocumentState> gone = stateStore.bumpAndFindMissing(
@@ -1027,6 +1031,10 @@ public class IngestionPipeline {
          * there rather than failing every remaining document the same way.
          */
         private String storeRefused;
+        /**
+         * A {@link #holds} lookup failed this run; later calls answer without asking.
+         */
+        private boolean holdsLookupFailed;
         private Instant nextOwnershipCheck = Instant.MIN;
         private final IngestionRun.Trigger trigger;
         private Instant nextProgressReport = Instant.MIN;
@@ -1078,6 +1086,31 @@ public class IngestionPipeline {
                     .filter(state -> !state.tombstoned())
                     .map(state -> new ConditionalHeaders(state.etag(), state.lastModified()))
                     .orElseGet(ConditionalHeaders::none);
+        }
+
+        @Override
+        public boolean holds(String documentId) {
+            // Only an ingest run reconciles, and only a live document can be missed.
+            if (mode != Mode.INGEST) {
+                return false;
+            }
+            if (holdsLookupFailed) {
+                // The store failed once this run already: answered as held without
+                // asking again, so an outage costs one warning, not one per document.
+                return true;
+            }
+            try {
+                return stateStore.lookup(sourceKey, documentId).filter(state -> !state.tombstoned()).isPresent();
+            } catch (RuntimeException e) {
+                // Answered as held: the document is then reported as content unknown
+                // rather than skipped. If the store also refuses to record that, the
+                // run fails in onError before it reconciles, so nothing is deleted.
+                holdsLookupFailed = true;
+                LOGGER.warnf("Could not look up documents of source '%s' (%s); for the rest of this run, every document "
+                        + "linked only through a URL too long to fetch is treated as held", LogSanitizer.sanitize(sourceKey),
+                        e.getClass().getSimpleName());
+                return true;
+            }
         }
 
         @Override

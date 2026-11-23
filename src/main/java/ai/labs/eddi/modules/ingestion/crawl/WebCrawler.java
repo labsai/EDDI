@@ -113,6 +113,14 @@ public class WebCrawler {
     private static final int MAX_SITEMAPS = 20;
 
     /**
+     * Distinct documents remembered as linked only through a URL too long to fetch.
+     * Each costs the sink a lookup after the crawl, so a site cannot plant
+     * millions; past this, discovery is incomplete and deletions are not
+     * reconciled.
+     */
+    static final int MAX_OVERSIZED_LINKS = 1_000;
+
+    /**
      * Hard ceiling on the frontier. Reached only by a site whose URL space is
      * generated rather than authored; past it, a crawl is collecting URLs it can
      * never fetch within any budget an operator can configure.
@@ -254,6 +262,11 @@ public class WebCrawler {
             frontier.releaseDeferred(candidate.canonicalId());
         }
 
+        // Only a crawl that covered its source is reconciled, so only then can an
+        // unreported document be counted missed, and only then is the work worth it.
+        if (stopReason == StopReason.COMPLETED && !counters.discoveryIncomplete) {
+            reportOversized(sink, frontier, counters, deadline);
+        }
         if (stopReason == StopReason.PAGE_LIMIT && counters.sitemapPages > 0) {
             // Sitemap pages are queued at depth 0, so maxDepth does not narrow them. A
             // source that stayed under maxPages by depth alone can now run into it —
@@ -423,10 +436,17 @@ public class WebCrawler {
             if (link.attr("rel").toLowerCase().contains("nofollow")) {
                 continue;
             }
+            // jsoup resolves href="my doc.html" without encoding the space, and the
+            // fetcher's URI.create refuses it: the request goes out encoded.
+            String fetchUrl = CrawlUrls.fetchable(href);
             // The bound applies to the URL that will be fetched: canonicalizing drops
-            // tracking
-            // parameters, so a short canonical id must not let an oversized href through.
-            if (CrawlUrls.stripFragment(href).length() > MAX_LINK_LENGTH) {
+            // tracking parameters, so a short canonical id must not let an oversized
+            // href through.
+            if (fetchUrl.isEmpty()) {
+                continue;
+            }
+            if (fetchUrl.length() > MAX_LINK_LENGTH) {
+                noteOversized(href, seedHost, request, excludes, frontier, counters);
                 continue;
             }
             String canonical = CrawlUrls.canonicalize(href);
@@ -438,7 +458,6 @@ public class WebCrawler {
             }
             // Both strings are retained, and a short relative link inherits the whole of
             // a long base URL: the count cap alone lets one page pin gigabytes.
-            String fetchUrl = CrawlUrls.stripFragment(href);
             long cost = (long) canonical.length() + fetchUrl.length();
             if (!frontier.admit(cost)) {
                 counters.discoveryIncomplete = true;
@@ -446,6 +465,83 @@ public class WebCrawler {
             }
             queued.add(canonical);
             queue.add(new Candidate(fetchUrl, canonical, depth, false));
+        }
+    }
+
+    /**
+     * Remembers the in-scope document a link names whose fetchable form is longer
+     * than {@link #MAX_LINK_LENGTH}, so it is not requested; see
+     * {@link #reportOversized}.
+     */
+    private void noteOversized(String url, String seedHost, CrawlRequest request, List<UrlPattern> excludes,
+                               Frontier frontier, Counters counters) {
+        String canonical = CrawlUrls.canonicalize(url);
+        // Already reached (a redirect target is delivered without being queued), so
+        // it would never be reported and must not count against the cap. A link seen
+        // before its target is reached is skipped again in reportOversized.
+        if (canonical.isEmpty() || frontier.queued.contains(canonical) || frontier.visited.contains(canonical)
+                || frontier.delivered.contains(canonical) || frontier.oversized.contains(canonical)
+                || !isInScope(canonical, seedHost, request, excludes)) {
+            return;
+        }
+        // Retained like any queued URL, so it is charged like one.
+        if (frontier.oversized.size() >= MAX_OVERSIZED_LINKS || !frontier.admit(canonical.length())) {
+            counters.discoveryIncomplete = true;
+            return;
+        }
+        frontier.oversized.add(canonical);
+    }
+
+    /**
+     * Reports the documents linked only through a URL too long to request.
+     *
+     * <p>
+     * Skipped silently, a document the source already held went unseen on a run
+     * that looked complete, and deletion reconciliation counted it missed until it
+     * was tombstoned — although nothing said it was gone. Each is reported as an
+     * error whose content is unknown instead, the way a page that could not be
+     * fetched is.
+     *
+     * <p>
+     * Run only after a crawl that completed with discovery complete, the only kind
+     * that is reconciled. Not reported: a document the crawl queued, polled or
+     * delivered — a redirect delivers under the id it landed on, which was never
+     * queued — and one the sink does not {@linkplain CrawlSink#holds hold}, since
+     * an overlong link to something never ingested has nothing to protect and
+     * reporting it would leave every run of that source inconclusive. At most
+     * {@link #MAX_OVERSIZED_LINKS} documents are remembered at all; past that,
+     * discovery is incomplete. Cancellation, interruption or the time budget stops
+     * the report before its next lookup and leaves discovery incomplete, so the
+     * documents left unreported are not read as deleted.
+     *
+     * <p>
+     * robots.txt is not consulted. Canonicalizing drops tracking parameters, so the
+     * id is not the URL a rule would be matched against, and judged by the id a
+     * document the real link may reach could be skipped and then deleted. Reported
+     * instead, it is kept: the safe direction for a link that is never fetched.
+     */
+    private static void reportOversized(CrawlSink sink, Frontier frontier, Counters counters, Instant deadline) {
+        for (String documentId : frontier.oversized) {
+            // Queued, polled or delivered: a redirect delivers under the id it landed
+            // on, which was never queued, and that too means another link reached it.
+            if (frontier.queued.contains(documentId) || frontier.visited.contains(documentId)
+                    || frontier.delivered.contains(documentId)) {
+                continue;
+            }
+            // Checked before each lookup, the one step here that costs anything.
+            if (sink.isCancelled() || Thread.currentThread().isInterrupted() || Instant.now().isAfter(deadline)) {
+                // The rest go unreported, so their absence must not read as deletion.
+                counters.discoveryIncomplete = true;
+                return;
+            }
+            if (!sink.holds(documentId)) {
+                continue;
+            }
+            counters.errors++;
+            counters.unreachable++;
+            sink.onError(new CrawlError(documentId, documentId,
+                    "Linked only through a URL longer than " + MAX_LINK_LENGTH + " characters once encoded; not fetched",
+                    0, true));
         }
     }
 
@@ -559,9 +655,14 @@ public class WebCrawler {
                     counters.discoveryIncomplete = true;
                     break;
                 }
-                // Bounded as fetched, before canonicalization drops tracking parameters (see
-                // enqueueLinks)
-                if (url == null || CrawlUrls.stripFragment(url).length() > MAX_LINK_LENGTH) {
+                // Encoded and bounded as fetched, before canonicalization drops tracking
+                // parameters (see enqueueLinks)
+                String fetchUrl = CrawlUrls.fetchable(url);
+                if (fetchUrl.isEmpty()) {
+                    continue;
+                }
+                if (fetchUrl.length() > MAX_LINK_LENGTH) {
+                    noteOversized(url, seedHost, request, excludes, frontier, counters);
                     continue;
                 }
                 String canonical = CrawlUrls.canonicalize(url);
@@ -569,7 +670,7 @@ public class WebCrawler {
                 // anything at all — so it earns no exemption from the scope.
                 if (!canonical.isEmpty() && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
-                    frontier.queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0, false));
+                    frontier.queue.add(new Candidate(fetchUrl, canonical, 0, false));
                     pagesFromSitemaps++;
                     counters.sitemapPages++;
                 }
@@ -1063,6 +1164,8 @@ public class WebCrawler {
          */
         private final Set<String> queued = new HashSet<>();
         private final Set<String> visited = new HashSet<>();
+        /** In-scope document ids some link named through a URL too long to fetch. */
+        private final Set<String> oversized = new LinkedHashSet<>();
         /** URL characters admitted by link discovery so far; see MAX_FRONTIER_CHARS. */
         private long queuedChars;
         /** Document ids this crawl has reported, as a page or as unchanged. */

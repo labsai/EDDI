@@ -126,6 +126,24 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a link with a raw space is fetched encoded, and its page ingested")
+        void fetchesUnencodedLinkEncoded() {
+            // jsoup resolves the href without encoding the space. Only the document id
+            // was encoded, so the fetch went out raw, the real fetcher's URI.create
+            // refused it, and the page was an inconclusive error on every run.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"my doc.html#intro\">doc</a></body></html>")
+                    .page(SITE + "/my%20doc.html", "<html><body>The document</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/my%20doc.html"), site.requestedUrls().toString());
+            assertTrue(sink.documentIds().contains(SITE + "/my%20doc.html"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
         @DisplayName("ignores a link marked rel=nofollow")
         void honoursNofollow() {
             FakeSite site = new FakeSite()
@@ -347,14 +365,166 @@ class WebCrawlerTest {
             // canonicalize() strips utm_*, leaving a short id: the bound must see the URL
             // that is fetched
             String overlong = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
-            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong)).page(overlong, "<html><body>Long</body></html>")
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong, SITE + "/b"))
+                    .page(SITE + "/b", linkTo(overlong))
+                    .page(overlong, "<html><body>Long</body></html>")
                     .page(SITE + "/ok", "<html><body>OK</body></html>");
-            RecordingSink sink = new RecordingSink();
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
+
+            CrawlSummary summary = new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertFalse(site.wasRequested(overlong));
+            // Skipped silently, the document went unseen on a run that looked complete,
+            // and reconciliation counted it missed until it was tombstoned.
+            assertEquals(1, sink.errors().size(), "reported once, however many pages link it: " + sink.errors());
+            var error = sink.errors().get(0);
+            assertEquals(SITE + "/ok", error.documentId());
+            assertTrue(error.contentUnknown(), "an unfetched page says nothing about whether it still exists");
+            assertEquals(1, summary.unreachableErrors());
+        }
+
+        @Test
+        @DisplayName("an oversized link is not reported when the document is also linked fetchably, or was never held")
+        void overlongLinkReportedOnlyForAHeldDocumentNothingElseReached() {
+            String overlongToOk = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            String overlongToNew = SITE + "/new?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite()
+                    // The oversized link comes first: what counts is what the crawl reached.
+                    .page(SITE + "/", linkTo(overlongToOk, SITE + "/ok", overlongToNew))
+                    .page(SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
 
             new WebCrawler(site)
                     .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
 
-            assertFalse(site.wasRequested(overlong));
+            assertTrue(sink.documentIds().contains(SITE + "/ok"), sink.documentIds().toString());
+            // /new was never ingested, so there is nothing for reconciliation to delete,
+            // and reporting it would leave every run inconclusive.
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("an oversized link is not reported for a document a redirect delivered")
+        void overlongLinkNotReportedForARedirectTarget() {
+            // /a lands on /ok, so /ok is delivered under an id that was never queued.
+            String overlongToOk = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", overlongToOk))
+                    .redirect(SITE + "/a", SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
+
+            new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/ok"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("overlong links to documents redirects already delivered do not count against the cap")
+        void overlongLinksToRedirectTargetsDoNotFillTheCap() {
+            // The seed's redirects are followed first, so the targets are delivered
+            // before the late pages that link them through overlong URLs are read.
+            int total = WebCrawler.MAX_OVERSIZED_LINKS + 1;
+            String padding = "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            String[] late = {SITE + "/late-0", SITE + "/late-1", SITE + "/late-2"};
+            List<String> seedLinks = new ArrayList<>();
+            FakeSite site = new FakeSite();
+            for (int i = 0; i < total; i++) {
+                seedLinks.add(SITE + "/r" + i);
+                site.redirect(SITE + "/r" + i, SITE + "/t" + i, "<html><body>T</body></html>");
+            }
+            seedLinks.addAll(List.of(late));
+            site.page(SITE + "/", linkTo(seedLinks.toArray(String[]::new)));
+            for (int page = 0; page < late.length; page++) {
+                List<String> links = new ArrayList<>();
+                for (int i = page; i < total; i += late.length) {
+                    links.add(SITE + "/t" + i + "?utm_source=" + padding);
+                }
+                site.page(late[page], linkTo(links.toArray(String[]::new)));
+            }
+            RecordingSink sink = new RecordingSink();
+            Limits roomy = new Limits(2 * total, 3 * total, 5L * 1024 * 1024, 512L * 1024 * 1024, Duration.ofMinutes(5),
+                    Duration.ofSeconds(5));
+
+            CrawlSummary summary = new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), roomy), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/t" + (total - 1)), "the redirects were followed");
+            assertFalse(summary.discoveryIncomplete(), "every overlong link named a document the crawl had reached");
+            assertTrue(summary.coveredWholeSource());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("a held document linked only through an overlong URL is reported even when robots.txt seems to disallow it")
+        void overlongLinkIsReportedWhateverRobotsSays() {
+            // The rule names the canonical id; the real link carries a tracking parameter,
+            // so judging by the id could skip a document the link reaches and delete it.
+            String overlong = SITE + "/held?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH) + "&a=1";
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow: /held?a=1")
+                    .page(SITE + "/", linkTo(overlong));
+            RecordingSink sink = new RecordingSink().knows(SITE + "/held?a=1", null, null);
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/", Scope.defaults(), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true)), sink);
+
+            assertEquals(1, sink.errors().size(), sink.errors().toString());
+            assertEquals(SITE + "/held?a=1", sink.errors().get(0).documentId());
+            assertTrue(sink.errors().get(0).contentUnknown());
+        }
+
+        @Test
+        @DisplayName("past MAX_OVERSIZED_LINKS, discovery is incomplete and nothing is looked up")
+        void tooManyOversizedLinksMakeDiscoveryIncomplete() {
+            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
+
+            CrawlSummary summary = crawlWithOversizedLinks(WebCrawler.MAX_OVERSIZED_LINKS + 1, sink);
+
+            assertTrue(summary.discoveryIncomplete(), "a crawl that stopped remembering links has not covered the source");
+            assertFalse(summary.coveredWholeSource());
+            assertEquals(0, sink.holdsCalls(), "an uncovered run is not reconciled, so nothing is looked up");
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("exactly MAX_OVERSIZED_LINKS oversized links leave discovery complete")
+        void oversizedLinksUpToTheCapKeepDiscoveryComplete() {
+            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
+
+            CrawlSummary summary = crawlWithOversizedLinks(WebCrawler.MAX_OVERSIZED_LINKS, sink);
+
+            assertFalse(summary.discoveryIncomplete());
+            assertTrue(summary.coveredWholeSource());
+            assertEquals(WebCrawler.MAX_OVERSIZED_LINKS, sink.holdsCalls(), "each remembered document is looked up once");
+            assertEquals(1, sink.errors().size(), "only the held one is reported: " + sink.errors());
+            assertEquals(SITE + "/p0", sink.errors().get(0).documentId());
+        }
+
+        /**
+         * A crawl of three pages linking {@code count} distinct documents, each only
+         * through a URL too long to fetch. Spread over three pages: one page holding
+         * them all is past maxBytesPerPage.
+         */
+        private CrawlSummary crawlWithOversizedLinks(int count, RecordingSink sink) {
+            String padding = "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite();
+            String[] pages = {SITE + "/", SITE + "/b", SITE + "/c"};
+            for (int page = 0; page < pages.length; page++) {
+                List<String> links = new ArrayList<>();
+                if (page == 0) {
+                    links.add(SITE + "/b");
+                    links.add(SITE + "/c");
+                }
+                for (int i = page; i < count; i += pages.length) {
+                    links.add(SITE + "/p" + i + "?utm_source=" + padding);
+                }
+                site.page(pages[page], linkTo(links.toArray(String[]::new)));
+            }
+            return new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
         }
 
         @Test
@@ -930,6 +1100,46 @@ class WebCrawlerTest {
 
             assertTrue(sink.documentIds().contains(SITE + "/orphan"),
                     "a page in the sitemap must be found even when nothing links to it");
+        }
+
+        @Test
+        @DisplayName("a sitemap URL with a raw space is fetched encoded")
+        void fetchesUnencodedSitemapUrlEncoded() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/my doc.html")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/my%20doc.html", "<html><body>listed with a space</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/my%20doc.html"), site.requestedUrls().toString());
+            assertTrue(sink.documentIds().contains(SITE + "/my%20doc.html"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("a sitemap URL too long to fetch is reported as content unknown, not skipped silently")
+        void overlongSitemapUrlIsReportedUnknown() {
+            // A sitemap <loc> over MAX_SITEMAP_URL_LENGTH is dropped as it is parsed, so
+            // this one is short as written and only too long once encoded: 1,000 emoji
+            // are 2,000 chars and 12,000 encoded. The space is what makes it need
+            // encoding at all.
+            String overlong = SITE + "/listed?utm_source=a%20b " + "\uD83D\uDE00".repeat(1_000);
+            assertTrue(overlong.length() <= WebCrawler.MAX_SITEMAP_URL_LENGTH);
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", overlong)
+                    .page(SITE + "/", "<html><body>no links here</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/listed", null, null);
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertFalse(site.wasRequested(overlong));
+            assertEquals(1, sink.errors().size(), sink.errors().toString());
+            assertEquals(SITE + "/listed", sink.errors().get(0).documentId());
+            assertTrue(sink.errors().get(0).contentUnknown());
         }
 
         @Test

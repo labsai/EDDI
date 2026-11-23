@@ -85,14 +85,18 @@ public final class CrawlUrls {
 
     private static String encodeIllegal(String url) {
         StringBuilder encoded = new StringBuilder(url.length() + 8);
-        for (int i = 0; i < url.length(); i++) {
-            char c = url.charAt(i);
+        // By code point: a character outside the BMP is two chars, and either half
+        // encoded alone is not UTF-8 — String.getBytes turns each into "?", so an
+        // emoji went out as %3F%3F.
+        for (int i = 0; i < url.length();) {
+            int c = url.codePointAt(i);
+            i += Character.charCount(c);
             boolean mustEncode = c <= 0x20 || c >= 0x7F || ILLEGAL_IN_URI.indexOf(c) >= 0;
             if (!mustEncode) {
-                encoded.append(c);
+                encoded.append((char) c);
                 continue;
             }
-            for (byte b : String.valueOf(c).getBytes(StandardCharsets.UTF_8)) {
+            for (byte b : Character.toString(c).getBytes(StandardCharsets.UTF_8)) {
                 encoded.append('%').append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
             }
         }
@@ -146,6 +150,30 @@ public final class CrawlUrls {
             return canonical.toString();
         } catch (URISyntaxException e) {
             return trimmed;
+        }
+    }
+
+    /**
+     * The URL to request: without its fragment, and with the characters a URI may
+     * not carry raw percent-encoded, exactly as {@link #canonicalize(String)}
+     * encodes them. An already valid URL comes back unchanged. Empty when the URL
+     * cannot be parsed even so.
+     *
+     * <p>
+     * Only the document id used to be encoded. The fetch went out with the raw
+     * {@code abs:href}, so {@code href="my doc.html"} was queued under a valid id
+     * and then failed in the fetcher's {@code URI.create} on every run — recorded
+     * as an inconclusive error, which also kept deletion reconciliation from ever
+     * running for that source.
+     */
+    public static String fetchable(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        try {
+            return parseTolerantly(stripFragment(url.trim())).toString();
+        } catch (URISyntaxException e) {
+            return "";
         }
     }
 

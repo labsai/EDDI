@@ -732,6 +732,94 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a failing lookup for a document linked only through an overlong URL counts it held, asked once")
+        void failingHoldsLookupKeepsTheDocumentAndTheRun() {
+            var armed = new boolean[1];
+            var failedLookups = new int[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<DocumentState> lookup(String sourceId, String documentId) {
+                    if (armed[0] && documentId.startsWith(SITE + "/held")) {
+                        failedLookups[0]++;
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.lookup(sourceId, documentId);
+                }
+            };
+            IngestionSource strict = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(1);
+            strict.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, strict);
+            // Longer than WebCrawler.MAX_LINK_LENGTH (8,192), which is package-private.
+            String padding = "a".repeat(8_200);
+
+            new IngestionPipeline(new WebCrawler(new FakeSite()
+                    .page(SITE + "/", "<html><body><main><p>Seed.</p><a href=\"" + SITE + "/held-1\">1</a><a href=\""
+                            + SITE + "/held-2\">2</a></main></body></html>")
+                    .page(SITE + "/held-1", pageWith("One."))
+                    .page(SITE + "/held-2", pageWith("Two."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            assertTrue(flaky.lookup(sourceKey, SITE + "/held-1").isPresent());
+
+            // Both are now linked only through URLs too long to fetch, and the store
+            // cannot say whether it holds them.
+            armed[0] = true;
+            IngestionReport report = new IngestionPipeline(new WebCrawler(new FakeSite()
+                    .page(SITE + "/", "<html><body><main><p>Seed.</p><a href=\"" + SITE + "/held-1?utm_source=" + padding
+                            + "\">1</a><a href=\"" + SITE + "/held-2?utm_source=" + padding + "\">2</a></main></body></html>")),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            armed[0] = false;
+
+            assertNotEquals(IngestionReport.Outcome.FAILED, report.outcome(), "a store failure here cannot fail a finished crawl");
+            assertEquals(1, failedLookups[0], "after one failure the run stops asking");
+            assertEquals(0, report.documentsTombstoned(), "held documents the run could not read are not gone");
+            assertFalse(flaky.lookup(sourceKey, SITE + "/held-1").orElseThrow().tombstoned());
+            assertFalse(flaky.lookup(sourceKey, SITE + "/held-2").orElseThrow().tombstoned());
+        }
+
+        @Test
+        @DisplayName("a store that cannot record an unreachable page fails the run before it reconciles")
+        void failingRecordUnreachableFailsTheRunAndDeletesNothing() {
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized void recordUnreachable(String sourceId, String documentId, String runId) {
+                    if (armed[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    super.recordUnreachable(sourceId, documentId, runId);
+                }
+            };
+            IngestionSource strict = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(1);
+            strict.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, strict);
+
+            new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Seed."))
+                    .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+
+            // /keep answers 503, and the store cannot record that the run saw it.
+            armed[0] = true;
+            IngestionReport report = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Seed."))
+                    .status(SITE + "/keep", 503)),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            armed[0] = false;
+
+            // Swallowed, the run would end covered and reconcile, and the page that only
+            // answered 503 would count as missed.
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertEquals(0, report.documentsTombstoned());
+            assertFalse(flaky.lookup(sourceKey, SITE + "/keep").orElseThrow().tombstoned());
+        }
+
+        @Test
         @DisplayName("embeddings discarded for lost ownership still count against the segment budget")
         void discardedEmbeddingsAreCharged() {
             var armed = new boolean[1];

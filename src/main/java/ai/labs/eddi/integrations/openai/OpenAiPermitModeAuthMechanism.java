@@ -89,7 +89,7 @@ import java.util.stream.Collectors;
  * selected by any request path segment equal to its id. This mechanism touches
  * neither.
  *
- * @since 6.7.0
+ * @since 6.7.1
  */
 @ApplicationScoped
 public class OpenAiPermitModeAuthMechanism implements HttpAuthenticationMechanism {
