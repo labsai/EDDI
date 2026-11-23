@@ -78,6 +78,9 @@ import ai.labs.eddi.modules.ingestion.mongo.MongoIngestedFileStore;
 import ai.labs.eddi.datastore.postgres.PostgresIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.mongo.MongoIngestionStateStore;
 import ai.labs.eddi.datastore.postgres.PostgresIngestionStateStore;
+import ai.labs.eddi.datastore.postgres.PostgresProviderCooldownStore;
+import ai.labs.eddi.modules.llm.impl.IProviderCooldownStore;
+import ai.labs.eddi.modules.llm.mongo.MongoProviderCooldownStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
@@ -177,6 +180,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IIngestionStateStore ingestionStateStore(Instance<MongoIngestionStateStore> mongo,
                                                     Instance<PostgresIngestionStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IProviderCooldownStore providerCooldownStore(Instance<MongoProviderCooldownStore> mongo,
+                                                        Instance<PostgresProviderCooldownStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

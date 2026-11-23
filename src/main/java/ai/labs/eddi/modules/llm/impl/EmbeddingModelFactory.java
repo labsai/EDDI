@@ -246,6 +246,9 @@ public class EmbeddingModelFactory {
 
         boolean ingestion = inputType == EmbeddingInputType.DOCUMENT;
         int ingestionRetries = ingestion ? ingestionMaxRetries(params) : 0;
+        // From the resolved parameters, so two references to one key share a quota;
+        // the key itself is only ever hashed into it.
+        String throttleKey = ingestion ? ProviderThrottleKey.of(provider, params) : null;
         params = providerParameters(provider, params, inputType);
 
         EmbeddingModel model = switch (provider) {
@@ -270,11 +273,21 @@ public class EmbeddingModelFactory {
         }
         // Outside the role decorator, and for ingestion only: a query answers a user
         // who is waiting, so retrieval never sleeps on a throttle.
+        // The cooldown is shared across runs and nodes: the first throttle any of
+        // them meets stops the others asking (IProviderCooldownStore).
         return ingestion
                 ? ThrottledEmbeddingModel.wrap(typed, provider, ingestionRetries,
                         RETRIES_OWNED_BY_DECORATOR.contains(provider), meterRegistry, unboundMaxWait, embedBatchSize)
+                        .sharingCooldown(providerCooldowns, throttleKey)
                 : typed;
     }
+
+    /**
+     * The shared provider cooldowns. Field-injected like {@link #meterRegistry};
+     * null in tests that construct the factory directly, which then share nothing.
+     */
+    @Inject
+    ProviderCooldowns providerCooldowns;
 
     /**
      * The retries {@link ThrottledEmbeddingModel} allows one ingestion call: the

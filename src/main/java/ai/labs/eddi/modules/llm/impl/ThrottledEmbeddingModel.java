@@ -145,10 +145,26 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
     private final int batchSize;
     /** Null on the shared instance; set on a run's view. */
     private final Instant deadline;
+    /**
+     * The shared cooldown rows ({@link ProviderCooldowns}), and this model's quota
+     * in them. Both null when nothing is shared — a hand-built model, a test — and
+     * the decorator then only hears a throttle from the provider itself.
+     */
+    private final ProviderCooldowns cooldowns;
+    private final String throttleKey;
 
     private ThrottledEmbeddingModel(EmbeddingModel delegate, String provider, int maxRetries, boolean retryTransient,
             MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock, Duration unboundMaxWait,
             int batchSize, Instant deadline) {
+        this(delegate, provider, maxRetries, retryTransient, meterRegistry, sleeper, clock, unboundMaxWait, batchSize,
+                deadline, null, null);
+    }
+
+    private ThrottledEmbeddingModel(EmbeddingModel delegate, String provider, int maxRetries, boolean retryTransient,
+            MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock, Duration unboundMaxWait,
+            int batchSize, Instant deadline, ProviderCooldowns cooldowns, String throttleKey) {
+        this.cooldowns = throttleKey == null ? null : cooldowns;
+        this.throttleKey = this.cooldowns == null ? null : throttleKey;
         this.delegate = delegate;
         this.provider = provider;
         this.maxRetries = Math.max(0, maxRetries);
@@ -216,10 +232,87 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
         if (model instanceof ThrottledEmbeddingModel throttled && deadline != null) {
             return new ThrottledEmbeddingModel(throttled.delegate, throttled.provider, throttled.maxRetries,
                     throttled.retryTransient, throttled.meterRegistry, throttled.sleeper, throttled.clock,
-                    throttled.unboundMaxWait, throttled.batchSize, deadline);
+                    throttled.unboundMaxWait, throttled.batchSize, deadline, throttled.cooldowns,
+                    throttled.throttleKey);
         }
         return model;
     }
+
+    /**
+     * This model sharing a quota's cooldown with every other run on every node: it
+     * waits out — or stops on — a throttle another run met before calling the
+     * provider, and records every throttle it meets itself.
+     *
+     * @param throttleKey
+     *            the quota, from {@link ProviderThrottleKey}; null shares nothing
+     */
+    public ThrottledEmbeddingModel sharingCooldown(ProviderCooldowns cooldowns, String throttleKey) {
+        return new ThrottledEmbeddingModel(delegate, provider, maxRetries, retryTransient, meterRegistry, sleeper,
+                clock, unboundMaxWait, batchSize, deadline, cooldowns, throttleKey);
+    }
+
+    /**
+     * The throttle a call would stop on right now without reaching the provider:
+     * the shared cooldown of this model's quota is running, and it is a daily one
+     * or ends after the deadline. Empty when a call may be made — including when
+     * the cooldown is short enough to be waited out, which the call then does.
+     */
+    public Optional<ProviderThrottledException> coolingDown() {
+        if (cooldowns == null) {
+            return Optional.empty();
+        }
+        Instant limit = limit();
+        return cooldowns.active(throttleKey)
+                .filter(cooldown -> cooldown.daily() || cooldown.until().isAfter(limit))
+                .map(cooldown -> refusedByCooldown(cooldown, clock.get()));
+    }
+
+    private ProviderThrottledException refusedByCooldown(IProviderCooldownStore.Cooldown cooldown, Instant now) {
+        Duration left = Duration.between(now, cooldown.until());
+        return new ProviderThrottledException(provider, left.isNegative() ? Duration.ZERO : left, cooldown.daily(),
+                null, null);
+    }
+
+    /**
+     * Waits out a running shared cooldown before a call, or throws when it cannot
+     * be waited out within {@code limit}: no call is spent on a quota another run
+     * has already seen refuse.
+     */
+    private void awaitCooldown(Instant limit) {
+        if (cooldowns == null) {
+            return;
+        }
+        Optional<IProviderCooldownStore.Cooldown> active = cooldowns.active(throttleKey);
+        if (active.isEmpty()) {
+            return;
+        }
+        IProviderCooldownStore.Cooldown cooldown = active.get();
+        Instant now = clock.get();
+        if (cooldown.daily() || cooldown.until().isAfter(limit)) {
+            throw refusedByCooldown(cooldown, now);
+        }
+        Duration wait = atLeastMinimum(Duration.between(now, cooldown.until()));
+        sleep(wait, new ProviderRetryHints.Hint(wait, false, null), null);
+    }
+
+    /** Shares a throttle the provider just answered with, for its whole window. */
+    private void recordCooldown(ProviderRetryHints.Hint hint) {
+        if (cooldowns == null) {
+            return;
+        }
+        Instant now = clock.get();
+        Instant until;
+        if (hint.daily()) {
+            until = ProviderRetryHints.dailyReset(provider, now)
+                    .orElse(now.plus(hint.retryAfter() != null ? hint.retryAfter() : DAILY_COOLDOWN_FALLBACK));
+        } else {
+            until = now.plus(atLeastMinimum(hint.waitOrFallback()));
+        }
+        cooldowns.record(throttleKey, until, hint.daily());
+    }
+
+    /** How long a daily refusal that names no reset is shared for. */
+    static final Duration DAILY_COOLDOWN_FALLBACK = Duration.ofHours(1);
 
     /**
      * Embeds in batches of at most {@code batchSize} segments, each waited out on
@@ -338,6 +431,7 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
     private <T> T call(Supplier<T> action, Instant limit) {
         int attempt = 0;
         while (true) {
+            awaitCooldown(limit);
             try {
                 return action.get();
             } catch (ProviderThrottledException | ProviderBillingException e) {
@@ -348,6 +442,9 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
                     throw new ProviderBillingException(provider, e);
                 }
                 Optional<ProviderRetryHints.Hint> throttle = ProviderRetryHints.parse(e);
+                // Shared before this call decides whether to wait or stop, so every
+                // other run on the quota stops asking whichever this one does.
+                throttle.ifPresent(this::recordCooldown);
                 Duration wait = throttle.isPresent()
                         ? waitForThrottle(throttle.get(), attempt, limit, e)
                         : waitForTransient(e, attempt, limit);

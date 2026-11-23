@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -87,10 +88,18 @@ final class DriveApi {
     private final Instant deadline;
     private final Sleeper sleeper;
     private final Supplier<Instant> clock;
+    /** Drive's quota in units, and its shared cooldown — see {@link DriveQuota}. */
+    private final DriveQuota quota;
     private int requests;
 
     DriveApi(DriveTransport transport, SourceContext context, Instant deadline, Sleeper sleeper,
             Supplier<Instant> clock) {
+        this(transport, context, deadline, sleeper, clock, DriveQuota.unlimited());
+    }
+
+    DriveApi(DriveTransport transport, SourceContext context, Instant deadline, Sleeper sleeper,
+            Supplier<Instant> clock, DriveQuota quota) {
+        this.quota = quota == null ? DriveQuota.unlimited() : quota;
         this.transport = transport;
         this.context = context;
         GoogleDriveSource drive = context.source().getGoogleDrive();
@@ -107,7 +116,8 @@ final class DriveApi {
 
     /** {@code drives.get}: the drive exists and this credential is a member. */
     JsonNode getDrive(String driveId) throws SourceException {
-        return json(call(BASE + "/drives/" + driveId + "?fields=" + encode("id,name"), MAX_JSON_BYTES));
+        return json(call(BASE + "/drives/" + driveId + "?fields=" + encode("id,name"), MAX_JSON_BYTES,
+                DriveQuota.LIST_UNITS));
     }
 
     /**
@@ -115,7 +125,8 @@ final class DriveApi {
      */
     JsonNode getFile(String fileId) throws SourceException {
         return json(call(BASE + "/files/" + fileId + "?supportsAllDrives=true&fields="
-                + encode("id,name,mimeType,driveId,trashed,parents,capabilities(canListChildren)"), MAX_JSON_BYTES));
+                + encode("id,name,mimeType,driveId,trashed,parents,capabilities(canListChildren)"), MAX_JSON_BYTES,
+                DriveQuota.LIST_UNITS));
     }
 
     /**
@@ -142,7 +153,7 @@ final class DriveApi {
         if (pageToken != null) {
             query.put("pageToken", pageToken);
         }
-        JsonNode page = json(call(BASE + "/files?" + queryString(query), MAX_JSON_BYTES));
+        JsonNode page = json(call(BASE + "/files?" + queryString(query), MAX_JSON_BYTES, DriveQuota.LIST_UNITS));
         List<Folder> folders = new ArrayList<>();
         for (JsonNode file : page.path("files")) {
             String id = file.path("id").asText(null);
@@ -177,7 +188,7 @@ final class DriveApi {
         if (pageToken != null) {
             query.put("pageToken", pageToken);
         }
-        JsonNode page = json(call(BASE + "/files?" + queryString(query), MAX_JSON_BYTES));
+        JsonNode page = json(call(BASE + "/files?" + queryString(query), MAX_JSON_BYTES, DriveQuota.LIST_UNITS));
         List<DriveFile> files = new ArrayList<>();
         for (JsonNode file : page.path("files")) {
             files.add(DriveFile.of(file));
@@ -189,12 +200,14 @@ final class DriveApi {
 
     /** {@code files.export}: a Google-native file in another format. */
     DriveResponse export(String fileId, String mimeType, long maxBytes) throws SourceException {
-        return call(BASE + "/files/" + fileId + "/export?mimeType=" + encode(mimeType), maxBytes);
+        return call(BASE + "/files/" + fileId + "/export?mimeType=" + encode(mimeType), maxBytes,
+                DriveQuota.DOWNLOAD_UNITS);
     }
 
     /** {@code files.get?alt=media}: a stored file's bytes. */
     DriveResponse download(String fileId, long maxBytes) throws SourceException {
-        return call(BASE + "/files/" + fileId + "?alt=media&supportsAllDrives=true", maxBytes);
+        return call(BASE + "/files/" + fileId + "?alt=media&supportsAllDrives=true", maxBytes,
+                DriveQuota.DOWNLOAD_UNITS);
     }
 
     /**
@@ -204,9 +217,10 @@ final class DriveApi {
      * @throws DriveApiException
      *             every other answer, classified
      */
-    private DriveResponse call(String url, long maxBytes) throws SourceException {
+    private DriveResponse call(String url, long maxBytes, int units) throws SourceException {
         URI uri = URI.create(url);
         for (int attempt = 0;; attempt++) {
+            pace(units);
             SourceException failure;
             try {
                 // Resolved per request: the allowlist is checked against this URL, and
@@ -222,6 +236,13 @@ final class DriveApi {
                 failure = e;
             }
             SourceError error = failure.error();
+            if (error.kind() == SourceError.Kind.THROTTLED) {
+                // Shared at once, whether this call then waits or gives up: every other
+                // run on this connection, on any node, stops asking until then.
+                quota.recordThrottle(connection, clock.get().plus(error.retryAfter()
+                        .filter(hint -> !hint.isNegative() && !hint.isZero())
+                        .orElse(DriveQuota.DEFAULT_COOLDOWN)));
+            }
             boolean retryable = error.kind() == SourceError.Kind.THROTTLED
                     || error.kind() == SourceError.Kind.TRANSIENT;
             if (!retryable || attempt >= MAX_RETRIES) {
@@ -248,6 +269,42 @@ final class DriveApi {
                 // The sleep overran: no budget is left for another request.
                 throw failure;
             }
+        }
+    }
+
+    /**
+     * Waits until a call costing {@code units} may go: past any shared cooldown of
+     * this connection, and until the unit budget can pay for it. A wait that would
+     * outlive the run is not started; the call fails as throttled instead, which
+     * the drain defers rather than counting as a failure.
+     */
+    private void pace(int units) throws SourceException {
+        Optional<Instant> cooling = quota.cooldownUntil(connection);
+        if (cooling.isPresent()) {
+            waitWithinDeadline(Duration.between(clock.get(), cooling.get()),
+                    "Google Drive is refusing this connection's calls until " + cooling.get());
+        }
+        for (;;) {
+            Duration wait = quota.reserve(connection, units, clock.get());
+            if (wait.isZero() || wait.isNegative()) {
+                return;
+            }
+            waitWithinDeadline(wait, "this connection's Google Drive quota units are spent for the minute");
+        }
+    }
+
+    private void waitWithinDeadline(Duration wait, String reason) throws SourceException {
+        if (wait.isNegative() || wait.isZero()) {
+            return;
+        }
+        if (clock.get().plus(wait).isAfter(deadline)) {
+            throw new SourceException(new SourceError.Throttled(reason, wait));
+        }
+        try {
+            sleeper.sleep(wait);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SourceException(new SourceError.Throttled(reason, wait));
         }
     }
 
