@@ -52,7 +52,12 @@ public class ConnectionException extends RuntimeException {
          * A vault secret behind the connection's credential is not granted to the agent
          * the connection is being resolved for (its {@code allowedAgents}).
          */
-        SECRET_NOT_GRANTED
+        SECRET_NOT_GRANTED,
+        /**
+         * A vault secret behind the connection's credential was being changed and did
+         * not settle while its grant was checked; retrying is reasonable.
+         */
+        SECRET_CHANGING
     }
 
     private final Reason reason;

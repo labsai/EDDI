@@ -58,6 +58,11 @@ class ConnectionExceptionMapperTest {
             // The agent is not on a vault secret's grant: an admin widens the grant.
             ConnectionException.Reason.SECRET_NOT_GRANTED, 403));
 
+    static {
+        // A vault secret being changed when its grant was checked: retry (#1179).
+        EXPECTED.put(ConnectionException.Reason.SECRET_CHANGING, 503);
+    }
+
     @Test
     @DisplayName("the table above covers every reason there is")
     void everyReasonIsCovered() {

@@ -285,6 +285,27 @@ class SecretResolverGrantTest {
         }
 
         @Test
+        @DisplayName("a pre-cache grant check whose grant read races an invalidation reads the grant again")
+        void requireGrantedRacingAnInvalidationReadsAgain() throws Exception {
+            var reads = new int[]{0};
+            when(provider.getMetadata(KEY)).thenAnswer(invocation -> {
+                if (reads[0]++ == 0) {
+                    // The settled sample was taken; the invalidation (A removed) starts and
+                    // finishes while the old grant is being read.
+                    resolver.invalidateLocal(KEY);
+                    return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A));
+                }
+                return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_B));
+            });
+
+            var refused = assertThrows(SecretResolver.SecretNotGrantedException.class,
+                    () -> resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "A2A agent at test"),
+                    "the grant read across the invalidation must not admit A");
+            assertFalse(refused instanceof SecretResolver.SecretChangingException, "refused by the settled grant, not as changing");
+            assertEquals(2, reads[0], "the grant was read again, bound to the settled state");
+        }
+
+        @Test
         @DisplayName("a vault that changes during every attempt leaves the reference unresolved")
         void vaultChangingOnEveryAttemptIsRefused() throws Exception {
             when(provider.resolve(KEY)).thenAnswer(invocation -> {

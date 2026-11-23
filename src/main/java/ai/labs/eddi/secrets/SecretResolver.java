@@ -659,17 +659,44 @@ public class SecretResolver {
             if (SecretReference.isReservedKeyName(ref.keyName())) {
                 continue;
             }
-            // Not while an invalidation of this secret is part-way through: the value may
+            // The grant read is bound to one settled state of this secret, as a resolution
+            // is: not while an invalidation of it is part-way through (the value may
             // already be evicted, and a caller fetching with it, while the old grant is
-            // still cached. Waited out, and refused under enforce if it does not settle
-            // (#1179): transient, so not counted as a grant refusal. Under warn the check
-            // goes on and logs, as any refusal there does.
-            if (settledGenerationOf(cacheKey(ref)) < 0 && grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
-                throw new SecretChangingException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
-                        + ", which is being changed; its grant cannot be checked for " + asking.describe()
-                        + " until the change has settled, so it is refused. Retry shortly.");
+            // still cached), and not kept if one started while the grant was read (#1179).
+            String key = cacheKey(ref);
+            boolean admitted = false;
+            boolean bound = false;
+            for (int attempt = 0; attempt < GRANT_BINDING_ATTEMPTS && !bound; attempt++) {
+                long generation = settledGenerationOf(key);
+                if (generation < 0) {
+                    continue;
+                }
+                try {
+                    admitted = grantAdmits(ref, asking, usedFor);
+                } catch (SecretNotGrantedException refused) {
+                    // A refusal read from a grant that changed meanwhile is no answer
+                    // either: only one bound to a settled state is final.
+                    if (generationOf(key) == generation) {
+                        throw refused;
+                    }
+                    continue;
+                }
+                bound = generationOf(key) == generation;
             }
-            if (!grantAdmits(ref, asking, usedFor)) {
+            if (!bound) {
+                String changing = (usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
+                        + ", which is being changed; its grant cannot be checked for " + asking.describe()
+                        + " until the change has settled";
+                if (grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
+                    // Transient, so not counted as a grant refusal: a retry is checked
+                    // against the settled grant.
+                    throw new SecretChangingException(changing + ", so it is refused. Retry shortly.");
+                }
+                // Warn mode refuses nothing; it says that the check it made is not bound.
+                LOGGER.warnf("%s; under eddi.vault.grant-enforcement=warn it is checked against the grant read now", changing);
+                admitted = grantAdmits(ref, asking, usedFor);
+            }
+            if (!admitted) {
                 // Not a grant refusal (not counted as one, refused under warn too): there
                 // is nothing to admit, and a cached client may still carry the old value.
                 throw new SecretMissingException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()

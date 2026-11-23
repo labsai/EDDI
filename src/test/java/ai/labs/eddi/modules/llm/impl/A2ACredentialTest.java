@@ -393,8 +393,33 @@ class A2ACredentialTest {
     }
 
     @Test
+    @DisplayName("control: a discovery during an eviction whose re-check admits keeps the fetched card's tool")
+    void discoveryDuringAnEvictionAdmittedKeepsTheTool() throws Exception {
+        var result = discoverDuringAnEviction(false);
+
+        assertEquals(1, result.toolSpecs().size(), "the fixture serves a card, so the refusal test below rolls something back");
+        assertEquals(1, result.executors().size());
+        assertEquals(1, result.requestResolvers().size());
+        verify(secretResolver, times(2)).requireGranted(any(Iterable.class), any(), anyString());
+    }
+
+    @Test
     @DisplayName("a discovery that starts while an eviction runs reads the grant again before handing out the tools (#1179)")
     void discoveryStartedDuringAnEvictionIsCheckedAgain() throws Exception {
+        var result = discoverDuringAnEviction(true);
+
+        assertTrue(result.toolSpecs().isEmpty(), "the card fetched during the eviction reached an agent the new grant refuses");
+        assertTrue(result.executors().isEmpty(), "its dispatch entry is rolled back too");
+        assertTrue(result.requestResolvers().isEmpty());
+        verify(secretResolver, times(2)).requireGranted(any(Iterable.class), any(), anyString());
+    }
+
+    /**
+     * Discovers one peer, served by a local fixture, from inside an open connection
+     * invalidation; the grant read after the fetch refuses when
+     * {@code refuseRecheck}.
+     */
+    private A2AToolProviderManager.A2AToolsResult discoverDuringAnEviction(boolean refuseRecheck) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         byte[] cardJson = "{\"name\":\"peer\",\"description\":\"fetched during the eviction\"}".getBytes(StandardCharsets.UTF_8);
         server.createContext("/agent.json", exchange -> {
@@ -411,13 +436,14 @@ class A2ACredentialTest {
             var peer = config("${vault:peer-key}");
             peer.setUrl("http://127.0.0.1:" + server.getAddress().getPort());
             peer.setTimeoutMs(5000L);
-            // The first grant read passes (the old binding's); the one after the fetch
-            // refuses.
-            doNothing().doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:peer-key} is not resolved for agent-a"))
-                    .when(secretResolver).requireGranted(any(Iterable.class), any(), anyString());
+            if (refuseRecheck) {
+                // The first grant read passes (the old binding's); the one after the fetch
+                // refuses.
+                doNothing().doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:peer-key} is not resolved for agent-a"))
+                        .when(secretResolver).requireGranted(any(Iterable.class), any(), anyString());
+            }
             var result = new AtomicReference<A2AToolProviderManager.A2AToolsResult>();
-            // Registered after the manager: discovery runs inside the open interval, where
-            // the counter it samples does not move again before it ends.
+            // Registered after the manager: discovery runs inside the open interval.
             registry.onInvalidation(new ConnectionRegistry.InvalidationListener() {
                 @Override
                 public void started() {
@@ -430,9 +456,7 @@ class A2ACredentialTest {
             });
 
             registry.invalidateLocal();
-
-            assertTrue(result.get().toolSpecs().isEmpty(), "the card fetched during the eviction reached an agent the new grant refuses");
-            verify(secretResolver, times(2)).requireGranted(any(Iterable.class), any(), anyString());
+            return result.get();
         } finally {
             server.stop(0);
         }

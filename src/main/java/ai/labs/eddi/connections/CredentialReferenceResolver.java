@@ -229,8 +229,13 @@ public class CredentialReferenceResolver {
      * refusal (403): an administrator widening a grant cannot fix it.
      */
     private static ConnectionException.Reason reasonOf(SecretResolver.SecretNotGrantedException e) {
-        return e instanceof SecretResolver.SecretMissingException
-                ? ConnectionException.Reason.INVALID_CONFIGURATION
+        if (e instanceof SecretResolver.SecretMissingException) {
+            return ConnectionException.Reason.INVALID_CONFIGURATION;
+        }
+        // A secret being changed is no refusal: retried, it is checked against the new
+        // grant (503, not 403).
+        return e instanceof SecretResolver.SecretChangingException
+                ? ConnectionException.Reason.SECRET_CHANGING
                 : ConnectionException.Reason.SECRET_NOT_GRANTED;
     }
 
