@@ -2274,8 +2274,11 @@ jobs:
       # allowlists a test fixture fails it by design. When — and only when — the
       # PR changes .gitleaksignore or .gitleaks.toml, scan the same range again with
       # the PR's own config. CI Gate tolerates the failure above only if this one
-      # passes, so a real secret riding along with an unrelated config edit still
-      # blocks. The check itself stays red, for the reviewer to read.
+      # passes, so a secret riding along with an honest config edit still blocks.
+      # A config that disables rules or allowlists broadly would pass this too:
+      # the reviewer reading that config diff remains the control. The check
+      # itself stays red. A PR that tightens the config (a stricter rule, or a
+      # malformed file) fails here with no tolerance, which is intended.
       - name: Re-scan with this pull request's gitleaks config
         id: pr_config
         if: ${{ always() && github.event_name == 'pull_request' }}
@@ -2284,7 +2287,10 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if git diff --quiet "$PR_BASE" "$PR_HEAD" -- .gitleaksignore .gitleaks.toml; then
+          # Against the merge-base, not the base tip: a config change that landed on
+          # main after this branch was cut is not this PR's change.
+          FORK_POINT=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          if git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore .gitleaks.toml; then
             echo "this pull request does not change the gitleaks config; nothing to re-scan"
             exit 0
           fi

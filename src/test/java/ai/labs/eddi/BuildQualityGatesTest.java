@@ -633,7 +633,9 @@ class BuildQualityGatesTest {
         assertTrue(check.contains(SKIP_ITS_DISABLED),
                 "the merged-check invocation must pass " + SKIP_ITS_DISABLED + ": the execution carries"
                         + " <skip>${skipITs}</skip>, so without it the gate skips itself. Found: " + check);
-        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests", "|| true", "|| :")) {
+        assertFalse(check.replace(" ", "").matches(".*\\|\\|(true|:).*"),
+                "the merged-check invocation must not swallow its own exit code with `|| true`/`|| :`: " + check);
+        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests")) {
             assertFalse(check.contains(relaxation),
                     "the merged-check invocation must not pass " + relaxation + ", which turns the gate into a"
                             + " report: " + check);
