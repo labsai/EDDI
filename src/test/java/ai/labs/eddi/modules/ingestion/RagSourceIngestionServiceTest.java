@@ -1501,6 +1501,24 @@ class RagSourceIngestionServiceTest {
         }
 
         @Test
+        @DisplayName("finding the slot held by a file delete, arms itself again instead of being consumed")
+        void slotHeldByMaintenanceIsArmedAgain() throws Exception {
+            knowledgeBase(true);
+            queueWork();
+            when(pipeline.throttledUntil(eq(KB_ID), any())).thenReturn(Optional.empty());
+            // A maintenance claim (a file delete) holds the run slot; it never re-arms.
+            stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null))).orElseThrow();
+            Instant before = Instant.now();
+
+            IngestionReport report = service.processContinuationFire(KB_ID, SOURCE_ID, r -> {
+            });
+
+            assertEquals(IngestionReport.Outcome.ALREADY_RUNNING, report.outcome());
+            assertEquals(1, armed.size(), "the only wake-up of a source without a cron is not lost");
+            assertTrue(!armed.get(0).isBefore(before.plus(IngestionPipeline.CONTINUATION_DELAY)));
+        }
+
+        @Test
         @DisplayName("drains under the current version, as a CONTINUATION run")
         void startsAContinuationRun() throws Exception {
             RagConfiguration kb = knowledgeBase(true);

@@ -6,15 +6,15 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.modules.llm.impl.IProviderCooldownStore.Cooldown;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -43,7 +43,18 @@ public class ProviderCooldowns {
 
     private final IProviderCooldownStore store;
     private final Supplier<Instant> clock;
-    private final Map<String, Cached> cache = new ConcurrentHashMap<>();
+    /**
+     * Bounded, and entries leave a minute after they were written: a deployment
+     * with many knowledge bases on many keys must not hold every key it ever saw.
+     * The 5 s trust in {@link #CACHE_TTL} is judged on the injected clock.
+     */
+    private final Cache<String, Cached> cache = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHED_QUOTAS)
+            .expireAfterWrite(Duration.ofMinutes(1))
+            .build();
+
+    /** The most quotas whose cooldown is held in memory. */
+    static final int MAX_CACHED_QUOTAS = 10_000;
 
     private record Cached(Cooldown cooldown, Instant readAt) {
     }
@@ -64,7 +75,7 @@ public class ProviderCooldowns {
             return Optional.empty();
         }
         Instant now = clock.get();
-        Cached cached = cache.get(throttleKey);
+        Cached cached = cache.getIfPresent(throttleKey);
         Cooldown cooldown;
         if (cached != null && cached.readAt().plus(CACHE_TTL).isAfter(now)) {
             cooldown = cached.cooldown();
@@ -85,7 +96,7 @@ public class ProviderCooldowns {
         if (throttleKey == null || until == null) {
             return;
         }
-        Cached cached = cache.get(throttleKey);
+        Cached cached = cache.getIfPresent(throttleKey);
         if (cached == null || cached.cooldown() == null || until.isAfter(cached.cooldown().until())) {
             cache.put(throttleKey, new Cached(new Cooldown(throttleKey, until, daily), clock.get()));
         }

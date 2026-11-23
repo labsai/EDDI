@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion.drive;
 
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.modules.llm.impl.ProviderCooldowns;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -96,8 +97,17 @@ public class DriveQuota {
         }
     }
 
-    private static String key(String connection) {
-        return KEY_PREFIX + (connection == null ? "default" : connection);
+    /**
+     * The quota a connection's calls count against, named by the connection's
+     * tenant and name — what the connections framework resolves the credential by —
+     * so equally named connections of two tenants never share a bucket or a
+     * cooldown. An ingestion source names its connection as
+     * {@code ${connection:name}} (the connection name rule has no {@code /}), which
+     * resolves in the default tenant; the key says so explicitly rather than
+     * relying on it.
+     */
+    static String key(String connection) {
+        return KEY_PREFIX + ConnectionReference.DEFAULT_TENANT + "/" + (connection == null ? "" : connection);
     }
 
     /** A token bucket of units, refilled continuously. */

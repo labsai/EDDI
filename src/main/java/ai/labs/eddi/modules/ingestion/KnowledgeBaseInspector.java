@@ -120,6 +120,9 @@ public class KnowledgeBaseInspector {
                 .limit(MAX_DOCUMENTS)
                 // The marker row the orphan sweep keeps is bookkeeping, not a document.
                 .filter(state -> !IngestionPipeline.SWEEP_MARKER.equals(state.documentId()))
+                // Nor is a row the work table created for a document still queued: it
+                // was never ingested, and would read as "removed" with no dates.
+                .filter(state -> !isQueuedOnly(state))
                 .map(state -> summarize(state, source, fileNames))
                 .filter(summary -> needle == null
                         || summary.documentId().toLowerCase(Locale.ROOT).contains(needle)
@@ -132,6 +135,14 @@ public class KnowledgeBaseInspector {
         int from = Math.min(Math.max(0, offset), matching.size());
         int to = Math.min(matching.size(), from + Math.max(1, limit));
         return new DocumentPage(matching.size(), truncated, matching.subList(from, to));
+    }
+
+    /**
+     * A row that exists only because the work table queued a document that was
+     * never ingested: no vectors, no content hash, no ingestion date.
+     */
+    static boolean isQueuedOnly(DocumentState state) {
+        return state.tombstoned() && state.contentHash() == null && state.lastIngestedAt() == null;
     }
 
     /** One chunk of text as the vector store holds it. */

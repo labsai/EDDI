@@ -821,11 +821,19 @@ public class RagSourceIngestionService {
             }
             return IngestionReport.heldBackByThrottle(source.effectiveId(), heldUntil.get());
         }
-        // ALREADY_RUNNING is fine: the run in flight drains, and arms the next
-        // continuation itself when it ends.
         return runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.CONTINUATION, onFinished)
                 .map(runId -> IngestionReport.started(runId, source.effectiveId()))
-                .orElseGet(() -> IngestionReport.alreadyRunning(source.effectiveId()));
+                .orElseGet(() -> {
+                    // The slot is held — by a run, which re-arms when it ends, or by a
+                    // maintenance claim (a file delete), which never does. This fire is
+                    // consumed either way, so it arms the next one itself: without it, a
+                    // source with no cron waits for "Run now".
+                    if (continuations != null) {
+                        continuations.arm(ragConfigId, sourceIdOf(source),
+                                Instant.now().plus(IngestionPipeline.CONTINUATION_DELAY));
+                    }
+                    return IngestionReport.alreadyRunning(source.effectiveId());
+                });
     }
 
     /** What a source's work table holds now — the drain's progress. */

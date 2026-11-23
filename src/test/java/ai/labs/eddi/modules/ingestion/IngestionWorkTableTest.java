@@ -443,6 +443,27 @@ class IngestionWorkTableTest {
         assertNull(armed.get(armed.size() - 1), "and the run withdrew its safety net instead of re-arming");
     }
 
+    @Test
+    @DisplayName("claims a failed release left behind are taken over by the next run at once")
+    void strandedClaimsAreTakenOverByTheNextRun() {
+        list("v1", "a", "b", "c", "d");
+        drive.crashes.put("b", new NodeDied());
+        stateStore.releaseFails = true;
+        var failing = pipeline();
+        failing.claimBatch = 4;
+        assertThrows(NodeDied.class, () -> failing.run(KB, knowledgeBase(), source(), Mode.INGEST, null,
+                IngestionRun.Trigger.MANUAL));
+        stateStore.releaseFails = false;
+        drive.crashes.clear();
+        assertTrue(counts().inFlight() > 0, "the release did not land: rows are left claimed");
+
+        // No time passes: the leases have not run out.
+        IngestionReport next = run(IngestionRun.Trigger.CONTINUATION);
+
+        assertEquals(3, next.documentsIngested(), "b, c and d are taken over, not left to their lease");
+        assertEquals(0, counts().outstanding());
+    }
+
     /** Stands for the JVM going away: not caught as a document failure. */
     private static final class NodeDied extends Error {
     }
@@ -454,9 +475,12 @@ class IngestionWorkTableTest {
     private static final class MortalStore extends InMemoryIngestionStateStore {
         boolean dead;
 
+        /** The release does not land, as when the database is briefly unreachable. */
+        boolean releaseFails;
+
         @Override
         public synchronized int releaseClaims(String sourceId, String claimer) {
-            return dead ? 0 : super.releaseClaims(sourceId, claimer);
+            return dead || releaseFails ? 0 : super.releaseClaims(sourceId, claimer);
         }
 
         @Override

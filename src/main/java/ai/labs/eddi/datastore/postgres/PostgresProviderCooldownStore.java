@@ -17,6 +17,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -36,6 +37,9 @@ public class PostgresProviderCooldownStore implements IProviderCooldownStore {
                 observed_at TIMESTAMP NOT NULL
             )
             """;
+
+    /** How long past its time a row is kept before a write removes it. */
+    static final Duration STALE_AFTER = Duration.ofDays(1);
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -102,6 +106,16 @@ public class PostgresProviderCooldownStore implements IProviderCooldownStore {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to record a provider cooldown", e);
+        }
+        // Rows long past are kept by nothing: one per quota ever throttled would
+        // otherwise accumulate. Removed on a write, which is rare, not on a read.
+        try (Connection connection = connection();
+                PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM provider_cooldowns WHERE until < ?")) {
+            statement.setTimestamp(1, Timestamp.from(Instant.now().minus(STALE_AFTER)));
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            // Housekeeping only.
         }
     }
 }

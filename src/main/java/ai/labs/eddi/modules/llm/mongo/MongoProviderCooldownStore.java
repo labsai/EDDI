@@ -8,6 +8,8 @@ import ai.labs.eddi.modules.llm.impl.IProviderCooldownStore;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -19,6 +21,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * MongoDB implementation of {@link IProviderCooldownStore}: one document per
@@ -40,7 +43,14 @@ public class MongoProviderCooldownStore implements IProviderCooldownStore {
     @Inject
     public MongoProviderCooldownStore(MongoDatabase database) {
         this.cooldowns = database.getCollection(COLLECTION);
+        // A row a day past its time is removed by MongoDB itself.
+        this.cooldowns.createIndex(Indexes.ascending(FIELD_UNTIL),
+                new IndexOptions().name("idx_provider_cooldown_ttl").expireAfter(STALE_AFTER_SECONDS,
+                        TimeUnit.SECONDS));
     }
+
+    /** How long past its time a row is kept. */
+    static final long STALE_AFTER_SECONDS = 86_400;
 
     @Override
     public Optional<Cooldown> read(String throttleKey) {

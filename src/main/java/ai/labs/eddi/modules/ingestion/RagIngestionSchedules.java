@@ -63,12 +63,17 @@ public final class RagIngestionSchedules {
      * The name of a source's continuation: the one-shot schedule that wakes the
      * drain of its work table when work is left after a run. Its own name, so
      * syncing the cron schedule never deletes it, and at most one per source.
+     * <p>
+     * A prefix of its own rather than a suffix: a source's id or name is not
+     * restricted, so {@code "foo" + ":cont"} could be the cron name of a source
+     * called {@code foo:cont}. No cron name starts with this prefix: theirs is
+     * {@code rag-ingestion:}.
      */
     public static String continuationName(String ragConfigId, String sourceId) {
-        return scheduleName(ragConfigId, sourceId) + CONTINUATION_SUFFIX;
+        return CONTINUATION_PREFIX + ragConfigId + ":" + sourceId;
     }
 
-    private static final String CONTINUATION_SUFFIX = ":cont";
+    private static final String CONTINUATION_PREFIX = "rag-ingestion-cont:";
 
     /** Marks a continuation; see {@link #continuationName}. */
     public static final String METADATA_CONTINUATION = "continuation";

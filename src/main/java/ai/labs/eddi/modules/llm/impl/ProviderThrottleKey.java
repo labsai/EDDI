@@ -66,7 +66,11 @@ public final class ProviderThrottleKey {
         }
         String credential = firstPresent(params, "apiKey", "accessKeyId");
         if (credential.isEmpty()) {
-            return "none";
+            // No project and no key — a self-hosted endpoint such as Ollama. Its quota is
+            // the server itself, which the host in the key already names; two such
+            // configurations of one host and model share a cooldown, as they share the
+            // server.
+            return "keyless";
         }
         return "key:" + sha256(credential).substring(0, SCOPE_HASH_LENGTH);
     }

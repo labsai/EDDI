@@ -479,6 +479,7 @@ public class IngestionPipeline {
                         null);
             } else {
                 sourceRun = discover(connector, context, source, mode, collector);
+                collector.flushQueue();
             }
 
             // Added to, not assigned: a file retired as unreadable during the run is
@@ -1698,6 +1699,12 @@ public class IngestionPipeline {
         private WorkOutcome workOutcome = WorkOutcome.RELEASE;
         /** Documents discovery queued in the work table this run. */
         private int queued;
+        /**
+         * Listed documents not yet written to the work table; see {@link #flushQueue}.
+         */
+        private final List<WorkRequest> pendingWork = new ArrayList<>();
+        /** Whether the listing armed its safety continuation. */
+        private boolean safetyNetArmed;
         /** Queued documents this run poisoned. */
         private int poisoned;
         /**
@@ -1972,21 +1979,39 @@ public class IngestionPipeline {
             if (payload == null) {
                 return false;
             }
-            EnqueueOutcome outcome = stateStore.enqueueWork(sourceKey, runId,
-                    new WorkRequest(item.documentId(), item.versionToken(), payload), clock.get());
-            if (outcome != EnqueueOutcome.FENCED) {
-                queued++;
-                if (queued == 1 && continuations != null) {
-                    // At the first document queued, not only at the drain's first claim:
-                    // should the node die while it is still listing, this wakes the drain
-                    // once the dead run has been reaped. The end of the run re-arms or
-                    // withdraws it.
-                    continuations.arm(ragConfigId, source.effectiveId(),
-                            clock.get().plus(staleRunThreshold(source)).plus(CONTINUATION_DELAY));
+            pendingWork.add(new WorkRequest(item.documentId(), item.versionToken(), payload));
+            if (pendingWork.size() >= IngestionWorkQueue.MAX_ENQUEUE_BATCH) {
+                flushQueue();
+            }
+            return true;
+        }
+
+        /**
+         * Writes what the listing queued so far, a page of at most
+         * {@link IngestionWorkQueue#MAX_ENQUEUE_BATCH} documents per call. Called when
+         * the buffer is full and once the listing ends, before the reconciliation reads
+         * the run stamps it writes.
+         */
+        void flushQueue() {
+            if (pendingWork.isEmpty()) {
+                return;
+            }
+            List<WorkRequest> page = new ArrayList<>(pendingWork);
+            pendingWork.clear();
+            for (EnqueueOutcome outcome : stateStore.enqueueWork(sourceKey, runId, page, clock.get())) {
+                if (outcome != EnqueueOutcome.FENCED) {
+                    queued++;
                 }
             }
+            if (!safetyNetArmed && queued > 0 && continuations != null) {
+                // At the first page queued, not only at the drain's first claim: should
+                // the node die while it is still listing, this wakes the drain once the
+                // dead run has been reaped. The end of the run re-arms or withdraws it.
+                safetyNetArmed = true;
+                continuations.arm(ragConfigId, source.effectiveId(),
+                        clock.get().plus(staleRunThreshold(source)).plus(CONTINUATION_DELAY));
+            }
             reportProgress(false);
-            return true;
         }
 
         /**
