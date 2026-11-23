@@ -17,6 +17,9 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.modules.llm.impl.HttpCallToolsProvider;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -85,6 +88,9 @@ public class ApiCallsTask implements ILifecycleTask {
         List<String> actions = latestData.getResult();
 
         for (var call : collectMatchingApiCalls(httpCallsConfig.getHttpCalls(), actions)) {
+            if (refusedByEmailGate(memory, currentStep, call)) {
+                continue;
+            }
             var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
             // ApiCallExecutor stores response in conversation memory via prePostUtils.
             // We also merge into templateDataObjects so subsequent calls in this loop can
@@ -104,6 +110,36 @@ public class ApiCallsTask implements ILifecycleTask {
                 templateDataObjects.putAll(httpCallResult);
             }
         }
+    }
+
+    /** Step datum listing the rule-driven calls the email approval gate refused. */
+    static final String EMAIL_GATE_REFUSED_KEY = "httpCalls:emailGateRefused";
+
+    /**
+     * The email approval gate (email plan v3 §8.1) for a rule-driven call: a mail
+     * turn whose target has an approval policy cannot pause here — there is no tool
+     * loop to resume into — so a call its {@code readOnlyTools} do not name is
+     * refused, never sent. Recorded on the step for the trace.
+     */
+    private static boolean refusedByEmailGate(IConversationMemory memory, IWritableConversationStep currentStep, ApiCall call) {
+        var request = call.getRequest();
+        // The path as the LLM loop addresses its http tools, so one readOnlyTools
+        // pattern means the same endpoint for a rule-driven call and a tool call.
+        var addresses = EmailApprovalGate.httpCallAddresses(call.getName(), request != null ? request.getMethod() : null,
+                request != null && request.getPath() != null ? HttpCallToolsProvider.normalizeEndpointPath(request.getPath()) : null);
+        if (!EmailApprovalGate.refusesRuleCall(memory, addresses)) {
+            return false;
+        }
+        LOGGER.warnf("httpCall '%s' not executed: this turn was started by a mail and its target's approvalPolicy refuses rule-driven "
+                + "calls that readOnlyTools does not name (conversation %s)", call.getName(), memory.getConversationId());
+        List<String> refused = new ArrayList<>();
+        IData<Object> previous = currentStep.getData(EMAIL_GATE_REFUSED_KEY);
+        if (previous != null && previous.getResult() instanceof List<?> list) {
+            list.forEach(entry -> refused.add(String.valueOf(entry)));
+        }
+        refused.add(call.getName() == null ? "httpcall" : call.getName());
+        currentStep.storeData(new Data<>(EMAIL_GATE_REFUSED_KEY, refused));
+        return true;
     }
 
     /**

@@ -21,6 +21,8 @@ import ai.labs.eddi.engine.mail.PlainTextMailRenderer.RenderedMail;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.integrations.email.EmailApprovalNotes;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailMetrics;
@@ -302,6 +304,14 @@ public class EmailReplySender {
      * approvers are staff, the sender is outside.
      */
     public Optional<LedgerEntry> onResumeCompleted(String conversationId, HitlVerdict verdict, Instant now) {
+        // The email approval gate held this mail before its new conversation started
+        // (email plan v3 §8.1): settled here in either mode — trigger mode too, which
+        // sends nothing but must still hand an approved mail back to the poll.
+        Optional<LedgerEntry> held = heldStartOf(conversationId);
+        if (held.isPresent()) {
+            SimpleConversationMemorySnapshot snapshot = readFull(conversationId);
+            return snapshot == null ? Optional.empty() : settleHeldStart(held.get(), snapshot, verdict, now).reply();
+        }
         Optional<Located> located = locate(conversationId);
         if (located.isEmpty()) {
             return Optional.empty();
@@ -310,7 +320,171 @@ public class EmailReplySender {
         if (snapshot == null) {
             return Optional.empty();
         }
+        LedgerEntry inbound = located.get().inbound();
+        if (rejectedBeforeRun(snapshot.getConversationOutputs(), inbound.messageId())) {
+            ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REJECTED, false, now);
+        } else if (verdict == HitlVerdict.APPROVED && snapshot.getConversationState() != ConversationState.ERROR
+                && AWAITING_HUMAN_NOTE.equals(inbound.lastError())) {
+            // The turn ran after all: the mail is an answered contact now (firstContact).
+            ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, null, false, now);
+        }
         return resumeRequest(located.get(), snapshot, verdict == null ? "NONE" : verdict.name()).flatMap(request -> enqueue(request, now));
+    }
+
+    /** The note the inbound processor closes a paused mail's row with. */
+    static final String AWAITING_HUMAN_NOTE = "awaiting_human";
+
+    /** The latest mail of {@code conversationId} when the email gate holds it. */
+    private Optional<LedgerEntry> heldStartOf(String conversationId) {
+        if (conversationId == null) {
+            return Optional.empty();
+        }
+        try {
+            return ledger.findInboundTurn(conversationId, true).filter(row -> EmailApprovalNotes.AWAITING_START.equals(row.approvalState()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Ledger rows of conversation %s could not be read: %s", sanitize(conversationId), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * How a held start was settled ({@link #settleHeldStart}).
+     *
+     * @param outcome
+     *            the row's new {@code approvalState}, or null when nothing changed
+     *            (still waiting, or settled by someone else)
+     * @param reply
+     *            the notice queued to the sender, if any
+     */
+    public record HeldStartOutcome(String outcome, Optional<LedgerEntry> reply) {
+        static HeldStartOutcome unchanged() {
+            return new HeldStartOutcome(null, Optional.empty());
+        }
+    }
+
+    /**
+     * Settles a mail the email approval gate held before its conversation started
+     * ({@link EmailApprovalNotes#AWAITING_START}), from what its conversation shows
+     * — called by the resume observer and by the stranded sweep, which catches what
+     * the observer missed (a node that died, an event that never came). Once: the
+     * {@code approvalState} change is conditional, and only its winner acts.
+     * <ul>
+     * <li>still paused or running: nothing changes;</li>
+     * <li>approved, and the start did not fail:
+     * {@link EmailApprovalNotes#START_APPROVED}, the row back to {@code RECEIVED}
+     * for the next poll;</li>
+     * <li>rejected: {@link EmailApprovalNotes#REJECTED}, and in conversation mode
+     * the target's {@code rejectedReply};</li>
+     * <li>approved but the start ended in ERROR:
+     * {@link EmailApprovalNotes#START_FAILED};</li>
+     * <li>no verdict (the pause was cancelled):
+     * {@link EmailApprovalNotes#START_CANCELLED}.</li>
+     * </ul>
+     * The last three tell the sender, in conversation mode, as a resume would (the
+     * same reply key, so an observer and a sweep send it once).
+     *
+     * @param verdictHint
+     *            the verdict of the resume event, used only when the step records
+     *            none; may be null
+     */
+    public HeldStartOutcome settleHeldStart(LedgerEntry row, SimpleConversationMemorySnapshot snapshot, HitlVerdict verdictHint, Instant now) {
+        if (row == null || snapshot == null || !EmailApprovalNotes.AWAITING_START.equals(row.approvalState())) {
+            return HeldStartOutcome.unchanged();
+        }
+        ConversationState state = snapshot.getConversationState();
+        if (state == ConversationState.AWAITING_HUMAN || state == ConversationState.IN_PROGRESS) {
+            return HeldStartOutcome.unchanged();
+        }
+        var outputs = snapshot.getConversationOutputs();
+        int step = outputs == null ? -1 : EmailReplyThread.mailStep(outputs, row.messageId());
+        Object recorded = step >= 0 ? outputs.get(step).get(HITL_DECISION_OUTPUT) : null;
+        String verdict = recorded != null ? String.valueOf(recorded) : verdictHint != null ? verdictHint.name() : null;
+        String outcome;
+        if (HitlVerdict.REJECTED.name().equals(verdict) || outputs != null && rejectedBeforeRun(outputs, row.messageId())) {
+            outcome = EmailApprovalNotes.REJECTED;
+        } else if (state == ConversationState.ERROR) {
+            outcome = EmailApprovalNotes.START_FAILED;
+        } else if (HitlVerdict.APPROVED.name().equals(verdict)) {
+            outcome = EmailApprovalNotes.START_APPROVED;
+        } else {
+            outcome = EmailApprovalNotes.START_CANCELLED;
+        }
+        if (!ledger.transitionApproval(row.id(), EmailApprovalNotes.AWAITING_START, outcome, null, now)) {
+            return HeldStartOutcome.unchanged();
+        }
+        if (EmailApprovalNotes.START_APPROVED.equals(outcome)) {
+            // CONVERSATION_START has run; the mail itself goes back to the poll — its
+            // turn answers it, so nothing is sent here.
+            try {
+                if (ledger.transition(row.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
+                    LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", row.id(),
+                            sanitize(row.integrationId()));
+                } else {
+                    LOGGER.warnf("Mail %s was approved but its row was not in DONE: it is not reopened for the next poll", row.id());
+                }
+            } catch (RuntimeException e) {
+                // Give the hold back, so the sweep settles it again instead of leaving an
+                // approved mail closed and unanswered.
+                reopenHeldStart(row, outcome, now);
+                throw e;
+            }
+            return new HeldStartOutcome(outcome, Optional.empty());
+        }
+        try {
+            ledger.transition(row.id(), State.DONE, State.DONE, null, null, outcome, false, now);
+            LOGGER.infof("Mail %s held before its conversation started was settled: %s", row.id(), outcome);
+            Optional<EmailIntegration> integration = directory.find(row.integrationId());
+            if (integration.isEmpty() || !integration.get().settings().replies()) {
+                return new HeldStartOutcome(outcome, Optional.empty());
+            }
+            Located located = new Located(row, integration.get().settings());
+            return new HeldStartOutcome(outcome,
+                    resumeRequest(located, snapshot, verdict == null ? "NONE" : verdict).flatMap(request -> enqueue(request, now)));
+        } catch (RuntimeException e) {
+            // The notice was not queued: keep the row on the held-start sweep, which
+            // tries again (the reply key makes a second queueing a no-op).
+            reopenHeldStart(row, outcome, now);
+            throw e;
+        }
+    }
+
+    /**
+     * Puts a held start back on {@code AWAITING_START} after its settlement failed
+     * part-way.
+     */
+    private void reopenHeldStart(LedgerEntry row, String settledAs, Instant now) {
+        try {
+            ledger.transitionApproval(row.id(), settledAs, EmailApprovalNotes.AWAITING_START, null, now);
+        } catch (RuntimeException again) {
+            LOGGER.warnf("Held mail %s was settled as %s but could not be put back for a retry: %s", row.id(), settledAs, again.getMessage());
+        }
+    }
+
+    /**
+     * The conversation output a resume records its verdict in
+     * ({@code Conversation#resume}).
+     */
+    static final String HITL_DECISION_OUTPUT = "hitlDecision";
+
+    /**
+     * The conversation of a held start is gone: the row ends
+     * {@link EmailApprovalNotes#CONVERSATION_GONE}, nothing is sent.
+     */
+    public boolean settleHeldStartGone(LedgerEntry row, Instant now) {
+        if (row == null || !ledger.transitionApproval(row.id(), EmailApprovalNotes.AWAITING_START, EmailApprovalNotes.CONVERSATION_GONE, null, now)) {
+            return false;
+        }
+        ledger.transition(row.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.CONVERSATION_GONE, false, now);
+        return true;
+    }
+
+    /**
+     * Whether the mail's step is one the email approval gate's rejection answered
+     * before the agent ran ({@code Conversation#rejectBeforeRun}).
+     */
+    static boolean rejectedBeforeRun(List<? extends Map<String, Object>> outputs, String messageId) {
+        int step = EmailReplyThread.mailStep(outputs, messageId);
+        return step >= 0 && EmailApprovalGate.REJECTED_OUTPUT_VALUE.equals(outputs.get(step).get(EmailApprovalGate.REJECTED_OUTPUT_KEY));
     }
 
     /**
@@ -388,7 +562,17 @@ public class EmailReplySender {
         if (step < 0) {
             return Optional.empty();
         }
-        String text = resumeText(verdict, snapshot.getConversationState(), EmailReplyThread.lastText(outputs));
+        String text;
+        if (rejectedBeforeRun(outputs, inbound.messageId())) {
+            // The target's rejectedReply, as the rejection wrote it; none configured
+            // (trigger mode) means nothing is sent.
+            text = EmailReplyThread.textOf(outputs.get(step));
+            if (text.isBlank()) {
+                return Optional.empty();
+            }
+        } else {
+            text = resumeText(verdict, snapshot.getConversationState(), EmailReplyThread.lastText(outputs));
+        }
         String discriminator = verdict + "." + sha256(text).substring(0, 16);
         return Optional.of(new Request(inbound.integrationId(), located.settings(), inbound, inbound.conversationId(), snapshot.getUserId(),
                 EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.RESUME, discriminator, text));

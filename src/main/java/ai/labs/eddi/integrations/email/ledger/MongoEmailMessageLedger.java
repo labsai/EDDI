@@ -65,6 +65,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_CREATED = "createdAt";
     static final String F_UPDATED = "updatedAt";
     static final String F_EXPIRES = "expiresAt";
+    static final String F_APPROVAL = "approvalState";
+    static final String F_CONTENT_HASH = "contentHash";
 
     private final MongoCollection<Document> rows;
 
@@ -85,6 +87,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
                 new IndexOptions().name("idx_email_ledger_conversation"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_APPROVAL), Indexes.ascending(F_NEXT)),
+                new IndexOptions().name("idx_email_ledger_approval").sparse(true));
     }
 
     @Override
@@ -219,6 +223,30 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public boolean transitionApproval(String id, String from, String to, String contentHash, Instant now) {
+        List<Bson> updates = new ArrayList<>();
+        updates.add(Updates.set(F_APPROVAL, IEmailMessageLedger.cap(to, MAX_APPROVAL_STATE)));
+        updates.add(Updates.set(F_UPDATED, Date.from(now)));
+        if (contentHash != null) {
+            updates.add(Updates.set(F_CONTENT_HASH, contentHash));
+        }
+        // eq(field, null) also matches a document written before the field existed.
+        return rows.updateOne(Filters.and(Filters.eq(F_ID, id), Filters.eq(F_APPROVAL, from)), Updates.combine(updates))
+                .getModifiedCount() == 1;
+    }
+
+    @Override
+    public List<LedgerEntry> findByApprovalState(String approvalState, Instant now, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        // A row with no nextAttemptAt (closed by the stranded sweep while held) is due.
+        for (Document document : rows.find(Filters.and(Filters.eq(F_APPROVAL, approvalState), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.or(Filters.eq(F_NEXT, null), Filters.lte(F_NEXT, Date.from(now))))).sort(Sorts.ascending(F_NEXT)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_RECIPIENT, sender),
                 Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.gte(F_CREATED, Date.from(since)),
@@ -267,7 +295,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_STATE, entry.state().name()).append(F_ATTEMPTS, entry.attempts()).append(F_NEXT, date(entry.nextAttemptAt()))
                 .append(F_CLAIM, entry.claimToken()).append(F_PROVIDER, IEmailMessageLedger.cap(entry.providerId(), MAX_PROVIDER_ID))
                 .append(F_ERROR, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR))
-                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()));
+                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()))
+                .append(F_APPROVAL, IEmailMessageLedger.cap(entry.approvalState(), MAX_APPROVAL_STATE)).append(F_CONTENT_HASH, entry.contentHash());
     }
 
     static LedgerEntry toEntry(Document document) {
@@ -277,7 +306,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 document.getString(F_SOURCE), document.getString(F_IDEMPOTENCY), document.getString(F_RECIPIENT),
                 State.valueOf(document.getString(F_STATE)), attempts == null ? 0 : attempts, instant(document.getDate(F_NEXT)),
                 document.getString(F_CLAIM), document.getString(F_PROVIDER), document.getString(F_ERROR), instant(document.getDate(F_CREATED)),
-                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)));
+                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)), document.getString(F_APPROVAL),
+                document.getString(F_CONTENT_HASH));
     }
 
     private static Date date(Instant instant) {

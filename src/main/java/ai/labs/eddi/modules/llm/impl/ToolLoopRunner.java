@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -375,10 +376,19 @@ class ToolLoopRunner {
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                            List<Map<String, Object>> trace, int startIteration, double toolCostBefore, AgentOrchestrator.ToolSetup setup,
                            boolean isLazy,
-                           LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
+                           LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig requestedToolApprovals,
                            int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                            JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
+
+        // The email approval gate (email plan v3 §8.1) of a mail turn: its own gate,
+        // applied after the agent's (see the classify below), never merged into it.
+        // While it is armed the loop pauses with a config even when the agent has
+        // none, so call ids, the pause budget and the batch are in force. Live path
+        // and resume both come through here, so the journal and the repeat check
+        // (clearedCalls) cover its pauses exactly as the agent gate's.
+        EmailApprovalGate.Policy emailGate = memory != null ? EmailApprovalGate.of(memory) : null;
+        ToolApprovalsConfig effectiveToolApprovals = EmailApprovalGate.ensureConfig(emailGate, requestedToolApprovals);
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
         Map<String, String> toolSources = setup.toolSources();
@@ -639,8 +649,13 @@ class ToolLoopRunner {
                             refuseExhaustedGatedCalls(
                                     admitted.isEmpty()
                                             ? new ToolApprovalGate.GateResult(List.of(), List.of(), Map.of())
-                                            : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                                    effectiveToolApprovals, clearedCalls),
+                                            // The email gate moves every call the agent's gate let
+                                            // through and readOnlyTools does not name to the gated
+                                            // side — whatever the agent's or task's exempt say.
+                                            : EmailApprovalGate.overlay(emailGate,
+                                                    toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                                            effectiveToolApprovals, clearedCalls),
+                                                    toolSources, setup.toolEndpoints()),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     var gateResult = screened.gateResult();

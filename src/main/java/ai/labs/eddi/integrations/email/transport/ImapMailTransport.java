@@ -393,24 +393,43 @@ public class ImapMailTransport implements MailTransport {
 
         @Override
         public Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes) throws MailboxException {
+            return findByMessageId(messageId, settings, maxBytes, null, null);
+        }
+
+        @Override
+        public Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes, String preferredSourceRef,
+                                                      String expectedSha256)
+                throws MailboxException {
             if (messageId == null || messageId.isBlank()) {
                 return Optional.empty();
             }
             try {
-                Optional<FoundMessage> found = search(folder, messageId, maxBytes);
-                if (found.isPresent() || !settings.movesProcessed()) {
-                    return found;
+                MailboxException[] oversized = new MailboxException[1];
+                List<FoundMessage> candidates = new ArrayList<>(
+                        search(folder, messageId, maxBytes, expectedSha256 == null && preferredSourceRef == null, oversized));
+                boolean settled = expectedSha256 != null
+                        ? candidates.stream().anyMatch(c -> expectedSha256.equalsIgnoreCase(c.sha256()))
+                        : !candidates.isEmpty() && (preferredSourceRef == null
+                                || candidates.stream().anyMatch(c -> preferredSourceRef.equals(c.sourceRef())));
+                if (!settled && settings.movesProcessed()) {
+                    // The mail may have been moved since: B in the polled folder must not
+                    // shadow the approved A in the move folder.
+                    Folder moved = store.getFolder(settings.moveToFolder());
+                    if (moved.exists()) {
+                        moved.open(Folder.READ_ONLY);
+                        try {
+                            candidates.addAll(search((IMAPFolder) moved, messageId, maxBytes, false, oversized));
+                        } finally {
+                            moved.close(false);
+                        }
+                    }
                 }
-                Folder moved = store.getFolder(settings.moveToFolder());
-                if (!moved.exists()) {
-                    return Optional.empty();
+                Optional<FoundMessage> chosen = FoundMessage.choose(candidates, preferredSourceRef, expectedSha256);
+                if (chosen.isEmpty() && oversized[0] != null) {
+                    // Nothing else matched: the oversized one may be the mail asked for.
+                    throw oversized[0];
                 }
-                moved.open(Folder.READ_ONLY);
-                try {
-                    return search((IMAPFolder) moved, messageId, maxBytes);
-                } finally {
-                    moved.close(false);
-                }
+                return chosen;
             } catch (MessagingException e) {
                 throw new MailboxException(MailboxException.Category.CONNECTION, "Searching the mailbox failed: " + rootMessage(e), e);
             }
@@ -418,18 +437,35 @@ public class ImapMailTransport implements MailTransport {
 
         /**
          * {@code SEARCH HEADER Message-ID} is a substring match, so every hit is
-         * compared with the id exactly before it is fetched.
+         * compared with the id exactly before it is fetched. Every exact hit is
+         * fetched, so the caller can choose; {@code firstOnly} stops at the first.
          */
-        private static Optional<FoundMessage> search(IMAPFolder in, String messageId, long maxBytes) throws MessagingException, MailboxException {
+        private static List<FoundMessage> search(IMAPFolder in, String messageId, long maxBytes, boolean firstOnly, MailboxException[] oversized)
+                throws MessagingException, MailboxException {
+            List<FoundMessage> found = new ArrayList<>();
             for (Message candidate : in.search(new HeaderTerm("Message-ID", messageId))) {
                 String[] ids = candidate.getHeader("Message-ID");
                 if (ids == null || Arrays.stream(ids).noneMatch(id -> id != null && id.strip().equalsIgnoreCase(messageId))) {
                     continue;
                 }
                 ImapMessage message = new ImapMessage((IMAPMessage) candidate, in.getUID(candidate), in.getUIDValidity(), in.getFullName());
-                return Optional.of(new FoundMessage(message.fetchRaw(maxBytes), message.internalDate(), message.sourceRef()));
+                try {
+                    found.add(new FoundMessage(message.fetchRaw(maxBytes), message.internalDate(), message.sourceRef()));
+                } catch (MailboxException e) {
+                    if (e.getCategory() != MailboxException.Category.TOO_LARGE) {
+                        throw e;
+                    }
+                    // An oversized twin must not hide an in-limit candidate: keep looking.
+                    if (oversized[0] == null) {
+                        oversized[0] = e;
+                    }
+                    continue;
+                }
+                if (firstOnly) {
+                    break;
+                }
             }
-            return Optional.empty();
+            return found;
         }
 
         @Override

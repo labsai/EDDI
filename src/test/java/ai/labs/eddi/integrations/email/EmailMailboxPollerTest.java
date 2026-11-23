@@ -248,6 +248,14 @@ class EmailMailboxPollerTest {
                 }
 
                 @Override
+                public Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings s, long maxBytes, String preferredSourceRef,
+                                                              String expectedSha256)
+                        throws MailboxException {
+                    events.add("find:" + messageId + ":" + preferredSourceRef + ":" + expectedSha256);
+                    return findByMessageId(messageId, s, maxBytes);
+                }
+
+                @Override
                 public MarkResult markProcessed(MailboxMessage message, EmailChannelSettings s) {
                     events.add("mark:" + message.uid());
                     return MarkResult.FLAGGED;
@@ -281,6 +289,23 @@ class EmailMailboxPollerTest {
         verify(processor).resubmissionTooLarge(any(), eq(big), any());
         verify(processor, never()).resubmissionLost(any(), eq(big), any());
         verify(processor).process(any(), argThat(m -> m != null && "<ok@x.com>".equals(m.envelopeMessageId())), any());
+    }
+
+    @Test
+    @DisplayName("an approved held mail is fetched again by what was approved: its hash, then where it was first seen")
+    void resubmissionAsksForTheApprovedMail() {
+        initialise(0);
+        Instant now = Instant.now();
+        String hash = "ab".repeat(32);
+        var held = new LedgerEntry("row-held", ID, Kind.TRIGGER, Direction.IN, "<held@x.com>", "conv-1", "imap:INBOX:1:7", "in:held", "a@x.com",
+                State.RECEIVED, 1, now, null, null, "email_gate:start_approved", now, now, now.plus(Duration.ofDays(30)),
+                "email_gate:start_approved", hash);
+        when(processor.pendingResubmissions(eq(ID), any())).thenReturn(List.of(held));
+        transport.byMessageId.put("<held@x.com>", new MailTransport.FoundMessage(EmailTestMail.mail().bytes(), now, "imap:INBOX:1:7"));
+
+        poller.poll(ID);
+
+        assertTrue(events.contains("find:<held@x.com>:imap:INBOX:1:7:" + hash), events.toString());
     }
 
     @Test

@@ -156,6 +156,12 @@ public class ConversationMemorySnapshot {
      * conversation among those is still recognised by its user id.
      */
     private String origin;
+    /**
+     * The email approval gate the conversation's latest mail turn carried
+     * ({@code IConversationMemory#getEmailApprovalGate}), or {@code null}. Absent
+     * in documents written before it existed.
+     */
+    private Map<String, Object> emailApprovalGate;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     /**
@@ -622,6 +628,14 @@ public class ConversationMemorySnapshot {
 
     public void setOrigin(String origin) {
         this.origin = origin;
+    }
+
+    public Map<String, Object> getEmailApprovalGate() {
+        return emailApprovalGate;
+    }
+
+    public void setEmailApprovalGate(Map<String, Object> emailApprovalGate) {
+        this.emailApprovalGate = emailApprovalGate;
     }
 
     public Deployment.Environment getEnvironment() {

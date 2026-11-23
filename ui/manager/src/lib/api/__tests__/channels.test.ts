@@ -8,6 +8,7 @@ import {
   parseChannelWarnings,
   createChannel,
   updateChannel,
+  withoutEmailApproval,
   type ChannelIntegrationConfiguration,
 } from "@/lib/api/channels";
 
@@ -73,6 +74,27 @@ describe("createDefaultTarget", () => {
   it("creates a target with empty targetId when none provided", () => {
     const target = createDefaultTarget();
     expect(target.targetId).toBe("");
+  });
+
+  it("preselects the actions approval policy for an email target only", () => {
+    expect(createDefaultTarget("agent-1", true).approvalPolicy).toBe("actions");
+    expect(createDefaultTarget("agent-1").approvalPolicy).toBeUndefined();
+  });
+});
+
+describe("withoutEmailApproval", () => {
+  it("drops the email approval fields and keeps the rest", () => {
+    const target = {
+      ...createDefaultTarget("agent-1", true),
+      readOnlyTools: ["http.get:*"],
+      rejectedReply: "No.",
+    };
+    const stripped = withoutEmailApproval(target);
+    expect(stripped).not.toHaveProperty("approvalPolicy");
+    expect(stripped).not.toHaveProperty("readOnlyTools");
+    expect(stripped).not.toHaveProperty("rejectedReply");
+    expect(stripped.targetId).toBe("agent-1");
+    expect(target.approvalPolicy).toBe("actions");
   });
 });
 

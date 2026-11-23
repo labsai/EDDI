@@ -80,7 +80,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * several unrelated call sites share, for no benefit; staying in-package keeps
  * every dependency at its original visibility.
  */
-class HttpCallToolsProvider implements ToolSourceProvider {
+public class HttpCallToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(HttpCallToolsProvider.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -891,7 +891,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * An absolute URL keeps only its path, so the same pattern matches however the
      * target server was configured.
      */
-    static String normalizeEndpointPath(String rawPath) {
+    public static String normalizeEndpointPath(String rawPath) {
         String path = rawPath.trim();
         // Request.path defaults to "", and an empty path means the target server's
         // root — ApiCallExecutor sends the request to targetServerUrl unchanged.
@@ -916,8 +916,29 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             } catch (IllegalArgumentException e) {
                 // Not parseable as a URI — a templated host, most likely. Leave it be:
                 // matching something odd is better than throwing during discovery.
-                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", sanitize(rawPath));
-                return path;
+                // The executor renders templates before it parses the URL, so a templated
+                // absolute URL addresses the same endpoint as its rendered form: keep the
+                // path after the authority, as the URI branch above does.
+                // The authority ends at the first '/', '?' or '#'; a '/' inside a query
+                // string is not a path.
+                int authorityEnd = path.indexOf("://") + 3;
+                while (authorityEnd < path.length() && "/?#".indexOf(path.charAt(authorityEnd)) < 0) {
+                    authorityEnd++;
+                }
+                if (authorityEnd >= path.length() || path.charAt(authorityEnd) != '/') {
+                    path = "/";
+                } else {
+                    String rest = path.substring(authorityEnd);
+                    int cut = rest.length();
+                    for (char stop : new char[]{'?', '#'}) {
+                        int at = rest.indexOf(stop);
+                        if (at >= 0 && at < cut) {
+                            cut = at;
+                        }
+                    }
+                    path = rest.substring(0, cut);
+                }
+                LOGGER.debugf("Normalised templated endpoint path '%s' for approval matching", sanitize(rawPath));
             }
         }
         if (!path.isEmpty() && !path.startsWith("/")) {

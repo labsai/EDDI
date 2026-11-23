@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -207,6 +208,21 @@ public class McpCallsTask implements ILifecycleTask {
             throws LifecycleException {
         try {
             String callName = mcpCall.getName() != null ? mcpCall.getName() : mcpCall.getToolName();
+
+            // The email approval gate (email plan v3 §8.1): a mail turn whose target has
+            // an approval policy cannot pause a rule-driven call, so one readOnlyTools
+            // does not name is refused before anything of it runs (its preRequest
+            // included) — whatever the agent's own toolApprovals say.
+            if (EmailApprovalGate.refusesRuleCall(memory, EmailApprovalGate.mcpCallAddresses(mcpCall.getName(), mcpCall.getToolName()))) {
+                LOGGER.warnf("MCP call '%s' → tool '%s' not executed: this turn was started by a mail and its target's approvalPolicy "
+                        + "refuses rule-driven calls that readOnlyTools does not name", callName, mcpCall.getToolName());
+                String deniedObjName = (mcpCall.getResponseObjectName() != null
+                        ? mcpCall.getResponseObjectName()
+                        : callName + "Response") + "Error";
+                prePostUtils.createMemoryEntry(currentStep, "DENIED: tool '" + mcpCall.getToolName() + "' is not read-only for mail turns",
+                        deniedObjName, KEY_MCP_CALLS);
+                return;
+            }
             LOGGER.infof("Executing MCP call '%s' → tool '%s'", callName, mcpCall.getToolName());
 
             // 1. PreRequest — prepare template variables

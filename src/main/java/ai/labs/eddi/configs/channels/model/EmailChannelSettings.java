@@ -634,6 +634,24 @@ public record EmailChannelSettings(
     /** An agent the integration targets has tools and no tool approvals. */
     public static final String WARNING_TOOLS_WITHOUT_APPROVALS = "email.tools-without-approvals";
     /**
+     * A target whose agent can act has {@code approvalPolicy: none}: mail turns run
+     * its tools under the agent's own {@code toolApprovals} only (email plan v3
+     * §8.1).
+     */
+    public static final String WARNING_APPROVAL_POLICY_NONE = "email.approval-policy-none";
+    /**
+     * A target with an approval policy has rule-driven {@code httpcalls} or
+     * {@code mcpcalls}: a mail turn refuses them unless {@code readOnlyTools} names
+     * them.
+     */
+    public static final String WARNING_RULE_CALLS_REFUSED = "email.rule-calls-refused";
+    /**
+     * A target with an approval policy names a {@code readOnlyTools} pattern that
+     * matches every tool ({@code *}): its mail turns' tool calls never wait, so the
+     * gate does nothing for tools (email plan v3 §8.1).
+     */
+    public static final String WARNING_READ_ONLY_EVERYTHING = "email.read-only-everything";
+    /**
      * An allowlist entry admits far more than one organisation: a whole public
      * suffix ({@code *@*.co.uk}, {@code *@github.io}), or the integration's own
      * domain, whose senders an outsider can often impersonate where the domain's

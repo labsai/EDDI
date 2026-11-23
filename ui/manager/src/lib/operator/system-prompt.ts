@@ -2249,7 +2249,34 @@ your tool schemas do not cover it, not as a routine first step:
   and undeploy only in a call a person approved through
   hitlConfig.toolApprovals; otherwise the refusal says "unless a person
   approves that call". A whole-integration PUT that empties a non-empty
-  allowlist needs ?confirmOpen=true and is audited like a sender change. Exchange Online: an
+  allowlist needs ?confirmOpen=true and is audited like a sender change.
+  Approval gate, per email
+  AGENT target (refused on GROUP targets and on other channel types):
+  approvalPolicy none (default for old targets: only the agent's own
+  toolApprovals), actions (the Manager's default for new email targets: every
+  tool call of a mail turn that readOnlyTools does not name pauses for
+  approval, whatever the agent's exempt says; such a pause auto-rejects after
+  eddi.email.approval-gate.expiry, default 72h), firstContact (as actions, and
+  a sender's first mail to that target pauses before the agent runs) or
+  everyTurn (every mail pauses before the agent runs, before
+  CONVERSATION_START for a new conversation). readOnlyTools takes
+  toolApprovals patterns (http.get:*, mcp:search, a tool name) and never
+  un-gates what the agent gates; rejectedReply is what a rejected mail is
+  answered with in conversation mode (default "Your request was not
+  approved."). Rule-driven httpcalls and mcpcalls of a mail turn are refused
+  unless readOnlyTools names them. The gate is recorded on the conversation,
+  so its later turns without a mail — a self-continuation, a scheduled
+  check-back — are gated the same (under everyTurn they wait too); a mail
+  conversation with no recorded gate fails closed (as actions, nothing
+  read-only). These pauses are ordinary approvals: list and decide them as
+  any other; the approval context of a held mail shows its sender, subject,
+  attachment names and the start of its text. An approval binds the mail
+  that was held: another mail with its Message-ID waits again. A rejected
+  held start ends its conversation. Save warnings email.approval-policy-none
+  (a target that can act has no policy), email.rule-calls-refused and
+  email.read-only-everything (a readOnlyTools pattern such as * matches every
+  tool, so nothing waits).
+  Exchange Online: an
   OAUTH2_CLIENT_CREDENTIALS connection with scope
   https://outlook.office365.com/.default and allowlist
   imaps://outlook.office365.com, plus Add-MailboxPermission granting the

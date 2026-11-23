@@ -122,6 +122,21 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.allowlistBroad",
         "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
       );
+    case "email.approval-policy-none":
+      return t(
+        "emailChannel.warning.approvalPolicyNone",
+        "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
+      );
+    case "email.rule-calls-refused":
+      return t(
+        "emailChannel.warning.ruleCallsRefused",
+        "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
+      );
+    case "email.read-only-everything":
+      return t(
+        "emailChannel.warning.readOnlyEverything",
+        "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. The agent's own tool approvals still apply. Name the read-only tools instead.",
+      );
     default:
       return code;
   }

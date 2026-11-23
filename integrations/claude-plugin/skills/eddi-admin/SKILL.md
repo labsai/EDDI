@@ -203,6 +203,14 @@ audit trail → server log → the configuration that produced it. Follow
   log. A `CONFLICT` means someone changed it meanwhile — read again. Removing the last allowlist
   entry lets every sender in and needs `confirmOpen: true`: only when the user asked for exactly
   that. A conversation an email started can never call these tools.
+  Each email AGENT target may set `approvalPolicy` (`none`, `actions`, `firstContact`,
+  `everyTurn`), `readOnlyTools` (tool-approval patterns such as `http.get:*`) and
+  `rejectedReply` — set them in the target of `update_channel_integration`. Under `actions` every
+  tool call of a mail turn not in `readOnlyTools` waits for approval even if the agent exempts it;
+  `firstContact` and `everyTurn` also hold the mail before the agent runs. Those pauses are
+  ordinary approvals (`list_pending_approvals`, `resume_conversation`). Not on GROUP targets.
+  Relay the warnings `email.approval-policy-none`, `email.rule-calls-refused` and
+  `email.read-only-everything` (a `readOnlyTools` pattern such as `*` matches every tool).
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a

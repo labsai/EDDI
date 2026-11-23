@@ -55,6 +55,9 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -1946,7 +1949,9 @@ class ConversationHitlService {
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
         populateTimeoutBookmark(memory);
+        applyEmailGateTimeout(memory, emailGateExpiry(conversationService.emailGateExpiry));
         renderApprovalContext(memory);
+        addHeldMailContext(memory);
         // Last: after the turn's secret scrub (done before this is called) and before
         // the store, so the hash covers exactly what is persisted.
         HitlPlanHash.commit(memory);
@@ -1974,6 +1979,112 @@ class ConversationHitlService {
                     hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
             LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * A mail the email approval gate holds before the agent runs (email plan v3
+     * §8.1) is shown to its approver as the first item of the pause's approval
+     * context — sender, subject, attachment names and the start of the text, with
+     * credential shapes redacted. The approval context is what every approval
+     * surface shows (the Manager, Slack, REST, MCP); the pause reason, which
+     * reaches the write-once audit ledger and the sender's own pause notice, stays
+     * without them.
+     */
+    static void addHeldMailContext(IConversationMemory memory) {
+        try {
+            var step = memory.getCurrentStep();
+            if (step == null || step.getData(EmailApprovalGate.PRE_RUN_MARKER) == null) {
+                return;
+            }
+            EmailApprovalGate.Policy gate = EmailApprovalGate.of(memory);
+            String text = gate == null ? null : EmailApprovalGate.heldMailText(gate.mail());
+            if (text == null) {
+                return;
+            }
+            String redacted = SecretRedactionFilter.redact(text);
+            boolean truncated = redacted.length() > MAX_HELD_MAIL_CONTEXT_CHARS;
+            if (truncated) {
+                int end = Character.isHighSurrogate(redacted.charAt(MAX_HELD_MAIL_CONTEXT_CHARS - 1))
+                        ? MAX_HELD_MAIL_CONTEXT_CHARS - 1
+                        : MAX_HELD_MAIL_CONTEXT_CHARS;
+                redacted = redacted.substring(0, end);
+            }
+            List<RenderedApprovalContext.Item> items = new ArrayList<>();
+            items.add(new RenderedApprovalContext.Item(EmailApprovalGate.HELD_MAIL_LABEL, redacted, truncated, EmailApprovalGate.HELD_MAIL_SOURCE,
+                    null, null));
+            RenderedApprovalContext rendered = memory.getHitlApprovalContext();
+            if (rendered != null && rendered.getItems() != null) {
+                items.addAll(rendered.getItems());
+            }
+            memory.setHitlApprovalContext(RenderedApprovalContext.of(items, rendered != null && rendered.isTruncated()));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not add the held mail to the approval context of %s: %s", sanitize(memory.getConversationId()),
+                    sanitize(e.getMessage()));
+        }
+    }
+
+    /** The most of a held mail the approval context shows. */
+    static final int MAX_HELD_MAIL_CONTEXT_CHARS = 3000;
+
+    /**
+     * How long a pause the email approval gate caused waits before it is rejected.
+     */
+    static final String EMAIL_GATE_EXPIRY_PROPERTY = "eddi.email.approval-gate.expiry";
+    static final String DEFAULT_EMAIL_GATE_EXPIRY = "PT72H";
+
+    /**
+     * {@code configured} ({@link ConversationService#emailGateExpiry}) when it is a
+     * positive ISO-8601 duration, else {@link #DEFAULT_EMAIL_GATE_EXPIRY}.
+     */
+    static String emailGateExpiry(String configured) {
+        try {
+            if (configured != null && !configured.isBlank()) {
+                Duration parsed = Duration.parse(configured.trim());
+                if (!parsed.isNegative() && !parsed.isZero()) {
+                    return configured.trim();
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("%s is not a positive ISO-8601 duration; using %s", EMAIL_GATE_EXPIRY_PROPERTY, DEFAULT_EMAIL_GATE_EXPIRY);
+        }
+        return DEFAULT_EMAIL_GATE_EXPIRY;
+    }
+
+    /**
+     * The email approval gate's timeout (email plan v3 §8.1), applied after the
+     * agent's: a pause of a mail turn that the email gate caused — the mail waiting
+     * before the agent ran, or a tool call it gated — is {@code AUTO_REJECT} after
+     * {@code expiry}, whatever the agent's {@code toolApprovals} or rules say. Any
+     * other pause of a mail turn keeps the agent's policy, except that it never
+     * auto-approves: an {@code AUTO_APPROVE} becomes {@code AUTO_REJECT}. A turn
+     * without an email gate is left as it is.
+     */
+    static void applyEmailGateTimeout(IConversationMemory memory, String expiry) {
+        EmailApprovalGate.Policy gate = EmailApprovalGate.of(memory);
+        if (gate == null) {
+            return;
+        }
+        var step = memory.getCurrentStep();
+        boolean preRun = step != null && step.getData(EmailApprovalGate.PRE_RUN_MARKER) != null;
+        PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+        boolean toolPause = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
+        boolean gatedByEmail = toolPause && batch != null && batch.getCalls() != null
+                && batch.getCalls().stream().anyMatch(call -> EmailApprovalGate.GATE_REASON.equals(call.getGateReason()));
+        if (preRun || gatedByEmail) {
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            memory.setHitlApprovalTimeout(expiry);
+            if (preRun) {
+                boolean inherited = EmailApprovalGate.PRE_RUN_INHERITED
+                        .equals(String.valueOf(step.getData(EmailApprovalGate.PRE_RUN_MARKER).getResult()));
+                memory.setHitlPauseReason(inherited
+                        ? EmailApprovalGate.INHERITED_PRE_RUN_REASON
+                        : gate.pauseReason() != null && !gate.pauseReason().isBlank()
+                                ? gate.pauseReason()
+                                : EmailApprovalGate.DEFAULT_PRE_RUN_REASON);
+            }
+        } else if (memory.getHitlTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE) {
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         }
     }
 

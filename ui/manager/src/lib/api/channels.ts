@@ -36,6 +36,19 @@ export const DEFAULT_OBSERVE_CONFIG: ObserveConfig = {
   maxCostPerDay: 5.0,
 };
 
+/**
+ * The email approval gate of an email target, in strictness order: `none` (the
+ * agent's own toolApprovals only), `actions` (every tool call not in
+ * `readOnlyTools` waits for approval), `firstContact` (as actions, and a
+ * sender's first mail waits before the agent runs), `everyTurn` (every mail
+ * waits before the agent runs). Email AGENT targets only.
+ */
+export const APPROVAL_POLICIES = ["none", "actions", "firstContact", "everyTurn"] as const;
+export type ApprovalPolicy = (typeof APPROVAL_POLICIES)[number];
+
+/** What the Manager preselects for a new email target. */
+export const DEFAULT_EMAIL_APPROVAL_POLICY: ApprovalPolicy = "actions";
+
 export interface ChannelTarget {
   name: string;
   triggers: string[];
@@ -43,6 +56,24 @@ export interface ChannelTarget {
   targetId: string;
   observeMode: boolean;
   observeConfig: ObserveConfig | null;
+  /** Email AGENT targets only; absent means `none`. */
+  approvalPolicy?: ApprovalPolicy;
+  /** Email only: tool-approval patterns a mail turn may call without the email gate. */
+  readOnlyTools?: string[];
+  /** Email only: what a sender is told when an approver rejects a held mail. */
+  rejectedReply?: string;
+}
+
+/**
+ * The target without the email approval fields — what a GROUP target, or a
+ * target of another channel type, must be saved as (the backend refuses them).
+ */
+export function withoutEmailApproval(target: ChannelTarget): ChannelTarget {
+  const copy: ChannelTarget = { ...target };
+  delete copy.approvalPolicy;
+  delete copy.readOnlyTools;
+  delete copy.rejectedReply;
+  return copy;
 }
 
 export interface ChannelIntegrationConfiguration {
@@ -299,8 +330,12 @@ export async function getEnrichedChannelDescriptors(
   );
 }
 
-/** Create an empty default target */
-export function createDefaultTarget(agentId = ""): ChannelTarget {
+/**
+ * Create an empty default target. An email target starts on the
+ * `actions` approval policy: mail is untrusted input, so its tool calls wait
+ * for approval unless the admin chooses otherwise.
+ */
+export function createDefaultTarget(agentId = "", email = false): ChannelTarget {
   return {
     name: "default",
     type: "AGENT",
@@ -308,5 +343,6 @@ export function createDefaultTarget(agentId = ""): ChannelTarget {
     triggers: [],
     observeMode: false,
     observeConfig: null,
+    ...(email ? { approvalPolicy: DEFAULT_EMAIL_APPROVAL_POLICY } : {}),
   };
 }
