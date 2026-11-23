@@ -558,6 +558,15 @@ class ConversationServiceDeepBranchTest {
         }
 
         @Test
+        @DisplayName("an agent an email turn consults (email-consult:) gets no memory store and no memory tools")
+        void consultedAgentHasNoMemory() {
+            var handler = conversationService.createPropertiesHandler("email-consult:int1:0123abcd",
+                    new AgentConfiguration.UserMemoryConfig(), true);
+            assertNull(handler.getUserMemoryStore(), "the sender's memory is neither read nor written");
+            assertFalse(handler.isMemoryToolsEnabled(), "no UserMemoryTool");
+        }
+
+        @Test
         @DisplayName("an authenticated email sender (email:<id>:<address>) keeps its memory")
         void authenticatedEmailSenderHasMemory() {
             var handler = conversationService.createPropertiesHandler("email:int1:alice@example.com",

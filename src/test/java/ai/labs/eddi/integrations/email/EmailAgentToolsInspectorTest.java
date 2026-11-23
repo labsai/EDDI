@@ -237,4 +237,41 @@ class EmailAgentToolsInspectorTest {
         assertEquals(List.of("ok"), inspector.targetsWithUngatedTools(targets));
         assertTrue(inspector.targetsWithUngatedTools(null).isEmpty());
     }
+
+    private static LlmConfiguration.Task builtIns(Boolean enabled, String... whitelist) {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(enabled);
+        task.setBuiltInToolsWhitelist(whitelist.length == 0 ? null : List.of(whitelist));
+        return task;
+    }
+
+    private static ChannelTarget consulting(String... names) {
+        var target = target("finance", "agent-1", ChannelTarget.TargetType.AGENT);
+        target.setConsultable(List.of(names));
+        return target;
+    }
+
+    @Test
+    void aConsultingTargetWhoseAgentCannotDelegateIsReported() throws Exception {
+        workflow(step(LLM.toString()));
+        llm(builtIns(true, "calculator"));
+        assertEquals(List.of("finance"), inspector.targetsWithoutConsultTool(List.of(consulting("legal"))));
+
+        llm(builtIns(false, "converse_with_agent"));
+        assertEquals(List.of("finance"), inspector.targetsWithoutConsultTool(List.of(consulting("legal"))), "built-ins off");
+
+        llm(builtIns(true));
+        assertEquals(List.of("finance"), inspector.targetsWithoutConsultTool(List.of(consulting("legal"))),
+                "an omitted whitelist gives a standalone agent no dynamic-agent tool");
+    }
+
+    @Test
+    void aConsultingTargetWhoseAgentDelegatesIsNotReported() throws Exception {
+        workflow(step(LLM.toString()));
+        llm(builtIns(true, "converse_with_agent"));
+        assertTrue(inspector.targetsWithoutConsultTool(List.of(consulting("legal"))).isEmpty());
+        assertTrue(inspector.targetsWithoutConsultTool(List.of(target("plain", "agent-1", ChannelTarget.TargetType.AGENT))).isEmpty(),
+                "a target that consults nobody is never reported");
+        assertTrue(inspector.targetsWithoutConsultTool(null).isEmpty());
+    }
 }

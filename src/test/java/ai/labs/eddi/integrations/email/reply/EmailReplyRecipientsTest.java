@@ -75,6 +75,11 @@ class EmailReplyRecipientsTest {
         assertEquals("unauthenticated_identity", decide(settings(), inbound(State.DONE), mail(), "alice").refusal());
         assertEquals("unauthenticated_identity", decide(settings(), inbound(State.DONE), mail(), null).refusal());
         assertEquals("unauthenticated_identity", decide(settings(), inbound(State.DONE), mail(), "email:" + INTEGRATION + ":").refusal());
+        // A consulted agent's conversation (email v2 plan §10.3) is never answered
+        // by mail, even if a mail row ever named it.
+        assertEquals("unauthenticated_identity", decide(settings(), inbound(State.DONE), mail(), EmailUserIdentity.consult(INTEGRATION)).refusal());
+        assertEquals("unauthenticated_identity",
+                decide(settings(), inbound(State.DONE), mail(), EmailUserIdentity.consult(INTEGRATION, SENDER)).refusal());
     }
 
     @Test

@@ -64,6 +64,16 @@ public class ClientContextGuard {
     public static final String KEY_SELF_CONTINUATION = "selfContinuation";
 
     /**
+     * Written by the email inbound processor; names the integration a mail's turn
+     * came from. (The {@code mail} context itself is not reserved: this guard also
+     * strips every key that starts with a reserved one, and {@code mail…} is too
+     * common a client key to take away. Its one trusted reader — the consultations
+     * of {@code EmailConsults} — acts only for email identities, which no client
+     * can own.)
+     */
+    public static final String KEY_EMAIL_INTEGRATION = "emailIntegration";
+
+    /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
      * consumer looks them up exactly ({@code IConversationStep#getData},
      * {@code IConversationStepStack#getExactDataPerStep}). A client key that merely
@@ -71,7 +81,8 @@ public class ClientContextGuard {
      * {@link #shadowsReserved(String)}.
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
-            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION);
+            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION,
+            KEY_EMAIL_INTEGRATION);
 
     private final Set<String> permittedReservedKeys;
 

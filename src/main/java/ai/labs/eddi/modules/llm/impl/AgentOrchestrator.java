@@ -1300,7 +1300,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
                 guard != null
                         ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
                                 caller != null && caller.isAdminActingAs(principal))
-                        : null);
+                        : null,
+                guard != null ? guard::ownerOf : null);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

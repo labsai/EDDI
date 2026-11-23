@@ -179,10 +179,47 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             LOG.debugf("Email warnings skipped: %s", e.getMessage());
             warnings = List.of();
         }
+        if (ownerCannotUseConsulted(id, configuration)) {
+            warnings = new ArrayList<>(warnings);
+            warnings.add(EmailChannelSettings.WARNING_CONSULT_OWNER_CANNOT_USE);
+        }
         if (warnings.isEmpty()) {
             return response;
         }
         return Response.fromResponse(response).header(WARNINGS_HEADER, String.join(",", warnings)).build();
+    }
+
+    /**
+     * Whether a consultation this integration allows would be refused at run time
+     * because the integration's owner may not use the consulted agent (email v2
+     * plan §10.3). Asked exactly as the delegation tool asks: the owner's own
+     * grants and published agents — no administrator bypass and no team shares,
+     * since an email turn carries neither. Best effort: anything unreadable says
+     * nothing.
+     */
+    boolean ownerCannotUseConsulted(String id, ChannelIntegrationConfiguration configuration) {
+        if (resourceAccessGuard == null || configuration.getTargets() == null) {
+            return false;
+        }
+        try {
+            String owner = resourceAccessGuard.ownerOf(id);
+            for (ChannelTarget target : configuration.getTargets()) {
+                if (target == null || target.getConsultable() == null) {
+                    continue;
+                }
+                for (String name : target.getConsultable()) {
+                    for (ChannelTarget consulted : configuration.getTargets()) {
+                        if (consulted != null && name.equalsIgnoreCase(consulted.getName()) && consulted.getTargetId() != null
+                                && (owner == null || !resourceAccessGuard.principalMayUse(consulted.getTargetId(), owner))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            LOG.debugf("Consult owner check skipped: %s", e.getMessage());
+        }
+        return false;
     }
 
     /**
@@ -687,14 +724,76 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             }
             if (email) {
                 validateEmailTargetRules(target, emailSettings, usedMentions, usedAddresses);
-            } else if (hasAny(target.getMentions()) || hasAny(target.getAddresses()) || hasAny(target.getAllowedSenders())) {
+            } else if (hasAny(target.getMentions()) || hasAny(target.getAddresses()) || hasAny(target.getAllowedSenders())
+                    || hasAny(target.getConsultable())) {
                 // Mode-specific keys are refused the same way: a rule that never applies
                 // would read as if it did something.
                 throw new BadRequestException(
-                        "Target '" + target.getName() + "': mentions, addresses and allowedSenders are only supported for email "
-                                + "integrations.");
+                        "Target '" + target.getName() + "': mentions, addresses, allowedSenders and consultable are only supported "
+                                + "for email integrations.");
             }
         }
+        if (email) {
+            // A second pass: a target may name one that comes after it.
+            for (ChannelTarget target : targets) {
+                validateConsultable(target, targets);
+            }
+        }
+    }
+
+    /**
+     * An email target's {@code consultable} (email v2 plan §10.1): names of other
+     * AGENT targets of the same integration, each with a different agent. Names are
+     * stored as the targets spell them, so what is matched is what is stored.
+     */
+    static void validateConsultable(ChannelTarget target, List<ChannelTarget> targets) {
+        List<String> names = target.getConsultable();
+        if (names == null) {
+            return;
+        }
+        String name = target.getName();
+        if (names.isEmpty()) {
+            target.setConsultable(null);
+            return;
+        }
+        if (target.getType() != ChannelTarget.TargetType.AGENT) {
+            throw new BadRequestException("Target '" + name + "': consultable is only supported for AGENT targets; a group "
+                    + "discussion consults its own members.");
+        }
+        if (names.size() > ChannelTarget.MAX_CONSULTABLE) {
+            throw new BadRequestException("Target '" + name + "': at most " + ChannelTarget.MAX_CONSULTABLE + " consultable targets.");
+        }
+        List<String> resolved = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String entry : names) {
+            ChannelTarget other = entry == null
+                    ? null
+                    : targets.stream()
+                            .filter(candidate -> candidate.getName() != null && candidate.getName().equalsIgnoreCase(entry.trim()))
+                            .findFirst()
+                            .orElse(null);
+            if (other == null) {
+                throw new BadRequestException("Target '" + name + "': consultable entry '" + entry + "' is not the name of a target "
+                        + "of this integration.");
+            }
+            if (other == target || (other.getTargetId() != null && other.getTargetId().equals(target.getTargetId()))) {
+                throw new BadRequestException("Target '" + name + "': consultable entry '" + entry + "' is this target's own agent; "
+                        + "an agent does not consult itself.");
+            }
+            if (other.getType() != ChannelTarget.TargetType.AGENT) {
+                throw new BadRequestException("Target '" + name + "': consultable entry '" + entry + "' must be an AGENT target; "
+                        + "converseWithAgent talks to a single agent.");
+            }
+            if (other.isObserveMode()) {
+                throw new BadRequestException("Target '" + name + "': consultable entry '" + entry + "' is an observer; only an "
+                        + "addressable target can be consulted.");
+            }
+            if (!seen.add(other.getName().toLowerCase(Locale.ROOT))) {
+                throw new BadRequestException("Target '" + name + "': consultable entry '" + entry + "' is listed twice.");
+            }
+            resolved.add(other.getName());
+        }
+        target.setConsultable(resolved);
     }
 
     private static boolean hasAny(List<String> values) {

@@ -741,6 +741,21 @@ public record EmailChannelSettings(
     public static final String WARNING_TOOLS_WITHOUT_APPROVALS = "email.tools-without-approvals";
 
     /**
+     * A target names {@code consultable} targets, but its agent has no LLM task
+     * that assembles {@code converse_with_agent} (built-in tools on and the tool in
+     * {@code builtInToolsWhitelist}), so a requested consultation can never happen.
+     */
+    public static final String WARNING_CONSULT_NOT_ENABLED = "email.consult-not-enabled";
+
+    /**
+     * A target names {@code consultable} targets whose agent the integration's
+     * owner may not use (own grant or published; an administrator role and team
+     * shares do not count for an email turn), so the consultation is refused at run
+     * time.
+     */
+    public static final String WARNING_CONSULT_OWNER_CANNOT_USE = "email.consult-owner-cannot-use";
+
+    /**
      * The bare connection name of {@code name} or {@code ${connection:name}}; null
      * when invalid.
      */

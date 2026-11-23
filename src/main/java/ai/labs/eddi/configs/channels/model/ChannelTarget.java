@@ -38,6 +38,10 @@ public class ChannelTarget {
     private List<String> mentions;
     private List<String> addresses;
     private List<String> allowedSenders;
+    private List<String> consultable;
+
+    /** Most names one target's {@code consultable} may hold. */
+    public static final int MAX_CONSULTABLE = 10;
 
     public ChannelTarget() {
         this.triggers = new ArrayList<>();
@@ -169,5 +173,23 @@ public class ChannelTarget {
 
     public void setAllowedSenders(List<String> allowedSenders) {
         this.allowedSenders = allowedSenders;
+    }
+
+    /**
+     * Email only: names of other targets of the same integration whose agent this
+     * target's agent may consult when a mail it runs with names one of them by
+     * address, plus-tag or mention (email v2 plan §10). The consulted agent answers
+     * {@code converseWithAgent} as tool output; this target's agent stays the only
+     * voice in the thread. Each name must be another {@code AGENT} target of the
+     * integration with a different agent; at most {@value #MAX_CONSULTABLE}.
+     *
+     * @since 6.8.0
+     */
+    public List<String> getConsultable() {
+        return consultable != null ? new ArrayList<>(consultable) : null;
+    }
+
+    public void setConsultable(List<String> consultable) {
+        this.consultable = consultable;
     }
 }

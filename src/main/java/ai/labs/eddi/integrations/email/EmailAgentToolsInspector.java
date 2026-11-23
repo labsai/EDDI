@@ -81,6 +81,72 @@ public class EmailAgentToolsInspector {
         return names;
     }
 
+    /**
+     * The names of the targets that name {@code consultable} targets while their
+     * agent has no LLM task assembling {@code converse_with_agent}: built-in tools
+     * on and the tool named in {@code builtInToolsWhitelist} (a standalone agent
+     * gets no dynamic-agent tool from an omitted whitelist). Best effort like
+     * {@link #targetsWithUngatedTools}: an unreadable agent is skipped.
+     */
+    public List<String> targetsWithoutConsultTool(List<ChannelTarget> targets) {
+        List<String> names = new ArrayList<>();
+        if (targets == null) {
+            return names;
+        }
+        for (ChannelTarget target : targets) {
+            if (target == null || target.getConsultable() == null || target.getConsultable().isEmpty() || target.getTargetId() == null) {
+                continue;
+            }
+            try {
+                if (!assemblesConverseTool(target.getTargetId())) {
+                    names.add(target.getName());
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Consult inspection skipped for agent %s: %s", LogSanitizer.sanitize(target.getTargetId()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        return names;
+    }
+
+    /** The whitelist name of the delegation tool. */
+    static final String CONVERSE_TOOL = "converse_with_agent";
+
+    boolean assemblesConverseTool(String agentId) throws Exception {
+        int version = agentStore.getCurrentResourceId(agentId).getVersion();
+        AgentConfiguration agent = agentStore.read(agentId, version);
+        if (agent == null || agent.getWorkflows() == null) {
+            return false;
+        }
+        for (URI workflowUri : agent.getWorkflows()) {
+            var workflowId = RestUtilities.extractResourceId(workflowUri);
+            if (workflowId == null || workflowId.getId() == null || workflowId.getVersion() == null) {
+                continue;
+            }
+            WorkflowConfiguration workflow = workflowStore.read(workflowId.getId(), workflowId.getVersion());
+            if (workflow == null || workflow.getWorkflowSteps() == null) {
+                continue;
+            }
+            for (var step : workflow.getWorkflowSteps()) {
+                URI uri = step.getConfig() != null && step.getConfig().get("uri") instanceof String value ? safeUri(value) : null;
+                if (uri == null || !LLM_AUTHORITY.equals(uri.getHost())) {
+                    continue;
+                }
+                LlmConfiguration llm = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                if (llm == null || llm.tasks() == null) {
+                    continue;
+                }
+                for (LlmConfiguration.Task task : llm.tasks()) {
+                    if (Boolean.TRUE.equals(task.getEnableBuiltInTools()) && task.getBuiltInToolsWhitelist() != null
+                            && task.getBuiltInToolsWhitelist().contains(CONVERSE_TOOL)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     boolean hasUngatedTools(String agentId) throws Exception {
         int version = agentStore.getCurrentResourceId(agentId).getVersion();
         AgentConfiguration agent = agentStore.read(agentId, version);

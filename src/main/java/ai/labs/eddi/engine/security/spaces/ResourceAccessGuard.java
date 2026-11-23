@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import io.quarkus.security.ForbiddenException;
@@ -340,6 +341,31 @@ public class ResourceAccessGuard {
      */
     public boolean principalMayUse(String resourceId, String principal) {
         return principalMayUse(resourceId, principal, false);
+    }
+
+    /**
+     * The owner recorded on {@code resourceId}'s current descriptor, or
+     * {@code null} when it has none or the descriptor cannot be read. For engine
+     * work done on a resource's behalf rather than a caller's — an email turn's
+     * delegation is checked against its integration's owner.
+     */
+    public String ownerOf(String resourceId) {
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+            String owner = descriptor == null ? null : descriptor.getOwnerId();
+            // An owner that is no person — erased (the GDPR pseudonym), anonymous, or
+            // any other synthetic principal — lends no rights: the caller falls back to
+            // a principal that holds none.
+            return owner == null || owner.isBlank() || ReservedPrincipals.isReserved(owner) ? null : owner;
+        } catch (ResourceNotFoundException e) {
+            return null;
+        } catch (ResourceStoreException | RuntimeException e) {
+            LOGGER.warnf("Could not load descriptor of %s to read its owner: %s", sanitize(resourceId), e.getMessage());
+            return null;
+        }
     }
 
     /**
