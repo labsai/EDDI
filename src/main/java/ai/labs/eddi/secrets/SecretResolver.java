@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.function.Consumer;
 
 /**
@@ -104,6 +105,36 @@ public class SecretResolver {
      * can tell that the value it read may be stale; see {@code resolveReference}.
      */
     private final AtomicLong invalidations = new AtomicLong();
+
+    /**
+     * Per-secret generations for binding a grant check to the value it releases
+     * (see {@code resolveReference}): bumped by an invalidation of a secret that
+     * hashes to the stripe, and all of them at once (through
+     * {@link #allInvalidations}) by a full invalidation. Striped rather than per
+     * key, so it is bounded; a collision costs only a retry. The global
+     * {@link #invalidations} would make every resolution retry during a bulk grant
+     * edit of unrelated secrets.
+     */
+    private final AtomicLongArray keyInvalidations = new AtomicLongArray(64);
+
+    /** Bumped by {@link #invalidateAllLocal}; see {@link #keyInvalidations}. */
+    private final AtomicLong allInvalidations = new AtomicLong();
+
+    /**
+     * The generation of {@code cacheKey}: changes whenever an invalidation covers
+     * it.
+     */
+    private long generationOf(String cacheKey) {
+        return allInvalidations.get() + keyInvalidations.get(stripeOf(cacheKey));
+    }
+
+    private void bumpGenerationOf(String cacheKey) {
+        keyInvalidations.incrementAndGet(stripeOf(cacheKey));
+    }
+
+    private int stripeOf(String cacheKey) {
+        return Math.floorMod(cacheKey.hashCode(), keyInvalidations.length());
+    }
 
     /**
      * Listeners notified when cached secrets are invalidated. Used by downstream
@@ -430,6 +461,41 @@ public class SecretResolver {
             return fullMatch;
         }
 
+        // The grant and the value are bound to one state of the vault: the generation
+        // is sampled before the grant is checked, and a value read after an
+        // invalidation moved it is not returned on the strength of that check — the
+        // grant may have changed in between and admit only the new value's readers
+        // (#1179). The resolution is retried against the new state; a vault that
+        // keeps changing under it is refused rather than raced. Only an invalidation
+        // of this secret counts; a resolution that reads no grant has none to bind.
+        if (grantEnforcement == VaultGrantGate.Mode.OFF || !access.checksGrant()) {
+            return resolveOnce(ref, fullMatch, access);
+        }
+        String key = cacheKey(ref);
+        for (int attempt = 0; attempt < GRANT_BINDING_ATTEMPTS; attempt++) {
+            long generation = generationOf(key);
+            String resolved = resolveOnce(ref, fullMatch, access);
+            if (generationOf(key) == generation) {
+                return resolved;
+            }
+        }
+        LOGGER.warnf("Vault reference %s not resolved: the vault changed during each of %d attempts, so its grant could not be "
+                + "bound to the value read", SecretReference.describe(fullMatch), GRANT_BINDING_ATTEMPTS);
+        resolveErrorCounter.increment();
+        return fullMatch;
+    }
+
+    /**
+     * Attempts {@link #resolveReference} makes to bind a grant check to the value
+     * it releases.
+     */
+    static final int GRANT_BINDING_ATTEMPTS = 3;
+
+    /**
+     * One grant check and one read, cache or provider; see
+     * {@link #resolveReference}.
+     */
+    private String resolveOnce(SecretReference ref, String fullMatch, SecretAccess access) {
         // The grant BEFORE the cache: the cache is keyed on the secret, not on who
         // asks, so a value one agent put there must not reach another that the
         // grant leaves out (#1179).
@@ -682,6 +748,7 @@ public class SecretResolver {
     public void invalidateLocal(SecretReference reference) {
         String cacheKey = cacheKey(reference);
         invalidations.incrementAndGet();
+        bumpGenerationOf(cacheKey);
         cache.invalidate(cacheKey);
         grantCache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
@@ -719,6 +786,7 @@ public class SecretResolver {
         // The generation moves too, so a grant read racing this write is not kept
         // (see grantOf).
         invalidations.incrementAndGet();
+        bumpGenerationOf(cacheKey);
         grantCache.invalidate(cacheKey);
         LOGGER.infof("Grant cache invalidated for: %s", sanitize(cacheKey));
     }
@@ -736,6 +804,7 @@ public class SecretResolver {
     /** The local half of {@link #invalidateAll}; see {@link #invalidateLocal}. */
     public void invalidateAllLocal() {
         invalidations.incrementAndGet();
+        allInvalidations.incrementAndGet();
         cache.invalidateAll();
         grantCache.invalidateAll();
         LOGGER.info("All cached secrets invalidated");

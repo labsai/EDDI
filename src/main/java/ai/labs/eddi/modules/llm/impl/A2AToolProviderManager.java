@@ -44,6 +44,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -110,6 +111,12 @@ public class A2AToolProviderManager {
      * request. See {@link #cardCacheKey}.
      */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
+
+    /**
+     * Bumped by every connection change before the cards are cleared, so a fetch in
+     * flight across one does not put back a card fetched with the old binding.
+     */
+    private final AtomicLong cardInvalidations = new AtomicLong();
 
     record CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
     }
@@ -199,6 +206,13 @@ public class A2AToolProviderManager {
         this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
         this.maxSchemaBytesPerAgent = maxSchemaBytesPerAgent > 0 ? maxSchemaBytesPerAgent : DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT;
         this.connectionResolver = connectionResolver;
+        if (connectionResolver != null) {
+            // A card fetched with a ${connection:…} apiKey is keyed on the reference, not
+            // on the secret the connection names; a rebound connection would otherwise
+            // keep serving the card fetched with the old secret for its TTL (#1179).
+            // Connection writes are rare, so every card goes.
+            connectionResolver.onConnectionChange(this::evictCards);
+        }
     }
 
     /**
@@ -274,7 +288,14 @@ public class A2AToolProviderManager {
             // Grant-checked, card-cached and called with ONE expansion of a ${vars:…}
             // apiKey: a variable repointed to another secret is another card-cache key,
             // never a hit on a card fetched with the old secret (#1179).
-            A2AAgentConfig config = bindCredential(configured);
+            A2AAgentConfig config;
+            try {
+                config = bindCredential(configured);
+            } catch (IllegalArgumentException e) {
+                // A variable assembling a reference: this peer is skipped, the others are not.
+                LOGGER.warnf("A2A agent at %s skipped: %s", sanitizeForLog(configured.getUrl()), sanitizeForLog(e.getMessage()));
+                continue;
+            }
             if (isNullOrEmpty(config.getUrl())) {
                 LOGGER.warnf("Skipping A2A agent config with empty URL");
                 continue;
@@ -339,7 +360,7 @@ public class A2AToolProviderManager {
             // A variable that does not resolve names no secret: refused rather than
             // checked vacuously while a card fetched with its old value is cached.
             throw new IllegalArgumentException("The apiKey of the A2A agent at " + config.getUrl() + " names a global variable that does "
-                    + "not resolve to a value, so its vault grant cannot be checked.");
+                    + "not resolve to a value, or expands past the length limit, so its vault grant cannot be checked.");
         }
         secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "A2A agent at " + config.getUrl());
     }
@@ -682,6 +703,7 @@ public class A2AToolProviderManager {
 
         // Check cache (5 min TTL)
         String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
+        long generation = cardInvalidations.get();
         CachedAgentInfo cached = agentCache.get(cacheKey);
         if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < 300_000) {
             return cached.agentCard();
@@ -699,7 +721,19 @@ public class A2AToolProviderManager {
         }
 
         agentCache.put(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()));
+        if (cardInvalidations.get() != generation) {
+            // A connection changed while this card was fetched: it may be the old
+            // binding's. Used for this call, not kept. The eviction bumps the counter
+            // BEFORE clearing, so either this check sees it or the clear lands after.
+            agentCache.remove(cacheKey);
+        }
         return card;
+    }
+
+    /** Drops every cached card; see {@link #cardInvalidations}. */
+    void evictCards() {
+        cardInvalidations.incrementAndGet();
+        agentCache.clear();
     }
 
     /**

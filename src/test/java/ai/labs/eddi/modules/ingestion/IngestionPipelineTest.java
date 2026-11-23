@@ -1764,6 +1764,26 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("an unreadable replacement whose cleanup is refused a vault grant is one failed document, not two")
+        void aRefusedCleanupOfAnUnreadableFileCountsOnce() {
+            var ingested = fileStore.store(SOURCE_KEY, "report.pdf", "text/plain",
+                    "Quarterly results".getBytes(StandardCharsets.UTF_8));
+            var source = uploadSource();
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            fileStore.store(SOURCE_KEY, "report.pdf", "application/pdf",
+                    "not really a pdf".getBytes(StandardCharsets.UTF_8));
+            doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                    .when(storeFactory).requireGranted(any(RagConfiguration.class), any(Map.class), any());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            assertTrue(String.valueOf(report.message()).contains("is not resolved for"), report.message());
+            assertEquals(1, report.documentsFailed());
+            assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty(), "not removed without the grant");
+        }
+
+        @Test
         @DisplayName("a stored file with no text — a scan — is reported, and retires what it replaced")
         void aFileWithNoTextIsAFailure() {
             // Skipped as blank on every run before, silently: it stayed "not indexed"

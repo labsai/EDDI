@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -250,6 +251,21 @@ class DreamServiceCitationTest {
         verify(store, never()).insertIfAbsent(any());
         assertEquals(1, count("fallback"));
         assertEquals(1, meters.counter("eddi.dream.summarization.failed").count());
+    }
+
+    @Test
+    @DisplayName("retry_once: a second call refused a vault secret fails the cycle, keeping no partial write")
+    void retryOnceSecondCallRefusedTheSecretFailsTheCycle() throws Exception {
+        config.setCiteSources(true);
+        config.setOnValidationFailure("retry_once");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult(BAD, 100, 20))
+                .thenThrow(new RuntimeException("retry failed", new SecretResolver.SecretNotGrantedException("grant narrowed")));
+
+        var result = dreamService.process(USER, AGENT, config);
+
+        assertFalse(result.isSuccess(), "a grant refusal is permanent: the schedule must see it");
+        verify(store, never()).insertIfAbsent(any());
     }
 
     /**

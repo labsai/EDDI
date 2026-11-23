@@ -1516,10 +1516,11 @@ public class IngestionPipeline {
             } catch (UnsupportedFeatureException e) {
                 replaceUnsupported = true;
             } catch (SecretResolver.SecretNotGrantedException e) {
-                // Left as it was, as below, and the run ends with the refusal.
+                // Left as it was, as below, and the run ends with the refusal. The
+                // document's failure is already counted above.
                 inconclusive++;
                 stateStore.recordUnreachable(sourceKey, documentId, runId);
-                recordGrantRefusal(e);
+                stopForGrantRefusal(e);
                 return;
             } catch (RuntimeException e) {
                 // Left as it was — still live, and counted as looked-at rather than
@@ -1558,14 +1559,22 @@ public class IngestionPipeline {
 
         /** A vault grant refusal outside a document's processing: ends the run. */
         void recordGrantRefusal(SecretResolver.SecretNotGrantedException e) {
+            stopForGrantRefusal(e);
+            failed++;
+            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+        }
+
+        /**
+         * Ends the run on a vault grant refusal without counting a failure, for a path
+         * that has already counted the document it was handling.
+         */
+        private void stopForGrantRefusal(SecretResolver.SecretNotGrantedException e) {
             grantRefused = true;
             if (storeRefused == null) {
                 storeRefused = e.getMessage();
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
                         LogSanitizer.sanitize(storeRefused));
             }
-            failed++;
-            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
         }
 
         private void recordDocumentFailure(RuntimeException e) {
@@ -1787,21 +1796,30 @@ public class IngestionPipeline {
             if (!stillOwnsRun(true)) {
                 return -1;
             }
-            // The store's grant again, after the embedding call: it can take long enough
-            // for a grant to be narrowed meanwhile (#1179).
-            embeddingStore = store();
-            embeddingStore.addAll(embeddings, textSegments);
-
             try {
-                // And again before the delete: a large addAll takes time too.
+                // The store's grant again, after the embedding call: it can take long
+                // enough for a grant to be narrowed meanwhile (#1179).
                 embeddingStore = store();
-                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
-                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
-                        .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
-            } catch (UnsupportedFeatureException e) {
-                // Surfaced in the report rather than swallowed: on a store that cannot
-                // delete, re-ingestion accumulates, and the operator has to know.
-                replaceUnsupported = true;
+                embeddingStore.addAll(embeddings, textSegments);
+
+                try {
+                    // And again before the delete: a large addAll takes time too.
+                    embeddingStore = store();
+                    embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
+                            .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
+                            .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
+                } catch (UnsupportedFeatureException e) {
+                    // Surfaced in the report rather than swallowed: on a store that cannot
+                    // delete, re-ingestion accumulates, and the operator has to know.
+                    replaceUnsupported = true;
+                }
+            } catch (RuntimeException e) {
+                // A grant refusal or a store failure after the provider embedded these
+                // segments: they are paid for and count against the budget and the cost,
+                // as a discarded embedding does. The caller counts nothing for a document
+                // that throws, so this is once.
+                discardedSegments += textSegments.size();
+                throw e;
             }
             return textSegments.size();
         }

@@ -109,6 +109,16 @@ public class ConnectionResolver {
         this.authorizationEnabled = authorizationEnabled;
     }
 
+    /**
+     * Runs {@code listener} whenever a connection changes, on this node or another:
+     * see {@link ConnectionRegistry#onInvalidation}.
+     */
+    public void onConnectionChange(Runnable listener) {
+        if (connectionRegistry != null) {
+            connectionRegistry.onInvalidation(listener);
+        }
+    }
+
     /** Whether a value carries a connection reference. */
     public static boolean containsReference(String value) {
         return ConnectionReference.contains(value);

@@ -263,12 +263,17 @@ class IngestionPipelineConnectorTest {
                 .when(storeFactory).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
         var connector = new Scripted();
         connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+        var source = source();
+        source.settings().setCostPerThousandSegments(1000.0);
 
-        IngestionReport report = run(connector);
+        IngestionReport report = pipeline(connector).run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
 
         assertTrue(String.valueOf(report.message()).contains("store-key"), report.message());
         assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "addAll ran before the refusal");
+        assertTrue(embeddingStore.removeFilters().isEmpty(), "no removeAll after the refusal");
         verify(storeFactory, times(3)).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        assertEquals(embeddingStore.segmentsOf("a").size() * 1.0, report.costUsd(), 1e-9,
+                "the embeddings the provider computed are paid for, refusal or not");
     }
 
     @Test

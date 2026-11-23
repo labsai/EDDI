@@ -7,16 +7,21 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -166,5 +171,24 @@ class A2ACredentialTest {
         var error = assertThrows(IllegalStateException.class, () -> manager.applyCredential(builder, config("${connection:sf}"), AGENT_URL));
 
         assertTrue(error.getMessage().contains("ConnectionResolver"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("a connection change, here or on another node, evicts the cached Agent Cards (#1179)")
+    void connectionChangeEvictsCachedCards() throws Exception {
+        var registry = new ConnectionRegistry(mock(IConnectionStore.class));
+        var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                new ConnectionResolver(registry, null, null, new SimpleMeterRegistry(), null, false));
+        Field cacheField = A2AToolProviderManager.class.getDeclaredField("agentCache");
+        cacheField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var cache = (Map<String, A2AToolProviderManager.CachedAgentInfo>) cacheField.get(manager);
+        cache.put(AGENT_URL + "|digest-of-the-connection-reference",
+                new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "fetched with the old secret"), System.currentTimeMillis()));
+
+        // What the cluster event for a connection written on another node runs.
+        registry.invalidateLocal();
+
+        assertEquals(0, manager.getActiveConnectionCount(), "a card fetched under the old binding must not be served");
     }
 }

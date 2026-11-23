@@ -610,7 +610,7 @@ function GrantEditor({
                   )
                 : t(
                     "secrets.grantAcknowledge",
-                    "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
+                    "I understand that, with grant enforcement in enforce mode, these agents will not deploy again until they are added back or their configuration stops using this secret.",
                   )}
             </span>
           </label>

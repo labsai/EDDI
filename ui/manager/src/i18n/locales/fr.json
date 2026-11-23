@@ -2089,7 +2089,7 @@
     "grantCheckingImpact": "Vérification des agents déployés…",
     "grantLosingAccessTitle": "Agents déployés qui utilisent ce secret et perdraient l’accès ({{count}})",
     "grantLosingAccessBody": "En mode enforce (par défaut), ils perdent l’accès — immédiatement sur ce serveur, sur les autres nœuds du cluster dès que la modification leur parvient — car l’autorisation est vérifiée à chaque utilisation du secret, pas seulement au déploiement d’un agent : leur prochain tour qui en a besoin échouera, de même que leur prochain déploiement. En mode warn, cela est seulement journalisé.",
-    "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
+    "grantAcknowledge": "Je comprends que, lorsque l’application des autorisations est en mode « enforce », ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
     "grantSaved": "Accès mis à jour pour « {{key}} »",
     "grantImpactFailed": "Impossible de vérifier quels agents déployés utilisent ce secret : n’importe lequel pourrait perdre l’accès.",
     "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés.",

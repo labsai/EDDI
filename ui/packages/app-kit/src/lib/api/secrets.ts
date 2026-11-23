@@ -170,8 +170,10 @@ export function grantsAllAgents(allowedAgents?: string[] | null): boolean {
 /**
  * A deployed agent that references a secret and would not be on its new grant
  * list. While `eddi.vault.grant-enforcement=enforce` it is refused the secret
- * from its next resolution on (the grant is checked whenever a secret is
- * resolved) and its next deployment is refused too.
+ * (the grant is checked whenever a secret is resolved): from its next
+ * resolution on, on the node that stored the change, and on every other node
+ * once that node has received the change's invalidation event, which is
+ * asynchronous. Its next deployment is refused too.
  */
 export interface AffectedAgent {
   agentId: string;

@@ -395,7 +395,18 @@ public class McpToolProviderManager {
             // Validated, grant-checked, cached and connected with ONE expansion of a
             // ${vars:…} apiKey: a variable repointed to another secret is another
             // cache key, never a hit on a session built with the old secret (#1179).
-            McpServerConfig serverConfig = bindCredential(configured);
+            McpServerConfig serverConfig;
+            try {
+                serverConfig = bindCredential(configured);
+            } catch (IllegalArgumentException e) {
+                // A variable assembling a reference: this server's configuration fault,
+                // reported as one, never the end of the other servers' discovery.
+                String name = configured.getName() != null ? configured.getName() : configured.getUrl();
+                LOGGER.errorf("MCP server '%s' was NOT contacted because its apiKey could not be expanded: %s", sanitize(name),
+                        sanitize(e.getMessage()));
+                failures.add(new McpServerFailure(name, configured.getUrl(), McpFailureKind.INVALID_CONFIGURATION, e.getMessage()));
+                continue;
+            }
             String url = serverConfig.getUrl();
             String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
 

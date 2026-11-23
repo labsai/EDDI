@@ -18,8 +18,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Name → connection lookup, cached.
@@ -94,7 +96,26 @@ public class ConnectionRegistry {
     public void invalidateLocal() {
         cache.invalidateAll();
         LOGGER.debug("Connection registry cache invalidated");
+        for (Runnable listener : invalidationListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "A connection invalidation listener failed");
+            }
+        }
     }
+
+    /**
+     * Runs {@code listener} after every invalidation, local or announced by another
+     * node: for a cache outside this registry that holds something fetched with a
+     * connection's credential, which must not outlive the binding it was fetched
+     * with (#1179).
+     */
+    public void onInvalidation(Runnable listener) {
+        invalidationListeners.add(listener);
+    }
+
+    private final List<Runnable> invalidationListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Cluster mode: announces connection writes to the other nodes. Field-injected

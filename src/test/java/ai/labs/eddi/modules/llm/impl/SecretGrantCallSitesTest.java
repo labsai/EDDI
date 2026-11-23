@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -91,6 +92,8 @@ class SecretGrantCallSitesTest {
     class ChatModels {
 
         private final AtomicInteger builds = new AtomicInteger();
+        /** The apiKey each synchronous build was given, in order. */
+        private final List<String> builtWithKeys = new ArrayList<>();
         private ChatModelRegistry registry;
 
         @BeforeEach
@@ -100,6 +103,7 @@ class SecretGrantCallSitesTest {
                 @Override
                 public ChatModel build(Map<String, String> parameters) {
                     builds.incrementAndGet();
+                    builtWithKeys.add(parameters.get("apiKey"));
                     return new ChatModel() {
                         @Override
                         public ChatResponse doChat(ChatRequest chatRequest) {
@@ -173,6 +177,7 @@ class SecretGrantCallSitesTest {
 
             assertNotSame(builtWithA, forB, "B is granted the new secret only, and must not get the model built with the old one");
             assertEquals(2, builds.get());
+            assertEquals(List.of("sk-plaintext", "sk-other"), builtWithKeys, "the second model is built with the new secret");
         }
 
         @Test
@@ -361,6 +366,36 @@ class SecretGrantCallSitesTest {
             peer.setApiKey("${vars:var1}");
             var boundPeer = a2a.bindCredential(peer);
             assertThrows(IllegalArgumentException.class, () -> a2a.requireSecretGranted(boundPeer, SecretAccess.agent(AGENT_A)));
+        }
+
+        @Test
+        @DisplayName("an apiKey whose expansion is refused fails its own server, and discovery goes on to the next")
+        void expansionRefusalStaysWithItsServer() {
+            when(variables.resolveValue(anyString())).thenAnswer(inv -> {
+                String value = inv.getArgument(0);
+                if (value.equals("${vars:assembled}")) {
+                    throw new GlobalVariableResolver.AssembledReferenceException("assembles a vault reference");
+                }
+                return value;
+            });
+            var manager = new McpToolProviderManager(variables, secretResolver);
+            var assembled = new McpServerConfig();
+            assembled.setName("assembled");
+            assembled.setUrl("https://mcp.example.com/mcp");
+            assembled.setApiKey("${vars:assembled}");
+            var next = new McpServerConfig();
+            next.setName("next"); // no URL: its own failure, which proves the loop reached it
+
+            var result = manager.discoverTools(List.of(assembled, next), SecretAccess.agent(AGENT_A));
+
+            assertEquals(List.of("assembled", "next"), result.failures().stream().map(McpToolProviderManager.McpServerFailure::serverName).toList());
+            assertEquals(McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, result.failures().get(0).kind());
+
+            var a2a = new A2AToolProviderManager(variables, secretResolver, false);
+            var peer = new A2AAgentConfig();
+            peer.setUrl("https://peer.example.com");
+            peer.setApiKey("${vars:assembled}");
+            assertDoesNotThrow(() -> a2a.discoverTools(List.of(peer), SecretAccess.agent(AGENT_A)));
         }
 
         @Test

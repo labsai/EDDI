@@ -156,17 +156,70 @@ class SecretResolverGrantTest {
         }
 
         @Test
-        @DisplayName("a grant read that races a grant write is not kept: the next resolution reads the grant again")
+        @DisplayName("a grant read that races a grant write is not kept: the retry reads the new grant and refuses")
         void grantReadRacingAWriteIsNotCached() throws Exception {
+            var reads = new int[]{0};
             when(provider.getMetadata(KEY)).thenAnswer(invocation -> {
-                // The write lands while this node is still reading the old grant.
-                resolver.invalidateCache(KEY);
-                return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A, AGENT_B));
+                if (reads[0]++ == 0) {
+                    // The write (B removed) lands while this node is still reading the old grant.
+                    resolver.invalidateCache(KEY);
+                    return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A, AGENT_B));
+                }
+                return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A));
             });
-            resolver.resolveValue(REF, SecretAccess.agent(AGENT_B));
-            grant(List.of(AGENT_A));
+            // Had the stale grant been cached, the retry would hit it and admit B.
             assertThrows(SecretResolver.SecretNotGrantedException.class, () -> resolver.resolveValue(REF, SecretAccess.agent(AGENT_B)),
-                    "the stale grant read during the write must not have been cached");
+                    "the stale grant read during the write must neither be cached nor released on");
+            assertEquals(2, reads[0], "the retry read the grant again");
+        }
+
+        @Test
+        @DisplayName("a grant narrowed between the check and the read does not release the value on the old check")
+        void grantNarrowedDuringTheReadIsCheckedAgain() throws Exception {
+            var writes = new int[]{0};
+            when(provider.resolve(KEY)).thenAnswer(invocation -> {
+                if (writes[0]++ == 0) {
+                    // A's grant passed; before the value comes back, A is cut off.
+                    grant(List.of(AGENT_B));
+                    resolver.invalidateGrant(KEY);
+                }
+                return "sk-plaintext";
+            });
+            assertThrows(SecretResolver.SecretNotGrantedException.class, () -> resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)),
+                    "the value read after the grant changed is released only on a check of the new grant");
+        }
+
+        @Test
+        @DisplayName("invalidations of other secrets, a bulk grant edit, do not make a resolution retry")
+        void otherSecretsInvalidationsAreIgnored() throws Exception {
+            when(provider.resolve(KEY)).thenAnswer(invocation -> {
+                resolver.invalidateGrant(new SecretReference("default", "unrelated-key"));
+                return "sk-plaintext";
+            });
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
+            verify(provider, times(1)).resolve(KEY);
+        }
+
+        @Test
+        @DisplayName("a resolution that reads no grant has nothing to bind, and is not retried")
+        void resolutionOutsideGrantsIsNotRetried() throws Exception {
+            when(provider.resolve(KEY)).thenAnswer(invocation -> {
+                resolver.invalidateGrant(KEY);
+                return "sk-plaintext";
+            });
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.outsideAgentGrants("test")));
+            verify(provider, times(1)).resolve(KEY);
+        }
+
+        @Test
+        @DisplayName("a vault that changes during every attempt leaves the reference unresolved")
+        void vaultChangingOnEveryAttemptIsRefused() throws Exception {
+            when(provider.resolve(KEY)).thenAnswer(invocation -> {
+                resolver.invalidateGrant(KEY);
+                return "sk-plaintext";
+            });
+            assertEquals(REF, resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
+            verify(provider, times(SecretResolver.GRANT_BINDING_ATTEMPTS)).resolve(KEY);
         }
 
         @Test

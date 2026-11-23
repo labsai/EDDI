@@ -22,6 +22,8 @@ import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.pricing.UsageNormalizer;
 import dev.langchain4j.model.output.TokenUsage;
+import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -456,7 +458,7 @@ class DreamServiceTest {
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         verify(summarizationService).summarizeWithUsage(anyString(), anyString(),
-                eq(dreamConfig.getLlmProvider()), eq(dreamConfig.getLlmModel()), eq(parameters), any());
+                eq(dreamConfig.getLlmProvider()), eq(dreamConfig.getLlmModel()), eq(parameters), eq(SecretAccess.agent("agent-1")));
     }
 
     @Test
@@ -1150,6 +1152,10 @@ class DreamServiceTest {
         assertFalse(DreamService.isTransientLlmFailure(new RuntimeException((String) null)));
         // A self-referential cause chain must terminate rather than spin
         assertFalse(DreamService.isTransientLlmFailure(new SelfCausedException("bad request")));
+        // A wrapped grant refusal is permanent even when the wrapper's message, quoting
+        // the secret's name, would match a transient indicator (#1179).
+        assertFalse(DreamService.isTransientLlmFailure(new RuntimeException("vault secret timeout-key refused",
+                new SecretResolver.SecretNotGrantedException("timeout-key is not granted"))));
     }
 
     /**

@@ -77,6 +77,31 @@ class GlobalVariableResolverTest {
         }
     }
 
+    @Nested
+    @DisplayName("expandFully")
+    class ExpandFully {
+
+        @Test
+        @DisplayName("a variable that multiplies itself stops at the length budget, still holding a reference")
+        void expansionBombIsCapped() {
+            // Four copies of itself per pass: 4^8 times the length after eight passes.
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("b", "${vars:b}${vars:b}${vars:b}${vars:b}"));
+
+            String expanded = GlobalVariableResolver.expandFully(resolver, "${vars:b}");
+
+            assertTrue(expanded.length() <= GlobalVariableResolver.MAX_EXPANDED_LENGTH, "length " + expanded.length());
+            assertTrue(expanded.contains("${vars:b}"), "an unfinished expansion keeps its reference, so callers refuse it");
+        }
+
+        @Test
+        @DisplayName("nested variables expand to the final value")
+        void nestedVariablesExpand() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("outer", "${vars:inner}", "inner", "sk-final"));
+
+            assertEquals("sk-final", GlobalVariableResolver.expandFully(resolver, "${vars:outer}"));
+        }
+    }
+
     // ====================== Short Form (default tenant) ======================
 
     @Nested

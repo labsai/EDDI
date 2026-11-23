@@ -767,9 +767,19 @@ public class DreamService {
                                 outcome = SummaryCitations.OUTCOME_RETRIED;
                             }
                         } catch (Exception e) {
-                            // The first call of this group succeeded, so this is no configuration
-                            // fault to abort the phase over: the group is skipped, as on any failure.
                             summarizationFailedCounter.increment();
+                            if (isGrantRefusal(e)) {
+                                // The grant was narrowed after the first call: permanent, so the
+                                // phase fails. The groups already consolidated stay done (#1179).
+                                LOGGER.errorf("[DREAM] Citation retry for user='%s', group='%s' was refused a vault secret; "
+                                        + "consolidation is ABORTED for this cycle", LogSanitizer.sanitize(userId),
+                                        LogSanitizer.sanitize(group.getKey()));
+                                return new SummarizationOutcome(totalConsolidated, estimatedCostAccumulated,
+                                        "Memory consolidation citation retry was refused a vault secret (" + config.getLlmProvider() + "/"
+                                                + config.getLlmModel() + "): " + e.getMessage());
+                            }
+                            // Otherwise the first call of this group succeeded, so this is no
+                            // configuration fault to abort the phase over: the group is skipped.
                             LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed (%s). Original entries are preserved.",
                                     LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getClass().getSimpleName());
                         }
@@ -1022,6 +1032,23 @@ public class DreamService {
             Pattern.CASE_INSENSITIVE);
 
     /**
+     * Whether a vault grant refusal is anywhere in {@code throwable}'s cause chain
+     * (bounded, as in {@link #isTransientLlmFailure}).
+     */
+    static boolean isGrantRefusal(Throwable throwable) {
+        Throwable current = throwable;
+        for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
+            if (current instanceof SecretResolver.SecretNotGrantedException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether an LLM failure is transient (retry later succeeds) rather than a
      * permanent configuration fault (bad credentials, wrong endpoint, unknown
      * model). Only the latter should fail the schedule fire, because a FAILED fire
@@ -1040,14 +1067,15 @@ public class DreamService {
      * like.
      */
     static boolean isTransientLlmFailure(Throwable throwable) {
+        if (isGrantRefusal(throwable)) {
+            // A vault grant refusal is configuration, never a blip — even when the
+            // secret's name, quoted by a wrapping exception's message, contains "429"
+            // or "timeout". So the whole chain is checked before any message (#1179).
+            return false;
+        }
         Throwable current = throwable;
         // Bounded walk — a self-referential cause chain must not spin forever.
         for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
-            if (current instanceof SecretResolver.SecretNotGrantedException) {
-                // A vault grant refusal is configuration, never a blip — even when the
-                // secret's name happens to contain "429" or "timeout" (#1179).
-                return false;
-            }
             if (current instanceof SocketTimeoutException || current instanceof TimeoutException || current instanceof ConnectException) {
                 return true;
             }

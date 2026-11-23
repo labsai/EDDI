@@ -2089,7 +2089,7 @@
     "grantCheckingImpact": "Comprobando los agentes desplegados…",
     "grantLosingAccessTitle": "Agentes desplegados que usan este secreto y perderían el acceso ({{count}})",
     "grantLosingAccessBody": "En el modo enforce (el predeterminado) pierden el acceso — de inmediato en este servidor y en los demás nodos del clúster cuando les llega el cambio — porque el permiso se comprueba cada vez que se usa el secreto, no solo al desplegar un agente: su próximo turno que lo necesite fallará, y también su próximo despliegue. En el modo warn solo se registra.",
-    "grantAcknowledge": "Entiendo que estos agentes no volverán a desplegarse hasta que se añadan de nuevo o su configuración deje de usar este secreto.",
+    "grantAcknowledge": "Entiendo que, con la aplicación de permisos en modo «enforce», estos agentes no volverán a desplegarse hasta que se añadan de nuevo o su configuración deje de usar este secreto.",
     "grantSaved": "Acceso actualizado para «{{key}}»",
     "grantImpactFailed": "No se pudo comprobar qué agentes desplegados usan este secreto, así que cualquiera podría perder el acceso.",
     "grantAcknowledgeUnchecked": "Guardar de todos modos sin saber a qué agentes desplegados afecta.",

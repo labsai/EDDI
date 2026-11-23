@@ -114,12 +114,22 @@ public class GlobalVariableResolver {
     static final int MAX_NESTING = 8;
 
     /**
+     * The longest expansion {@link #expandFully} builds. Each pass can multiply the
+     * length (a variable holding its own reference several times), so the nesting
+     * cap alone still lets eight passes grow a short value exponentially. A
+     * credential never comes near this.
+     */
+    static final int MAX_EXPANDED_LENGTH = 64 * 1024;
+
+    /**
      * {@code value} with its {@code ${vars:…}} references expanded until none is
-     * left, or until a pass changes nothing (a missing variable, a cycle) or
-     * {@link #MAX_NESTING} passes have run. {@link #resolveValue} makes one pass,
-     * so a variable holding {@code ${vars:inner}} would otherwise reach a caller
-     * with a reference still in it — and a caller that binds a cache entry or a
-     * grant check to the expansion must see the final credential, not an
+     * left, or until a pass changes nothing (a missing variable, a cycle),
+     * {@link #MAX_NESTING} passes have run, or a pass would grow it past
+     * {@link #MAX_EXPANDED_LENGTH} — then the last expansion within the budget,
+     * which still holds a reference, is returned. {@link #resolveValue} makes one
+     * pass, so a variable holding {@code ${vars:inner}} would otherwise reach a
+     * caller with a reference still in it — and a caller that binds a cache entry
+     * or a grant check to the expansion must see the final credential, not an
      * intermediate one (#1179). The result may still contain a reference; such a
      * caller refuses it.
      */
@@ -127,7 +137,7 @@ public class GlobalVariableResolver {
         String current = value;
         for (int pass = 0; pass < MAX_NESTING && containsReference(current); pass++) {
             String next = resolver.resolveValue(current);
-            if (next == null || next.equals(current)) {
+            if (next == null || next.equals(current) || next.length() > MAX_EXPANDED_LENGTH) {
                 break;
             }
             current = next;
