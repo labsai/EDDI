@@ -28,7 +28,12 @@ import java.util.List;
  * claimed or failed for good) under the same version token keeps its row as it
  * is — its {@code notBefore} and attempt count included. Re-listing a source
  * must not undo a throttle's deferral, nor re-arm a poisoned document. A new
- * version token re-arms the row and bumps its {@code workVersion}.</li>
+ * version token re-arms the row and bumps its {@code workVersion}. A document
+ * that was never ingested and whose last work is {@code DONE} at the same token
+ * — a file with no text, one too large for any run — only gets the run stamp
+ * too: nothing about it changed, so it is not downloaded again every listing. A
+ * document that was ingested once is always queued again when it is listed as
+ * changed, because then its vectors are what is at stake.</li>
  * <li><b>Enqueueing counts as seeing.</b> It stamps the row with the listing
  * run's id, as {@link IIngestionStateStore#recordUnreachable} does, so a
  * document the listing found but the drain has not reached is never counted as
@@ -40,9 +45,11 @@ import java.util.List;
  * <li><b>Claims are exclusive.</b> A claim moves a row to {@code CLAIMED} in
  * one atomic statement per row, so two claimers — two threads, two nodes —
  * never hold the same row. A claim whose lease ({@code claimUntil}) has passed
- * can be claimed again: that is how a crashed run's rows come back. Claims are
- * fenced like document writes: only the run that owns the source's rows can
- * claim them.</li>
+ * can be claimed again: that is how a crashed run's rows come back. So can a
+ * claim held by any run other than the claimer: only the run that owns the
+ * source's rows can claim at all (claims are fenced like document writes), so a
+ * claim by another run belongs to one that has ended — whose release did not
+ * land — or to one that was reaped, whose writes are fenced already.</li>
  * <li><b>Completion is conditional</b> on the claimer and the
  * {@code workVersion} it claimed. When discovery queued a newer version while a
  * worker held the old one, the worker's completion matches nothing and the
@@ -98,6 +105,12 @@ public interface IngestionWorkQueue {
 
     /** The longest payload a row carries. */
     int MAX_PAYLOAD_LENGTH = 16_384;
+
+    /**
+     * The most documents one {@link #enqueueWork(String, String, List, Instant)}
+     * call takes.
+     */
+    int MAX_ENQUEUE_BATCH = 1_000;
 
     /** What {@link #enqueueWork} did. */
     enum EnqueueOutcome {
@@ -157,12 +170,23 @@ public interface IngestionWorkQueue {
      * Queues one document for the drain — see the interface for when this is a
      * no-op. Fenced on {@code runId} like every document write.
      */
-    EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now);
+    default EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
+        return enqueueWork(sourceId, runId, List.of(request), now).get(0);
+    }
+
+    /**
+     * Queues up to {@link #MAX_ENQUEUE_BATCH} documents in a few statements — one
+     * listing page at a time, not one round trip per document.
+     *
+     * @return the outcome of each request, in order
+     */
+    List<EnqueueOutcome> enqueueWork(String sourceId, String runId, List<WorkRequest> requests, Instant now);
 
     /**
      * Claims up to {@code limit} due rows for {@code claimer}, oldest
      * {@code notBefore} first: pending rows due by {@code now}, and claimed rows
-     * whose lease passed. Only rows {@code claimer} owns are claimed.
+     * whose lease passed or that another run holds. Only rows {@code claimer} owns
+     * are claimed.
      */
     List<WorkClaim> claimWork(String sourceId, String claimer, int limit, Instant now, Instant claimUntil);
 

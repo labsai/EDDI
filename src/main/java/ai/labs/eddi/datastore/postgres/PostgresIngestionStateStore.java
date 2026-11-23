@@ -146,8 +146,12 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
      * The claim's index: only rows with work to claim, by due time. Partial, so the
      * millions of rows with nothing pending cost it nothing.
      */
-    private static final String CREATE_WORK_DUE_INDEX = "CREATE INDEX IF NOT EXISTS idx_ingestion_work_due "
-            + "ON rag_ingestion_documents (source_id, not_before) WHERE work_state IN ('PENDING', 'CLAIMED')";
+    private static final String CREATE_WORK_DUE_INDEX = "CREATE INDEX IF NOT EXISTS idx_ingestion_work_due_v2 "
+            + "ON rag_ingestion_documents (source_id, not_before, document_id) "
+            + "WHERE work_state IN ('PENDING', 'CLAIMED')";
+
+    /** The index this replaces, without the claim's tiebreak column. */
+    private static final String DROP_OLD_WORK_DUE_INDEX = "DROP INDEX IF EXISTS idx_ingestion_work_due";
 
     /** The longest error text a work row keeps. */
     private static final int MAX_WORK_ERROR_LENGTH = 1_000;
@@ -184,6 +188,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             }
             statement.execute(CREATE_RUNS_SOURCE_INDEX);
             statement.execute(CREATE_ACTIVE_RUN_INDEX);
+            statement.execute(DROP_OLD_WORK_DUE_INDEX);
             statement.execute(CREATE_WORK_DUE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -617,6 +622,18 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // is reaped.
             throw new IngestionStateStoreException("Failed to finish an ingestion run", e);
         }
+        // A finished run holds no claims: whatever its drain did not release goes
+        // back to pending here too.
+        releaseClaimsQuietly(run.sourceId(), run.runId());
+    }
+
+    private void releaseClaimsQuietly(String sourceId, String runId) {
+        try {
+            releaseClaims(sourceId, runId);
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "Could not release the claims of run %s; the next run takes them over",
+                    LogSanitizer.sanitize(runId));
+        }
     }
 
     @Override
@@ -755,23 +772,32 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     // === the work table (IngestionWorkQueue) ===
 
     @Override
-    public EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
-        String payload = request.payload();
-        if (payload != null && payload.length() > MAX_PAYLOAD_LENGTH) {
-            throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH + " characters");
+    public List<EnqueueOutcome> enqueueWork(String sourceId, String runId, List<WorkRequest> requests,
+                                            Instant now) {
+        if (requests.size() > MAX_ENQUEUE_BATCH) {
+            throw new IllegalArgumentException("At most " + MAX_ENQUEUE_BATCH + " documents are queued at a time");
+        }
+        for (WorkRequest request : requests) {
+            if (request.payload() != null && request.payload().length() > MAX_PAYLOAD_LENGTH) {
+                throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH
+                        + " characters");
+            }
         }
         // Re-arm: a row this run owns without equal work gets the new version,
         // due now, with its attempts and error reset. The run stamp counts as
         // seeing it; the content hash and the tombstone are not touched. Equal work
-        // is the same token, pending, claimed or poisoned; COALESCE because a row
-        // that never had work must not compare as NULL and so match nothing.
+        // is the same token, pending, claimed or poisoned — or done for a document
+        // never ingested (a file with no text), which nothing would change.
+        // COALESCE because a row that never had work must not compare as NULL and
+        // so match nothing.
         String rearm = """
                 UPDATE rag_ingestion_documents
                    SET last_run_id = ?, work_state = 'PENDING', work_version = work_version + 1, work_token = ?,
                        work_payload = ?, not_before = ?, attempts = 0, last_error = NULL,
                        claimed_by = NULL, claim_until = NULL
                  WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
-                   AND NOT (COALESCE(work_state, '') IN ('PENDING', 'CLAIMED', 'POISON')
+                   AND NOT ((COALESCE(work_state, '') IN ('PENDING', 'CLAIMED', 'POISON')
+                             OR (COALESCE(work_state, '') = 'DONE' AND last_ingested_at IS NULL))
                             AND work_token IS NOT DISTINCT FROM ?)
                 """;
         String stamp = """
@@ -787,46 +813,85 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 VALUES (?, ?, ?, 0, TRUE, ?, 'PENDING', 1, ?, ?, ?, 0)
                 ON CONFLICT (source_id, document_id) DO NOTHING
                 """;
+        EnqueueOutcome[] outcomes = new EnqueueOutcome[requests.size()];
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        Timestamp at = Timestamp.from(now);
+        // Three batched statements, each over the requests the one before left
+        // undecided: a listing page costs three round trips, not three per file.
         try (Connection connection = connection()) {
+            List<Integer> open = new ArrayList<>();
             try (PreparedStatement statement = connection.prepareStatement(rearm)) {
-                statement.setString(1, runId);
-                statement.setString(2, request.versionToken());
-                statement.setString(3, payload);
-                statement.setTimestamp(4, Timestamp.from(now));
-                statement.setString(5, sourceId);
-                statement.setString(6, request.documentId());
-                statement.setString(7, runId);
-                statement.setString(8, request.versionToken());
-                if (statement.executeUpdate() > 0) {
-                    return EnqueueOutcome.QUEUED;
+                for (WorkRequest request : requests) {
+                    statement.setString(1, runId);
+                    statement.setString(2, request.versionToken());
+                    statement.setString(3, request.payload());
+                    statement.setTimestamp(4, at);
+                    statement.setString(5, sourceId);
+                    statement.setString(6, request.documentId());
+                    statement.setString(7, runId);
+                    statement.setString(8, request.versionToken());
+                    statement.addBatch();
+                }
+                int[] counts = statement.executeBatch();
+                for (int i = 0; i < counts.length; i++) {
+                    if (counts[i] > 0) {
+                        outcomes[i] = EnqueueOutcome.QUEUED;
+                    } else {
+                        open.add(i);
+                    }
                 }
             }
-            try (PreparedStatement statement = connection.prepareStatement(stamp)) {
-                statement.setString(1, runId);
-                statement.setString(2, sourceId);
-                statement.setString(3, request.documentId());
-                statement.setString(4, runId);
-                if (statement.executeUpdate() > 0) {
-                    return EnqueueOutcome.ALREADY_QUEUED;
+            List<Integer> unknown = new ArrayList<>();
+            if (!open.isEmpty()) {
+                try (PreparedStatement statement = connection.prepareStatement(stamp)) {
+                    for (int index : open) {
+                        statement.setString(1, runId);
+                        statement.setString(2, sourceId);
+                        statement.setString(3, requests.get(index).documentId());
+                        statement.setString(4, runId);
+                        statement.addBatch();
+                    }
+                    int[] counts = statement.executeBatch();
+                    for (int i = 0; i < counts.length; i++) {
+                        if (counts[i] > 0) {
+                            outcomes[open.get(i)] = EnqueueOutcome.ALREADY_QUEUED;
+                        } else {
+                            unknown.add(open.get(i));
+                        }
+                    }
                 }
             }
-            try (PreparedStatement statement = connection.prepareStatement(insert)) {
-                statement.setString(1, sourceId);
-                statement.setString(2, request.documentId());
-                statement.setString(3, runId);
-                statement.setString(4, runId);
-                statement.setString(5, request.versionToken());
-                statement.setString(6, payload);
-                statement.setTimestamp(7, Timestamp.from(now));
-                if (statement.executeUpdate() > 0) {
-                    return EnqueueOutcome.QUEUED;
+            if (!unknown.isEmpty()) {
+                try (PreparedStatement statement = connection.prepareStatement(insert)) {
+                    for (int index : unknown) {
+                        WorkRequest request = requests.get(index);
+                        statement.setString(1, sourceId);
+                        statement.setString(2, request.documentId());
+                        statement.setString(3, runId);
+                        statement.setString(4, runId);
+                        statement.setString(5, request.versionToken());
+                        statement.setString(6, request.payload());
+                        statement.setTimestamp(7, at);
+                        statement.addBatch();
+                    }
+                    int[] counts = statement.executeBatch();
+                    for (int i = 0; i < counts.length; i++) {
+                        int index = unknown.get(i);
+                        if (counts[i] > 0) {
+                            outcomes[index] = EnqueueOutcome.QUEUED;
+                        } else {
+                            // The row exists and another run owns it.
+                            fenced("queue a document", sourceId, requests.get(index).documentId(), runId);
+                            outcomes[index] = EnqueueOutcome.FENCED;
+                        }
+                    }
                 }
             }
-            // The row exists and another run owns it.
-            fenced("queue a document", sourceId, request.documentId(), runId);
-            return EnqueueOutcome.FENCED;
+            return List.of(outcomes);
         } catch (SQLException e) {
-            throw new IngestionStateStoreException("Failed to queue a document", e);
+            throw new IngestionStateStoreException("Failed to queue documents", e);
         }
     }
 
@@ -846,7 +911,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                   FROM (SELECT source_id, document_id FROM rag_ingestion_documents
                          WHERE source_id = ? AND fencing_run_id = ?
                            AND ((work_state = 'PENDING' AND not_before <= ?)
-                                OR (work_state = 'CLAIMED' AND claim_until <= ?))
+                                OR (work_state = 'CLAIMED' AND (claim_until <= ? OR claimed_by <> ?)))
                          ORDER BY not_before, document_id
                          LIMIT ?
                          FOR UPDATE SKIP LOCKED) due
@@ -861,7 +926,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setString(4, claimer);
             statement.setTimestamp(5, at);
             statement.setTimestamp(6, at);
-            statement.setInt(7, limit);
+            statement.setString(7, claimer);
+            statement.setInt(8, limit);
             List<WorkClaim> claims = new ArrayList<>();
             List<Instant> due = new ArrayList<>();
             try (ResultSet resultSet = statement.executeQuery()) {

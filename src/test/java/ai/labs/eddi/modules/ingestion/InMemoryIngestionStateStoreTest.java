@@ -18,6 +18,11 @@ import org.junit.jupiter.api.DisplayName;
 @DisplayName("InMemoryIngestionStateStore (test double)")
 class InMemoryIngestionStateStoreTest implements IngestionStateStoreContract, IngestionWorkQueueContract {
 
+    @Override
+    public void forceClaimedBy(String sourceId, String documentId, String claimer) {
+        ((InMemoryIngestionStateStore) store()).forceClaimedBy(sourceId, documentId, claimer);
+    }
+
     private InMemoryIngestionStateStore store;
 
     @BeforeEach

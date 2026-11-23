@@ -60,6 +60,13 @@ class MongoIngestionStateStoreTest extends MongoTestBase implements IngestionSta
     }
 
     @Override
+    public void forceClaimedBy(String sourceId, String documentId, String claimer) {
+        getDatabase().getCollection("rag_ingestion_documents").updateOne(
+                Filters.and(Filters.eq("sourceId", sourceId), Filters.eq("documentId", documentId)),
+                Updates.set("claimedBy", claimer));
+    }
+
+    @Override
     public void forceDocumentOwner(String sourceId, String documentId, String runId) {
         getDatabase().getCollection("rag_ingestion_documents").updateOne(
                 Filters.and(Filters.eq("sourceId", sourceId), Filters.eq("documentId", documentId)),

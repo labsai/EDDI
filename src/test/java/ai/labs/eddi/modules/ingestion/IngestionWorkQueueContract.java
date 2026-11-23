@@ -364,6 +364,91 @@ public interface IngestionWorkQueueContract {
         assertEquals(WorkCounts.NONE, store().workCounts(WORK_SOURCE, at));
     }
 
+    /**
+     * Sets a claimed row's claimer directly, as a release that did not land leaves
+     * it.
+     */
+    void forceClaimedBy(String sourceId, String documentId, String claimer);
+
+    @Test
+    @DisplayName("two null version tokens are equal work: re-listing keeps the deferral")
+    default void nullTokensAreEqualWork() {
+        String run = openRun(WORK_SOURCE);
+        Instant start = now();
+        store().enqueueWork(WORK_SOURCE, run, request("doc-a", null), start);
+        WorkClaim claim = claimAll(WORK_SOURCE, run, start).get(0);
+        store().deferWork(WORK_SOURCE, "doc-a", run, claim.workVersion(), start.plus(Duration.ofHours(1)));
+
+        assertEquals(EnqueueOutcome.ALREADY_QUEUED, store().enqueueWork(WORK_SOURCE, run, request("doc-a", null), start));
+        assertTrue(claimAll(WORK_SOURCE, run, start).isEmpty(), "still deferred");
+    }
+
+    @Test
+    @DisplayName("a page is queued in one call, with an outcome per document")
+    default void aPageIsQueuedInOneCall() {
+        String run = openRun(WORK_SOURCE);
+        Instant start = now();
+        store().enqueueWork(WORK_SOURCE, run, request("old", "v1"), start);
+        List<WorkRequest> page = new ArrayList<>();
+        page.add(request("old", "v1"));
+        for (int i = 0; i < 250; i++) {
+            page.add(request("new-" + i, "v1"));
+        }
+        List<EnqueueOutcome> outcomes = store().enqueueWork(WORK_SOURCE, run, page, start);
+        assertEquals(251, outcomes.size());
+        assertEquals(EnqueueOutcome.ALREADY_QUEUED, outcomes.get(0));
+        assertTrue(outcomes.subList(1, 251).stream().allMatch(outcome -> outcome == EnqueueOutcome.QUEUED));
+        assertEquals(251, store().workCounts(WORK_SOURCE, start).queued());
+        assertEquals(List.of(EnqueueOutcome.FENCED),
+                store().enqueueWork(WORK_SOURCE, "not-the-owner", List.of(request("old", "v2")), start));
+    }
+
+    @Test
+    @DisplayName("a document never ingested and done at the same version is not queued again")
+    default void doneNeverIngestedIsNotQueuedAgain() {
+        String run = openRun(WORK_SOURCE);
+        Instant start = now();
+        store().enqueueWork(WORK_SOURCE, run, request("no-text", "v1"), start);
+        WorkClaim claim = claimAll(WORK_SOURCE, run, start).get(0);
+        store().completeWork(WORK_SOURCE, "no-text", run, claim.workVersion());
+
+        assertEquals(EnqueueOutcome.ALREADY_QUEUED,
+                store().enqueueWork(WORK_SOURCE, run, request("no-text", "v1"), start),
+                "a file with no text is not downloaded again every listing");
+        assertEquals(EnqueueOutcome.QUEUED, store().enqueueWork(WORK_SOURCE, run, request("no-text", "v2"), start));
+
+        // Once ingested, a document listed as changed is always queued again.
+        store().enqueueWork(WORK_SOURCE, run, request("ingested", "v1"), start);
+        WorkClaim second = claimAll(WORK_SOURCE, run, start).stream()
+                .filter(c -> c.documentId().equals("ingested")).findFirst().orElseThrow();
+        store().recordIngested(WORK_SOURCE, "ingested", "v1", null, null, run, null);
+        store().completeWork(WORK_SOURCE, "ingested", run, second.workVersion());
+        assertEquals(EnqueueOutcome.QUEUED, store().enqueueWork(WORK_SOURCE, run, request("ingested", "v1"), start));
+    }
+
+    @Test
+    @DisplayName("a claim another run left behind is taken over at once, and a finished run holds none")
+    default void strandedClaimsAreTakenOver() {
+        String first = openRun(WORK_SOURCE);
+        Instant start = now();
+        store().enqueueWork(WORK_SOURCE, first, request("doc-a", "v1"), start);
+        store().enqueueWork(WORK_SOURCE, first, request("doc-b", "v1"), start);
+        assertEquals(2, store().claimWork(WORK_SOURCE, first, 10, start, start.plus(Duration.ofHours(1))).size());
+
+        closeRun(first, WORK_SOURCE);
+        assertEquals(0, store().workCounts(WORK_SOURCE, start).inFlight(), "finishing a run releases its claims");
+
+        // A release that did not land: the rows still name the first run as claimer
+        // while a second run owns the source.
+        String second = openRun(WORK_SOURCE);
+        claimAll(WORK_SOURCE, second, start);
+        forceClaimedBy(WORK_SOURCE, "doc-a", first);
+        forceClaimedBy(WORK_SOURCE, "doc-b", first);
+        // The owner claims them at once, long before the lease ends.
+        assertEquals(2, store().claimWork(WORK_SOURCE, second, 10, start, start.plus(Duration.ofHours(1))).size(),
+                "the claims of a run that has ended are not stranded until their lease");
+    }
+
     private static long version(List<WorkClaim> claims, String documentId) {
         return claims.stream().filter(claim -> claim.documentId().equals(documentId)).findFirst().orElseThrow()
                 .workVersion();

@@ -21,6 +21,12 @@ import com.mongodb.client.model.Updates;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
+import com.mongodb.MongoBulkWriteException;
+import com.mongodb.bulk.BulkWriteError;
+import com.mongodb.client.model.BulkWriteOptions;
+import com.mongodb.client.model.InsertOneModel;
+import com.mongodb.client.model.UpdateOneModel;
+import com.mongodb.client.model.WriteModel;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,6 +34,11 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -147,8 +158,12 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 new IndexOptions().name("idx_ingestion_doc").unique(true).background(true));
         // The claim's index: only rows with work to claim, by due time. Partial on
         // the field's presence, so rows that never had work cost it nothing.
-        this.documents.createIndex(Indexes.ascending(FIELD_SOURCE_ID, FIELD_WORK_STATE, FIELD_NOT_BEFORE),
-                new IndexOptions().name("idx_ingestion_work_due").background(true)
+        // With the claim's tiebreak, so the sort is served by the index. Replaces an
+        // index of the same purpose without it.
+        dropIndexQuietly(this.documents, "idx_ingestion_work_due");
+        this.documents.createIndex(
+                Indexes.ascending(FIELD_SOURCE_ID, FIELD_WORK_STATE, FIELD_NOT_BEFORE, FIELD_DOCUMENT_ID),
+                new IndexOptions().name("idx_ingestion_work_due_v2").background(true)
                         .partialFilterExpression(Filters.exists(FIELD_WORK_STATE, true)));
         this.runs.createIndex(Indexes.ascending(FIELD_RUN_ID),
                 new IndexOptions().name("idx_ingestion_run").unique(true).background(true));
@@ -462,6 +477,14 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
             LOGGER.warnf("Ingestion run %s was already closed (reaped) before it finished; its result is discarded",
                     LogSanitizer.sanitize(run.runId()));
         }
+        // A finished run holds no claims: whatever its drain did not release goes
+        // back to pending here too.
+        try {
+            releaseClaims(run.sourceId(), run.runId());
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "Could not release the claims of run %s; the next run takes them over",
+                    LogSanitizer.sanitize(run.runId()));
+        }
     }
 
     @Override
@@ -557,66 +580,135 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     // === the work table (IngestionWorkQueue) ===
 
     @Override
-    public EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
-        String payload = request.payload();
-        if (payload != null && payload.length() > MAX_PAYLOAD_LENGTH) {
-            throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH + " characters");
+    public List<EnqueueOutcome> enqueueWork(String sourceId, String runId, List<WorkRequest> requests,
+                                            Instant now) {
+        if (requests.size() > MAX_ENQUEUE_BATCH) {
+            throw new IllegalArgumentException("At most " + MAX_ENQUEUE_BATCH + " documents are queued at a time");
         }
-        String documentId = request.documentId();
-        // Equal work: the same token (two nulls included), pending, claimed or
-        // poisoned. Such a row keeps its deferral and its attempts.
-        Bson equalWork = Filters.and(
-                Filters.in(FIELD_WORK_STATE, WorkState.PENDING.name(), WorkState.CLAIMED.name(),
-                        WorkState.POISON.name()),
-                Filters.eq(FIELD_WORK_TOKEN, request.versionToken()));
-        return translating("queue a document", () -> {
-            var rearmed = documents.updateOne(
-                    Filters.and(ownedDocument(sourceId, documentId, runId), Filters.nor(equalWork)),
-                    Updates.combine(
-                            Updates.set(FIELD_LAST_RUN_ID, runId),
-                            Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
-                            Updates.inc(FIELD_WORK_VERSION, 1L),
-                            Updates.set(FIELD_WORK_TOKEN, request.versionToken()),
-                            Updates.set(FIELD_WORK_PAYLOAD, payload),
-                            Updates.set(FIELD_NOT_BEFORE, Date.from(now)),
-                            Updates.set(FIELD_ATTEMPTS, 0),
-                            Updates.unset(FIELD_LAST_ERROR),
-                            Updates.unset(FIELD_CLAIMED_BY),
-                            Updates.unset(FIELD_CLAIM_UNTIL)));
-            if (rearmed.getMatchedCount() > 0) {
-                return EnqueueOutcome.QUEUED;
+        for (WorkRequest request : requests) {
+            if (request.payload() != null && request.payload().length() > MAX_PAYLOAD_LENGTH) {
+                throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH
+                        + " characters");
             }
-            var stamped = documents.updateOne(ownedDocument(sourceId, documentId, runId),
-                    Updates.set(FIELD_LAST_RUN_ID, runId));
-            if (stamped.getMatchedCount() > 0) {
-                return EnqueueOutcome.ALREADY_QUEUED;
+        }
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        return translating("queue documents", () -> {
+            // One read of the page's rows decides each document; one unordered bulk
+            // write applies it. The decision is safe to take outside the write: only the
+            // run that owns the source queues for it, and every write still carries the
+            // fence and the equal-work condition in its own filter.
+            Map<String, Document> existing = new HashMap<>();
+            List<String> ids = requests.stream().map(WorkRequest::documentId).distinct().toList();
+            for (Document row : documents.find(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.in(FIELD_DOCUMENT_ID, ids)))) {
+                existing.put(row.getString(FIELD_DOCUMENT_ID), row);
             }
-            // A document this source never held: a row with no vectors (tombstoned, no
-            // content hash), owned by this run, with its work. A duplicate key means
-            // the row exists and another run owns it.
-            Document row = new Document(FIELD_SOURCE_ID, sourceId)
-                    .append(FIELD_DOCUMENT_ID, documentId)
-                    .append(FIELD_LAST_RUN_ID, runId)
-                    .append(FIELD_MISSED_RUNS, 0)
-                    .append(FIELD_TOMBSTONED, true)
-                    .append(FIELD_FENCING_RUN_ID, runId)
-                    .append(FIELD_WORK_STATE, WorkState.PENDING.name())
-                    .append(FIELD_WORK_VERSION, 1L)
-                    .append(FIELD_WORK_TOKEN, request.versionToken())
-                    .append(FIELD_WORK_PAYLOAD, payload)
-                    .append(FIELD_NOT_BEFORE, Date.from(now))
-                    .append(FIELD_ATTEMPTS, 0);
-            try {
-                documents.insertOne(row);
-                return EnqueueOutcome.QUEUED;
-            } catch (MongoWriteException e) {
-                if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+            EnqueueOutcome[] outcomes = new EnqueueOutcome[requests.size()];
+            List<WriteModel<Document>> writes = new ArrayList<>();
+            List<Integer> writeIndex = new ArrayList<>();
+            Set<String> inserting = new HashSet<>();
+            for (int i = 0; i < requests.size(); i++) {
+                WorkRequest request = requests.get(i);
+                String documentId = request.documentId();
+                Document row = existing.get(documentId);
+                if (row == null) {
+                    if (!inserting.add(documentId)) {
+                        // Listed twice on one page: the first insert queued it.
+                        outcomes[i] = EnqueueOutcome.ALREADY_QUEUED;
+                        continue;
+                    }
+                    writes.add(new InsertOneModel<>(newWorkRow(sourceId, runId, request, now)));
+                    outcomes[i] = EnqueueOutcome.QUEUED;
+                } else if (!runId.equals(row.getString(FIELD_FENCING_RUN_ID))) {
                     fenced("queue a document", sourceId, documentId, runId);
-                    return EnqueueOutcome.FENCED;
+                    outcomes[i] = EnqueueOutcome.FENCED;
+                    continue;
+                } else if (isEqualWork(row, request.versionToken())) {
+                    writes.add(new UpdateOneModel<>(ownedDocument(sourceId, documentId, runId),
+                            Updates.set(FIELD_LAST_RUN_ID, runId)));
+                    outcomes[i] = EnqueueOutcome.ALREADY_QUEUED;
+                } else {
+                    writes.add(new UpdateOneModel<>(
+                            Filters.and(ownedDocument(sourceId, documentId, runId),
+                                    Filters.nor(equalWork(request.versionToken()))),
+                            rearm(runId, request, now)));
+                    outcomes[i] = EnqueueOutcome.QUEUED;
                 }
-                throw e;
+                writeIndex.add(i);
             }
+            if (!writes.isEmpty()) {
+                try {
+                    documents.bulkWrite(writes, new BulkWriteOptions().ordered(false));
+                } catch (MongoBulkWriteException e) {
+                    for (BulkWriteError error : e.getWriteErrors()) {
+                        if (error.getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                            throw e;
+                        }
+                        // Inserted meanwhile by another run, which owns it.
+                        outcomes[writeIndex.get(error.getIndex())] = EnqueueOutcome.FENCED;
+                    }
+                }
+            }
+            return List.of(outcomes);
         });
+    }
+
+    /**
+     * Equal work: the same token (two nulls included), pending, claimed or poisoned
+     * — or done for a document never ingested (a file with no text), which
+     * re-queueing would only download again.
+     */
+    private static Bson equalWork(String versionToken) {
+        return Filters.and(
+                Filters.or(
+                        Filters.in(FIELD_WORK_STATE, WorkState.PENDING.name(), WorkState.CLAIMED.name(),
+                                WorkState.POISON.name()),
+                        Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.DONE.name()),
+                                Filters.eq(FIELD_LAST_INGESTED_AT, null))),
+                Filters.eq(FIELD_WORK_TOKEN, versionToken));
+    }
+
+    /** {@link #equalWork}, judged on a row already read. */
+    private static boolean isEqualWork(Document row, String versionToken) {
+        WorkState state = WorkState.parse(row.getString(FIELD_WORK_STATE));
+        boolean pending = state == WorkState.PENDING || state == WorkState.CLAIMED || state == WorkState.POISON;
+        boolean doneNeverIngested = state == WorkState.DONE && row.get(FIELD_LAST_INGESTED_AT) == null;
+        return (pending || doneNeverIngested) && Objects.equals(row.getString(FIELD_WORK_TOKEN), versionToken);
+    }
+
+    private static Bson rearm(String runId, WorkRequest request, Instant now) {
+        return Updates.combine(
+                Updates.set(FIELD_LAST_RUN_ID, runId),
+                Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                Updates.inc(FIELD_WORK_VERSION, 1L),
+                Updates.set(FIELD_WORK_TOKEN, request.versionToken()),
+                Updates.set(FIELD_WORK_PAYLOAD, request.payload()),
+                Updates.set(FIELD_NOT_BEFORE, Date.from(now)),
+                Updates.set(FIELD_ATTEMPTS, 0),
+                Updates.unset(FIELD_LAST_ERROR),
+                Updates.unset(FIELD_CLAIMED_BY),
+                Updates.unset(FIELD_CLAIM_UNTIL));
+    }
+
+    /**
+     * A document this source never held: a row with no vectors (tombstoned, no
+     * content hash), owned by this run, with its work.
+     */
+    private static Document newWorkRow(String sourceId, String runId, WorkRequest request, Instant now) {
+        return new Document(FIELD_SOURCE_ID, sourceId)
+                .append(FIELD_DOCUMENT_ID, request.documentId())
+                .append(FIELD_LAST_RUN_ID, runId)
+                .append(FIELD_MISSED_RUNS, 0)
+                .append(FIELD_TOMBSTONED, true)
+                .append(FIELD_FENCING_RUN_ID, runId)
+                .append(FIELD_WORK_STATE, WorkState.PENDING.name())
+                .append(FIELD_WORK_VERSION, 1L)
+                .append(FIELD_WORK_TOKEN, request.versionToken())
+                .append(FIELD_WORK_PAYLOAD, request.payload())
+                .append(FIELD_NOT_BEFORE, Date.from(now))
+                .append(FIELD_ATTEMPTS, 0);
     }
 
     @Override
@@ -635,7 +727,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                         Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()),
                                 Filters.lte(FIELD_NOT_BEFORE, at)),
                         Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
-                                Filters.lte(FIELD_CLAIM_UNTIL, at))));
+                                Filters.or(Filters.lte(FIELD_CLAIM_UNTIL, at),
+                                        Filters.ne(FIELD_CLAIMED_BY, claimer)))));
         Bson claim = Updates.combine(
                 Updates.set(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
                 Updates.set(FIELD_CLAIMED_BY, claimer),
@@ -705,7 +798,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                         new Document("$cond", List.of(poisoned, WorkState.POISON.name(), WorkState.PENDING.name())))
                         .append(FIELD_NOT_BEFORE, new Document("$cond", Arrays.asList(poisoned, null, Date.from(notBefore))))
                         .append(FIELD_ATTEMPTS, attemptsAfter)
-                        .append(FIELD_LAST_ERROR, truncate(error))),
+                        // $literal: an error text starting with "$" must not be read as a
+                        // field path by the pipeline update.
+                        .append(FIELD_LAST_ERROR, new Document("$literal", truncate(error)))),
                 new Document("$unset", List.of(FIELD_CLAIMED_BY, FIELD_CLAIM_UNTIL)));
         return translating("record a failed attempt", () -> {
             Document after = documents.findOneAndUpdate(held(sourceId, documentId, claimer, workVersion), update,
@@ -751,30 +846,50 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     @Override
     public WorkCounts workCounts(String sourceId, Instant now) {
         Date at = Date.from(now);
+        Document pending = new Document("$eq", List.of("$" + FIELD_WORK_STATE, WorkState.PENDING.name()));
+        Document claimed = new Document("$eq", List.of("$" + FIELD_WORK_STATE, WorkState.CLAIMED.name()));
+        Document due = new Document("$lte", List.of("$" + FIELD_NOT_BEFORE, at));
+        Document lapsed = new Document("$lte", List.of("$" + FIELD_CLAIM_UNTIL, at));
+        Document waiting = new Document("$and", List.of(pending, new Document("$gt", List.of("$" + FIELD_NOT_BEFORE,
+                at))));
+        Document group = new Document("_id", null)
+                .append("queued", countIf(new Document("$or", List.of(
+                        new Document("$and", List.of(pending, due)),
+                        new Document("$and", List.of(claimed, lapsed))))))
+                .append("waiting", countIf(waiting))
+                .append("inFlight", countIf(new Document("$and", List.of(claimed,
+                        new Document("$gt", List.of("$" + FIELD_CLAIM_UNTIL, at))))))
+                .append("done", countIf(new Document("$eq", List.of("$" + FIELD_WORK_STATE, WorkState.DONE.name()))))
+                .append("failed", countIf(new Document("$eq", List.of("$" + FIELD_WORK_STATE,
+                        WorkState.POISON.name()))))
+                .append("next", new Document("$min", new Document("$cond",
+                        Arrays.asList(waiting, "$" + FIELD_NOT_BEFORE, null))));
+        // One pass over the source's rows with work, served by the claim's index.
+        List<Bson> pipeline = List.of(
+                new Document("$match", new Document(FIELD_SOURCE_ID, sourceId)
+                        .append(FIELD_WORK_STATE, new Document("$exists", true))),
+                new Document("$group", group));
         return translating("count queued documents", () -> {
-            long queued = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.or(
-                            Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()),
-                                    Filters.lte(FIELD_NOT_BEFORE, at)),
-                            Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
-                                    Filters.lte(FIELD_CLAIM_UNTIL, at)))));
-            Bson waitingFilter = Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()), Filters.gt(FIELD_NOT_BEFORE, at));
-            long waiting = documents.countDocuments(waitingFilter);
-            long inFlight = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()), Filters.gt(FIELD_CLAIM_UNTIL, at)));
-            long done = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.eq(FIELD_WORK_STATE, WorkState.DONE.name())));
-            long failed = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.eq(FIELD_WORK_STATE, WorkState.POISON.name())));
-            Instant next = null;
-            if (waiting > 0) {
-                Document earliest = documents.find(waitingFilter).sort(Sorts.ascending(FIELD_NOT_BEFORE)).limit(1)
-                        .first();
-                next = earliest == null ? null : toInstant(earliest.getDate(FIELD_NOT_BEFORE));
+            Document result = documents.aggregate(pipeline).first();
+            if (result == null) {
+                return WorkCounts.NONE;
             }
-            return new WorkCounts(queued, waiting, inFlight, done, failed, next);
+            return new WorkCounts(longOrZero(result, "queued"), longOrZero(result, "waiting"),
+                    longOrZero(result, "inFlight"), longOrZero(result, "done"), longOrZero(result, "failed"),
+                    toInstant(result.getDate("next")));
         });
+    }
+
+    private static Document countIf(Document condition) {
+        return new Document("$sum", new Document("$cond", List.of(condition, 1L, 0L)));
+    }
+
+    private static void dropIndexQuietly(MongoCollection<Document> collection, String name) {
+        try {
+            collection.dropIndex(name);
+        } catch (MongoException e) {
+            // Absent, which is the usual case.
+        }
     }
 
     @Override

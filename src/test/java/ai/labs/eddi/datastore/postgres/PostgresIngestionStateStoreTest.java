@@ -95,6 +95,19 @@ class PostgresIngestionStateStoreTest extends PostgresTestBase implements Ingest
     }
 
     @Override
+    public void forceClaimedBy(String sourceId, String documentId, String claimer) {
+        String sql = "UPDATE rag_ingestion_documents SET claimed_by = ? WHERE source_id = ? AND document_id = ?";
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, claimer);
+            statement.setString(2, sourceId);
+            statement.setString(3, documentId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not set the claimer", e);
+        }
+    }
+
+    @Override
     public void forceDocumentOwner(String sourceId, String documentId, String runId) {
         String sql = "UPDATE rag_ingestion_documents SET fencing_run_id = ? WHERE source_id = ? AND document_id = ?";
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {

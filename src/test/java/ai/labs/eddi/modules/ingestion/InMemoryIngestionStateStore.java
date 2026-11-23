@@ -304,6 +304,10 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public synchronized void finishRun(IngestionRun run) {
+        // A finished run holds no claims, as in both real backends.
+        if (run.sourceId() != null) {
+            releaseClaims(run.sourceId(), run.runId());
+        }
         IngestionRun existing = runs.get(run.runId());
         if (existing == null || existing.status() != IngestionRun.Status.RUNNING) {
             // Already closed — reaped while this worker was still going. Both real
@@ -435,6 +439,14 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
 
     private final Map<String, Work> work = new LinkedHashMap<>();
 
+    /** Sets a claimed row's claimer directly — see the work-queue contract. */
+    public synchronized void forceClaimedBy(String sourceId, String documentId, String claimer) {
+        Work row = work.get(key(sourceId, documentId));
+        if (row != null) {
+            row.claimedBy = claimer;
+        }
+    }
+
     /** Lets a test see a row's error without a getter in the interface. */
     public synchronized String lastWorkError(String sourceId, String documentId) {
         Work row = work.get(key(sourceId, documentId));
@@ -442,7 +454,19 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public synchronized EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
+    public synchronized List<EnqueueOutcome> enqueueWork(String sourceId, String runId, List<WorkRequest> requests,
+                                                         Instant now) {
+        if (requests.size() > MAX_ENQUEUE_BATCH) {
+            throw new IllegalArgumentException("At most " + MAX_ENQUEUE_BATCH + " documents are queued at a time");
+        }
+        List<EnqueueOutcome> outcomes = new ArrayList<>();
+        for (WorkRequest request : requests) {
+            outcomes.add(enqueueOne(sourceId, runId, request, now));
+        }
+        return outcomes;
+    }
+
+    private EnqueueOutcome enqueueOne(String sourceId, String runId, WorkRequest request, Instant now) {
         if (request.payload() != null && request.payload().length() > MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH + " characters");
         }
@@ -462,8 +486,10 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         }
         documents.put(documentKey, withRunId(existing, runId));
         Work row = work.computeIfAbsent(documentKey, ignored -> new Work(sourceId, request.documentId()));
+        boolean doneNeverIngested = row.state == WorkState.DONE && existing.lastIngestedAt() == null;
         boolean equal = (row.state == WorkState.PENDING || row.state == WorkState.CLAIMED
-                || row.state == WorkState.POISON) && Objects.equals(row.token, request.versionToken());
+                || row.state == WorkState.POISON || doneNeverIngested)
+                && Objects.equals(row.token, request.versionToken());
         if (equal) {
             return EnqueueOutcome.ALREADY_QUEUED;
         }
@@ -499,7 +525,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
                 continue;
             }
             boolean pending = row.state == WorkState.PENDING && !row.notBefore.isAfter(now);
-            boolean lapsed = row.state == WorkState.CLAIMED && !row.claimUntil.isAfter(now);
+            boolean lapsed = row.state == WorkState.CLAIMED
+                    && (!row.claimUntil.isAfter(now) || !claimer.equals(row.claimedBy));
             if (pending || lapsed) {
                 due.add(row);
             }
