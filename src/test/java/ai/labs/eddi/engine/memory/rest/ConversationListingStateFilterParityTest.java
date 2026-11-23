@@ -204,11 +204,13 @@ class ConversationListingStateFilterParityTest extends MongoTestBase {
     @DisplayName("agentVersion is part of the descriptor query")
     void agentVersionInTheQuery(String name, Supplier<ListingBackend> factory) throws Exception {
         ListingBackend backend = fresh(factory);
-        List<String> ids = backend.seed(10, i -> READY.name(), i -> false, 16);
+        // More descriptors than one requested batch (20), so a backend that ignored the
+        // version would read a full batch of rejects and reach the bound of one.
+        List<String> ids = backend.seed(30, i -> READY.name(), i -> false, 16);
         var listing = byIdSet(backend, true);
         listing.maxRejectedScan = 1;
         assertEquals(expected(ids, i -> true),
-                ids(listing.readConversationDescriptors(0, 20, null, null, ListingBackend.AGENT_ID, 1, null, null)), name);
+                ids(listing.readConversationDescriptors(0, 40, null, null, ListingBackend.AGENT_ID, 1, null, null)), name);
         // Version 2 matches none of the descriptors in the query itself: nothing is
         // read and rejected, so a bound of one is not reached.
         assertEquals(List.of(), ids(listing.readConversationDescriptors(0, 20, null, null, ListingBackend.AGENT_ID, 2, null, null)), name);

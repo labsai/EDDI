@@ -63,6 +63,11 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
     private static final int LIMIT = 20;
     private static final int RUNS = 3;
     private static final int STATE_WRITES = 2_000;
+    /**
+     * Timed writes per configuration: every sample goes READY -> IN_PROGRESS, then
+     * back.
+     */
+    private static final int WRITES_TIMED = 2 * STATE_WRITES;
 
     private final StringBuilder report = new StringBuilder();
 
@@ -113,7 +118,8 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
             ended = countEnded(backend, ids);
             int deepIndex = Math.min(ended - LIMIT, RestConversationStore.MAX_RESULT_OFFSET) / LIMIT;
             for (int index : new int[]{0, Math.max(1, deepIndex)}) {
-                for (String path : List.of("before", "after")) {
+                // Alternate which path is measured first, so order is not read as a difference.
+                for (String path : index == 0 ? List.of("before", "after") : List.of("after", "before")) {
                     Measure m = measureListing(backend, index, path);
                     report.append(String.format("| %d (%.1f%%) | %s | %s | %.1f | %d | %d | %d | %d | %s | %s | %s |%n", ended,
                             100.0 * ended / size, index == 0 ? "first" : "index " + index + " (offset " + index * LIMIT + ")", path,
@@ -239,55 +245,69 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
         backend.clear();
         List<String> ids = backend.seed(10_000, i -> ConversationState.READY.name(), i -> false, 2_048);
         List<String> sample = ids.subList(0, STATE_WRITES);
-        report.append("## ").append(backend.name()).append(", state-write cost (").append(STATE_WRITES)
+        report.append("## ").append(backend.name()).append(", state-write cost (").append(WRITES_TIMED)
                 .append(" writes, 10,000 conversations)\n\n| write | total ms | µs per write |\n|---|---|---|\n");
 
         double withIndex = timeStateWrites(backend, sample);
-        report.append(String.format("| conversation state (as shipped) | %.0f | %.0f |%n", withIndex, withIndex * 1000 / STATE_WRITES));
         if (backend instanceof ListingBackend.Mongo) {
             var memories = getDatabase().getCollection("conversationmemories");
+            // Counterbalanced: with, without, with again, so a drift in cache or clock
+            // between configurations is not read as the index's cost.
             memories.dropIndex(Indexes.ascending("conversationState", "_id"));
             double without = timeStateWrites(backend, sample);
             memories.createIndex(Indexes.ascending("conversationState", "_id"));
-            report.append(String.format("| conversation state without the {conversationState, _id} index | %.0f | %.0f |%n", without,
-                    without * 1000 / STATE_WRITES));
+            double withIndexAgain = timeStateWrites(backend, sample);
+            report.append(String.format("| conversation state (as shipped; runs %.0f ms, %.0f ms, mean) | %.0f | %.0f |%n", withIndex,
+                    withIndexAgain, (withIndex + withIndexAgain) / 2, (withIndex + withIndexAgain) / 2 * 1000 / WRITES_TIMED));
+            report.append(String.format("| conversation state without the {conversationState, _id} index (run between them) | %.0f | %.0f |%n",
+                    without, without * 1000 / WRITES_TIMED));
             var descriptors = getDatabase().getCollection("descriptors");
             long start = System.nanoTime();
-            for (int i = 0; i < sample.size(); i++) {
-                descriptors.updateOne(Filters.eq("_id", new ObjectId(sample.get(i))),
-                        Updates.set("conversationState", i % 2 == 0 ? "IN_PROGRESS" : "READY"));
+            for (String target : List.of("IN_PROGRESS", "READY")) {
+                for (String id : sample) {
+                    descriptors.updateOne(Filters.eq("_id", new ObjectId(id)), Updates.set("conversationState", target));
+                }
             }
             double sync = (System.nanoTime() - start) / 1e6;
             report.append(String.format("| + descriptor state sync (one more `$set` per state write) | %.0f | %.0f |%n", sync,
-                    sync * 1000 / STATE_WRITES));
+                    sync * 1000 / WRITES_TIMED));
         } else {
+            report.append(String.format("| conversation state (as shipped) | %.0f | %.0f |%n", withIndex, withIndex * 1000 / WRITES_TIMED));
             DataSource dataSource = ((ListingBackend.Postgres) backend).dataSource();
             try (Connection conn = dataSource.getConnection();
                     PreparedStatement update = conn.prepareStatement("UPDATE resources SET data = jsonb_set(data, '{conversationState}', "
                             + "to_jsonb(?::text)) WHERE collection_name = 'descriptors' AND id = ?::uuid")) {
                 long start = System.nanoTime();
-                for (int i = 0; i < sample.size(); i++) {
-                    update.setString(1, i % 2 == 0 ? "IN_PROGRESS" : "READY");
-                    update.setString(2, sample.get(i));
-                    update.executeUpdate();
+                for (String target : List.of("IN_PROGRESS", "READY")) {
+                    for (String id : sample) {
+                        update.setString(1, target);
+                        update.setString(2, id);
+                        update.executeUpdate();
+                    }
                 }
                 double sync = (System.nanoTime() - start) / 1e6;
                 report.append(String.format("| + descriptor state sync (one more `UPDATE` per state write) | %.0f | %.0f |%n", sync,
-                        sync * 1000 / STATE_WRITES));
+                        sync * 1000 / WRITES_TIMED));
             }
         }
         report.append('\n');
     }
 
     private static double timeStateWrites(ListingBackend backend, List<String> ids) {
-        // Warm up, then time the flips a turn makes (READY -> IN_PROGRESS -> READY).
-        for (String id : ids.subList(0, 100)) {
-            backend.memoryStore.setConversationState(id, ConversationState.IN_PROGRESS);
-        }
+        // The flips a turn makes, the same for every configuration: all samples
+        // READY -> IN_PROGRESS, then back. An untimed identical pass warms up first and
+        // leaves every sample READY, so each timed pass starts from the same state.
+        flipAll(backend, ids);
         long start = System.nanoTime();
-        for (int i = 0; i < ids.size(); i++) {
-            backend.memoryStore.setConversationState(ids.get(i), i % 2 == 0 ? ConversationState.IN_PROGRESS : ConversationState.READY);
-        }
+        flipAll(backend, ids);
         return (System.nanoTime() - start) / 1e6;
+    }
+
+    private static void flipAll(ListingBackend backend, List<String> ids) {
+        for (ConversationState target : List.of(ConversationState.IN_PROGRESS, ConversationState.READY)) {
+            for (String id : ids) {
+                backend.memoryStore.setConversationState(id, target);
+            }
+        }
     }
 }

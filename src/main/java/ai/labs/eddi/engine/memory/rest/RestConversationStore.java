@@ -498,7 +498,10 @@ public class RestConversationStore implements IRestConversationStore {
             // A batch shorter than scanSize was the last one: nothing was left to read,
             // so a short page is the complete answer. A full one may have more behind it.
             if (seesAllConversations && !pageFull && conversationDescriptors.size() == scanSize
-                    && rejectedDescriptors >= maxRejectedScan) {
+                    && rejectedDescriptors >= maxRejectedScan
+                    // A full batch can be the very last one: look one batch ahead (descriptors
+                    // only, no summary read) so a store that ends exactly here is not refused.
+                    && !readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions).isEmpty()) {
                 // More descriptors remain and the page is not full: the rows found are
                 // not the whole page, and saying so is the only honest answer.
                 meterRegistry.counter("eddi.conversations.listing.scan_bound_exceeded").increment();

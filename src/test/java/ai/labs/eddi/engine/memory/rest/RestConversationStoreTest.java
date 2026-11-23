@@ -2722,6 +2722,19 @@ class RestConversationStoreTest {
         }
 
         @Test
+        @DisplayName("a store that ends exactly at the bound is a complete (empty) answer, not a refusal")
+        void storeEndingExactlyAtTheBoundIsNotRefused() {
+            // Nothing is ENDED, so all 60 descriptors are rejected: the bound is reached on
+            // the last, full batch of 10, with no descriptor left to examine.
+            restConversationStore.maxStateIdSet = -1;
+            restConversationStore.maxRejectedScan = store.size();
+
+            assertTrue(restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null).isEmpty());
+            assertEquals(0.0, restConversationStore.meterRegistry.counter("eddi.conversations.listing.scan_bound_exceeded").count());
+        }
+
+        @Test
         @DisplayName("within the bound, the per-row filter still finds a match far down the store")
         void withinTheBoundTheMatchIsFound() {
             states.put(conversationId(55), ConversationState.ENDED);
