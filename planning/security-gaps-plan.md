@@ -21,13 +21,20 @@ A second adversarial review followed the fact-check. Its corrections to facts ar
 - **§3, re-pointing an existing reference.** `CallerTokenAuthorPolicy` matches the literal `${caller:token}` (`:80`, `:125`). An exchange connection is referenced as `${connection:name}`, which carries no author rule. An editor saves an agent that references connection `crm` while it is `API_KEY`. An admin later changes `crm` to `OAUTH2_TOKEN_EXCHANGE`. Every existing editor-authored reference now spends the token of whoever chats, admins included: the confused deputy the `CallerIdentityResolver` javadoc (`:52-59`) describes. Needed: a resolve-time author check, or re-validation of referencing configs when a connection's type changes.
 - **§3, more sites than `isOAuth()`.** A new `AuthType` and `Binding` also reach the binding matrix in `ConnectionConfiguration.java:258-272` and `:425-430`, `OAuthTokenService:658` and `RestConnectionAuthorization:143`/`:558`. `OAuthConfig` has `audience` (`:110`) but no `resource` field yet.
 - **§1, compatibility with a pre-6.7 EDDI.** An EDDI that does not know `toolCallGuardrails` at all behaves as Jackson treats unknown properties. Not verified.
+- **§4, `acr` semantics: any-of or all-of.** Quarkus 3.40.1 `StepUpAuthenticationPolicy.verifyAcr` is **all-of**: the token must carry every expected value. The plan's `requiredAuthLevel.acr` is written as any-of and merged by intersection. Either choice differs from `@AuthenticationContext` unless it is all-of, and the plan says it matches Quarkus' challenge format. Undecided. Under all-of the merge across rules is a union. Also open: what clients do with a multi-value `acr_values` challenge (the parameter is a preference list, not a conjunction).
+- **§4, earned-autonomy promotion rewrites the approval config.** [`docs/hitl-oversight.md`](../docs/hitl-oversight.md):150-152: a promotion adds a narrower pattern to `exempt` and removes the identical friction rule; removing the last `requireApproval` pattern drops `exempt` and `rules`. So a promotion can delete the rule that carries `requiredAuthLevel`, or collide with the save-time refusal in §4. Options: a rule with `requiredAuthLevel` is ineligible for promotion, or the promotion preview refuses it. Undecided.
+- **§4, replay window.** One fresh login approves any number of batches within `maxAge`, across conversations. Whether that is acceptable, or a step-up should be consumed by one batch, is undecided.
+- **§1, `deploymentKey` rotation (unverified).** Recomputing the token in `LlmTask` breaks when `deploymentKey` rotates, for every paused conversation. An option: the detector extracts the marker from the system message in `GuardrailContext.messages()`, which also solves the `call`-scope pause gap above.
+- **§1, other sinks (unverified).** Tracing spans and debug logs that record the prompt are not on the scrub list.
+- **§2, what the filter does not hide (unverified).** Role filtering reduces noise; it does not keep tool names secret, because `read_docs` (DOCS tier, every role) serves `mcp-server.md`. When a caller's roles change mid-session, nothing sends `tools/list_changed`.
+- **§3, exchange cache and scope (unverified).** The cache key (connection, `sub`, token hash) has no connection version or config hash, so an audience edit keeps serving old tokens until they expire. An injected model acts downstream as the user with the connection's full scope: require minimal `scopes` and recommend an approval gate on writes. A subject token that expires mid tool loop is not covered.
 - **Citations.**
   - `ToolCallGuardrailValidation.java:28-31` is the class javadoc; the refusal code is at `:82-86`.
   - `system:*` tool decisions are described at `docs/hitl.md:192` and `:485`; `:322` is about group TASK-gate budgets.
   - `docs/mcp-server.md:898` says `/mcp` cannot be opened selectively; it does not itself say an unauthenticated `tools/list` is refused.
   - §12's wording is "Not accept a client-supplied header as the grant principal — ever."
+- **Verified:** `"*"` passes `ToolApprovalPatterns.validate` (`:125-150`): non-blank, legal characters, no colon.
 - **Not yet checked:**
-  - whether `"*"` passes `ToolApprovalPatterns.validate`;
   - the `token_endpoint` host in Keycloak's discovery document under `KC_HOSTNAME` (it matters for the exact-match rule);
   - how a caller token survives the NATS coordinator running a turn on another replica;
   - the streaming path's system-message source;
@@ -72,13 +79,14 @@ A marker appended before step 5 is silently cut from any long prompt. So:
 
 > *Fact-check.* Two refinements. (a) The cap is opt-in: `maxSystemPromptChars` defaults to `-1`, and `capSystemPrompt` returns the prompt unchanged when `maxChars <= 0` (`LlmTask.java:3830`), so the cut happens only where an author set it. (b) There is a sixth, uncapped step: `ConversationHistoryBuilder.composeSystemMessage` (`:72-76`, called at `:125` and `:225`) appends the rolling summary *after* the cap. "After `capSystemPrompt`" must therefore mean after the summary is composed too, or the helper must run inside `ConversationHistoryBuilder`; otherwise the marker is not at the tail whenever a summary is active.
 
-- `CanaryMarker.apply(systemMessage, task, memory)` is a single shared helper, called **after** `capSystemPrompt`. It replaces the tail of the prompt when needed so that the marker always survives. Wherever a system message is built, it goes through this helper:
+- `CanaryMarker.apply(systemMessage, task, memory)` is a single shared helper, called **after** `capSystemPrompt` and after the rolling summary is composed. The summary is never capped, so nothing truncates the marker, and the helper only appends. Wherever a system message is built, it goes through this helper:
   - the normal turn path;
+  - the agent and tool-loop path, which builds its own string (see the note below);
   - `ToolLoopResumer.fallbackRebuildMessages` (verified: it rebuilds from the raw `systemMessage` parameter at `:543-562`, so today that path would carry no marker);
   - any cascade step that rebuilds messages.
-- The tool loop and cascade reuse the message list built once, so they inherit the marker. A test per path pins this: normal, cascade, tool loop, resume, degraded resume, streaming.
+- A test per path pins this: normal, cascade, tool loop and agent mode, resume, degraded resume, streaming, rolling summary active.
 
-> *Second review: the agent and tool-loop path builds its own string.* `LlmTask.java:822` composes `agentSystemMessage = composeSystemMessage(systemMessage, summaryPrefix)`, and `:823` strips the history builder's leading `SystemMessage` only when it is exactly equal (`withoutLeadingSystemMessage`). `agentSystemMessage` then goes to the cascade and the tool loop (`:889`, `:980`, `:992`, `:1025`). So "the tool loop and cascade inherit the marker" is false. Running the helper only inside `ConversationHistoryBuilder` would break this path: `:822` would recompose the prompt without the marker, the strip would miss, and the loop would receive two system messages. The consistent placements are inside `composeSystemMessage` itself, or on both the builder input and `:822`. Add tests for "rolling summary active" and "agent mode with a summary". Also, the helper runs after the cap and the summary is never capped, so nothing truncates the marker: drop "replaces the tail of the prompt", which would only destroy author text.
+> *Second review: the agent and tool-loop path builds its own string.* `LlmTask.java:822` composes `agentSystemMessage = composeSystemMessage(systemMessage, summaryPrefix)`, and `:823` strips the history builder's leading `SystemMessage` only when it is exactly equal (`withoutLeadingSystemMessage`). `agentSystemMessage` then goes to the cascade and the tool loop (`:889`, `:980`, `:992`, `:1025`). The cascade and tool loop therefore do **not** inherit a marker added elsewhere. Running the helper only inside `ConversationHistoryBuilder` would break this path: `:822` would recompose the prompt without the marker, the strip would miss, and the loop would receive two system messages. The consistent placements are inside `composeSystemMessage` itself, or on both the builder input and `:822`. Add tests for "rolling summary active" and "agent mode with a summary".
 - Side calls do not carry the system prompt and so need no marker: the summarizer, the title generator and the convergence judge. Group member turns are ordinary `LlmTask` turns and are covered. (unverified: confirm each side-call builder while implementing.)
 
 ### Token scope
@@ -135,7 +143,7 @@ N-gram overlap between the answer and the system message, which `GuardrailContex
 
 An unknown guardrail type is skipped with a warning (`GuardrailService.java:1028`) (verified). So an older EDDI, or a rollback, silently runs agents without the canary. Say this in the docs' Compatibility section, as [`tool-call-guardrails.md`](../docs/tool-call-guardrails.md) does for 6.7.
 
-*Fact-check:* that holds for input and output only. An unknown `toolCallGuardrails` type is **refused** (`ToolCallGuardrailValidation.java:28-31`), so on an older EDDI that knows tool-call guardrails, an agent with a canary tool-call entry fails to deploy instead of running unguarded. The Compatibility section needs both behaviours.
+*Fact-check:* that holds for input and output only. An unknown `toolCallGuardrails` type is **refused** (`ToolCallGuardrailValidation.java:82-86`), so on an older EDDI that knows tool-call guardrails, an agent with a canary tool-call entry fails to deploy instead of running unguarded. The Compatibility section needs both behaviours.
 
 ## 2. Role-aware MCP tool visibility
 
@@ -167,9 +175,7 @@ Revision 1 called this "disclosure, not enforcement". That was wrong. In quarkus
 
 ### Caching and paging
 
-`ToolMessageHandler.toolsList` honours `tools().ttlMs()` and `cacheScope()` and paginates (verified in review). A list that differs per caller must not be cached across callers. Pin the extension's cache to per-connection scope, or disable it, and test that paging over a filtered list is stable.
-
-> *Second review: there is no server-side cache to pin.* `ttlMs` and `cacheScope` only go into the response as hints (`MessageHandler.putCacheControl`). `CacheScope` has exactly two values, `PUBLIC` and `PRIVATE`, and a stateless protocol version with nothing configured emits `PUBLIC` with `ttlMs: 0` (verified with `javap`). The action is to set `cacheScope` to `PRIVATE` once the list differs per caller, so a shared client or intermediary does not hand one caller's list to another. The §5 test "no cross-caller caching" becomes "a filtered `tools/list` response carries `cacheScope: PRIVATE`".
+`ToolMessageHandler.toolsList` honours `tools().ttlMs()` and `cacheScope()` and paginates (verified in review). A list that differs per caller must not be cached across callers. There is no server-side cache to pin: `ttlMs` and `cacheScope` only go into the response as hints (`MessageHandler.putCacheControl`). `CacheScope` has exactly two values, `PUBLIC` and `PRIVATE`, and a stateless protocol version with nothing configured emits `PUBLIC` with `ttlMs: 0` (verified with `javap`). The action is to set `cacheScope` to `PRIVATE` once the list differs per caller, so a shared client or intermediary does not hand one caller's list to another. The test is "a filtered `tools/list` response carries `cacheScope: PRIVATE`", plus "paging over a filtered list is stable".
 
 ### Clients that see a different list
 
@@ -243,7 +249,7 @@ With exchange, EDDI sends the user's inbound token, with its own client credenti
 
 ### Open questions (unverified)
 
-- Standard token exchange in Keycloak 26.8.0 (`docker-compose.auth.yml:90`): whether it is enabled by default and what it requires of the realm.
+- Standard token exchange in Keycloak 26.8 (`docker-compose.auth.yml`, 26.8.2 on `main`): whether it is enabled by default and what it requires of the realm.
 - Whether `act` survives a second exchange hop. If not, record the gap in the audit entry rather than reconstructing it from headers.
 
 ## 4. Step-up authentication on tool approvals
@@ -258,7 +264,7 @@ Quarkus OIDC 3.40.1 ships `@AuthenticationContext(value, maxAge)` and `StepUpAut
 
 ### Config
 
-`toolApprovals.rules[].requiredAuthLevel: { "acr": ["mfa", "hwk"], "maxAge": "PT5M" }`. The `acr` list is the set of acceptable values; the token's `acr` must be one of them.
+`toolApprovals.rules[].requiredAuthLevel: { "acr": ["mfa", "hwk"], "maxAge": "PT5M" }`. The `acr` list is meant as the set of acceptable values (any-of), but that is undecided: see the open gaps.
 
 - It adds friction and never gates or ungates ([`docs/hitl.md`](../docs/hitl.md):405) (verified). Whether a call pauses is still decided only by `requireApproval`/`exempt`. A rule with `requiredAuthLevel` whose match is not covered by `requireApproval` is refused at save time.
 
@@ -267,14 +273,14 @@ Quarkus OIDC 3.40.1 ships `@AuthenticationContext(value, maxAge)` and `StepUpAut
 `ToolApprovalRules.governing` reduces a batch to one whole rule, chosen by timeout-policy strictness and then specificity (`ToolApprovalRules.java:92-101`) (verified). Note that `matchByCallId` (`:65-84`) takes the first matching rule per call, so "all matched rules" below means one rule per call in the batch. Riding on `effectiveRule` would drop a `requiredAuthLevel` from a losing rule. For example, an MFA-gated call batched with a `WAIT_INDEFINITELY` call would lose step-up entirely. So:
 
 - `PendingToolCallBatch.effectiveAuthLevel` is a separate persisted field, merged field by field across **all** matched rules:
-  - `acr`: the **intersection** of the acceptable sets. ACR values are unordered strings, so "highest" does not exist. An empty intersection is a configuration conflict, and the batch fails closed: it can only be rejected.
+  - `acr`: depends on the any-of or all-of decision in the open gaps. Under any-of the merge is the **intersection** of the acceptable sets (ACR values are unordered strings, so "highest" does not exist), and an empty intersection is a configuration conflict that fails closed: the batch can only be rejected. Under all-of the merge is a **union**.
   - `maxAge`: the minimum.
 - It goes through the persistence round trip. Test it with a store round trip, not in memory only.
 
 ### Decision path
 
 - **Only approval needs step-up. Rejection never does.** Anyone with the right to decide may always say no, including through Slack and MCP.
-- An approval checks the decider's token: `acr` is in the merged set, and `auth_time` is within `maxAge`. This check runs in the HITL decision service, per batch. (unverified: confirm that the resume endpoint has the decider's access token with `acr` and `auth_time`, not just a `SecurityIdentity` built from roles. Keycloak puts `acr` in access tokens; `auth_time` may need a mapper.) The failure response reuses Quarkus' step-up challenge, so the Manager and Chat UI can re-authenticate with `acr_values` and `max_age` and return to the approval card.
+- An approval checks the decider's token: `acr` satisfies the merged set, and `auth_time` is within `maxAge`. A token with no `auth_time` fails closed. An omitted `maxAge` means no age limit, only the `acr` check (to be stated in the docs). This check runs in the HITL decision service, per batch. (unverified: confirm that the resume endpoint has the decider's access token with `acr` and `auth_time`, not just a `SecurityIdentity` built from roles. Keycloak puts `acr` in access tokens; `auth_time` may need a mapper.) The failure response reuses Quarkus' step-up challenge, so the Manager and Chat UI can re-authenticate with `acr_values` and `max_age` and return to the approval card.
 - `eddi-approver` / `eddi-admin` deciding on someone else's conversation need the same level. Step-up is about the decision, not about whose conversation it is.
 
 | Approval surface | Approve | Reject |
@@ -283,7 +289,11 @@ Quarkus OIDC 3.40.1 ships `@AuthenticationContext(value, maxAge)` and `StepUpAut
 | Slack approvals (no OIDC token) | `STEP_UP_REQUIRED` | Always |
 | MCP `resume_conversation` (offline token, old `auth_time`) | `STEP_UP_REQUIRED` unless the token is fresh | Always |
 | Timeout `AUTO_APPROVE` | Never takes effect | — |
-| `system:*` automated approvals ([`docs/hitl.md`](../docs/hitl.md):322) | Never take effect | — |
+| `system:*` automated approvals ([`docs/hitl.md`](../docs/hitl.md):192, :485) | Never take effect | — |
+
+### Scope
+
+Step-up is defined only for `toolApprovals.rules`. Turn-level `PAUSE_CONVERSATION` approvals and group approvals (`approve_group_phase`, `submit_group_human_input`) are out of scope and are not gated by `requiredAuthLevel`; if that is not acceptable, it is a gap to settle before the build.
 
 ### Automated approvals: check at decision time too
 
@@ -330,6 +340,6 @@ Unit tests with JUnit 5 and Mockito, plus ITs where a real store or HTTP is need
 | --- | --- | --- | --- |
 | 1 | `McpToolTiers` single source (§2) | S | None. Built on branch `refactor/mcp-tool-tiers` (not yet merged) |
 | 2 | Canary guardrail (§1), without the overlap companion | M | `GuardrailModelClient` was checked and forwards no system message. Still open: marker placement (inside `composeSystemMessage`, see the agent-path note), `call` scope across a pause, poisoning under `agent` scope |
-| 3 | Role-aware `tools/list` (§2) | S | Identity-in-filter spike passes, *and* the filter is proven to fail closed when the lookup throws |
-| 4 | Step-up on approvals (§4) | M–L (backend, two UIs, realm) | Confirm the resume path sees `acr` / `auth_time`; decide per-call shadowing and per-call decisions (open gaps below) |
+| 3 | Role-aware `tools/list` (§2). In progress, stacked on item 1 | S | Identity-in-filter spike passes, *and* the filter is proven to fail closed when the lookup throws |
+| 4 | Step-up on approvals (§4) | M–L (backend, two UIs, realm) | Confirm the resume path sees `acr` / `auth_time`; decide per-call shadowing, per-call decisions and the `acr` semantics (open gaps above) |
 | 5 | Token exchange (§3) | M–L | Keycloak 26.8 exchange check; §12 carve-out agreed; `/v1` under `http-policy=authenticated` decided; connection-type change re-validation decided |

@@ -46,6 +46,10 @@ The design gaps it found are listed in a new "Second review" section, undecided:
 - a more specific approval rule drops step-up for that call;
 - step-up must follow per-call decisions;
 - changing a connection to token exchange re-points existing editor-authored references.
+- `acr` is any-of in the plan but all-of in Quarkus;
+- an earned-autonomy promotion can delete the rule that carries `requiredAuthLevel`;
+- a leaked marker, key rotation, the exchange cache key and the step-up replay window are
+  listed as unverified suspicions.
 
 ### Design decisions
 
@@ -60,11 +64,13 @@ The design gaps it found are listed in a new "Second review" section, undecided:
   on scheduled calls, and on `/v1` under the default `permit` policy (allowing it under
   `authenticated` is left open). Exchanged tokens are cached in memory only, which is a
   §12 carve-out still to be agreed.
-- Step-up merges `acr` by intersection and `maxAge` by minimum into a separately persisted
-  field. Only approvals need step-up; rejections never do. Which rules and calls the merge
-  covers is an open gap.
+- Step-up merges `maxAge` by minimum, and `acr` by a rule that depends on an undecided any-of or
+  all-of choice (Quarkus' check is all-of), into a separately persisted field. Only approvals
+  need step-up; rejections never do. It covers `toolApprovals.rules` only. Which rules and
+  calls the merge covers is an open gap.
 
 ### What's next
 
 Item 1 of the suggested order, `McpToolTiers`, is built on `refactor/mcp-tool-tiers`
-(not yet merged). The others wait on the gates and open gaps the plan lists.
+(not yet merged), and item 3, the role-aware `tools/list`, is in progress stacked on it.
+The others wait on the gates and open gaps the plan lists.
