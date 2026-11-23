@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -933,6 +935,39 @@ class GroupConversationServiceTest {
             assertEquals(1.0, meterRegistry.counter("eddi_group_followup_count").count());
         }
 
+        /**
+         * Email plan v3 §5.3: MCP {@code followup_with_member} (or its REST endpoint)
+         * from a tainted turn taints the discussion, persisted with the follow-up, and
+         * the member turn it runs — whose conversation an untainted round started.
+         */
+        @Test
+        void followUp_fromTaintedRequest_taintsTheDiscussionAndTheMemberTurn() throws Exception {
+            givenGroupConfigReadable();
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationOutputs(new LinkedList<>(List.of(new ConversationOutput())));
+            doAnswer(inv -> {
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), eq("agentA"), eq("convA"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+
+            GroupConversation result;
+            try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+                result = service.followUpWithMember("gc-1", "alice", "What now?");
+            }
+
+            assertEquals(TurnOrigin.EMAIL, result.getOrigin());
+            verify(conversationStore).updateIfState(argThat(stored -> TurnOrigin.EMAIL.equals(stored.getOrigin())),
+                    eq(GroupConversationState.IN_PROGRESS));
+            verify(conversationService).say(any(), eq("agentA"), eq("convA"), any(), any(), any(),
+                    argThat(input -> TurnOrigin.EMAIL.equals(TurnOrigin.fromContext(input.getContext()))), anyBoolean(), any());
+        }
+
         @Test
         void followUp_unknownMember_throwsAndDoesNotCallAgent() throws Exception {
             var gc = completedGc();
@@ -1028,6 +1063,48 @@ class GroupConversationServiceTest {
             assertThrows(GroupDiscussionException.class,
                     () -> service.continueDiscussion("gc-1", "q", null));
             verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        /**
+         * Email plan v3 §5.3: {@code continue_group_discussion} from a tainted turn
+         * taints the discussion before its round is persisted, so every member turn of
+         * the round reads the taint from it.
+         */
+        @Test
+        void continue_fromTaintedRequest_taintsTheDiscussionBeforeTheRoundIsPersisted() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            var inProgress = new GroupConversation();
+            inProgress.setId("gc-1");
+            inProgress.setGroupId("group-1");
+            inProgress.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+            // What the FIRST write carries, captured as it is made: the config lookup
+            // fails after it and the failure path writes the same mutable object again,
+            // so the object's final state says nothing about the round write itself.
+            var firstWrite = new ArrayList<String>();
+            doAnswer(inv -> {
+                GroupConversation written = inv.getArgument(0);
+                if (firstWrite.isEmpty()) {
+                    firstWrite.add(String.valueOf(written.getOrigin()));
+                    firstWrite.add(String.valueOf(written.getState()));
+                    firstWrite.add(String.valueOf(written.getRound()));
+                }
+                return null;
+            }).when(conversationStore).updateIfState(any(), any());
+
+            try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+                assertThrows(IResourceStore.ResourceNotFoundException.class, () -> service.continueDiscussion("gc-1", "next", null));
+            }
+
+            assertEquals(List.of(TurnOrigin.EMAIL, GroupConversationState.IN_PROGRESS.name(), "2"), firstWrite,
+                    "the round write itself carries the taint");
+            verify(conversationStore, atLeastOnce()).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
         }
 
         @Test

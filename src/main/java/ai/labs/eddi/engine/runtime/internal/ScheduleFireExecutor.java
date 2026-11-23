@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -234,6 +235,25 @@ public class ScheduleFireExecutor {
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        // A schedule a tainted turn created or changed carries the origin taint (email
+        // plan v3 §5.3), and so does all its fire does — every branch, the team cadence
+        // discussion and the conversation strategies alike — on top of whatever taint
+        // the thread already has (a manual fire from a tainted request).
+        String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
+        if (origin == null) {
+            return fireBound(schedule, instanceId, attemptNumber);
+        }
+        try {
+            return TurnOrigin.callWith(origin, () -> fireBound(schedule, instanceId, attemptNumber));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            // fireBound records every failure as a fire log; nothing checked escapes it.
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private ScheduleFireLog fireBound(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Map<String, Object> md = schedule.getMetadata();
         if (HitlSchedules.isHitlTimeout(md)) {
             // HITL timeout fast-path — isolate exceptions and record a fire log for
@@ -1109,6 +1129,9 @@ public class ScheduleFireExecutor {
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
         }
+        // A check-back a mail-started turn booked starts a conversation that is just as
+        // tainted (email plan v3 §5.3).
+        context = TurnOrigin.withOrigin(context, TurnOrigin.fromMetadata(schedule.getMetadata()));
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, context);
 
@@ -1430,6 +1453,10 @@ public class ScheduleFireExecutor {
         // Set userId context
         String userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
         contextMap.put("userId", new Context(Context.ContextType.string, userId));
+        String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
+        if (origin != null) {
+            contextMap.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, origin));
+        }
 
         inputData.setContext(contextMap);
         return inputData;

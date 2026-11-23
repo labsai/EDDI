@@ -2249,7 +2249,29 @@ your tool schemas do not cover it, not as a routine first step:
   trigger anyone on the internet can fire (save warning email.open-trigger).
   Mail content is untrusted input: recommend hitlConfig.toolApprovals on a
   target agent whose tools change things (save warning
-  email.tools-without-approvals). Exchange Online: an
+  email.tools-without-approvals). Sender lists: read them with GET
+  /channelstore/channels/{id}/email-senders ({version, allow, block}; the id
+  from GET /channelstore/channels/descriptors). With write scope, change them
+  with POST on the same path, body {expectedVersion, add: {allow, block},
+  remove: {allow, block}, reason, confirmOpen} — never by rewriting the
+  integration. Prefer exact addresses over *@domain or *@*.domain, always
+  give the reason (it goes into the audit log), and on a 409 read the lists
+  again. Removing the last allowlist entry lets every sender in and needs
+  confirmOpen true: only when the admin asked for exactly that. Each change
+  is a new version; no-op entries come back as unchanged. Warnings
+  email.allowlist-emptied and email.allowlist-broad (a whole public suffix
+  or the integration's own domain). A conversation that an email started —
+  or one it led to, a team backlog task it filed included — can never change
+  channel integrations or sender lists, decide an approval, or change shares,
+  secrets, secret grants, connections or workspace settings: refused at
+  runtime (errorCode EMAIL_ORIGIN), and an integration whose target agent
+  holds such a tool by name cannot be saved. It may change agent
+  configuration (agents, workflows, LLM/httpcalls/rules/output/property/
+  mcpcalls/RAG documents, snippets, variables, triggers, groups) or deploy
+  and undeploy only in a call a person approved through
+  hitlConfig.toolApprovals; otherwise the refusal says "unless a person
+  approves that call". A whole-integration PUT that empties a non-empty
+  allowlist needs ?confirmOpen=true and is audited like a sender change. Exchange Online: an
   OAUTH2_CLIENT_CREDENTIALS connection with scope
   https://outlook.office365.com/.default and allowlist
   imaps://outlook.office365.com, plus Add-MailboxPermission granting the

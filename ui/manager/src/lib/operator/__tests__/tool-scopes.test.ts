@@ -249,7 +249,18 @@ describe("tool-scopes", () => {
         "PATCH /llmstore/llms/{id}",
         "PATCH /apicallstore/apicalls/{id}",
         "PATCH /mcpcallsstore/mcpcalls/{id}",
+        // The one channelstore write: an email integration's sender lists, with
+        // expectedVersion, confirmOpen and an audit entry (email plan v3 §5.4).
+        "POST /channelstore/channels/{id}/email-senders",
       ]);
+    });
+
+    it("writes an email integration's sender lists, and nothing else of any channel integration", () => {
+      const channelWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/channelstore/"));
+      expect(channelWrites).toEqual(["POST /channelstore/channels/{id}/email-senders"]);
+      expect(READ_ENDPOINTS).toContain("GET /channelstore/channels/{id}/email-senders");
+      // The whole document, read by an admin, holds any plaintext credential as stored.
+      expect(READ_ENDPOINTS).not.toContain("GET /channelstore/channels/{id}");
     });
 
     it("can create a group but never update, duplicate or delete one", () => {

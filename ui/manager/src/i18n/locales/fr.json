@@ -3558,6 +3558,9 @@
     "selectGroup": "Choisir un groupe…",
     "unknownGroup": "{{id}} (introuvable)",
     "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
+    "confirmOpenTitle": "Retirer le dernier expéditeur autorisé ?",
+    "confirmOpenDesc": "Avec une liste d'autorisation vide, tout expéditeur peut faire agir l'agent, dans la seule limite de l'authentification de l'expéditeur, et seulement si elle est activée. La modification est consignée dans le journal d'audit.",
+    "confirmOpenConfirm": "Enregistrer et ouvrir",
     "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
   "hitl": {
@@ -5643,7 +5646,9 @@
       "openTrigger": "Enregistré, mais n'importe qui sur Internet peut faire agir cet agent : il n'y a pas de liste d'expéditeurs autorisés et les e-mails non authentifiés sont traités.",
       "toolsWithoutApprovals": "Enregistré, mais un agent ciblé par cette intégration a des outils sans approbation d'outils. Le contenu des e-mails est une entrée non fiable : ajoutez hitlConfig.toolApprovals pour les outils qui modifient des choses.",
       "aiDisclosureDisabled": "Enregistré, mais les réponses n'indiquent plus qu'une IA les a rédigées. Les règles de transparence comme l'AI Act européen attendent que les gens sachent qu'ils parlent à une IA.",
-      "honorReplyTo": "Enregistré, mais les réponses vont à l'adresse Reply-To, que DMARC n'authentifie pas : quiconque peut envoyer un e-mail authentifié depuis un domaine autorisé décide où va la réponse."
+      "honorReplyTo": "Enregistré, mais les réponses vont à l'adresse Reply-To, que DMARC n'authentifie pas : quiconque peut envoyer un e-mail authentifié depuis un domaine autorisé décide où va la réponse.",
+      "allowlistEmptied": "Enregistré, mais la liste d'autorisation est désormais vide : tout expéditeur peut faire agir l'agent, limité seulement par l'authentification de l'expéditeur, et seulement si elle est activée.",
+      "allowlistBroad": "Enregistré, mais une entrée de la liste d'autorisation admet tout un suffixe public (comme *@*.co.uk) ou le propre domaine de cette intégration. Préférez des adresses exactes."
     },
     "defaultTargetHint": "La cible par défaut reçoit chaque e-mail dont le plus-tag (invoices+urgent@…) ou l'objet ne correspond au déclencheur d'aucune autre cible. Vous pourrez ajouter d'autres cibles après la création.",
     "triggerLabel": "Plus-tags ou mots de l'objet",
@@ -5690,6 +5695,27 @@
     "targetAddressesHint": "Un e-mail à l'une de ces adresses en À ou Cc est acheminé ici en premier. Chacune doit être un alias de l'intégration ou une adresse plus de sa boîte (invoices+finance@…).",
     "targetAllowedSenders": "Expéditeurs autorisés pour cette cible",
     "targetAllowedSendersHint": "Si défini, seuls les expéditeurs authentifiés correspondant à l'un de ces motifs atteignent cette cible, quel que soit l'acheminement de l'e-mail. Les autres sont refusés, jamais envoyés à la cible par défaut à la place."
+  },
+  "emailSenders": {
+    "loading": "Chargement des listes d'expéditeurs…",
+    "invalidEntry": "Utilisez user@domain, *@domain ou *@*.domain.",
+    "onBothLists": "Cet expéditeur figure sur l'autre liste. Retirez-le d'abord de celle-ci.",
+    "saved": "Listes d'expéditeurs enregistrées en version {{version}}.",
+    "nothingChanged": "Rien n'a changé : ces entrées étaient déjà dans cet état.",
+    "conflict": "Quelqu'un a modifié cette intégration entre-temps. Les listes ont été rechargées ; vérifiez-les et appliquez à nouveau.",
+    "emptyAllowlist": "Aucune — tout expéditeur est autorisé (sous réserve de l'authentification de l'expéditeur).",
+    "emptyBlocklist": "Aucune.",
+    "keep": "Conserver {{entry}}",
+    "remove": "Retirer {{entry}}",
+    "addLabel": "Ajouter à {{list}}",
+    "add": "Ajouter",
+    "hint": "Préférez des adresses exactes. Chaque modification appliquée est une nouvelle version de cette intégration et est consignée dans le journal d'audit avec sa raison. EDDI refuse qu'une conversation lancée par un e-mail modifie ces listes.",
+    "saveFirst": "Enregistrez ou abandonnez d'abord vos autres modifications ; les listes d'expéditeurs s'appliquent séparément.",
+    "reason": "Pourquoi (pour le journal d'audit)",
+    "reasonPlaceholder": "p. ex. nouveau fournisseur, contrat 2026-114",
+    "confirmOpen": "Je comprends : avec une liste d'autorisation vide, tout expéditeur peut faire agir l'agent.",
+    "apply": "Appliquer les modifications",
+    "discard": "Abandonner"
   },
   "feedback": {
     "title": "Avis",

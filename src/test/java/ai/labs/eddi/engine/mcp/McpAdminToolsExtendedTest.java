@@ -997,26 +997,39 @@ class McpAdminToolsExtendedTest {
     void updateChannelIntegration_success() throws IOException {
         var config = new ChannelIntegrationConfiguration();
         when(jsonSerialization.deserialize("{}", ChannelIntegrationConfiguration.class)).thenReturn(config);
-        when(channelStore.updateChannel(RESOURCE_ID, 1, config))
+        when(channelStore.updateChannel(RESOURCE_ID, 1, null, config))
                 .thenReturn(Response.ok().header("Location", "/channelstore/channels/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
 
-        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, "{}");
+        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, "{}", null);
 
         assertNotNull(result);
-        verify(channelStore).updateChannel(RESOURCE_ID, 1, config);
+        verify(channelStore).updateChannel(RESOURCE_ID, 1, null, config);
+    }
+
+    @Test
+    void updateChannelIntegration_passesConfirmOpen() throws IOException {
+        var config = new ChannelIntegrationConfiguration();
+        when(jsonSerialization.deserialize("{}", ChannelIntegrationConfiguration.class)).thenReturn(config);
+        when(channelStore.updateChannel(RESOURCE_ID, 1, Boolean.TRUE, config))
+                .thenReturn(Response.ok().header("Location", "/channelstore/channels/" + RESOURCE_ID + "?version=2").build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
+
+        tools.updateChannelIntegration(RESOURCE_ID, 1, "{}", true);
+
+        verify(channelStore).updateChannel(RESOURCE_ID, 1, Boolean.TRUE, config);
     }
 
     @Test
     void updateChannelIntegration_nullId_returnsError() {
-        String result = tools.updateChannelIntegration(null, 1, "{}");
+        String result = tools.updateChannelIntegration(null, 1, "{}", null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("resourceId is required"));
     }
 
     @Test
     void updateChannelIntegration_nullConfig_returnsError() {
-        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, null);
+        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("config is required"));
     }
@@ -1026,7 +1039,7 @@ class McpAdminToolsExtendedTest {
         when(jsonSerialization.deserialize(anyString(), eq(ChannelIntegrationConfiguration.class)))
                 .thenThrow(new RuntimeException("update error"));
 
-        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, "{}");
+        String result = tools.updateChannelIntegration(RESOURCE_ID, 1, "{}", null);
 
         assertTrue(result.contains("error"));
     }

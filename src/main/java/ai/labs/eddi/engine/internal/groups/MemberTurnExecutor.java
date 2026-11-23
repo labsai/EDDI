@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
@@ -385,6 +386,11 @@ public class MemberTurnExecutor {
         }
 
         putDynamicAgentContext(gc, context);
+        // Every turn, not only the member's first: a discussion tainted after its
+        // members started (a continuation from a tainted turn) taints them too.
+        if (gc.getOrigin() != null) {
+            context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, gc.getOrigin()));
+        }
 
         // Share discussion attachments with this member on its first turn: grant the
         // member conversation access to group-owned blobs and inject attachment_*.
@@ -669,6 +675,11 @@ public class MemberTurnExecutor {
         // STANDALONE dynamic-agent default — creation enabled though the group
         // forbids it.
         putDynamicAgentContext(gc, groupContext);
+        // A discussion a mail started taints every member conversation (email plan v3
+        // §5.3); the member's later turns read it from its own memory.
+        if (gc.getOrigin() != null) {
+            groupContext.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, gc.getOrigin()));
+        }
         var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
         String conversationId = result.conversationId();
         gc.getMemberConversationIds().put(convKey, conversationId);
@@ -890,8 +901,11 @@ public class MemberTurnExecutor {
                     : Math.max(0.0, bindingCeiling - gc.getTotalCost());
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget, gc.getId());
+            // The child discussion is created on this thread, which runs no turn: the
+            // parent's taint is bound for it explicitly.
+            GroupConversation subConversation = TurnOrigin.callWith(gc.getOrigin(),
+                    () -> groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null, gc.getAttachments(),
+                            remainingBudget, gc.getId()));
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets

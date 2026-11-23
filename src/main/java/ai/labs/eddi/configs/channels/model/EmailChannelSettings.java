@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.channels.model;
 
 import ai.labs.eddi.engine.mail.AddressNormalizer;
+import ai.labs.eddi.engine.mail.PublicSuffixList;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -710,6 +711,9 @@ public record EmailChannelSettings(
         if (settings.mode() == Mode.TRIGGER && !settings.requireAuthentication() && settings.senderAllowlist().isEmpty()) {
             warnings.add(WARNING_OPEN_TRIGGER);
         }
+        if (allowlistIsBroad(settings.senderAllowlist(), settings.address())) {
+            warnings.add(WARNING_ALLOWLIST_BROAD);
+        }
         if (settings.mode() == Mode.CONVERSATION) {
             if (settings.aiDisclosure() == null || settings.aiDisclosure().isBlank()) {
                 warnings.add(WARNING_AI_DISCLOSURE_DISABLED);
@@ -739,6 +743,51 @@ public record EmailChannelSettings(
     public static final String WARNING_OPEN_TRIGGER = "email.open-trigger";
     /** An agent the integration targets has tools and no tool approvals. */
     public static final String WARNING_TOOLS_WITHOUT_APPROVALS = "email.tools-without-approvals";
+    /**
+     * An allowlist entry admits far more than one organisation: a whole public
+     * suffix ({@code *@*.co.uk}, {@code *@github.io}), or the integration's own
+     * domain, whose senders an outsider can often impersonate where the domain's
+     * DMARC policy is weak.
+     */
+    public static final String WARNING_ALLOWLIST_BROAD = "email.allowlist-broad";
+
+    /**
+     * Whether an allowlist entry is {@link #WARNING_ALLOWLIST_BROAD broad}: a
+     * domain pattern over a public suffix, or over the integration's own domain or
+     * its organisational domain.
+     */
+    static boolean allowlistIsBroad(List<String> allowlist, String ownAddress) {
+        if (allowlist == null || allowlist.isEmpty()) {
+            return false;
+        }
+        PublicSuffixList suffixes = PublicSuffixList.bundled();
+        String ownDomain = null;
+        String ownOrganisation = null;
+        if (ownAddress != null && ownAddress.indexOf('@') > 0) {
+            ownDomain = ownAddress.substring(ownAddress.lastIndexOf('@') + 1).toLowerCase(Locale.ROOT);
+            ownOrganisation = suffixes.organizationalDomain(ownDomain);
+        }
+        for (String entry : allowlist) {
+            String trimmed = entry == null ? "" : entry.trim();
+            String domain;
+            if (trimmed.startsWith("*@*.")) {
+                domain = trimmed.substring(4);
+            } else if (trimmed.startsWith("*@")) {
+                domain = trimmed.substring(2);
+            } else {
+                continue;
+            }
+            try {
+                domain = AddressNormalizer.normalizeDomain(domain);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            if (domain.equals(suffixes.publicSuffix(domain)) || domain.equals(ownDomain) || domain.equals(ownOrganisation)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * The bare connection name of {@code name} or {@code ${connection:name}}; null

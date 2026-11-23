@@ -39,6 +39,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.HttpHeaders;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
@@ -318,7 +319,26 @@ public class RestA2AEndpoint {
     @Produces({MediaType.APPLICATION_JSON, MediaType.SERVER_SENT_EVENTS})
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
     public Response handleJsonRpc(@PathParam("agentId") String agentId, @HeaderParam(A2AModels.VERSION_HEADER) String protocolVersion,
-                                  JsonRpcRequest request) {
+                                  @HeaderParam(TurnOrigin.HEADER) String turnOrigin, JsonRpcRequest request) {
+        // A peer EDDI sends the origin taint of the turn that called it (email plan v3
+        // §5.3), so a mail-started turn cannot shed it by going through A2A. Taken from
+        // anyone: it only ever restricts the conversations it lands in.
+        String origin = TurnOrigin.normalise(turnOrigin);
+        try {
+            return TurnOrigin.callWith(origin, () -> handleJsonRpc(agentId, protocolVersion, request));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            // handleJsonRpc answers every failure itself; nothing checked escapes it.
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * {@link #handleJsonRpc(String, String, String, JsonRpcRequest)} without an
+     * origin taint.
+     */
+    public Response handleJsonRpc(String agentId, String protocolVersion, JsonRpcRequest request) {
         if (request == null || request.method() == null) {
             count("invalid", "none", "error");
             return jsonRpcError(request == null || !A2AWireFormat.isAcceptableRequestId(request.id()) ? null : request.id(),

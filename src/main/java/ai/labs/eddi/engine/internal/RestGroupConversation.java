@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.RunOnVirtualThread;
@@ -837,9 +838,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             // ${caller:...} reference fails closed — on this path alone, since
             // startAndDiscussAsync captures for a streamed start the same way.
             final CallerIdentity caller = callerIdentityContext.captureOrCurrent();
+            // The origin taint likewise (email plan v3 §5.3): read from the request here,
+            // bound again around the continuation, which taints the discussion with it.
+            final String origin = TurnOrigin.current();
             executorService.submit(callerIdentityContext.withIdentity(caller, () -> {
                 try {
-                    groupConversationService.continueDiscussion(gcId, request.question(), listener);
+                    TurnOrigin.callWith(origin, () -> groupConversationService.continueDiscussion(gcId, request.question(), listener));
                 } catch (TeamBudgetRefusedException e) {
                     LOGGER.infof("Continue streaming on %s refused (team budget, %s)", sanitize(gcId), e.reason());
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(budgetRefusalText(e)));

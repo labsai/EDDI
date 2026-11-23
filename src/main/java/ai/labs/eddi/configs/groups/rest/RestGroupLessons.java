@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.internal.LessonConsolidationService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -169,6 +170,10 @@ public class RestGroupLessons implements IRestGroupLessons {
             }
             Instant firstFire = CronParser.computeNextFire(cron, Instant.now(), zone);
             String name = SCHEDULE_NAME_PREFIX + groupId;
+            // A reschedule replaces the schedule, and the taint is sticky across it as
+            // across any edit (RestScheduleStore.updateSchedule): read before the
+            // delete, so a failed read leaves the old schedule in place.
+            String storedOrigin = scheduleStore.readScheduleByName(name).map(stored -> TurnOrigin.fromMetadata(stored.getMetadata())).orElse(null);
             scheduleStore.deleteSchedulesByName(name);
 
             String principal = principal();
@@ -182,8 +187,11 @@ public class RestGroupLessons implements IRestGroupLessons {
             schedule.setCreatedBy(principal);
             schedule.setNextFire(firstFire);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(LessonConsolidationService.METADATA_TYPE_KEY, LessonConsolidationService.METADATA_TYPE_CONSOLIDATION,
-                    LessonConsolidationService.METADATA_GROUP_ID_KEY, groupId));
+            // Tainted when a mail-started turn schedules it, or scheduled the one it
+            // replaces (email plan v3 §5.3).
+            schedule.setMetadata(TurnOrigin.stampMetadata(Map.of(LessonConsolidationService.METADATA_TYPE_KEY,
+                    LessonConsolidationService.METADATA_TYPE_CONSOLIDATION, LessonConsolidationService.METADATA_GROUP_ID_KEY, groupId),
+                    TurnOrigin.combine(storedOrigin, TurnOrigin.current())));
             String id = scheduleStore.createSchedule(schedule);
             return Response.status(Response.Status.CREATED)
                     .entity(Map.of("scheduleId", id, "cronExpression", schedule.getCronExpression(), "timeZone",

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
@@ -19,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +46,38 @@ class McpErrorResultInterceptorTest {
         public String notATool() {
             return "";
         }
+
+        @Tool(name = "fixture_update_email_senders", description = "x")
+        public String updateEmailSenders() {
+            return "";
+        }
+
+        @Tool(description = "x")
+        public String fixture_accept_team_handoff() {
+            return "";
+        }
+
+        @Tool(name = "fixture_update_resource", description = "x")
+        public String updateResource() {
+            return "";
+        }
+    }
+
+    @Test
+    @DisplayName("a configuration tool from a tainted MCP request needs X-Eddi-Approved-Call; approval never unlocks a guarded tool")
+    void configurationToolNeedsApproval() throws Exception {
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            InvocationContext refused = invocation("updateResource", "{\"ok\":true}");
+            var thrown = assertThrows(ToolCallException.class, () -> interceptor.toToolError(refused));
+            assertTrue(thrown.getMessage().contains("unless a person approves"), thrown.getMessage());
+            verify(refused, never()).proceed();
+
+            try (var approved = TurnOriginTestSupport.inboundApproved(true)) {
+                assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("updateResource", "{\"ok\":true}")));
+                assertThrows(ToolCallException.class, () -> interceptor.toToolError(invocation("updateEmailSenders", "{\"ok\":true}")));
+            }
+        }
+        assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("updateResource", "{\"ok\":true}")), "untainted");
     }
 
     private static InvocationContext invocation(String methodName, Object result) throws Exception {
@@ -109,5 +145,33 @@ class McpErrorResultInterceptorTest {
         assertFalse(McpErrorResultInterceptor.isErrorPayload("{\"status\":\"RESUMED\"}"));
         assertFalse(McpErrorResultInterceptor.isErrorPayload("Document not found: x"));
         assertFalse(McpErrorResultInterceptor.isErrorPayload(""));
+    }
+
+    /**
+     * The receiving side of the email escalation guard on EDDI's MCP server: a
+     * request a mail-started turn sends carries {@code X-Eddi-Turn-Origin: email},
+     * and a guarded tool fails before it runs — by its declared name or, without
+     * one, by its method name.
+     */
+    @Test
+    @DisplayName("a guarded tool called from a tainted MCP request fails with EMAIL_ORIGIN and never runs")
+    void taintedRequestRefusedGuardedTool() throws Exception {
+        for (String method : new String[]{"updateEmailSenders", "fixture_accept_team_handoff"}) {
+            InvocationContext ctx = invocation(method, "{\"ok\":true}");
+            try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+                var thrown = assertThrows(ToolCallException.class, () -> interceptor.toToolError(ctx));
+                assertTrue(thrown.getMessage().contains("EMAIL_ORIGIN"), thrown.getMessage());
+            }
+            verify(ctx, never()).proceed();
+        }
+    }
+
+    @Test
+    @DisplayName("the same tool runs for an untainted request, and an unguarded tool for a tainted one")
+    void othersRun() throws Exception {
+        assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("updateEmailSenders", "{\"ok\":true}")));
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("aTool", "{\"ok\":true}")));
+        }
     }
 }

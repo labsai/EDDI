@@ -1254,7 +1254,7 @@ class ConversationHitlService {
             return work;
         }
         return principalContext.withPrincipal(
-                new ResolutionPrincipal(memory.getUserId(), memory.getResolutionProvenance()), work);
+                new ResolutionPrincipal(memory.getUserId(), memory.getResolutionProvenance(), memory.getOrigin()), work);
     }
 
     /**

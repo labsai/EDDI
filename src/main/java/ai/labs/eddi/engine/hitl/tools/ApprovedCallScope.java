@@ -43,6 +43,25 @@ public final class ApprovedCallScope {
 
     private static final ThreadLocal<Binding> ACTING_AGENT = new ThreadLocal<>();
 
+    /**
+     * The conversation whose tool call runs on this thread
+     * ({@link #inConversation}), bound by {@code ToolExecutionService} around every
+     * tool it runs. A tool that starts or continues another conversation inline (a
+     * nested agent call) runs that conversation's tool calls on the same thread,
+     * under the approval binding of the outer call; this is what tells the two
+     * apart where an approval is stated to a receiving side
+     * ({@link #approvesHere}).
+     */
+    private static final ThreadLocal<Executing> EXECUTING_CONVERSATION = new ThreadLocal<>();
+
+    /**
+     * A tool call executing on this thread, of conversation {@code conversationId}
+     * ({@code null}: of no conversation) — a holder, so "a tool call of no
+     * conversation" and "no tool call" stay apart.
+     */
+    private record Executing(String conversationId) {
+    }
+
     /** The reason a request aimed at the running conversation is refused with. */
     public static final String OWN_CONVERSATION_REASON = "the request targets the conversation the agent is running in";
 
@@ -100,9 +119,70 @@ public final class ApprovedCallScope {
         };
     }
 
-    /** Whether an approved call is executing on this thread. */
+    /**
+     * Whether an approved call is executing on this thread — of any conversation.
+     * Right where it restricts ({@link #checkOutgoing}); never use it to grant:
+     * that is {@link #isActiveFor} or {@link #approvesHere}.
+     */
     public static boolean isActive() {
         return ACTING_AGENT.get() != null;
+    }
+
+    /**
+     * Runs {@code work} as a tool call of conversation {@code conversationId}, so
+     * {@link #approvesHere} judges an approval binding against that conversation. A
+     * {@code null} id is bound as "no conversation", which an approval made for a
+     * conversation never covers.
+     */
+    public static <T> T inConversation(String conversationId, Supplier<T> work) {
+        Executing previous = EXECUTING_CONVERSATION.get();
+        EXECUTING_CONVERSATION.set(new Executing(conversationId));
+        try {
+            return work.get();
+        } finally {
+            if (previous == null) {
+                EXECUTING_CONVERSATION.remove();
+            } else {
+                EXECUTING_CONVERSATION.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Whether a request sent from this thread may state that a person approved it
+     * ({@code X-Eddi-Approved-Call}, the MCP {@code approvedCall} meta): an
+     * approved call is executing, and the tool call running here
+     * ({@link #inConversation}) belongs to the conversation the approval was made
+     * in. A conversation that the approved call started or continued inline runs
+     * its own tool calls on this thread too, and the approval of the outer call
+     * must not extend to them. A binding without a conversation counts for any, as
+     * in {@link #isActiveFor}.
+     */
+    public static boolean approvesHere() {
+        Binding binding = ACTING_AGENT.get();
+        Executing executing = EXECUTING_CONVERSATION.get();
+        return binding != null && (binding.conversationId() == null
+                || binding.conversationId().equals(executing == null ? null : executing.conversationId()));
+    }
+
+    /**
+     * Whether a tool call of some conversation ({@link #inConversation}) is
+     * executing on this thread — work inside a turn, where an approval is only ever
+     * the one {@link #approvesHere} states, never the inbound request's.
+     */
+    public static boolean inToolCall() {
+        return EXECUTING_CONVERSATION.get() != null;
+    }
+
+    /**
+     * Whether an approved call of conversation {@code conversationId} is executing
+     * on this thread: a binding made for another conversation does not count, so
+     * the approval of one call never extends to a turn that call happens to run on
+     * the same thread. A binding without a conversation counts for any.
+     */
+    public static boolean isActiveFor(String conversationId) {
+        Binding binding = ACTING_AGENT.get();
+        return binding != null && (binding.conversationId() == null || binding.conversationId().equals(conversationId));
     }
 
     /**

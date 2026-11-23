@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard.RecordedFeedback;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffLineage;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -306,8 +307,16 @@ public class TeamCadenceService {
             String userId = cadence.createdBy() != null && !cadence.createdBy().isBlank()
                     ? cadence.createdBy()
                     : FALLBACK_USER_ID;
-            GroupConversationService.CadenceDiscussion prepared = groupConversationService.prepareCadenceDiscussion(
-                    groupId, question, userId, toTaskDefinitions(pulled, descriptions), cadence.maxCostPerRun(), null);
+            // A pulled task that a tainted turn filed or changed taints the whole run
+            // (email plan v3 §5.3): its text is a mail's, and a member turn of an
+            // untainted discussion could act on it with every tool the guard refuses.
+            // createGroupConversation stamps the discussion from the bound taint, and
+            // every member conversation inherits it from there.
+            String runOrigin = originOf(pulled);
+            List<TaskDefinition> taskDefinitions = toTaskDefinitions(pulled, descriptions);
+            GroupConversationService.CadenceDiscussion prepared = TurnOrigin.callWith(runOrigin,
+                    () -> groupConversationService.prepareCadenceDiscussion(groupId, question, userId, taskDefinitions,
+                            cadence.maxCostPerRun(), null));
             GroupConversation gc = prepared.conversation();
             HandoffLineage.stamp(gc, pulled, workspace);
 
@@ -527,7 +536,7 @@ public class TeamCadenceService {
                         backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()).taintedBy(gc.getOrigin()));
                 workspace.retainBacklogFeedback(taskId -> !taskId.equals(backlogTask.id()));
                 workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
                 if (outcome.assignedAgentId() != null) {
@@ -541,7 +550,7 @@ public class TeamCadenceService {
                         backlogTask.description(), TaskStatus.COMPLETED, outcome.assignedAgentId(),
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), false, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()).taintedBy(gc.getOrigin()));
                 workspace.retainBacklogFeedback(taskId -> !taskId.equals(backlogTask.id()));
                 workspace.getMetrics().setTasksApproved(workspace.getMetrics().getTasksApproved() + 1);
                 if (outcome.assignedAgentId() != null) {
@@ -563,7 +572,7 @@ public class TeamCadenceService {
                         backlogTask.description(),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
                         backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
-                        backlogTask.bet()));
+                        backlogTask.bet()).taintedBy(gc.getOrigin()));
                 if (outcome != null && outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
@@ -754,7 +763,7 @@ public class TeamCadenceService {
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
         return new TaskItem(task.id(), task.subject(), task.description(), status, task.assignedAgentId(),
                 task.assignedDisplayName(), task.dependsOnIds(), task.result(), task.verificationNote(),
-                task.verified(), task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
+                task.verified(), task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet(), task.origin());
     }
 
     /**
@@ -765,6 +774,18 @@ public class TeamCadenceService {
      * to a member that requires peer verification as it shows a task filed with the
      * task tool, not as configured text.
      */
+    /**
+     * The taint of a run that works {@code pulled}: {@code TurnOrigin#EMAIL} when
+     * any of them carries it, otherwise {@code null}.
+     */
+    static String originOf(List<TaskItem> pulled) {
+        String origin = null;
+        for (TaskItem task : pulled) {
+            origin = TurnOrigin.combine(origin, task.origin());
+        }
+        return origin;
+    }
+
     private static List<TaskDefinition> toTaskDefinitions(List<TaskItem> pulled, Map<String, String> descriptions) {
         List<TaskDefinition> defs = new ArrayList<>(pulled.size());
         for (TaskItem task : pulled) {

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -35,6 +36,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -279,21 +281,116 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final Object uniquenessLock = new Object();
 
     @Override
-    public Response updateChannel(String id, Integer version,
+    public Response updateChannel(String id, Integer version, Boolean confirmOpen,
                                   ChannelIntegrationConfiguration channelConfiguration) {
+        return saveChannel(id, version, channelConfiguration, confirmOpen, null, null);
+    }
+
+    /**
+     * Every save of an existing integration — a full {@code PUT}, the MCP
+     * {@code update_channel_integration}, the Manager's page Save and the targeted
+     * sender-list edit alike (email plan v3 §5.1). For an email integration the
+     * sender lists of the stored version are compared with the saved ones: emptying
+     * a non-empty allowlist (which opens the integration to every sender) is
+     * refused unless {@code confirmOpen}, and is then warned about; every change is
+     * one {@code EMAIL_SENDERS_CHANGED} ledger entry.
+     *
+     * @param reason
+     *            why the lists changed, recorded with the audit entry; {@code null}
+     *            for a whole-document save
+     * @param before
+     *            the lists the save starts from, when the caller already read them;
+     *            {@code null} reads them from the stored version
+     */
+    private Response saveChannel(String id, Integer version, ChannelIntegrationConfiguration channelConfiguration, Boolean confirmOpen,
+                                 String reason, EmailSenderLists.View before) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
+            // The one version this save is judged against, compared at, audited at and
+            // written to: ?version=0 names the current one, and resolving it again for
+            // the write could land on a version a concurrent save (another node, which
+            // this lock does not serialise) created after the comparison. Writing the
+            // resolved version instead makes such a stale save the update's 409.
+            Integer baseVersion = id == null || version == null ? version : restVersionInfo.validateParameters(id, version);
             validateUniqueChannelId(channelConfiguration, id);
-            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
+            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, baseVersion));
             validateUniqueName(channelConfiguration, id);
+            EmailSenderLists.Change senders = null;
             if (isEmail(channelConfiguration)) {
                 emailSupport().validateAgainstDeployment(channelConfiguration, id);
+                if (before != null) {
+                    senders = EmailSenderLists.diff(before, EmailSenderLists.read(null, channelConfiguration.getPlatformConfig()));
+                } else {
+                    senders = senderListChange(id, baseVersion, channelConfiguration);
+                }
+                if (senders != null && senders.allowlistEmptied() && !Boolean.TRUE.equals(confirmOpen)) {
+                    throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
+                }
             }
-            Response response = restVersionInfo.update(id, version, channelConfiguration);
+            Response response = restVersionInfo.update(id, baseVersion, channelConfiguration);
             syncDescriptor(id, channelConfiguration);
-            return withEmailFollowUp(id, channelConfiguration, response);
+            Response answered = withEmailFollowUp(id, channelConfiguration, response);
+            if (senders == null || !senders.changed() || answered.getStatus() >= 300) {
+                return answered;
+            }
+            var location = answered.getLocation() == null ? null : RestUtilities.extractResourceId(answered.getLocation());
+            emailSupport().auditSenderListChange(id, baseVersion, location == null ? null : location.getVersion(), senders.added(),
+                    senders.removed(), reason, senders.allowlistEmptied());
+            if (!senders.allowlistEmptied()) {
+                return answered;
+            }
+            LOG.warnf("Email integration '%s' no longer has a sender allowlist: every sender can now make its agent run",
+                    sanitize(id));
+            return withWarning(answered, EmailSenderLists.WARNING_ALLOWLIST_EMPTIED);
         }
+    }
+
+    /**
+     * How the sender lists of the stored version {@code version} (already resolved:
+     * never {@code 0}) differ from the ones in {@code saved}, or {@code null} when
+     * that version does not exist — the update then fails on its own, with the 404
+     * or 409 it owes.
+     * <p>
+     * Any other failure to read it refuses the save: without the stored lists there
+     * is no telling whether the save empties the allowlist, and a save that skipped
+     * the check would open the integration to every sender unconfirmed and
+     * unaudited.
+     */
+    private EmailSenderLists.Change senderListChange(String id, Integer version, ChannelIntegrationConfiguration saved) {
+        if (id == null || version == null) {
+            return null;
+        }
+        ChannelIntegrationConfiguration stored;
+        try {
+            stored = channelStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (Exception e) {
+            LOG.errorf("Could not read version %d of email integration '%s' to compare its sender lists; refusing the save", version,
+                    sanitize(id));
+            throw new InternalServerErrorException("The stored sender lists could not be read; the email integration was not saved.");
+        }
+        if (stored == null) {
+            throw new InternalServerErrorException("The stored sender lists could not be read; the email integration was not saved.");
+        }
+        return EmailSenderLists.diff(EmailSenderLists.read(version, isEmail(stored) ? stored.getPlatformConfig() : null),
+                EmailSenderLists.read(null, saved.getPlatformConfig()));
+    }
+
+    /** {@code response} with {@code code} added to its {@link #WARNINGS_HEADER}. */
+    private static Response withWarning(Response response, String code) {
+        String header = response.getHeaderString(WARNINGS_HEADER);
+        List<String> codes = new ArrayList<>();
+        codes.add(code);
+        if (header != null) {
+            for (String existing : header.split(",")) {
+                if (!existing.isBlank() && !codes.contains(existing.trim())) {
+                    codes.add(existing.trim());
+                }
+            }
+        }
+        return Response.fromResponse(response).header(WARNINGS_HEADER, null).header(WARNINGS_HEADER, String.join(",", codes)).build();
     }
 
     @Override
@@ -422,6 +519,100 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         return emailSupport().clearSuppression(id, request.address())
                 ? Response.noContent().build()
                 : Response.status(Response.Status.NOT_FOUND).build();
+    }
+
+    @Override
+    public EmailSenderLists.View readEmailSenders(String id) {
+        restVersionInfo.requireViewAccess(id);
+        int version = currentVersion(id);
+        ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+        return EmailSenderLists.read(version, current.getPlatformConfig());
+    }
+
+    /**
+     * A targeted edit of the sender lists (email plan v3 §5.1). The read, the
+     * version check and the write are one step under {@link #uniquenessLock}, and
+     * the write is {@link #updateChannel} itself: the same validation, deployment
+     * checks, warnings and poll re-registration as a save of the whole document.
+     * The document is read from the store, not through {@link #readChannel}, whose
+     * redacted copy the redaction-marker guard would refuse to store.
+     */
+    @Override
+    public Response updateEmailSenders(String id, EmailSenderLists.UpdateRequest request) {
+        if (request == null || request.expectedVersion() == null) {
+            throw new BadRequestException("The body must name the version it was read from: {\"expectedVersion\": <n>, ...}.");
+        }
+        restVersionInfo.requireEditAccess(id);
+        synchronized (uniquenessLock) {
+            int version = currentVersion(id);
+            ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+            EmailSenderLists.View before = EmailSenderLists.read(version, current.getPlatformConfig());
+            if (request.expectedVersion() != version) {
+                return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON).entity(before).build();
+            }
+            EmailSenderLists.Change change;
+            try {
+                change = EmailSenderLists.apply(before.allow(), before.block(), request);
+            } catch (EmailSenderLists.InvalidChange e) {
+                throw new BadRequestException(e.getMessage());
+            }
+            if (!change.changed()) {
+                return Response.ok(new EmailSenderLists.UpdateResult(version, version, false, before.allow(), before.block(), List.of(),
+                        List.of(), change.unchanged(), List.of())).build();
+            }
+            current.setPlatformConfig(EmailSenderLists.withLists(current.getPlatformConfig(), change.allow(), change.block()));
+            // The whole-document save makes the confirmOpen check, the warning and the
+            // audit entry, as it does for every save — this edit adds its reason.
+            Response saved = saveChannel(id, version, current, request.confirmOpen(), EmailSenderLists.cleanReason(request.reason()), before);
+            var location = saved.getLocation() == null ? null : RestUtilities.extractResourceId(saved.getLocation());
+            Integer newVersion = location == null ? null : location.getVersion();
+            List<String> warnings = new ArrayList<>();
+            String header = saved.getHeaderString(WARNINGS_HEADER);
+            if (header != null && !header.isBlank()) {
+                for (String code : header.split(",")) {
+                    if (!code.isBlank() && !warnings.contains(code.trim())) {
+                        warnings.add(code.trim());
+                    }
+                }
+            }
+            var result = new EmailSenderLists.UpdateResult(version, newVersion, true, change.allow(), change.block(), change.added(),
+                    change.removed(), change.unchanged(), warnings);
+            Response.ResponseBuilder answer = Response.ok(result).type(MediaType.APPLICATION_JSON);
+            if (saved.getLocation() != null) {
+                answer.location(saved.getLocation());
+            }
+            if (!warnings.isEmpty()) {
+                answer.header(WARNINGS_HEADER, String.join(",", warnings));
+            }
+            return answer.build();
+        }
+    }
+
+    private int currentVersion(String id) {
+        try {
+            IResourceStore.IResourceId currentId = channelStore.getCurrentResourceId(id);
+            if (currentId == null || currentId.getVersion() == null) {
+                throw new NotFoundException("No channel integration " + id + ".");
+            }
+            return currentId.getVersion();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        }
+    }
+
+    private ChannelIntegrationConfiguration readEmailIntegration(String id, int version) {
+        ChannelIntegrationConfiguration current;
+        try {
+            current = channelStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("The channel store could not be read.");
+        }
+        if (!isEmail(current)) {
+            throw new NotFoundException("Channel integration " + id + " is not an email integration.");
+        }
+        return current;
     }
 
     /**

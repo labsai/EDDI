@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.userevents.UserEvent;
 import ai.labs.eddi.engine.userevents.UserEventAudience;
 import ai.labs.eddi.engine.userevents.UserEventPublisher;
@@ -43,9 +45,11 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -201,6 +205,34 @@ class ScheduleFireExecutorTest {
         ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
         verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
         assertEquals(0.3, (double) input.getValue().getContext().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE).getValue(), 1e-9);
+    }
+
+    /**
+     * Email plan v3 §5.3: a check-back a mail-started turn booked fires into a
+     * conversation that is just as tainted, the new one included.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void fire_taintedCheckBack_carriesTheOriginIntoTheStartAndTheTurn() throws Exception {
+        var schedule = makeCronSchedule("sched-taint", "new");
+        schedule.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL)));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-taint", null));
+        var done = new SimpleConversationMemorySnapshot();
+        done.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<Map<String, Context>> startContext = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), eq("agent-1"), eq("system:scheduler"), startContext.capture());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(startContext.getValue()));
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(input.getValue().getContext()));
     }
 
     @Test
@@ -1363,6 +1395,64 @@ class ScheduleFireExecutorTest {
                 TeamCadenceService.METADATA_GROUP_ID_KEY, "group-1",
                 TeamCadenceService.METADATA_CADENCE_ID_KEY, "cadence-1"));
         return s;
+    }
+
+    /**
+     * Email plan v3 §5.3: a cadence a mail-started turn added (its schedule carries
+     * the taint) starts its discussion with the taint bound, so
+     * createGroupConversation stores it and every member inherits it — the cadence
+     * path used to start the discussion untainted.
+     */
+    @Test
+    @Timeout(10)
+    void fire_taintedTeamCadence_startsTheDiscussionTainted() throws Exception {
+        var schedule = makeTeamCadenceSchedule("sched-cadence-taint");
+        var metadata = new HashMap<>(schedule.getMetadata());
+        metadata.put(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL);
+        schedule.setMetadata(metadata);
+        var duringFire = new AtomicReference<String>("not fired");
+        when(teamCadenceService.processScheduledFire(any(), any())).thenAnswer(inv -> {
+            duringFire.set(TurnOrigin.current());
+            return new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-1", 3, null, null);
+        });
+
+        executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(TurnOrigin.EMAIL, duringFire.get());
+        assertNull(TurnOrigin.current(), "the binding ends with the fire");
+    }
+
+    /**
+     * The schedule route end to end, past the REST layer: a schedule a tainted turn
+     * created fires, and the conversation it starts cannot call
+     * {@code update_email_senders} in its first turn.
+     */
+    @Test
+    @Timeout(10)
+    void fire_taintedSchedule_startedConversationCannotEditSenders() throws Exception {
+        var schedule = makeCronSchedule("sched-taint-e2e", "new");
+        schedule.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL)));
+        var tools = TurnOriginTestSupport.toolExecutionService();
+        var resultInStart = new AtomicReference<String>();
+        var executed = new AtomicBoolean();
+        when(conversationService.startConversation(any(), eq("agent-1"), any(), any())).thenAnswer(inv -> {
+            resultInStart.set(tools.executeToolWrapped("update_email_senders", "{}", null, "conv-taint", () -> {
+                executed.set(true);
+                return "updated";
+            }, false, false, false, 60));
+            return new IConversationService.ConversationResult("conv-taint", null);
+        });
+        var done = new SimpleConversationMemorySnapshot();
+        done.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        assertFalse(executed.get(), "the guarded tool must never run in the scheduled conversation");
+        assertTrue(resultInStart.get().contains("started by an email"), resultInStart.get());
     }
 
     @Test

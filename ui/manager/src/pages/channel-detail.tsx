@@ -32,7 +32,7 @@ import {
   withEmailFixedKeys,
   withoutEmailTargetRules,
 } from "@/lib/email-channel";
-import { platformConfigForType } from "@/lib/channel-platform-config";
+import { platformConfigForType, adoptStoredVersion, emptiesSenderAllowlist } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
   CHANNEL_TYPES,
@@ -270,11 +270,22 @@ export function ChannelDetailPage() {
   // card handed its state to the card that slid into its place.
   const [targetKeys, setTargetKeys] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // The Save that would empty the email sender allowlist, waiting for confirmation.
+  const [confirmOpenSave, setConfirmOpenSave] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   // The stored configuration the draft was seeded from (or last saved as), as
   // JSON. The draft differing from it is what "unsaved changes" means here.
-  const [baseline, setBaseline] = useState<string | null>(null);
+  const [baseline, setBaselineState] = useState<string | null>(null);
+  // The same value, readable inside the seed effect without re-running it.
+  const baselineRef = useRef<string | null>(null);
+  const setBaseline = (json: string | null) => {
+    baselineRef.current = json;
+    setBaselineState(json);
+  };
+  // A sender-list change was stored and the page has not yet adopted the version
+  // it wrote: saving now would send the old lists with the new version.
+  const [pendingSenderVersion, setPendingSenderVersion] = useState<number | null>(null);
   const isDirty =
     draft !== null && baseline !== null && JSON.stringify(draft) !== baseline;
   useUnsavedChangesGuard(isDirty);
@@ -291,12 +302,24 @@ export function ChannelDetailPage() {
   useEffect(() => {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
+      const sameChannel = seededFor.current?.startsWith(`${id}@`) ?? false;
       seededFor.current = key;
+      if (pendingSenderVersion === version) setPendingSenderVersion(null);
+      const previous = baselineRef.current;
+      if (sameChannel && pendingSenderVersion === version && previous !== null) {
+        // The version a sender-list change wrote: every field takes its stored value,
+        // except one the user edited on this page since it was seeded.
+        const base = JSON.parse(previous) as typeof config;
+        setDraft((prev) => prev ? adoptStoredVersion(prev, base, config) : { ...config });
+        setBaseline(JSON.stringify(config));
+        setTargetKeys(config.targets.map(() => nextTargetKey()));
+        return;
+      }
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
     }
-  }, [config, id, version]);
+  }, [config, id, version, pendingSenderVersion]);
 
   const isWebhook = draft?.channelType === "webhook";
   const isEmail = draft?.channelType === "email";
@@ -304,8 +327,8 @@ export function ChannelDetailPage() {
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;
 
-  const handleSave = async () => {
-    if (!draft || !id) return;
+  const handleSave = async (confirmOpen = false) => {
+    if (!draft || !id || pendingSenderVersion !== null) return;
     // Bot token and signing secret are references only. A plaintext value is
     // returned verbatim by GET /channelstore/channels/{id} to anyone who can
     // read the channel and travels into every export; the backend only logs a
@@ -330,13 +353,19 @@ export function ChannelDetailPage() {
         return;
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
+      // Emptying a non-empty allowlist opens the integration to every sender: the
+      // backend refuses that save unless it is confirmed, so ask first.
+      if (!confirmOpen && emptiesSenderAllowlist(config?.platformConfig, toSave.platformConfig)) {
+        setConfirmOpenSave(true);
+        return;
+      }
     } else if (draft.targets.some((target) => EMAIL_TARGET_RULE_FIELDS.some((field) => target[field] !== undefined))) {
       // Email-only target rules left over from a switch of the channel type: the
       // backend refuses them on any other type.
       toSave = { ...draft, targets: draft.targets.map(withoutEmailTargetRules) };
     }
     try {
-      const result = await updateMutation.mutateAsync({ id, version, config: toSave });
+      const result = await updateMutation.mutateAsync({ id, version, config: toSave, confirmOpen });
       // Update URL to new version so subsequent saves don't conflict
       const location = (result as { location?: string })?.location;
       if (location) {
@@ -503,7 +532,7 @@ export function ChannelDetailPage() {
         <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteOpen(true)} data-testid="delete-channel-btn">
           <Trash2 className="h-4 w-4 me-1" /> {t("common.delete")}
         </Button>
-        <Button size="sm" onClick={handleSave} disabled={updateMutation.isPending} data-testid="save-channel-btn">
+        <Button size="sm" onClick={() => void handleSave()} disabled={updateMutation.isPending || pendingSenderVersion !== null} data-testid="save-channel-btn">
           <Save className="h-4 w-4 me-1" /> {updateMutation.isPending ? t("common.saving") : t("common.save")}
         </Button>
       </div>
@@ -535,7 +564,26 @@ export function ChannelDetailPage() {
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
         {isEmail ? (
-          <EmailPlatformFields advancedOpen platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+          <EmailPlatformFields
+            advancedOpen
+            platformConfig={draft.platformConfig}
+            onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)}
+            senderLists={
+              id && config?.channelType === "email" ? (
+                // A sender-list change is a new version: moving the URL to it
+                // reseeds the draft, so a later save cannot write the old lists back.
+                <EmailSenderListsEditor
+                  key={id}
+                  integrationId={id}
+                  disabled={isDirty}
+                  onChanged={(newVersion) => {
+                    setPendingSenderVersion(newVersion);
+                    setSearchParams({ version: String(newVersion) }, { replace: true });
+                  }}
+                />
+              ) : undefined
+            }
+          />
         ) : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (
@@ -664,6 +712,24 @@ export function ChannelDetailPage() {
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         isPending={deleteMutation.isPending}
+      />
+
+      {/* Emptying the email sender allowlist */}
+      <AlertDialog
+        open={confirmOpenSave}
+        onOpenChange={setConfirmOpenSave}
+        title={t("channelDetail.confirmOpenTitle", "Remove the last allowed sender?")}
+        description={t(
+          "channelDetail.confirmOpenDesc",
+          "With an empty allowlist every sender can make the agent run, limited only by sender authentication, and only when it is enabled. The change is recorded in the audit log.",
+        )}
+        onConfirm={() => {
+          setConfirmOpenSave(false);
+          void handleSave(true);
+        }}
+        confirmLabel={t("channelDetail.confirmOpenConfirm", "Save and open")}
+        cancelLabel={t("common.cancel")}
+        isPending={updateMutation.isPending}
       />
     </div>
   );

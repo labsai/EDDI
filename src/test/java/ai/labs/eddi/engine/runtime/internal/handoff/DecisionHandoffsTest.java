@@ -19,6 +19,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.TeamHandoffEvent;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -118,6 +119,17 @@ class DecisionHandoffsTest {
         assertEquals(1, events.size());
         assertEquals("FILED", events.get(0).outcome());
         assertEquals("DECISION", events.get(0).trigger());
+    }
+
+    @Test
+    void aTaintedDiscussionsDecisionFilesATaintedTask() throws Exception {
+        var gc = discussion(vote("ACME", "ACME won"));
+        gc.setOrigin(TurnOrigin.EMAIL);
+        decisionHandoffs.afterCompleted(gc, sourceConfig, listener);
+        var ws = workspaces.readOrCreate(TARGET);
+        var task = ws.getBacklog().getTasks().get(0);
+        assertEquals(TurnOrigin.EMAIL, task.origin());
+        assertEquals(TurnOrigin.EMAIL, ws.getHandoffs().originOf(task.id()).turnOrigin());
     }
 
     @Test

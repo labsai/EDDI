@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -298,10 +299,12 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             schedule.setCreatedBy(principal);
             schedule.setNextFire(firstFire);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
+            // A cadence a mail-started turn adds runs its discussions tainted (email plan
+            // v3 §5.3): ScheduleFireExecutor binds the taint around every fire.
+            schedule.setMetadata(TurnOrigin.stampMetadata(Map.of(
                     TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE,
                     TeamCadenceService.METADATA_GROUP_ID_KEY, groupId,
-                    TeamCadenceService.METADATA_CADENCE_ID_KEY, cadenceId));
+                    TeamCadenceService.METADATA_CADENCE_ID_KEY, cadenceId), TurnOrigin.current()));
             String scheduleId = scheduleStore.createSchedule(schedule);
 
             var cadence = new Cadence(cadenceId, scheduleId, request.inputTemplate(),

@@ -65,3 +65,49 @@ export function platformConfigForType(
   }
   return next;
 }
+
+const SENDER_KEYS = ["senderAllowlist", "senderBlocklist"];
+
+function hasSenderEntries(list: string | undefined): boolean {
+  return (list ?? "").split(",").some((entry) => entry.trim() !== "");
+}
+
+/**
+ * Whether saving `next` over the stored `stored` platform config removes the
+ * last entry of a non-empty email sender allowlist — which opens the
+ * integration to every sender, and which the backend saves only with
+ * `confirmOpen`.
+ */
+export function emptiesSenderAllowlist(
+  stored: Record<string, string> | undefined,
+  next: Record<string, string> | undefined,
+): boolean {
+  return hasSenderEntries(stored?.senderAllowlist) && !hasSenderEntries(next?.senderAllowlist);
+}
+
+/**
+ * The draft after the page adopts a newer stored version (the one a targeted
+ * sender-list change wrote). Every field takes its stored value — another
+ * editor's change to the host or the routing must not be written back from an
+ * old snapshot — except a field the user edited on this page since it was
+ * seeded (it differs from `base`). The sender lists always come from the store.
+ */
+export function adoptStoredVersion<
+  T extends { platformConfig: Record<string, string> },
+>(draft: T, base: T, stored: T): T {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const next: Record<string, unknown> = { ...stored };
+  for (const key of Object.keys(draft)) {
+    if (key === "platformConfig") continue;
+    const k = key as keyof T;
+    if (!same(draft[k], base[k])) next[key] = draft[k];
+  }
+  const platformConfig: Record<string, string> = { ...stored.platformConfig };
+  for (const key of Object.keys(draft.platformConfig)) {
+    if (SENDER_KEYS.includes(key)) continue;
+    const mine = draft.platformConfig[key];
+    if (mine !== undefined && !same(mine, base.platformConfig[key])) platformConfig[key] = mine;
+  }
+  next.platformConfig = platformConfig;
+  return next as T;
+}

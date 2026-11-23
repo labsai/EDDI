@@ -180,6 +180,13 @@ public class GroupConversation {
      */
     private HandoffRunState handoffState;
     private int depth;
+    /**
+     * The origin taint ({@code TurnOrigin#EMAIL}) of the discussion, or
+     * {@code null}: a mail, or a turn a mail started, started it. Every member
+     * conversation and nested discussion it starts inherits it (email plan v3
+     * §5.3). An old document reads as untainted.
+     */
+    private String origin;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
 
@@ -1315,6 +1322,21 @@ public class GroupConversation {
 
     public void setDepth(int depth) {
         this.depth = depth;
+    }
+
+    public String getOrigin() {
+        return origin;
+    }
+
+    /**
+     * Sets the taint once: a set value is never cleared nor replaced (like
+     * {@code ConversationMemory#setOrigin}), so a caller that passes {@code null} —
+     * an untainted follow-up, a stale copy — cannot untaint the discussion.
+     */
+    public void setOrigin(String origin) {
+        if (this.origin == null) {
+            this.origin = origin;
+        }
     }
 
     public int getRound() {

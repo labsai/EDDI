@@ -3525,6 +3525,9 @@
     "selectGroup": "Gruppe auswählen …",
     "unknownGroup": "{{id}} (nicht gefunden)",
     "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
+    "confirmOpenTitle": "Den letzten erlaubten Absender entfernen?",
+    "confirmOpenDesc": "Mit einer leeren Allowlist kann jeder Absender den Agenten auslösen, begrenzt nur durch die Absender-Authentifizierung, und nur wenn sie aktiviert ist. Die Änderung wird im Audit-Log festgehalten.",
+    "confirmOpenConfirm": "Speichern und öffnen",
     "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
   },
   "hitl": {
@@ -5591,7 +5594,9 @@
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
-      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
+      "allowlistEmptied": "Gespeichert, aber die Allowlist ist jetzt leer: Jeder Absender kann den Agenten starten, begrenzt nur durch die Absender-Authentifizierung, und nur wenn sie aktiviert ist.",
+      "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5638,6 +5643,27 @@
     "targetAddressesHint": "E-Mails an eine dieser Adressen in An oder Cc gehen zuerst hierher. Jede muss ein Alias der Integration oder eine Plus-Adresse ihres Postfachs sein (invoices+finance@…).",
     "targetAllowedSenders": "Erlaubte Absender für dieses Ziel",
     "targetAllowedSendersHint": "Wenn gesetzt, erreichen nur authentifizierte Absender, die einem dieser Muster entsprechen, dieses Ziel — gleich, wie die E-Mail geleitet wurde. Alle anderen werden abgewiesen, nie stattdessen an das Standardziel geleitet."
+  },
+  "emailSenders": {
+    "loading": "Absenderlisten werden geladen…",
+    "invalidEntry": "Verwenden Sie user@domain, *@domain oder *@*.domain.",
+    "onBothLists": "Dieser Absender steht auf der anderen Liste. Entfernen Sie ihn dort zuerst.",
+    "saved": "Absenderlisten als Version {{version}} gespeichert.",
+    "nothingChanged": "Nichts geändert: Diese Einträge waren bereits in diesem Zustand.",
+    "conflict": "Jemand hat diese Integration inzwischen geändert. Die Listen wurden neu geladen; prüfen Sie sie und wenden Sie die Änderung erneut an.",
+    "emptyAllowlist": "Keine – jeder Absender ist zugelassen (vorbehaltlich der Absender-Authentifizierung).",
+    "emptyBlocklist": "Keine.",
+    "keep": "{{entry}} behalten",
+    "remove": "{{entry}} entfernen",
+    "addLabel": "Zu {{list}} hinzufügen",
+    "add": "Hinzufügen",
+    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. EDDI verweigert einer Unterhaltung, die eine E-Mail gestartet hat, jede Änderung dieser Listen.",
+    "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderlisten werden für sich angewendet.",
+    "reason": "Warum (für das Audit-Log)",
+    "reasonPlaceholder": "z. B. neuer Lieferant, Vertrag 2026-114",
+    "confirmOpen": "Mir ist klar: Mit einer leeren Allowlist kann jeder Absender den Agenten starten.",
+    "apply": "Absenderänderungen anwenden",
+    "discard": "Verwerfen"
   },
   "feedback": {
     "title": "Feedback",

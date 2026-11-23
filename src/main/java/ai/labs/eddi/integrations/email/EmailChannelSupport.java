@@ -50,6 +50,10 @@ public class EmailChannelSupport {
     @Inject
     Instance<IEmailSuppressionStore> suppressions;
 
+    /** The sender-list audit; field-injected for the same reason. */
+    @Inject
+    Instance<EmailSenderListAudit> senderListAudit;
+
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
             EmailPollScheduler scheduler, EmailAgentToolsInspector toolsInspector) {
@@ -136,8 +140,28 @@ public class EmailChannelSupport {
                 break;
             }
         }
+        // Email plan v3 §5.3, best effort: an agent a mail can reach must not hold a
+        // tool that changes channel integrations or decides approvals. The runtime
+        // refusal is the boundary; this tells the author at save time.
+        List<String> guarded = toolsInspector.targetsHoldingGuardedTools(configuration.getTargets());
+        if (!guarded.isEmpty()) {
+            errors.add("A mail-started turn may never change channel integrations or their senders, nor decide approvals, and these "
+                    + "targets give their agent such a tool: " + String.join("; ", guarded) + ". Remove the tool from that agent, or "
+                    + "point the target at an agent without it.");
+        }
         if (!errors.isEmpty()) {
             throw new BadRequestException(String.join(" ", errors));
+        }
+    }
+
+    /**
+     * Records a change of the integration's sender lists in the audit ledger
+     * ({@link EmailSenderListAudit}). Never throws.
+     */
+    public void auditSenderListChange(String integrationId, Integer previousVersion, Integer newVersion, List<String> added,
+                                      List<String> removed, String reason, boolean allowlistEmptied) {
+        if (senderListAudit != null && senderListAudit.isResolvable()) {
+            senderListAudit.get().changed(integrationId, previousVersion, newVersion, added, removed, reason, allowlistEmptied);
         }
     }
 

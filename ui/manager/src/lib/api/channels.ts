@@ -131,14 +131,22 @@ export async function createChannel(
   );
 }
 
+/**
+ * Saves a whole integration. `confirmOpen` confirms that the save empties a
+ * non-empty email sender allowlist, which opens the integration to every sender:
+ * the backend refuses such a save without it.
+ */
 export async function updateChannel(
   id: string,
   version: number,
   config: ChannelIntegrationConfiguration,
+  confirmOpen = false,
 ): Promise<ChannelSaveResult> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (confirmOpen) params.set("confirmOpen", "true");
   return toSaveResult(
     await api.putWithResponse<{ location?: string } | undefined>(
-      `/channelstore/channels/${seg(id)}?version=${version}`,
+      `/channelstore/channels/${seg(id)}?${params}`,
       config,
     ),
   );
@@ -163,6 +171,60 @@ export function duplicateChannel(
   return api.post<{ location: string }>(
     `/channelstore/channels/${seg(id)}?version=${version}`,
   );
+}
+
+// ─── Email sender lists ─────────────────────────────────────────
+
+/** An email integration's sender lists, as of one version. */
+export interface EmailSenderLists {
+  version: number;
+  allow: string[];
+  block: string[];
+}
+
+/** Entries for one direction of a sender-list change. */
+export interface EmailSenderEntries {
+  allow?: string[];
+  block?: string[];
+}
+
+/** The body of `POST /channelstore/channels/{id}/email-senders`. */
+export interface EmailSenderChange {
+  /** The version the lists were read from; another current version is a 409. */
+  expectedVersion: number;
+  add?: EmailSenderEntries;
+  remove?: EmailSenderEntries;
+  /** Why — recorded in the audit ledger. */
+  reason?: string;
+  /** Required to remove the last allowlist entry, which allows every sender. */
+  confirmOpen?: boolean;
+}
+
+/** What a sender-list change answers. Entries are `allow:<entry>` / `block:<entry>`. */
+export interface EmailSenderChangeResult {
+  previousVersion: number;
+  version: number;
+  changed: boolean;
+  allow: string[];
+  block: string[];
+  added: string[];
+  removed: string[];
+  unchanged: string[];
+  warnings: string[];
+}
+
+/** The current sender lists of an email integration. */
+export function getEmailSenders(id: string): Promise<EmailSenderLists> {
+  return api.get<EmailSenderLists>(`/channelstore/channels/${seg(id)}/email-senders`);
+}
+
+/**
+ * Adds and removes sender-list entries without rewriting the integration: the
+ * backend stores a new version, exactly as a save would. A stale
+ * `expectedVersion` is refused with 409 and the current lists in the error body.
+ */
+export function updateEmailSenders(id: string, change: EmailSenderChange): Promise<EmailSenderChangeResult> {
+  return api.post<EmailSenderChangeResult>(`/channelstore/channels/${seg(id)}/email-senders`, change);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

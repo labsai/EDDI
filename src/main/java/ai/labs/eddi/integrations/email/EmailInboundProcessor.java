@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.mail.SenderAuthenticator;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -518,8 +519,14 @@ public class EmailInboundProcessor {
             if (existingConversation == null && target.getType() == ChannelTarget.TargetType.GROUP) {
                 // A group takes a question, not a context map: the rendered input is all
                 // its members see of the mail.
-                var discussion = groupConversationService.startAndDiscussAsync(target.getTargetId(), input, userId,
-                        settings.replies() ? groupReplyListener(ctx, row, userId, mailData(parsed, List.of(), false, addressed)) : null);
+                // The poller runs no turn, so the taint (email plan v3 §5.3) is bound for the
+                // discussion it creates; the discussion hands it to every member.
+                var replyListener = settings.replies() ? groupReplyListener(ctx, row, userId, mailData(parsed, List.of(), false, addressed)) : null;
+                String groupId = target.getTargetId();
+                String groupUserId = userId;
+                String groupInput = input;
+                var discussion = TurnOrigin.callWith(TurnOrigin.EMAIL,
+                        () -> groupConversationService.startAndDiscussAsync(groupId, groupInput, groupUserId, replyListener));
                 ledger.transition(row.id(), State.TURN_SUBMITTED, State.DONE, discussion.getId(), null, "group_discussion", false, now);
                 count(ctx, EmailMetrics.PROCESSED);
                 LOGGER.infof("Email integration %s: mail %s started group discussion %s", sanitize(id), row.id(), sanitize(discussion.getId()));
@@ -537,6 +544,9 @@ public class EmailInboundProcessor {
             Map<String, Object> mail = mailData(parsed, attachmentData, false, addressed);
             context.put(MAIL_CONTEXT_KEY, new Context(Context.ContextType.object, mail));
             context.put(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, id));
+            // Every mail turn re-asserts the taint, also on a conversation that is older
+            // than the stored taint.
+            context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
             input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true, addressed));
             InputData inputData = new InputData(input, context);
             // The turn carries the mail's ledger key: a turn submitted again for the same
@@ -672,7 +682,10 @@ public class EmailInboundProcessor {
     }
 
     private String startConversation(String agentId, String userId, String integrationId, String intent) throws Exception {
-        Map<String, Context> startContext = Map.of(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId));
+        // The taint (email plan v3 §5.3): this conversation, and every one it starts,
+        // cannot change channel integrations or decide approvals.
+        Map<String, Context> startContext = Map.of(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId),
+                TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
         String conversationId = conversationService.startConversation(Deployment.Environment.production, agentId, userId, startContext)
                 .conversationId();
         if (intent == null) {

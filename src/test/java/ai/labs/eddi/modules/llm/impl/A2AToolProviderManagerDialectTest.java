@@ -5,6 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.modules.llm.impl.A2AToolProviderManager.RemoteDialect;
 import ai.labs.eddi.modules.llm.impl.A2AToolProviderManager.RemoteEndpoint;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -201,6 +204,7 @@ class A2AToolProviderManagerDialectTest {
         private final List<String> methods = new CopyOnWriteArrayList<>();
         private final List<String> versionHeaders = new CopyOnWriteArrayList<>();
         private final List<String> cardPaths = new CopyOnWriteArrayList<>();
+        private final List<String> originHeaders = new CopyOnWriteArrayList<>();
 
         @BeforeEach
         void setUp() throws IOException {
@@ -249,6 +253,7 @@ class A2AToolProviderManagerDialectTest {
                 var request = MAPPER.readValue(exchange.getRequestBody().readAllBytes(), Map.class);
                 methods.add((String) request.get("method"));
                 versionHeaders.add(String.valueOf(exchange.getRequestHeaders().getFirst("A2A-Version")));
+                originHeaders.add(String.valueOf(exchange.getRequestHeaders().getFirst(TurnOrigin.HEADER)));
                 serve(exchange, 200, Map.of("jsonrpc", "2.0", "id", request.get("id"), "result", result));
             });
             server.start();
@@ -275,6 +280,22 @@ class A2AToolProviderManagerDialectTest {
             assertEquals(List.of("SendMessage"), methods);
             assertEquals(List.of("1.0"), versionHeaders);
             assertTrue(cardPaths.contains("/a2a/.well-known/agent-card.json"), cardPaths.toString());
+        }
+
+        @Test
+        @DisplayName("a call from a mail-started turn carries the origin taint to the peer (email plan v3 §5.3); others carry none")
+        void originTaintHeader() throws Exception {
+            String url = peer("card-v1_0", "v1_0-completed", true);
+            call(url);
+            var principals = new ResolutionPrincipalContext();
+            principals.bind(new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED, TurnOrigin.EMAIL));
+            try {
+                call(url);
+            } finally {
+                principals.clear();
+            }
+
+            assertEquals(List.of("null", TurnOrigin.EMAIL), originHeaders);
         }
 
         @Test

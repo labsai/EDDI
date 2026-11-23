@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -410,6 +411,108 @@ class MemberTurnExecutorTest {
         executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
 
         assertEquals(List.of(placeholder), sent[0].getContext().get("groupTranscript").getValue());
+    }
+
+    /**
+     * Email plan v3 §5.3: the taint rides on every member turn, not only on the
+     * member's first — a discussion tainted after its members started (continued
+     * from a tainted turn) taints conversations an untainted round started.
+     */
+    @Test
+    void executeAgentTurn_taintedDiscussion_taintsEveryMemberTurn() throws Exception {
+        for (String origin : new String[]{TurnOrigin.EMAIL, null}) {
+            var conversationService = Mockito.mock(IConversationService.class);
+            var agentFactory = Mockito.mock(IAgentFactory.class);
+            when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            InputData[] turnInput = new InputData[1];
+            doAnswer(inv -> {
+                turnInput[0] = inv.getArgument(6);
+                inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+            var gc = newGc();
+            gc.setOrigin(origin);
+            var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                    new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                    new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+            executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+            assertEquals(origin, TurnOrigin.fromContext(turnInput[0].getContext()));
+        }
+    }
+
+    /**
+     * The same, on ONE discussion: a plain first round starts the member's
+     * conversation; the discussion is then tainted (a continuation from a tainted
+     * turn), and the second round's turn goes to that existing conversation with
+     * the taint, without starting a new one.
+     */
+    @Test
+    void executeAgentTurn_discussionTaintedAfterItsFirstRound_taintsTheExistingConversation() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        List<String> conversationIds = new ArrayList<>();
+        List<InputData> inputs = new ArrayList<>();
+        doAnswer(inv -> {
+            conversationIds.add(inv.getArgument(2));
+            inputs.add(inv.getArgument(6));
+            inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        var gc = newGc();
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        executor.executeAgentTurn(member(), gc, "round 1", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+        gc.setOrigin(TurnOrigin.EMAIL);
+        executor.executeAgentTurn(member(), gc, "round 2", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        verify(conversationService, times(1)).startConversation(any(), eq(AGENT_A), any(), any());
+        assertEquals(2, inputs.size());
+        assertEquals(conversationIds.get(0), conversationIds.get(1), "the second turn goes to the conversation the first started");
+        assertNull(TurnOrigin.fromContext(inputs.get(0).getContext()), "the plain round");
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(inputs.get(1).getContext()), "the tainted round");
+    }
+
+    @Test
+    void executeAgentTurn_taintedDiscussion_taintsTheMemberConversation() throws Exception {
+        for (String origin : new String[]{TurnOrigin.EMAIL, null}) {
+            var conversationService = Mockito.mock(IConversationService.class);
+            var agentFactory = Mockito.mock(IAgentFactory.class);
+            when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+            @SuppressWarnings("unchecked")
+            Map<String, Context>[] startContext = new Map[1];
+            when(conversationService.startConversation(any(), eq(AGENT_A), any(), any())).thenAnswer(inv -> {
+                startContext[0] = inv.getArgument(3);
+                return new IConversationService.ConversationResult("conv-1", null);
+            });
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+            var gc = newGc();
+            gc.setOrigin(origin);
+            var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                    new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                    new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+            executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+            assertEquals(origin, TurnOrigin.fromContext(startContext[0]));
+        }
     }
 
     /**
