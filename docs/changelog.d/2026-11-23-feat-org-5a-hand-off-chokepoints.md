@@ -12,9 +12,9 @@ not change.
 - **`BaseRuntime.submitCallable`** wraps each submission with `OrgPropagation`. The work and
   its completion callbacks then run with the submitter's binding, on the worker pool, the turn
   pool and the nested pool alike.
-  - All eight callers submit bounded work: a turn, a deployment, one API call, a parse, a HITL
-    resume, a cleanup job. None of them starts a long-lived task, so nothing outlives the
-    request that bound it.
+  - It has nine call sites in six classes, besides the two coordinators. All of them submit
+    bounded work: a turn, a deployment, one API call, a parse, a HITL resume, a cleanup job.
+    None of them starts a long-lived task, so nothing outlives the request that bound it.
   - A worker thread keeps no binding after the task.
 - **The conversation coordinators capture at enqueue.** `submitInOrder` wraps each task in
   `OrgCapturedTask` with the enqueuer's binding.
@@ -24,8 +24,21 @@ not change.
   - The runtime still receives the original task, and the coordinators read the marker
     interfaces (`IDescribedTask`, `ILeaseAwareTask`, `IDiscardableTask`) from it. So dead-letter
     descriptions, lease binding and discard hooks work as before.
-  - A task captured for one org, submitted from a thread bound to another, is refused
-    (`OrgBindingException`). The queue then dead-letters it and moves on.
+  - A task captured for one org but submitted from a thread bound to another is refused with
+    `OrgBindingException`. On the first turn the task is rolled back and the caller gets the
+    exception. On a later in-memory turn it is dead-lettered, and the queue moves on.
+
+    The cluster coordinator always submits from an unbound continuation thread, so it binds
+    the captured org and never refuses.
+  - A turn enqueued *unbound* runs under the submitting thread's binding:
+    - in memory, the previous turn's org;
+    - in the cluster, unbound.
+
+    It is the same conversation, so nothing crosses orgs. But the in-memory path does not fail
+    closed for an enqueuer that forgot to bind. The guard below pins those enqueuers.
+  - The marker hooks (`describe`, `bindLease`, `onDiscarded`) run under the calling thread's
+    binding, not the captured one. That is fine while they persist nothing org-scoped. The
+    package that makes stores read the org revisits it.
 - **`OrgPropagation.capture()`** returns the current binding as a value, to restore around work
   that is chosen later. The coordinator uses it; streaming callbacks will too.
 
@@ -36,7 +49,7 @@ not change.
 - Later packages: the after-return work (`AsyncResponse`, streaming, SSE, LLM callbacks) and
   the NATS consumers, which need the `Eddi-Org` header of Phase 1 task 6.
 
-**Not in this package:** the 66 classes that hand work off with raw async APIs outside the
+**Not in this package:** the 72 classes that hand work off with raw async APIs outside the
 chokepoints. `OrgHandOffGuardTest` pins them, and the later packages work through them.
 
 ### Tests
@@ -53,8 +66,9 @@ chokepoints. `OrgHandOffGuardTest` pins them, and the later packages work throug
   - `capture()` restores later work, and refuses another org;
   - two capture layers: unbound outside org, platform outside org, and org outside unbound work
     all hold, and two different orgs are refused.
-- **`OrgHandOffGuardTest`** (new). A ratchet over raw async APIs. A new class that uses one must
-  propagate. A class on the pinned list that starts propagating, or stops handing off, must
+- **`OrgHandOffGuardTest`** (new). A ratchet over raw async APIs: executors, schedulers, async
+  futures, Mutiny threading, `executeBlocking`, raw and virtual threads, `ForkJoinPool` and
+  parallel streams. A new class that uses one must propagate. A class on the pinned list that starts propagating, or stops handing off, must
   leave the list.
 - **Mutation checks:** removing any of these fails a test:
   - the runtime wrap;

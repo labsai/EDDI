@@ -20,6 +20,18 @@ import java.util.concurrent.Callable;
  * follows {@link OrgPropagation}: a task captured for one org is refused on a
  * thread bound to another.
  * <p>
+ * A task captured <em>unbound</em> is submitted under the submitting thread's
+ * binding. In the in-memory coordinator that is the previous turn's worker,
+ * bound to that turn's org; in the cluster coordinator it is an unbound
+ * continuation thread. Neither crosses orgs, since the previous turn belongs to
+ * the same conversation. But the in-memory coordinator does not fail closed for
+ * a turn whose enqueuer forgot to bind. The enqueuers that do not propagate yet
+ * are pinned by {@code OrgHandOffGuardTest}.
+ * <p>
+ * The marker hooks ({@code describe}, {@code bindLease}, {@code onDiscarded})
+ * run under the calling thread's binding, not the captured one. That holds as
+ * long as they persist nothing org-scoped.
+ * <p>
  * The runtime receives the {@linkplain #original original} task. The
  * coordinators read marker interfaces ({@code IDescribedTask},
  * {@code ILeaseAwareTask}, {@code IDiscardableTask}) from the original too,

@@ -49,27 +49,32 @@ class OrgHandOffGuardTest {
      * Thread hand-offs: executors, async futures, Mutiny threading, raw threads.
      */
     private static final Pattern RAW_ASYNC = Pattern.compile("Executors\\.new|newVirtualThread|ManagedExecutor|supplyAsync\\(|runAsync\\("
-            + "|thenApplyAsync|thenAcceptAsync|thenComposeAsync|whenCompleteAsync|emitOn\\(|runSubscriptionOn\\(|Thread\\.ofVirtual"
-            + "|executor\\.(execute|submit)|Executor\\.(execute|submit)|\\.execute\\(\\(\\) ->|\\.submit\\(\\(\\) ->|new Thread\\(");
+            + "|then(Apply|Accept|Compose|Run|Combine)Async|(whenComplete|handle|exceptionally)Async|emitOn\\(|runSubscriptionOn\\("
+            + "|Thread\\.ofVirtual|new Thread\\(|ForkJoinPool|parallelStream\\(|executeBlocking\\("
+            + "|(?i:executor|scheduler|pool)\\w*(\\(\\))?\\.(execute|submit|schedule|scheduleAtFixedRate|scheduleWithFixedDelay)\\("
+            + "|\\.schedule(AtFixedRate|WithFixedDelay)\\(|\\.execute\\(\\(\\) ->|\\.submit\\(\\(\\) ->");
     private static final Pattern PROPAGATES = Pattern.compile("\\bOrgPropagation\\b|\\bOrgCapturedTask\\b");
 
     /**
      * Raw async users that do not propagate yet. Shrink it; never grow it without
      * deciding the hand-off needs no org (and then say so in the class instead).
      */
-    private static final Set<String> NOT_YET_PROPAGATING = Set.of("A2AInFlightLimiter", "AgentDeploymentManagement", "AgentTestRunner",
-            "AgentTestService", "AlertDispatcher", "ApiCallsTask", "ApprovedCallScope", "AuditKeyring", "AuditLedgerService", "BoundedFanOut",
-            "BoundedHostResolver", "BoundedLogStore", "CascadingModelExecutor", "ClusterAdminService", "ConversationTitleService",
-            "EmailReplyComposer", "EmailReplySender", "FacilitatorEngine", "GroupApprovedResultActions", "GroupConversationService",
-            "GuardrailModelClient", "HitlCrashRecoveryObserver", "HttpCallToolsProvider", "JetStreamEventBus", "KvLeaseManager",
-            "LlmConfiguration", "LlmTask", "McpCallsTask", "NatsClusterRpc", "NatsConnectionManager", "NatsLeaseManager",
-            "ObservableChatModel", "OffloadingScheduler", "OperatorRevisionCheck", "OutboundHttp", "OutputMatchHook",
-            "PhaseExecutionEngine", "PostgresAuditStore", "PostgresFieldIndexSwaps", "PostgresSubstringSearchIndexes", "ProgressLogger",
-            "RagSourceIngestionService", "RestAgentEngineStreaming", "RestAlertEvents", "RestApprovalAnalytics", "RestAttachmentUpload",
-            "RestClusterAdmin", "RestCoordinatorAdmin", "RestGroupConversation", "RestImportService", "RestLogAdmin", "RestRagIngestion",
-            "RetryConfiguration", "SampledAuditRecorder", "SchedulePollerService", "ServiceConvergenceJudge", "SlackEventHandler",
-            "SlackInteractivityHandler", "TaskForceEngine", "ToolExecutionService", "ToolLoopRunner", "ToolMockRegistry",
-            "UnrestrictedSecretsCheck", "UserEventHub", "WebScraperTool", "WorkspaceNotifications");
+    private static final Set<String> NOT_YET_PROPAGATING = Set.of(
+            "A2AInFlightLimiter", "AgentDeploymentManagement", "AgentTestRunner", "AgentTestService", "AlertDispatcher",
+            "ApiCallsTask", "AuditKeyring", "AuditLedgerService", "BoundedBodyReader", "BoundedFanOut", "BoundedHostResolver",
+            "BoundedLogStore", "CascadingModelExecutor", "ClusterActivityLog", "ClusterAdminService", "ClusterHitlRecovery",
+            "ClusterPresence", "ClusterWatcher", "ConversationTitleService", "EmailReplyComposer", "EmailReplySender",
+            "GroupApprovedResultActions", "GroupConversationService", "GroupHitlCoordinator", "GroupTieBreakPauses",
+            "GuardrailModelClient", "HitlCrashRecoveryObserver", "HttpCallToolsProvider", "HttpClientModule", "JetStreamEventBus",
+            "KvLeaseManager", "LlmConfiguration", "LlmTask", "McpCallsTask", "MetricsScrapeRoute", "NatsClusterRpc",
+            "NatsConnectionManager", "NatsLeaseManager", "OAuthTokenService", "ObservableChatModel", "OffloadingScheduler",
+            "OperatorRevisionCheck", "OutboundHttp", "OutputMatchHook", "PhaseExecutionEngine", "PostgresAuditStore",
+            "PostgresFieldIndexSwaps", "PostgresSubstringSearchIndexes", "ProgressLogger", "RagSourceIngestionService",
+            "RestAgentEngineStreaming", "RestAlertEvents", "RestApprovalAnalytics", "RestAttachmentUpload", "RestClusterAdmin",
+            "RestCoordinatorAdmin", "RestGroupConversation", "RestLogAdmin", "RestRagIngestion", "RetryConfiguration",
+            "SampledAuditRecorder", "SchedulePollerService", "ServiceConvergenceJudge", "SlackEventHandler",
+            "SlackInteractivityHandler", "TaskForceEngine", "ToolExecutionService", "ToolLoopRunner", "UnrestrictedSecretsCheck",
+            "UserEventHub", "WebScraperTool", "WorkspaceNotifications");
 
     private record Source(String name, String text) {
     }
