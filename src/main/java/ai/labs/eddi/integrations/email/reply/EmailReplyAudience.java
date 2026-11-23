@@ -138,7 +138,14 @@ public final class EmailReplyAudience {
         }
         try {
             long sent = ledger.countSentReplies(conversationId);
-            return address -> sent == 0 || ledger.countSentRepliesTo(conversationId, address) == sent;
+            return address -> {
+                try {
+                    return sent == 0 || ledger.countSentRepliesTo(conversationId, address) == sent;
+                } catch (RuntimeException e) {
+                    // The read fails later than the one above: still a drop, never a throw.
+                    return false;
+                }
+            };
         } catch (RuntimeException e) {
             return address -> false;
         }
@@ -164,7 +171,7 @@ public final class EmailReplyAudience {
             }
             for (Object value : addresses) {
                 String address = value instanceof String s ? AddressNormalizer.tryNormalize(s).orElse(null) : null;
-                if (address == null || routesOnward(address)) {
+                if (address == null || routesOnward(address) || !address.chars().allMatch(c -> c < 128)) {
                     dropped.add(INVALID);
                 } else if (EmailReplyRecipients.isOwn(settings, address)) {
                     dropped.add(OWN);

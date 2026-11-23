@@ -944,13 +944,15 @@ public class EmailReplySender {
      */
     private boolean copyBounced(String integrationId, LedgerEntry row, String address, DeliveryReport.Recipient block, Instant now) {
         String status = block.status() == null ? "?" : block.status().strip();
-        ledger.removeReplyRecipients(row.id(), List.of(address));
+        // Suppress first: were the suppression to fail after the record was removed, a
+        // later report could not find the address again and it would be copied anew.
         if (suppressions.suppress(integrationId, address, "bounce:" + status, now)) {
             metrics.suppressed("bounce");
             metrics.reply("cc_bounced");
             LOGGER.infof("Email integration %s: Cc address %s of reply %s suppressed after a permanent bounce (%s)", sanitize(integrationId),
                     recipientPseudonym(address), row.id(), sanitize(status));
         }
+        ledger.removeReplyRecipients(row.id(), List.of(address));
         return true;
     }
 

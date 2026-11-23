@@ -574,6 +574,45 @@ interface EmailMessageLedgerContract {
         assertEquals(0, ledger().countSentReplies("conv-none"));
     }
 
+    /**
+     * An inbound mail that ran a turn in {@code conversationId}, and a reply row
+     * answering {@code mailId}.
+     */
+    private static LedgerEntry turnMail(String id, String conversationId) {
+        return new LedgerEntry(id, "int-1", Kind.TRIGGER, Direction.IN, "<" + id + "@example.com>", conversationId, "imap:INBOX:1:1", "in:" + id,
+                "alice@example.com", State.DONE, 1, null, null, null, null, NOW, NOW, NOW.plus(Duration.ofDays(30)));
+    }
+
+    private static LedgerEntry answer(String mailId, String kind, String conversationId, String recipient, State state) {
+        return new LedgerEntry(UUID.randomUUID().toString(), "int-1", Kind.REPLY, Direction.OUT, "<eddi." + UUID.randomUUID() + "@contoso.com>",
+                conversationId, mailId + "|" + kind + "|1", "reply:" + UUID.randomUUID(), recipient, state, 1, NOW, null, null, null, NOW, NOW,
+                NOW.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    @DisplayName("per-turn coverage: a pause notice and its resume reply cover one turn once, so they cannot stand in for a later unanswered turn")
+    default void turnCoverage() {
+        ledger().insertIfAbsent(turnMail("m-1", "conv-9"));
+        ledger().insertIfAbsent(turnMail("m-2", "conv-9"));
+        ledger().insertIfAbsent(turnMail("m-other", "conv-elsewhere"));
+        LedgerEntry pause = answer("m-1", "pause", "conv-9", "alice@example.com", State.SENT);
+        LedgerEntry resume = answer("m-1", "reply", "conv-9", "alice@example.com", State.SENT);
+        LedgerEntry queued = answer("m-2", "reply", "conv-9", "alice@example.com", State.PENDING);
+        ledger().insertIfAbsent(pause);
+        ledger().insertIfAbsent(resume);
+        ledger().insertIfAbsent(queued);
+        ledger().addReplyRecipients(recipientsOf(pause, "alice@example.com", "bob@example.com"));
+        ledger().addReplyRecipients(recipientsOf(resume, "alice@example.com", "bob@example.com"));
+        ledger().addReplyRecipients(recipientsOf(queued, "alice@example.com"));
+
+        assertEquals(Set.of("m-1", "m-2"), ledger().turnMailIds("conv-9"));
+        assertEquals(Set.of("m-1"), ledger().answeredMailIdsSentTo("conv-9", "bob@example.com"),
+                "two sent rows, one turn; the second turn's reply is still queued");
+        assertEquals(Set.of("m-1"), ledger().answeredMailIdsSentTo("conv-9", "alice@example.com"), "a queued reply covers nothing yet");
+        assertEquals(Set.of(), ledger().answeredMailIdsSentTo("conv-9", "carol@example.com"));
+        assertEquals(Set.of(), ledger().turnMailIds("conv-none"));
+    }
+
     @Test
     @DisplayName("GDPR: recipients are found by address; erasing an address removes its entries and the children of its rows")
     default void recipientErasure() {

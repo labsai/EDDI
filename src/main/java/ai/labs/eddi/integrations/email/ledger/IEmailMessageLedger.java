@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The email message ledger (email plan §12): one row per message EDDI sends or
@@ -421,6 +422,35 @@ public interface IEmailMessageLedger {
      * {@code replyAudience: thread} (email v2 plan §9.4).
      */
     long countSentRepliesTo(String conversationId, String recipient);
+
+    /**
+     * The ids of the inbound mails of {@code conversationId} that ran a turn there:
+     * every one of them is in the history the agent reads, answered or not.
+     */
+    Set<String> turnMailIds(String conversationId);
+
+    /**
+     * The ids of the inbound mails of {@code conversationId} that a
+     * {@link State#SENT} {@link Kind#REPLY} row went to {@code recipient}
+     * (normalised) for — as its {@code To}, or as a {@code Cc} the child store
+     * still holds. A mail answered by a pause notice and again by its resume reply
+     * counts once, which is the point: the test of who may continue a thread
+     * conversation is that every {@link #turnMailIds} entry is in this set — per
+     * turn, not per reply row (email v2 plan §9.4).
+     */
+    Set<String> answeredMailIdsSentTo(String conversationId, String recipient);
+
+    /**
+     * The inbound mail id a reply row's {@code sourceRef}
+     * ({@code <inbound row id>|<kind>|<discriminator>}) names.
+     */
+    static String inboundIdOf(String sourceRef) {
+        if (sourceRef == null) {
+            return "";
+        }
+        int bar = sourceRef.indexOf('|');
+        return bar < 0 ? sourceRef : sourceRef.substring(0, bar);
+    }
 
     /**
      * Records the recipients of a reply row. Idempotent per

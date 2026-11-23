@@ -318,6 +318,39 @@ class EmailThreadRepliesTest {
     }
 
     @Test
+    @DisplayName("switching replyAudience back to sender keeps the every-reply boundary of a conversation that runs as a thread identity")
+    void switchingBackKeepsTheBoundary() throws Exception {
+        EmailInboundProcessor processor = processor();
+        EmailTestMail first = startThread(processor);
+        String eddiId = sentReplyId(0);
+        EmailTestMail privately = EmailTestMail.mail().to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), privately.polled(2), Instant.now());
+        complete(1, "Your private question: answered.");
+        SimpleConversationMemorySnapshot shared = new SimpleConversationMemorySnapshot();
+        shared.setConversationId("conv-1");
+        shared.setAgentId(EmailInboundProcessorTest.AGENT);
+        shared.setUserId(userIds.get("conv-1"));
+        when(conversations.readConversation(eq("conv-1"), any(), any(), anyList())).thenReturn(shared);
+
+        EmailTestMail fromBob = EmailTestMail.mail().from(BOB).to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(Map.of("replyAudience", "sender", "threadParticipants", "anyAuthenticatedParticipant")), fromBob.polled(3),
+                Instant.now());
+
+        assertNotEquals("conv-1", sayConversations.get(2), "Bob missed the private reply: the setting does not make him a participant");
+    }
+
+    @Test
+    @DisplayName("a signed Cc with a non-ASCII local part is never copied, so it cannot fail the whole reply")
+    void nonAsciiCopyIsDropped() {
+        EmailTestMail mail = EmailTestMail.mail().to(MAILBOX).header("Cc: " + BOB + ", \"élise\" <élise@supplier.com>");
+        processor().process(context(Map.of()), mail.polled(1), Instant.now());
+        complete(0, "It ships Monday.");
+        assertEquals(List.of(List.of(ALICE, BOB)), envelopes);
+    }
+
+    @Test
     @DisplayName("a Cc who missed an earlier reply is not copied on a later one, and the agent is told so (v2 plan §9.3)")
     void lateJoinerIsNotCopied() {
         EmailInboundProcessor processor = processor();

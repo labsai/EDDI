@@ -9,9 +9,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -197,6 +199,25 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
                         && r.state() == State.SENT && (recipient.equals(r.recipient()) || recipients.values().stream()
                                 .anyMatch(c -> c.rowId().equals(r.id()) && c.role() == RecipientRole.CC && recipient.equals(c.address()))))
                 .count();
+    }
+
+    @Override
+    public synchronized Set<String> turnMailIds(String conversationId) {
+        Set<String> ids = new LinkedHashSet<>();
+        rows.values().stream().filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.TRIGGER && r.direction() == Direction.IN)
+                .forEach(r -> ids.add(r.id()));
+        return ids;
+    }
+
+    @Override
+    public synchronized Set<String> answeredMailIdsSentTo(String conversationId, String recipient) {
+        Set<String> ids = new LinkedHashSet<>();
+        rows.values().stream()
+                .filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY && r.direction() == Direction.OUT
+                        && r.state() == State.SENT && (recipient.equals(r.recipient()) || recipients.values().stream()
+                                .anyMatch(c -> c.rowId().equals(r.id()) && c.role() == RecipientRole.CC && recipient.equals(c.address()))))
+                .forEach(r -> ids.add(IEmailMessageLedger.inboundIdOf(r.sourceRef())));
+        return ids;
     }
 
     @Override

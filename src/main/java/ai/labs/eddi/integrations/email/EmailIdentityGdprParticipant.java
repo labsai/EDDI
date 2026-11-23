@@ -303,8 +303,14 @@ public class EmailIdentityGdprParticipant implements IGdprParticipant {
             detail.put("integrationId", integrationId);
             detail.put("outcome", "thread_conversation_erased");
             detail.put("reason", "gdpr_erasure");
-            service.submit(new AuditEntry(UUID.randomUUID().toString(), conversationId, null, null, null, null, -1, "email.gdpr", "email", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0, Instant.now(), null, null));
+            boolean queued = service.submit(new AuditEntry(UUID.randomUUID().toString(), conversationId, null, null, null, null, -1, "email.gdpr",
+                    "email", -1, 0L, Map.of(), detail, null, null, List.of(), 0.0, Instant.now(), null, null));
+            if (!queued) {
+                // The conversation is already gone and a retry would skip it, so the entry
+                // cannot be regenerated: say so loudly rather than let the gap go unseen.
+                LOGGER.warnf("The audit ledger dropped the erasure entry of thread conversation %s (queue full); the erasure itself succeeded",
+                        conversationId);
+            }
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not audit an erased thread conversation: %s", e.getMessage());
         }

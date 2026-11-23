@@ -20,8 +20,10 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -434,6 +436,36 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
         return count("SELECT COUNT(*) FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
                 + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
                 + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC'))", conversationId, recipient, recipient);
+    }
+
+    @Override
+    public Set<String> turnMailIds(String conversationId) {
+        return strings("SELECT id FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'TRIGGER' AND direction = 'IN'", false, conversationId);
+    }
+
+    @Override
+    public Set<String> answeredMailIdsSentTo(String conversationId, String recipient) {
+        return strings("SELECT l.source_ref FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
+                + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
+                + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC'))", true, conversationId, recipient, recipient);
+    }
+
+    private Set<String> strings(String sql, boolean sourceRefs, String... parameters) {
+        Set<String> found = new LinkedHashSet<>();
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < parameters.length; i++) {
+                statement.setString(i + 1, parameters[i]);
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    String value = rows.getString(1);
+                    found.add(sourceRefs ? IEmailMessageLedger.inboundIdOf(value) : value);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger turns of a conversation", e);
+        }
+        return found;
     }
 
     private long count(String sql, String... parameters) {

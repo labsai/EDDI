@@ -1131,13 +1131,29 @@ public class EmailInboundProcessor {
         return null;
     }
 
+    /**
+     * Whether the conversation runs as its integration's {@code email-thread:}
+     * identity. A conversation that cannot be read counts as one: the strict rule
+     * is the one that fails closed.
+     */
+    private boolean runsAsThreadIdentity(String conversationId, Optional<LedgerEntry> first) {
+        Owner owner = ownerOf(conversationId);
+        if (owner.unreadable()) {
+            return true;
+        }
+        return first.isPresent() && EmailUserIdentity.isThreadIdentityOf(owner.userId(), first.get().integrationId());
+    }
+
     /** Whether {@code sender} may continue {@code conversationId} (see above). */
     boolean participantOf(String conversationId, EmailChannelSettings settings, String sender) {
         // The first mail that ran in the conversation names its original sender.
         Optional<LedgerEntry> first = ledger.findInboundTurn(conversationId, false);
         boolean firstSender = first.isPresent() && sender.equals(first.get().recipient());
         boolean anyParticipant = settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT;
-        if (!settings.repliesToThread()) {
+        // A conversation that runs as a shared thread identity keeps the strict rule
+        // whatever the setting is now: switching replyAudience back to sender must not
+        // let someone who missed a reply continue it and read it through the agent.
+        if (!settings.repliesToThread() && !(anyParticipant && runsAsThreadIdentity(conversationId, first))) {
             return firstSender || anyParticipant && ledger.hasSentReply(conversationId, sender);
         }
         // Under a thread audience a continuing sender reads the conversation's history
@@ -1153,13 +1169,16 @@ public class EmailInboundProcessor {
         if (sent == 0) {
             return firstSender;
         }
-        // The baseline is every mail that ran a turn here, not only the replies sent: a
-        // reply still queued, refused or failed, and a mail EDDI never answered, are
-        // all
-        // in the history the agent would read, yet appear in no one's sent count — so
-        // counting only sent replies would let a participant who missed that mail in.
-        long turns = Math.max(sent, ledger.countByConversationSince(conversationId, Kind.TRIGGER, Instant.EPOCH));
-        return ledger.countSentRepliesTo(conversationId, sender) == turns;
+        // Coverage is per turn, not per reply row: every mail that ran a turn here is
+        // in
+        // the history the agent would read, so the sender must have been sent a reply
+        // to
+        // each of them. A reply still queued, refused or failed, or a mail EDDI never
+        // answered, leaves a turn uncovered; a pause notice and its resume reply are
+        // two
+        // rows for one turn and cover it once. One read of each side, no row totals to
+        // disagree between two calls.
+        return ledger.answeredMailIdsSentTo(conversationId, sender).containsAll(ledger.turnMailIds(conversationId));
     }
 
     /**

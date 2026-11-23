@@ -135,7 +135,9 @@ export function EmailPlatformFields({
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <div className="space-y-0.5">
           <p>
-            {conversation
+            {conversation && pc.replyAudience === "thread"
+              ? t("emailChannel.modeNoteConversationThread", "Conversation mode: the agent replies in the mail thread over SMTP, to the sender whose address DKIM/DMARC authenticated (with Reply to the Reply-To address switched on: to the mail's single Reply-To instead, which DMARC does not cover). With the thread audience, the answered mail's other To and Cc recipients that match the allowed recipients are copied — never anyone the model names.")
+              : conversation
               ? t(
                   "emailChannel.modeNoteConversation",
                   "Conversation mode: the agent replies in the mail thread over SMTP, to the sender whose address DKIM/DMARC authenticated (with Reply to the Reply-To address switched on: to the mail's single Reply-To instead, which DMARC does not cover) — never to Cc, never to anyone the model names.",
@@ -458,7 +460,7 @@ export function EmailPlatformFields({
               <p className={hintClass}>
                 {t(
                   "emailChannel.replyAudienceHint",
-                  "The reply always goes To the authenticated sender. With the thread, the answered mail's other To and Cc recipients that match the allowed recipients are copied — never an address the model names.",
+                  "The reply goes To the authenticated sender, or to the single Reply-To address when “Reply to the Reply-To address” is on. With the thread, the answered mail's other To and Cc recipients that match the allowed recipients are copied — never an address the model names.",
                 )}
               </p>
             </div>
@@ -469,7 +471,7 @@ export function EmailPlatformFields({
                   <span>
                     {t(
                       "emailChannel.replyAudienceWarning",
-                      "Everyone copied reads what the agent answers, including what its tools looked up. So these conversations run without long-term memory: nothing one person told the agent before reaches their colleagues.",
+                      "Everyone copied reads what the agent answers, including what its tools looked up. These conversations run without long-term memory, so nothing one person told the agent in an earlier conversation reaches their colleagues. Within the thread, though, the agent answers from the shared conversation, so a reply copied to a colleague can include what an earlier message said.",
                     )}
                   </span>
                 </div>

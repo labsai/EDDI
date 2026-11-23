@@ -155,6 +155,11 @@ class EmailReplyAudienceTest {
 
         when(ledger.countSentReplies("broken")).thenThrow(new IllegalStateException("store down"));
         assertFalse(EmailReplyAudience.readEveryReply(ledger, "broken").test(COLLEAGUE));
+
+        when(ledger.countSentReplies("half")).thenReturn(2L);
+        when(ledger.countSentRepliesTo("half", COLLEAGUE)).thenThrow(new IllegalStateException("store down"));
+        assertFalse(EmailReplyAudience.readEveryReply(ledger, "half").test(COLLEAGUE),
+                "the per-address read failing drops that copy, it does not throw");
     }
 
     @Test

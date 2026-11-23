@@ -27,8 +27,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -273,6 +275,25 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         return rows.countDocuments(sentRepliesTo(conversationId, recipient));
     }
 
+    @Override
+    public Set<String> turnMailIds(String conversationId) {
+        Set<String> ids = new LinkedHashSet<>();
+        for (Document found : rows.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.eq(F_DIRECTION, Direction.IN.name()))).projection(new Document(F_ID, 1))) {
+            ids.add(found.getString(F_ID));
+        }
+        return ids;
+    }
+
+    @Override
+    public Set<String> answeredMailIdsSentTo(String conversationId, String recipient) {
+        Set<String> ids = new LinkedHashSet<>();
+        for (Document found : rows.find(sentRepliesTo(conversationId, recipient)).projection(new Document(F_SOURCE, 1))) {
+            ids.add(IEmailMessageLedger.inboundIdOf(found.getString(F_SOURCE)));
+        }
+        return ids;
+    }
+
     private static Bson sentReplies(String conversationId) {
         return Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
                 Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()));
@@ -312,7 +333,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         } catch (MongoBulkWriteException e) {
             // A recipient already recorded (a retried enqueue) is kept once; anything
             // else is a real failure.
-            if (e.getWriteErrors().stream().anyMatch(error -> error.getCode() != DUPLICATE_KEY_ERROR_CODE)) {
+            // (an unacknowledged write is one too: the caller schedules delivery next).
+            if (e.getWriteConcernError() != null || e.getWriteErrors().stream().anyMatch(error -> error.getCode() != DUPLICATE_KEY_ERROR_CODE)) {
                 throw e;
             }
         }

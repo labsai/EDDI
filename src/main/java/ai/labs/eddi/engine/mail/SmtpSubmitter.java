@@ -165,16 +165,26 @@ public final class SmtpSubmitter {
      * nothing was sent to anyone, so the caller may drop them and submit again.
      */
     static List<String> rejectedRecipients(MessagingException e) {
-        if (!(e instanceof SendFailedException failed) || failed.getInvalidAddresses() == null) {
-            return List.of();
-        }
         List<String> rejected = new ArrayList<>();
-        for (Address address : failed.getInvalidAddresses()) {
-            if (address instanceof InternetAddress internet && internet.getAddress() != null) {
-                rejected.add(internet.getAddress().toLowerCase(Locale.ROOT));
+        // Angus files only some refusals under invalid addresses (550, 553...); a 552
+        // lands among the valid-but-unsent ones, which also hold accepted recipients.
+        // So the address-specific 5xx refusals in the exception chain are read as well.
+        Exception current = e;
+        for (int depth = 0; current != null && depth < 20; depth++) {
+            if (current instanceof SMTPAddressFailedException address && address.getReturnCode() >= 500 && address.getReturnCode() < 600
+                    && address.getAddress() != null && address.getAddress().getAddress() != null) {
+                rejected.add(address.getAddress().getAddress().toLowerCase(Locale.ROOT));
+            }
+            current = current instanceof MessagingException messaging ? messaging.getNextException() : null;
+        }
+        if (e instanceof SendFailedException failed && failed.getInvalidAddresses() != null) {
+            for (Address address : failed.getInvalidAddresses()) {
+                if (address instanceof InternetAddress internet && internet.getAddress() != null) {
+                    rejected.add(internet.getAddress().toLowerCase(Locale.ROOT));
+                }
             }
         }
-        return List.copyOf(rejected);
+        return rejected.stream().distinct().toList();
     }
 
     private static int returnCode(MessagingException e) {
