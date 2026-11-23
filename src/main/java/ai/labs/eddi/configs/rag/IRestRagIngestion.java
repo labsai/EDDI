@@ -139,6 +139,31 @@ public interface IRestRagIngestion {
                             @QueryParam("limit")
                             @DefaultValue("20") Integer limit);
 
+    @GET
+    @Path("/{id}/sources/{sourceId}/work")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "Counts of the source's work table by state.")
+    @Operation(summary = "Ingestion work queue progress",
+               description = "What the source's work table holds now: documents queued to be fetched and embedded, "
+                       + "deferred (waiting for a throttle, a backoff or a budget), in flight, done and failed for "
+                       + "good, and when the next deferred document is due.")
+    Response readSourceWork(@PathParam("id") String ragConfigId,
+                            @PathParam("sourceId") String sourceId,
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version);
+
+    @POST
+    @Path("/{id}/sources/{sourceId}/retry-failed")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "How many failed documents were queued again.")
+    @Operation(summary = "Retry failed documents",
+               description = "Queues every document of this source that failed too often to be retried "
+                       + "automatically, and wakes the source's drain.")
+    Response retryFailedDocuments(@PathParam("id") String ragConfigId,
+                                  @PathParam("sourceId") String sourceId,
+                                  @Parameter(name = "version", required = true, example = "1")
+                                  @QueryParam("version") Integer version);
+
     // --- Uploaded files (sources of type "upload") ---
 
     @POST

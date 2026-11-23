@@ -9,6 +9,11 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.EnqueueOutcome;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.FailOutcome;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.WorkClaim;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.WorkCounts;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.WorkRequest;
 import ai.labs.eddi.modules.ingestion.connector.Coverage;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryContext;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryResult;
@@ -145,6 +150,41 @@ public class IngestionPipeline {
 
     /** The time the throttle gate compares against; replaced in tests. */
     Supplier<Instant> clock = Instant::now;
+
+    /**
+     * How often a queued document may fail before it is poisoned — left alone until
+     * its version changes or "retry failed" re-arms it. A throttle, a budget stop
+     * or lost ownership is not a failure and does not count.
+     */
+    @ConfigProperty(name = "eddi.rag.ingestion.work.max-attempts", defaultValue = "5")
+    int maxWorkAttempts = 5;
+
+    /** How many queued documents the drain claims at a time. */
+    @ConfigProperty(name = "eddi.rag.ingestion.work.claim-batch", defaultValue = "20")
+    int claimBatch = 20;
+
+    /**
+     * Whether discovery queues the documents it lists in the work table instead of
+     * processing each where it was found. Not final only so a test can compare.
+     */
+    boolean queueWork = true;
+
+    /** The first backoff after a failed attempt; it doubles per attempt. */
+    static final Duration WORK_RETRY_BACKOFF = Duration.ofMinutes(1);
+
+    /** The longest backoff after a failed attempt. */
+    static final Duration MAX_WORK_RETRY_BACKOFF = Duration.ofHours(1);
+
+    /** How soon a continuation fires when work is due at once. */
+    static final Duration CONTINUATION_DELAY = Duration.ofSeconds(30);
+
+    /**
+     * Arms and withdraws the one-shot that drains what a run left queued.
+     * Field-injected; null in a hand-assembled pipeline, which then leaves queued
+     * work for the next run.
+     */
+    @Inject
+    RagIngestionContinuations continuations;
 
     /**
      * Metadata key that ties a segment back to its document, used to replace it.
@@ -426,12 +466,34 @@ public class IngestionPipeline {
             if (mode == Mode.INGEST) {
                 markForSweepIfFresh(source, sourceKey, runId);
             }
-            SourceRun sourceRun = discover(connectors.forType(source.getType()), source, sourceKey, runId, mode,
-                    collector);
+            SourceConnector connector = connectors.forType(source.getType());
+            SourceContext context = new SourceContext(source, sourceKey, runId, mode == Mode.PREVIEW,
+                    sourceCredentials);
+            // A continuation drains what an earlier listing queued and lists nothing,
+            // so it concludes nothing about what is gone: INCREMENTAL coverage.
+            boolean drainOnly = mode == Mode.INGEST && trigger == IngestionRun.Trigger.CONTINUATION;
+            SourceRun sourceRun;
+            if (drainOnly) {
+                collector.deadline = uploadDeadline(clock.get(), source);
+                sourceRun = new SourceRun(WebCrawler.StopReason.COMPLETED, Coverage.INCREMENTAL, false, null, null,
+                        null);
+            } else {
+                sourceRun = discover(connector, context, source, mode, collector);
+                collector.flushQueue();
+            }
 
             // Added to, not assigned: a file retired as unreadable during the run is
             // already counted.
             collector.tombstoned += reconcileDeletions(source, sourceKey, runId, mode, sourceRun, collector);
+
+            if (mode == Mode.INGEST) {
+                // After the reconciliation, which judges the listing alone: whatever the
+                // drain then meets — a throttle, the deadline — says nothing about which
+                // documents exist.
+                drain(connector, context, ragConfigId, source, sourceKey, runId, collector);
+                sourceRun = afterDrain(sourceRun, collector);
+                armContinuation(ragConfigId, source, sourceKey, collector);
+            }
 
             // A run that wrote nothing (every document unchanged) never meets the
             // retired store's refusal, yet its documents are not in the knowledge
@@ -578,6 +640,10 @@ public class IngestionPipeline {
                     sourceRun.incompleteReason() != null ? sourceRun.incompleteReason() : sourceRun.stopReason());
             return 0;
         }
+        // A complete listing is also the authority on queued work: a document it did
+        // not see — gone from the source, or outside its scope now — has nothing left
+        // to fetch. Only here, never for a partial listing, which saw a subset.
+        withdrawUnlistedWork(source, sourceKey, runId);
         int threshold = source.settings().tombstoneAfterMissedRunsOrDefault();
         boolean scopeChanged = scopeChanged(source, sourceKey, sourceRun);
         List<DocumentState> gone = stateStore.bumpAndFindMissing(sourceKey, runId, scopeChanged ? 1 : threshold);
@@ -625,6 +691,21 @@ public class IngestionPipeline {
             recordAppliedScope(sourceKey, sourceRun);
         }
         return removedIds.size();
+    }
+
+    private void withdrawUnlistedWork(IngestionSource source, String sourceKey, String runId) {
+        try {
+            int withdrawn = stateStore.cancelUnlistedWork(sourceKey, runId);
+            if (withdrawn > 0) {
+                LOGGER.infof("Withdrew the queued work of %d document(s) of source '%s' that its complete listing "
+                        + "no longer found", withdrawn, LogSanitizer.sanitize(source.getName()));
+            }
+        } catch (RuntimeException e) {
+            // Housekeeping: such work is drained and meets a document that is gone or
+            // outside the scope, which retrieval already hides.
+            LOGGER.warnf(e, "Could not withdraw the queued work of documents source '%s' no longer lists",
+                    LogSanitizer.sanitize(source.getName()));
+        }
     }
 
     /**
@@ -762,6 +843,11 @@ public class IngestionPipeline {
         if (collector.inconclusive > 0 || collector.superseded) {
             return false;
         }
+        if (workLeft(sourceKey)) {
+            // Queued, deferred or failed documents still have only their old chunks —
+            // the ones the sweep would remove. It waits for a run with nothing left.
+            return false;
+        }
         Set<String> runsSinceClear = new HashSet<>();
         runsSinceClear.add(runId);
         try {
@@ -784,6 +870,19 @@ public class IngestionPipeline {
                     + "cleared; they stay retrievable and the next complete run tries again",
                     LogSanitizer.sanitize(source.getName()));
             return false;
+        }
+    }
+
+    /**
+     * Whether the source's work table still holds work, or failures. Unknown counts
+     * as yes.
+     */
+    private boolean workLeft(String sourceKey) {
+        try {
+            WorkCounts counts = stateStore.workCounts(sourceKey, clock.get());
+            return counts.outstanding() + counts.failed() > 0;
+        } catch (RuntimeException e) {
+            return true;
         }
     }
 
@@ -1024,10 +1123,8 @@ public class IngestionPipeline {
      * crawl and the upload loop ran before connectors existed. A connector's run
      * level failure ends the run like any other exception.
      */
-    private SourceRun discover(SourceConnector connector, IngestionSource source, String sourceKey, String runId,
-                               Mode mode, Collector collector) {
-        SourceContext context = new SourceContext(source, sourceKey, runId, mode == Mode.PREVIEW,
-                sourceCredentials);
+    private SourceRun discover(SourceConnector connector, SourceContext context, IngestionSource source, Mode mode,
+                               Collector collector) {
         DiscoveryResult result;
         try {
             List<Partition> partitions = connector.listPartitions(context);
@@ -1039,7 +1136,7 @@ public class IngestionPipeline {
             }
             Partition partition = partitions.get(0);
             connector.verifyAccess(context, partition);
-            Instant deadline = uploadDeadline(Instant.now(), source);
+            Instant deadline = uploadDeadline(clock.get(), source);
             // One deadline for the run: discovery stops at it, and a provider's rate
             // limit is waited out only as long as it allows.
             collector.deadline = deadline;
@@ -1077,6 +1174,217 @@ public class IngestionPipeline {
         };
         return new SourceRun(WebCrawler.StopReason.valueOf(result.stopReason().name()), result.coverage(), covered,
                 result.incompleteReason(), result.summary(), result.scopeSignature());
+    }
+
+    /**
+     * Processes the source's queued documents until none is due, the run's deadline
+     * passes or the run has to stop.
+     *
+     * <p>
+     * Claimed in small batches under a lease that outlasts the run's own stale
+     * deadline, so a claim never lapses while its run is alive; a run that dies
+     * leaves its claims to the reaper, which returns them to pending. Each claim is
+     * settled by what processing it concluded ({@link WorkOutcome}): done, deferred
+     * to a time (a throttle — never a failure), failed with a backoff, or released
+     * unchanged. A document is processed at most once per run: one that comes back
+     * due in the same run is left for the next.
+     */
+    private void drain(SourceConnector connector, SourceContext context, String ragConfigId, IngestionSource source,
+                       String sourceKey, String runId, Collector collector) {
+        Instant claimUntil = clock.get().plus(staleRunThreshold(source));
+        Set<String> processed = new HashSet<>();
+        boolean armed = false;
+        collector.draining = true;
+        try {
+            while (!collector.isCancelled() && clock.get().isBefore(collector.deadline)) {
+                List<WorkClaim> batch = stateStore.claimWork(sourceKey, runId, Math.max(1, claimBatch), clock.get(),
+                        claimUntil);
+                if (batch.isEmpty()) {
+                    break;
+                }
+                if (collector.coolingDown()) {
+                    // The provider's shared cooldown is still running: the batch goes back
+                    // unchanged (below), and no document is downloaded only to be deferred.
+                    // Asked only once there is work, so a run with nothing queued is not
+                    // reported throttled for another source's quota.
+                    break;
+                }
+                if (!armed && continuations != null) {
+                    // Before the first claim is worked on: should this node die now, the
+                    // reaper returns the claims and this wakes the drain again, even for a
+                    // source with no cron.
+                    continuations.arm(ragConfigId, source.effectiveId(), claimUntil.plus(CONTINUATION_DELAY));
+                    armed = true;
+                }
+                for (WorkClaim claim : batch) {
+                    if (collector.isCancelled() || !clock.get().isBefore(collector.deadline)) {
+                        break;
+                    }
+                    if (!processed.add(claim.documentId())) {
+                        // Back within the same run (its backoff was short): the next run
+                        // tries it, so no document is attempted twice in one.
+                        stateStore.deferWork(sourceKey, claim.documentId(), runId, claim.workVersion(),
+                                collector.deadline);
+                        continue;
+                    }
+                    processClaim(claim, connector, context, collector);
+                }
+            }
+        } finally {
+            collector.draining = false;
+            try {
+                stateStore.releaseClaims(sourceKey, runId);
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Could not release the queued documents run %s still held; they wait for the "
+                        + "reaper", LogSanitizer.sanitize(runId));
+            }
+        }
+    }
+
+    /** One claimed document: processed, then settled by its outcome. */
+    private void processClaim(WorkClaim claim, SourceConnector connector, SourceContext context,
+                              Collector collector) {
+        String sourceKey = collector.sourceKey;
+        String runId = collector.runId;
+        WorkItem item = WorkPayloads.decode(claim);
+        if (item == null) {
+            // Not something this build can act on, now or later.
+            stateStore.failWork(sourceKey, claim.documentId(), runId, claim.workVersion(),
+                    "The queued work could not be read", clock.get(), 1);
+            collector.poisoned++;
+            return;
+        }
+        collector.workOutcome = WorkOutcome.RELEASE;
+        try {
+            collector.process(item, connector, context);
+        } catch (IngestionStateStoreException e) {
+            // The state store is unwell, not the document: the run fails as it always
+            // has, and the claim is released by the drain without counting an attempt.
+            throw e;
+        } catch (RuntimeException e) {
+            // A failure of this document's processing, not of the run: counted against
+            // the document, which is poisoned if it keeps doing this.
+            LOGGER.warnf(e, "Processing queued document '%s' of source '%s' failed",
+                    LogSanitizer.sanitize(claim.documentId()), LogSanitizer.sanitize(collector.source.getName()));
+            collector.failed++;
+            collector.inconclusive++;
+            collector.workOutcome = WorkOutcome.retry(describe(e));
+        }
+        settle(claim, collector);
+    }
+
+    private void settle(WorkClaim claim, Collector collector) {
+        String sourceKey = collector.sourceKey;
+        String runId = collector.runId;
+        WorkOutcome outcome = collector.workOutcome;
+        Instant now = clock.get();
+        switch (outcome.kind()) {
+            case DONE -> stateStore.completeWork(sourceKey, claim.documentId(), runId, claim.workVersion());
+            case DEFER -> stateStore.deferWork(sourceKey, claim.documentId(), runId, claim.workVersion(),
+                    outcome.notBefore() != null ? outcome.notBefore() : now);
+            case RELEASE -> stateStore.deferWork(sourceKey, claim.documentId(), runId, claim.workVersion(), now);
+            case RETRY -> {
+                var failure = stateStore.failWork(sourceKey, claim.documentId(), runId, claim.workVersion(),
+                        outcome.error(), now.plus(retryBackoff(claim.attempts())), Math.max(1, maxWorkAttempts));
+                if (failure == FailOutcome.POISONED) {
+                    collector.poisoned++;
+                    LOGGER.warnf("Document '%s' of source '%s' failed %d times and is no longer retried until it "
+                            + "changes or its failures are retried: %s", LogSanitizer.sanitize(claim.documentId()),
+                            LogSanitizer.sanitize(collector.source.getName()), Math.max(1, maxWorkAttempts),
+                            LogSanitizer.sanitize(outcome.error()));
+                }
+            }
+        }
+    }
+
+    /** One minute after the first failure, doubling, at most an hour. */
+    static Duration retryBackoff(int attemptsBefore) {
+        Duration backoff = WORK_RETRY_BACKOFF.multipliedBy(1L << Math.min(Math.max(0, attemptsBefore), 20));
+        return backoff.compareTo(MAX_WORK_RETRY_BACKOFF) > 0 ? MAX_WORK_RETRY_BACKOFF : backoff;
+    }
+
+    /**
+     * The run's stop reason once the drain is over: a throttle or a stop the drain
+     * met is the run's, even after a complete listing.
+     */
+    private static SourceRun afterDrain(SourceRun listing, Collector collector) {
+        if (collector.throttle != null || collector.sourceThrottledUntil != null) {
+            return new SourceRun(WebCrawler.StopReason.THROTTLED, listing.coverage(), listing.coveredWholeSource(),
+                    listing.incompleteReason(), listing.summary(), listing.scopeSignature());
+        }
+        if (collector.providerRefused != null || collector.interrupted) {
+            return new SourceRun(WebCrawler.StopReason.CANCELLED, listing.coverage(), listing.coveredWholeSource(),
+                    listing.incompleteReason(), listing.summary(), listing.scopeSignature());
+        }
+        return listing;
+    }
+
+    /**
+     * Arms the source's continuation for whatever the run left queued, or withdraws
+     * it when nothing is left. Not after a budget stop: the budget is the source's
+     * limit per run, and the next scheduled or manual run takes the rest, as before
+     * the work table. Best effort — the work stays queued either way.
+     */
+    private void armContinuation(String ragConfigId, IngestionSource source, String sourceKey,
+                                 Collector collector) {
+        if (continuations == null || collector.superseded) {
+            return;
+        }
+        try {
+            Instant now = clock.get();
+            WorkCounts counts = stateStore.workCounts(sourceKey, now);
+            if (counts.outstanding() == 0 || collector.budgetExhausted || collector.storeRefused != null
+                    || collector.providerRefused != null) {
+                continuations.disarm(ragConfigId, source.effectiveId());
+                return;
+            }
+            Instant at = counts.queued() + counts.inFlight() > 0 || counts.nextAttemptAt() == null
+                    ? now.plus(CONTINUATION_DELAY)
+                    : counts.nextAttemptAt();
+            if (collector.throttle != null || collector.sourceThrottledUntil != null) {
+                // Rows the drain never reached are still due: waking before the provider
+                // takes calls again would only be refused again.
+                Instant resume = collector.resumeAfter != null
+                        ? collector.resumeAfter
+                        : now.plus(throttleCooldown);
+                if (resume.isAfter(at)) {
+                    at = resume;
+                }
+            }
+            if (at.isBefore(now.plus(CONTINUATION_DELAY))) {
+                at = now.plus(CONTINUATION_DELAY);
+            }
+            continuations.arm(ragConfigId, source.effectiveId(), at);
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not check what source '%s' still has queued; it waits for its next run",
+                    LogSanitizer.sanitize(source.getName()));
+        }
+    }
+
+    /** What processing one queued document concluded about its row. */
+    record WorkOutcome(Kind kind, Instant notBefore, String error) {
+
+        enum Kind {
+            /** Settled: ingested, unchanged, gone, unreadable, skipped. */
+            DONE,
+            /** Not attempted for a reason outside the document: due again at a time. */
+            DEFER,
+            /** A real failure: one attempt, then a backoff. */
+            RETRY,
+            /** Nothing learned: due again now, attempts unchanged. */
+            RELEASE
+        }
+
+        static final WorkOutcome DONE_OUTCOME = new WorkOutcome(Kind.DONE, null, null);
+        static final WorkOutcome RELEASE = new WorkOutcome(Kind.RELEASE, null, null);
+
+        static WorkOutcome deferUntil(Instant notBefore) {
+            return new WorkOutcome(Kind.DEFER, notBefore, null);
+        }
+
+        static WorkOutcome retry(String error) {
+            return new WorkOutcome(Kind.RETRY, null, error);
+        }
     }
 
     /**
@@ -1382,6 +1690,28 @@ public class IngestionPipeline {
         private String providerRefused;
         /** A wait on the provider was interrupted: the run is being stopped. */
         private boolean interrupted;
+        /**
+         * The drain is processing claimed rows: discovery's documents are processed,
+         * not queued again, and each records its {@link #workOutcome}.
+         */
+        private boolean draining;
+        /** What processing the current claimed row concluded. */
+        private WorkOutcome workOutcome = WorkOutcome.RELEASE;
+        /** Documents discovery queued in the work table this run. */
+        private int queued;
+        /**
+         * Listed documents not yet written to the work table; see {@link #flushQueue}.
+         */
+        private final List<WorkRequest> pendingWork = new ArrayList<>();
+        /** Whether the listing armed its safety continuation. */
+        private boolean safetyNetArmed;
+        /** Queued documents this run poisoned. */
+        private int poisoned;
+        /**
+         * When the source's own API takes calls again, once it throttled a fetch in the
+         * drain — Google Drive's quota, not the embedding provider's.
+         */
+        private Instant sourceThrottledUntil;
         /** The run's deadline, set when discovery starts. */
         private Instant deadline;
         private ExtractionLimits extractionLimits;
@@ -1442,7 +1772,32 @@ public class IngestionPipeline {
 
         boolean isCancelled() {
             return budgetExhausted || storeRefused != null || throttle != null || providerRefused != null
-                    || interrupted || !stillOwnsRun(false);
+                    || interrupted || sourceThrottledUntil != null || !stillOwnsRun(false);
+        }
+
+        /**
+         * Whether the embedding provider's shared cooldown is still running — set by
+         * any run on any node that the provider throttled. Asked before the drain
+         * claims, so no document is fetched only to be deferred; when it is running,
+         * the run stops as a throttle would have stopped it.
+         */
+        boolean coolingDown() {
+            EmbeddingModel embeddingModel;
+            try {
+                embeddingModel = model();
+            } catch (RuntimeException e) {
+                // A model that cannot be built fails each document as it always has.
+                return false;
+            }
+            if (!(embeddingModel instanceof ThrottledEmbeddingModel throttled)) {
+                return false;
+            }
+            Optional<ProviderThrottledException> cooling = throttled.coolingDown();
+            if (cooling.isEmpty()) {
+                return false;
+            }
+            onThrottled(cooling.get());
+            return true;
         }
 
         /**
@@ -1560,6 +1915,12 @@ public class IngestionPipeline {
                     onUnchanged(item.documentId());
                     return;
                 }
+                // Changed, or new: queued rather than fetched here, so the listing stays
+                // a listing — cheap, complete, and not stopped by an embedding
+                // provider's throttle. The drain fetches it under a claim.
+                if (enqueue(item)) {
+                    return;
+                }
                 // After the unchanged check, not before it: a document that has not
                 // changed needs no provider call, so it is unchanged, not throttled. One
                 // that has changed is not fetched once the provider has said no: asking
@@ -1574,6 +1935,7 @@ public class IngestionPipeline {
                     if (e.error() instanceof SourceError.NotFound) {
                         // Gone between discovery and fetch. Not an error and not a miss:
                         // the next run will see it gone and reconcile it properly.
+                        workOutcome = WorkOutcome.DONE_OUTCOME;
                         return;
                     }
                     onFailure(item.documentId(), e.error());
@@ -1595,6 +1957,61 @@ public class IngestionPipeline {
                 case Content.FileBytes file -> onFile(document, file);
                 case Content.Text text -> onText(document, text);
             }
+        }
+
+        /**
+         * Queues a listed document in the work table instead of fetching it now.
+         *
+         * <p>
+         * Only while listing a source for real: never in a preview (which writes
+         * nothing), never in the drain (which is processing this very row), and never
+         * for an item that carries its content already — a crawled page, which cannot
+         * be fetched again later.
+         *
+         * @return whether the item was queued; false leaves it to be processed here, as
+         *         before the work table
+         */
+        private boolean enqueue(WorkItem item) {
+            if (mode != Mode.INGEST || draining || !queueWork) {
+                return false;
+            }
+            String payload = WorkPayloads.encode(item);
+            if (payload == null) {
+                return false;
+            }
+            pendingWork.add(new WorkRequest(item.documentId(), item.versionToken(), payload));
+            if (pendingWork.size() >= IngestionWorkQueue.MAX_ENQUEUE_BATCH) {
+                flushQueue();
+            }
+            return true;
+        }
+
+        /**
+         * Writes what the listing queued so far, a page of at most
+         * {@link IngestionWorkQueue#MAX_ENQUEUE_BATCH} documents per call. Called when
+         * the buffer is full and once the listing ends, before the reconciliation reads
+         * the run stamps it writes.
+         */
+        void flushQueue() {
+            if (pendingWork.isEmpty()) {
+                return;
+            }
+            List<WorkRequest> page = new ArrayList<>(pendingWork);
+            pendingWork.clear();
+            for (EnqueueOutcome outcome : stateStore.enqueueWork(sourceKey, runId, page, clock.get())) {
+                if (outcome != EnqueueOutcome.FENCED) {
+                    queued++;
+                }
+            }
+            if (!safetyNetArmed && queued > 0 && continuations != null) {
+                // At the first page queued, not only at the drain's first claim: should
+                // the node die while it is still listing, this wakes the drain once the
+                // dead run has been reaped. The end of the run re-arms or withdraws it.
+                safetyNetArmed = true;
+                continuations.arm(ragConfigId, source.effectiveId(),
+                        clock.get().plus(staleRunThreshold(source)).plus(CONTINUATION_DELAY));
+            }
+            reportProgress(false);
         }
 
         /**
@@ -1694,6 +2111,7 @@ public class IngestionPipeline {
         }
 
         void onUnchanged(String documentId) {
+            workOutcome = WorkOutcome.DONE_OUTCOME;
             seen++;
             unchanged++;
             if (mode == Mode.INGEST) {
@@ -1710,7 +2128,12 @@ public class IngestionPipeline {
          *            about any document's content
          */
         void onFailure(String documentId, SourceError error) {
+            if (draining && documentId != null && error.kind() == SourceError.Kind.THROTTLED) {
+                deferSourceThrottled(documentId, error);
+                return;
+            }
             boolean contentUnknown = documentId == null || !error.isDefinitive();
+            workOutcome = contentUnknown ? WorkOutcome.retry(error.reason()) : WorkOutcome.DONE_OUTCOME;
             failed++;
             reportProgress(false);
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
@@ -1729,6 +2152,29 @@ public class IngestionPipeline {
             // tail pages of a rate-limited site are deleted after
             // tombstoneAfterMissedRuns runs, with every run reporting success.
             stateStore.recordUnreachable(sourceKey, documentId, runId);
+        }
+
+        /**
+         * A queued document whose fetch the source's own API throttled — Google Drive's
+         * quota, after its retries. Deferred, never failed: like an embedding
+         * provider's throttle, it says nothing about the document. The drain stops,
+         * because every next fetch would hear the same answer.
+         */
+        private void deferSourceThrottled(String documentId, SourceError error) {
+            Instant until = clock.get().plus(error.retryAfter()
+                    .filter(delay -> !delay.isNegative() && !delay.isZero())
+                    .orElse(throttleCooldown));
+            sourceThrottledUntil = until;
+            if (resumeAfter == null || until.isAfter(resumeAfter)) {
+                resumeAfter = until;
+            }
+            throttled++;
+            inconclusive++;
+            workOutcome = WorkOutcome.deferUntil(until);
+            meterRegistry.counter("eddi.ingestion.throttled", metricTags).increment();
+            LOGGER.infof("Source '%s' throttled a download (%s); the queued documents wait until %s",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(error.reason()), until);
+            reportProgress(false);
         }
 
         /**
@@ -1866,6 +2312,9 @@ public class IngestionPipeline {
          */
         private void onUnreadable(SourceDocument document, String reason) {
             String documentId = document.documentId();
+            // A verdict about the file, not a failure to look: retrying the same bytes
+            // reads them the same way. A new version re-queues it.
+            workOutcome = WorkOutcome.DONE_OUTCOME;
             seen++;
             failed++;
             definitive++;
@@ -1909,6 +2358,9 @@ public class IngestionPipeline {
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
                         LogSanitizer.sanitize(storeRefused));
             }
+            // A store that refused everything is not this document's fault: released,
+            // not counted as an attempt.
+            workOutcome = storeRefused != null ? WorkOutcome.RELEASE : WorkOutcome.retry(describe(e));
             failed++;
             inconclusive++;
             if (mode == Mode.INGEST && documentId != null) {
@@ -1951,6 +2403,7 @@ public class IngestionPipeline {
             if (markdown.isBlank()) {
                 // A page of pure navigation converts to nothing; storing an empty
                 // document would only pollute retrieval.
+                workOutcome = WorkOutcome.DONE_OUTCOME;
                 skipped++;
                 return;
             }
@@ -1960,6 +2413,7 @@ public class IngestionPipeline {
                     ? refreshCitation(existing.get(), title, url)
                     : CitationCheck.REEMBED;
             if (citation != CitationCheck.REEMBED) {
+                workOutcome = WorkOutcome.DONE_OUTCOME;
                 unchanged++;
                 if (mode == Mode.INGEST && fromResponse && citation != CitationCheck.PENDING) {
                     // The page was downloaded again, so the validators the server sent
@@ -2035,6 +2489,7 @@ public class IngestionPipeline {
             }
             segments += stored;
             ingested++;
+            workOutcome = WorkOutcome.DONE_OUTCOME;
             meterRegistry.counter("eddi.ingestion.segments.stored", metricTags).increment(stored);
 
             // Only now, with the vectors safely stored. Recording before this — or
@@ -2063,6 +2518,7 @@ public class IngestionPipeline {
          * running on an incomplete picture.
          */
         private void ownershipUnverified(String documentId, boolean known) {
+            workOutcome = WorkOutcome.RELEASE;
             inconclusive++;
             if (known && mode == Mode.INGEST) {
                 try {
@@ -2124,6 +2580,11 @@ public class IngestionPipeline {
          * which keeps the orphan sweep away even if the run's coverage were trusted.
          */
         private void deferThrottled(String documentId, boolean known) {
+            // The provider's resume time becomes the row's notBefore; with none named,
+            // the same cooldown the run gate waits.
+            workOutcome = WorkOutcome.deferUntil(resumeAfter != null
+                    ? resumeAfter
+                    : clock.get().plus(throttleCooldown));
             throttled++;
             inconclusive++;
             meterRegistry.counter("eddi.ingestion.throttled", metricTags).increment();
@@ -2155,6 +2616,10 @@ public class IngestionPipeline {
             if (known) {
                 stateStore.recordUnreachable(sourceKey, documentId, runId);
             }
+            // Too large for any run: settled, and queued again by the next listing like
+            // every document whose content was not recorded. Otherwise it waits, due,
+            // for the next run's budget.
+            workOutcome = needed > budget ? WorkOutcome.DONE_OUTCOME : WorkOutcome.RELEASE;
             if (needed > budget) {
                 failed++;
                 // Like every other failed document: its old chunks are all it has, so a sweep
@@ -2266,7 +2731,7 @@ public class IngestionPipeline {
                 outcome = IngestionReport.Outcome.FAILED;
             } else if (mode == Mode.PREVIEW) {
                 outcome = IngestionReport.Outcome.PREVIEW;
-            } else if (throttle != null) {
+            } else if (throttle != null || sourceThrottledUntil != null) {
                 // Not FAILED, and not the error column either, which the Manager shows
                 // as an alert: the stop reason and resumeAfter say it.
                 outcome = IngestionReport.Outcome.THROTTLED;

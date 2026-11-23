@@ -151,6 +151,14 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     /** Replaced in tests. */
     Supplier<Instant> clock = Instant::now;
 
+    /**
+     * Drive's quota in units, and the cooldown shared across the cluster.
+     * Field-injected; a connector assembled by hand gets no limit and shares
+     * nothing, as before.
+     */
+    @Inject
+    DriveQuota quota = DriveQuota.unlimited();
+
     @Inject
     public GoogleDriveSourceConnector(DriveTransport transport, DocumentExtractors extractors) {
         this.transport = transport;
@@ -648,7 +656,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     }
 
     private DriveApi api(SourceContext context, Instant deadline) {
-        return new DriveApi(transport, context, deadline, sleeper, clock);
+        return new DriveApi(transport, context, deadline, sleeper, clock, quota);
     }
 
     private static GoogleDriveSource drive(SourceContext context) {

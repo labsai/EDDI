@@ -138,7 +138,7 @@ export interface IngestionRun {
   /** The crawler's stop reason (`COMPLETED`, `PAGE_LIMIT`, `TIME_LIMIT`, …), once the run ended. */
   stopReason?: string | null;
   /** What started the run; absent on runs recorded before it was. */
-  trigger?: "MANUAL" | "SCHEDULED" | null;
+  trigger?: "MANUAL" | "SCHEDULED" | "CONTINUATION" | null;
   /**
    * Documents left for a later run because the embedding provider's rate limit
    * stopped this one — neither failed nor removed. Absent from older servers.
@@ -218,6 +218,38 @@ export function previewSource(kbId: string, sourceId: string, version: number) {
 /** Past runs, newest first. */
 export function getSourceRuns(kbId: string, sourceId: string, version: number, limit = 20) {
   return api.get<IngestionRun[]>(`${base(kbId, sourceId)}/runs?version=${version}&limit=${limit}`);
+}
+
+/**
+ * What a source's work table holds: the documents its listing queued, and
+ * where each stands. Absent (404) on servers older than the work table.
+ */
+export interface SourceWork {
+  sourceId: string;
+  /** Due now, waiting for a run to claim them. */
+  queued: number;
+  /** Waiting for a time: a rate limit, a backoff after a failure, or the next run's budget. */
+  deferred: number;
+  /** Claimed by a run that is processing them. */
+  inFlight: number;
+  /** Processed. */
+  done: number;
+  /** Failed too often to be retried on their own; "Retry failed" queues them again. */
+  failed: number;
+  /** When the next deferred document is due; null when none waits. */
+  nextAttemptAt?: string | null;
+}
+
+/** The source's work table, by state. */
+export function getSourceWork(kbId: string, sourceId: string, version: number) {
+  return api.get<SourceWork>(`${base(kbId, sourceId)}/work?version=${version}`);
+}
+
+/** Queues the source's failed documents again and wakes its drain. */
+export function retryFailedDocuments(kbId: string, sourceId: string, version: number) {
+  return api.post<{ sourceId: string; requeued: number }>(
+    `${base(kbId, sourceId)}/retry-failed?version=${version}`,
+  );
 }
 
 /** Forgets what the source has ingested, so the next run re-ingests everything. */

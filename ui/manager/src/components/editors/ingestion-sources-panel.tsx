@@ -25,11 +25,13 @@ import {
   usePreviewIngestionSource,
   usePurgeIngestionSource,
   useRefreshAfterRun,
+  useRetryFailedDocuments,
   useRunIngestionSource,
   useSourceFiles,
+  useSourceWork,
 } from "@/hooks/use-ingestion-sources";
 import { IngestionFilesPanel } from "@/components/editors/ingestion-files-panel";
-import { RunHistory, RunProgress } from "@/components/editors/ingestion-run-history";
+import { RunHistory, RunProgress, WorkQueueStatus } from "@/components/editors/ingestion-run-history";
 import { CronField, ScheduleStatus } from "@/components/editors/ingestion-schedule";
 import { SourceContents } from "@/components/editors/ingestion-source-contents";
 import { DriveFolderScope } from "@/components/editors/drive-folder-scope";
@@ -270,6 +272,9 @@ function SourceCard({
   const purgeMutation = usePurgeIngestionSource(kbId, version);
 
   const activeRun = runs.data?.find((run) => run.status === "RUNNING");
+  // The work table: what the listing queued and the drain has not finished.
+  const work = useSourceWork(kbId, isSaved ? source.id : undefined, version, Boolean(activeRun));
+  const retryFailedMutation = useRetryFailedDocuments(kbId, version);
   // The files an upload source holds are what its run will read, so their count is
   // the progress bar's total. The files panel's own query, observed only while a
   // run is in flight: observing it always would refetch the list every time the
@@ -881,6 +886,15 @@ function SourceCard({
                 hasCron={Boolean(source.cron?.trim()) && !hasUnsavedChanges}
                 enabled={source.enabled !== false}
                 isRunning={Boolean(activeRun)}
+                testId={testId}
+              />
+
+              <WorkQueueStatus
+                work={work.data}
+                canRetry={!readOnly}
+                onRetryFailed={() => retryFailedMutation.mutate(source.id as string)}
+                retrying={retryFailedMutation.isPending}
+                retryError={retryFailedMutation.isError}
                 testId={testId}
               />
 

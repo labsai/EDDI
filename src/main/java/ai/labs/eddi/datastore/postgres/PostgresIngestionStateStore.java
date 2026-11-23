@@ -128,7 +128,33 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // A run the embedding provider's rate limit stopped: how many documents it
             // left for later, and when the provider said it would take calls again.
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS documents_throttled INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS resume_after TIMESTAMP"};
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS resume_after TIMESTAMP",
+            // The work table (IngestionWorkQueue): what discovery listed and the drain
+            // has not processed yet, on the document's own row. Every column is
+            // nullable or defaulted, so a row written before it reads as "no work".
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS work_state VARCHAR(16)",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS work_version BIGINT NOT NULL DEFAULT 0",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS work_token TEXT",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS work_payload TEXT",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS not_before TIMESTAMP",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS last_error TEXT",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS claimed_by VARCHAR(64)",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS claim_until TIMESTAMP"};
+
+    /**
+     * The claim's index: only rows with work to claim, by due time. Partial, so the
+     * millions of rows with nothing pending cost it nothing.
+     */
+    private static final String CREATE_WORK_DUE_INDEX = "CREATE INDEX IF NOT EXISTS idx_ingestion_work_due_v2 "
+            + "ON rag_ingestion_documents (source_id, not_before, document_id) "
+            + "WHERE work_state IN ('PENDING', 'CLAIMED')";
+
+    /** The index this replaces, without the claim's tiebreak column. */
+    private static final String DROP_OLD_WORK_DUE_INDEX = "DROP INDEX IF EXISTS idx_ingestion_work_due";
+
+    /** The longest error text a work row keeps. */
+    private static final int MAX_WORK_ERROR_LENGTH = 1_000;
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -162,6 +188,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             }
             statement.execute(CREATE_RUNS_SOURCE_INDEX);
             statement.execute(CREATE_ACTIVE_RUN_INDEX);
+            statement.execute(DROP_OLD_WORK_DUE_INDEX);
+            statement.execute(CREATE_WORK_DUE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
             // Thrown, not only logged: carrying on would fail every later call on a
@@ -594,6 +622,18 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // is reaped.
             throw new IngestionStateStoreException("Failed to finish an ingestion run", e);
         }
+        // A finished run holds no claims: whatever its drain did not release goes
+        // back to pending here too.
+        releaseClaimsQuietly(run.sourceId(), run.runId());
+    }
+
+    private void releaseClaimsQuietly(String sourceId, String runId) {
+        try {
+            releaseClaims(sourceId, runId);
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "Could not release the claims of run %s; the next run takes them over",
+                    LogSanitizer.sanitize(runId));
+        }
     }
 
     @Override
@@ -709,11 +749,384 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                     statement.setArray(2, connection.createArrayOf("varchar", reaped.toArray()));
                     statement.executeUpdate();
                 }
+                // The dead runs' claims go back to pending now, rather than once their
+                // leases pass: the crash costs the run its slice, not the documents.
+                try (PreparedStatement statement = connection.prepareStatement(RELEASE_REAPED_CLAIMS)) {
+                    statement.setString(1, sourceId);
+                    statement.setArray(2, connection.createArrayOf("varchar", reaped.toArray()));
+                    statement.executeUpdate();
+                }
             }
             return reaped.size();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to reap stale ingestion runs", e);
         }
+    }
+
+    private static final String RELEASE_REAPED_CLAIMS = """
+            UPDATE rag_ingestion_documents
+               SET work_state = 'PENDING', claimed_by = NULL, claim_until = NULL
+             WHERE source_id = ? AND work_state = 'CLAIMED' AND claimed_by = ANY (?)
+            """;
+
+    // === the work table (IngestionWorkQueue) ===
+
+    @Override
+    public List<EnqueueOutcome> enqueueWork(String sourceId, String runId, List<WorkRequest> requests,
+                                            Instant now) {
+        if (requests.size() > MAX_ENQUEUE_BATCH) {
+            throw new IllegalArgumentException("At most " + MAX_ENQUEUE_BATCH + " documents are queued at a time");
+        }
+        for (WorkRequest request : requests) {
+            if (request.payload() != null && request.payload().length() > MAX_PAYLOAD_LENGTH) {
+                throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH
+                        + " characters");
+            }
+        }
+        // Re-arm: a row this run owns without equal work gets the new version,
+        // due now, with its attempts and error reset. The run stamp counts as
+        // seeing it; the content hash and the tombstone are not touched. Equal work
+        // is the same token, pending, claimed or poisoned — or done for a document
+        // never ingested (a file with no text), which nothing would change.
+        // COALESCE because a row that never had work must not compare as NULL and
+        // so match nothing.
+        String rearm = """
+                UPDATE rag_ingestion_documents
+                   SET last_run_id = ?, work_state = 'PENDING', work_version = work_version + 1, work_token = ?,
+                       work_payload = ?, not_before = ?, attempts = 0, last_error = NULL,
+                       claimed_by = NULL, claim_until = NULL
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
+                   AND NOT ((COALESCE(work_state, '') IN ('PENDING', 'CLAIMED', 'POISON')
+                             OR (COALESCE(work_state, '') = 'DONE' AND last_ingested_at IS NULL))
+                            AND work_token IS NOT DISTINCT FROM ?)
+                """;
+        String stamp = """
+                UPDATE rag_ingestion_documents SET last_run_id = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
+                """;
+        // A document this source never held: a row with no vectors (tombstoned, no
+        // content hash), owned by this run, with its work.
+        String insert = """
+                INSERT INTO rag_ingestion_documents
+                    (source_id, document_id, last_run_id, missed_runs, tombstoned, fencing_run_id,
+                     work_state, work_version, work_token, work_payload, not_before, attempts)
+                VALUES (?, ?, ?, 0, TRUE, ?, 'PENDING', 1, ?, ?, ?, 0)
+                ON CONFLICT (source_id, document_id) DO NOTHING
+                """;
+        EnqueueOutcome[] outcomes = new EnqueueOutcome[requests.size()];
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        Timestamp at = Timestamp.from(now);
+        // Three batched statements, each over the requests the one before left
+        // undecided: a listing page costs three round trips, not three per file.
+        try (Connection connection = connection()) {
+            List<Integer> open = new ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement(rearm)) {
+                for (WorkRequest request : requests) {
+                    statement.setString(1, runId);
+                    statement.setString(2, request.versionToken());
+                    statement.setString(3, request.payload());
+                    statement.setTimestamp(4, at);
+                    statement.setString(5, sourceId);
+                    statement.setString(6, request.documentId());
+                    statement.setString(7, runId);
+                    statement.setString(8, request.versionToken());
+                    statement.addBatch();
+                }
+                int[] counts = statement.executeBatch();
+                for (int i = 0; i < counts.length; i++) {
+                    if (counts[i] > 0) {
+                        outcomes[i] = EnqueueOutcome.QUEUED;
+                    } else {
+                        open.add(i);
+                    }
+                }
+            }
+            List<Integer> unknown = new ArrayList<>();
+            if (!open.isEmpty()) {
+                try (PreparedStatement statement = connection.prepareStatement(stamp)) {
+                    for (int index : open) {
+                        statement.setString(1, runId);
+                        statement.setString(2, sourceId);
+                        statement.setString(3, requests.get(index).documentId());
+                        statement.setString(4, runId);
+                        statement.addBatch();
+                    }
+                    int[] counts = statement.executeBatch();
+                    for (int i = 0; i < counts.length; i++) {
+                        if (counts[i] > 0) {
+                            outcomes[open.get(i)] = EnqueueOutcome.ALREADY_QUEUED;
+                        } else {
+                            unknown.add(open.get(i));
+                        }
+                    }
+                }
+            }
+            if (!unknown.isEmpty()) {
+                try (PreparedStatement statement = connection.prepareStatement(insert)) {
+                    for (int index : unknown) {
+                        WorkRequest request = requests.get(index);
+                        statement.setString(1, sourceId);
+                        statement.setString(2, request.documentId());
+                        statement.setString(3, runId);
+                        statement.setString(4, runId);
+                        statement.setString(5, request.versionToken());
+                        statement.setString(6, request.payload());
+                        statement.setTimestamp(7, at);
+                        statement.addBatch();
+                    }
+                    int[] counts = statement.executeBatch();
+                    for (int i = 0; i < counts.length; i++) {
+                        int index = unknown.get(i);
+                        if (counts[i] > 0) {
+                            outcomes[index] = EnqueueOutcome.QUEUED;
+                        } else {
+                            // The row exists and another run owns it.
+                            fenced("queue a document", sourceId, requests.get(index).documentId(), runId);
+                            outcomes[index] = EnqueueOutcome.FENCED;
+                        }
+                    }
+                }
+            }
+            return List.of(outcomes);
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to queue documents", e);
+        }
+    }
+
+    @Override
+    public List<WorkClaim> claimWork(String sourceId, String claimer, int limit, Instant now, Instant claimUntil) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        // One statement: the inner SELECT locks the rows it picks and skips any a
+        // concurrent claimer has locked, and FOR UPDATE re-checks the condition on
+        // a row another claimer committed in the meantime. Two claimers on two
+        // nodes therefore never come back with the same row. Fenced on the claimer:
+        // a run that no longer owns the source claims nothing.
+        String sql = """
+                UPDATE rag_ingestion_documents d
+                   SET work_state = 'CLAIMED', claimed_by = ?, claim_until = ?
+                  FROM (SELECT source_id, document_id FROM rag_ingestion_documents
+                         WHERE source_id = ? AND fencing_run_id = ?
+                           AND ((work_state = 'PENDING' AND not_before <= ?)
+                                OR (work_state = 'CLAIMED' AND (claim_until <= ? OR claimed_by <> ?)))
+                         ORDER BY not_before, document_id
+                         LIMIT ?
+                         FOR UPDATE SKIP LOCKED) due
+                 WHERE d.source_id = due.source_id AND d.document_id = due.document_id
+                RETURNING d.document_id, d.work_version, d.work_token, d.work_payload, d.attempts, d.not_before
+                """;
+        Timestamp at = Timestamp.from(now);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, claimer);
+            statement.setTimestamp(2, Timestamp.from(claimUntil));
+            statement.setString(3, sourceId);
+            statement.setString(4, claimer);
+            statement.setTimestamp(5, at);
+            statement.setTimestamp(6, at);
+            statement.setString(7, claimer);
+            statement.setInt(8, limit);
+            List<WorkClaim> claims = new ArrayList<>();
+            List<Instant> due = new ArrayList<>();
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    claims.add(new WorkClaim(resultSet.getString(1), resultSet.getLong(2), resultSet.getString(3),
+                            resultSet.getString(4), resultSet.getInt(5)));
+                    due.add(toInstant(resultSet.getTimestamp(6)));
+                }
+            }
+            // RETURNING promises no order; the oldest due goes first.
+            return inDueOrder(claims, due);
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to claim queued documents", e);
+        }
+    }
+
+    private static List<WorkClaim> inDueOrder(List<WorkClaim> claims, List<Instant> due) {
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < claims.size(); i++) {
+            order.add(i);
+        }
+        order.sort((a, b) -> {
+            Instant left = due.get(a);
+            Instant right = due.get(b);
+            int byDue = left == null || right == null ? 0 : left.compareTo(right);
+            return byDue != 0 ? byDue : claims.get(a).documentId().compareTo(claims.get(b).documentId());
+        });
+        List<WorkClaim> sorted = new ArrayList<>(claims.size());
+        for (int index : order) {
+            sorted.add(claims.get(index));
+        }
+        return sorted;
+    }
+
+    /** The condition every claimed-row update carries. */
+    private static final String HELD = "source_id = ? AND document_id = ? AND claimed_by = ? AND work_version = ? "
+            + "AND work_state = 'CLAIMED'";
+
+    @Override
+    public boolean completeWork(String sourceId, String documentId, String claimer, long workVersion) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET work_state = 'DONE', claimed_by = NULL, claim_until = NULL, not_before = NULL,
+                       attempts = 0, last_error = NULL, work_payload = NULL
+                 WHERE %s
+                """.formatted(HELD);
+        return updateHeld(sql, "complete a queued document", sourceId, documentId, claimer, workVersion);
+    }
+
+    @Override
+    public boolean deferWork(String sourceId, String documentId, String claimer, long workVersion,
+                             Instant notBefore) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET work_state = 'PENDING', not_before = ?, claimed_by = NULL, claim_until = NULL
+                 WHERE %s
+                """.formatted(HELD);
+        return updateHeld(sql, "defer a queued document", sourceId, documentId, claimer, workVersion,
+                Timestamp.from(notBefore));
+    }
+
+    @Override
+    public FailOutcome failWork(String sourceId, String documentId, String claimer, long workVersion, String error,
+                                Instant notBefore, int maxAttempts) {
+        // Every right-hand side reads the row as it was, so attempts + 1 is the count
+        // after this failure in all three places.
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET attempts = attempts + 1, last_error = ?, claimed_by = NULL, claim_until = NULL,
+                       work_state = CASE WHEN attempts + 1 >= ? THEN 'POISON' ELSE 'PENDING' END,
+                       not_before = CASE WHEN attempts + 1 >= ? THEN NULL ELSE CAST(? AS TIMESTAMP) END
+                 WHERE %s
+                RETURNING work_state
+                """.formatted(HELD);
+        int cap = Math.max(1, maxAttempts);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, truncate(error));
+            statement.setInt(2, cap);
+            statement.setInt(3, cap);
+            statement.setTimestamp(4, Timestamp.from(notBefore));
+            statement.setString(5, sourceId);
+            statement.setString(6, documentId);
+            statement.setString(7, claimer);
+            statement.setLong(8, workVersion);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return FailOutcome.NOT_CLAIMED;
+                }
+                return "POISON".equals(resultSet.getString(1)) ? FailOutcome.POISONED : FailOutcome.RETRY;
+            }
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a failed attempt", e);
+        }
+    }
+
+    @Override
+    public int releaseClaims(String sourceId, String claimer) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET work_state = 'PENDING', claimed_by = NULL, claim_until = NULL
+                 WHERE source_id = ? AND work_state = 'CLAIMED' AND claimed_by = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.setString(2, claimer);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to release claimed documents", e);
+        }
+    }
+
+    @Override
+    public int cancelUnlistedWork(String sourceId, String runId) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET work_state = NULL, work_payload = NULL, not_before = NULL, attempts = 0, last_error = NULL,
+                       claimed_by = NULL, claim_until = NULL
+                 WHERE source_id = ? AND fencing_run_id = ? AND work_state IN ('PENDING', 'POISON')
+                   AND last_run_id IS DISTINCT FROM ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.setString(2, runId);
+            statement.setString(3, runId);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to withdraw the work of unlisted documents", e);
+        }
+    }
+
+    @Override
+    public WorkCounts workCounts(String sourceId, Instant now) {
+        String sql = """
+                SELECT COUNT(*) FILTER (WHERE (work_state = 'PENDING' AND not_before <= ?)
+                                           OR (work_state = 'CLAIMED' AND claim_until <= ?)),
+                       COUNT(*) FILTER (WHERE work_state = 'PENDING' AND not_before > ?),
+                       COUNT(*) FILTER (WHERE work_state = 'CLAIMED' AND claim_until > ?),
+                       COUNT(*) FILTER (WHERE work_state = 'DONE'),
+                       COUNT(*) FILTER (WHERE work_state = 'POISON'),
+                       MIN(not_before) FILTER (WHERE work_state = 'PENDING' AND not_before > ?)
+                  FROM rag_ingestion_documents
+                 WHERE source_id = ? AND work_state IS NOT NULL
+                """;
+        Timestamp at = Timestamp.from(now);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 1; i <= 5; i++) {
+                statement.setTimestamp(i, at);
+            }
+            statement.setString(6, sourceId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return WorkCounts.NONE;
+                }
+                return new WorkCounts(resultSet.getLong(1), resultSet.getLong(2), resultSet.getLong(3),
+                        resultSet.getLong(4), resultSet.getLong(5), toInstant(resultSet.getTimestamp(6)));
+            }
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to count queued documents", e);
+        }
+    }
+
+    @Override
+    public int retryFailedWork(String sourceId, Instant now) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET work_state = 'PENDING', attempts = 0, last_error = NULL, not_before = ?
+                 WHERE source_id = ? AND work_state = 'POISON'
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, Timestamp.from(now));
+            statement.setString(2, sourceId);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to re-arm failed documents", e);
+        }
+    }
+
+    private boolean updateHeld(String sql, String what, String sourceId, String documentId, String claimer,
+                               long workVersion, Timestamp... leading) {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            for (Timestamp value : leading) {
+                statement.setTimestamp(index++, value);
+            }
+            statement.setString(index++, sourceId);
+            statement.setString(index++, documentId);
+            statement.setString(index++, claimer);
+            statement.setLong(index, workVersion);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to " + what, e);
+        }
+    }
+
+    private static String truncate(String error) {
+        if (error == null) {
+            return null;
+        }
+        return error.length() <= MAX_WORK_ERROR_LENGTH ? error : error.substring(0, MAX_WORK_ERROR_LENGTH);
     }
 
     /**

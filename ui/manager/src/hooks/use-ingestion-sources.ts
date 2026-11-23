@@ -7,9 +7,11 @@ import {
   getSourceFiles,
   getSourceRuns,
   getSourceSchedule,
+  getSourceWork,
   previewCron,
   previewSource,
   purgeSource,
+  retryFailedDocuments,
   runSource,
   searchKnowledgeBase,
   type CronPreview,
@@ -20,6 +22,7 @@ import {
   type KnowledgeSearchRequest,
   type KnowledgeSearchResult,
   type SourceSchedule,
+  type SourceWork,
 } from "@/lib/api/ingestion-sources";
 
 const ingestionKeys = {
@@ -32,7 +35,47 @@ const ingestionKeys = {
   documents: (kbId: string, sourceId: string, version: number) =>
     ["ingestion", "documents", kbId, sourceId, version] as const,
   cronPreview: (cron: string) => ["ingestion", "cron-preview", cron] as const,
+  work: (kbId: string, sourceId: string, version: number) =>
+    ["ingestion", "work", kbId, sourceId, version] as const,
 };
+
+/**
+ * What a source's work table holds — the documents its listing queued, by state.
+ *
+ * Polled every few seconds while a run is in flight or work is queued or in
+ * flight, so the drain is seen moving; once a minute otherwise, which is enough
+ * for deferred work coming due. An older server without the endpoint answers
+ * 404, and the panel then shows nothing rather than an error.
+ */
+export function useSourceWork(
+  kbId: string | undefined,
+  sourceId: string | undefined,
+  version: number,
+  refreshWhileRunning: boolean,
+) {
+  return useQuery<SourceWork>({
+    queryKey: ingestionKeys.work(kbId ?? "", sourceId ?? "", version),
+    queryFn: () => getSourceWork(kbId as string, sourceId as string, version),
+    enabled: Boolean(kbId && sourceId),
+    retry: false,
+    refetchInterval: (query) => {
+      const work = query.state.data;
+      const busy = refreshWhileRunning || (work != null && work.queued + work.inFlight > 0);
+      return busy ? 5000 : 60_000;
+    },
+  });
+}
+
+/** Queues a source's failed documents again. */
+export function useRetryFailedDocuments(kbId: string | undefined, version: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => retryFailedDocuments(kbId as string, sourceId, version),
+    onSuccess: (_result, sourceId) => {
+      queryClient.invalidateQueries({ queryKey: ingestionKeys.work(kbId ?? "", sourceId, version) });
+    },
+  });
+}
 
 /**
  * Run history for one source.

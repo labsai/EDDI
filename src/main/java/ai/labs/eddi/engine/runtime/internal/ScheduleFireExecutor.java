@@ -759,18 +759,28 @@ public class ScheduleFireExecutor {
             // than crawl: the fire runs with no caller and no access check of its own,
             // and the REST route to the same action requires EDIT on the knowledge
             // base. Thrown so the existing catch records it like any other failure.
-            String expectedName = RagIngestionSchedules.scheduleName(
-                    RagIngestionSchedules.ragConfigId(md), RagIngestionSchedules.sourceId(md));
+            boolean continuation = RagIngestionSchedules.isContinuation(md);
+            String expectedName = continuation
+                    ? RagIngestionSchedules.continuationName(RagIngestionSchedules.ragConfigId(md),
+                            RagIngestionSchedules.sourceId(md))
+                    : RagIngestionSchedules.scheduleName(RagIngestionSchedules.ragConfigId(md),
+                            RagIngestionSchedules.sourceId(md));
             if (schedule.getName() == null || !schedule.getName().equals(expectedName)) {
                 throw new IllegalStateException("This ingestion schedule's name does not match the knowledge "
                         + "base and source in its metadata");
             }
 
-            var report = ragSourceIngestionService.processScheduledFire(
-                    RagIngestionSchedules.ragConfigId(md),
-                    RagIngestionSchedules.ragConfigVersion(md),
-                    RagIngestionSchedules.sourceId(md),
-                    finished -> logFailedRun(schedule, instanceId, attemptNumber, startedAt, finished));
+            // A continuation drains the source's work table; the cron lists it.
+            var report = continuation
+                    ? ragSourceIngestionService.processContinuationFire(
+                            RagIngestionSchedules.ragConfigId(md),
+                            RagIngestionSchedules.sourceId(md),
+                            finished -> logFailedRun(schedule, instanceId, attemptNumber, startedAt, finished))
+                    : ragSourceIngestionService.processScheduledFire(
+                            RagIngestionSchedules.ragConfigId(md),
+                            RagIngestionSchedules.ragConfigVersion(md),
+                            RagIngestionSchedules.sourceId(md),
+                            finished -> logFailedRun(schedule, instanceId, attemptNumber, startedAt, finished));
             cost = report.costUsd();
             if (report.isSuccess() || isBenignOutcome(report)) {
                 // ALREADY_RUNNING and SKIPPED are outcomes, not failures. A run can

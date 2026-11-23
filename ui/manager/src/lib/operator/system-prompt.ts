@@ -707,8 +707,10 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   run with an error naming the ids; the fix is to name the folder by \`id\`.
   When folders are removed from the scope or a folder is excluded, the next run
   that lists the whole new scope removes their documents at once, not after
-  \`tombstoneAfterMissedRuns\` runs; a run that stops early (throttled, time
-  budget) removes nothing. Retrieval applies the current scope at once all the
+  \`tombstoneAfterMissedRuns\` runs; a run whose listing stops early (Google
+  Drive's own rate limit, the time budget) removes nothing. The embedding
+  provider's throttle does not stop the listing of a Drive source, only its
+  embedding, so it does not prevent the removal. Retrieval applies the current scope at once all the
   same: chunks under a removed or excluded folder are not returned even before
   that run. Two cases wait for a run: a newly typed path (by id or picked in the
   Manager it applies at once), and chunks written before folder chains were
@@ -777,12 +779,21 @@ const BODY_KNOWLEDGE_BASES_RUNS = `- To answer "did the documents actually land?
   Each run reports documents seen, ingested, unchanged, failed and removed,
   segments stored, cost and any error. No runs means it was never run.
 - A run with \`stopReason: THROTTLED\` was paused by the embedding provider's
-  rate limit or daily quota: it is not a failure, nothing was deleted, and its
+  rate limit or daily quota: it is not a failure, and its
   \`documentsThrottled\` documents were left for a later run (they are not in
-  \`documentsFailed\`). \`resumeAfter\` is when the provider takes calls again —
+  \`documentsFailed\`). A throttle only stops embedding: if the run's listing
+  was complete, documents that left the source or its scope were still
+  removed, so a THROTTLED run can report removed documents. \`resumeAfter\` is when the provider takes calls again —
   for Gemini's daily quota, midnight Pacific time. Until then the source's
   scheduled runs are held back without listing the source or calling the
-  provider; "Run now" is not held back, but runs into the same limit. When you
+  provider; "Run now" is not held back, but runs into the same limit. Google
+  Drive and upload sources queue what they list in a durable work table and
+  drain it; a throttled document waits there until \`resumeAfter\`, and a run
+  with \`trigger: CONTINUATION\` is the automatic follow-up that drains the
+  rest, listing nothing. The run history is all you can read of this: you
+  cannot see how many documents are still queued. A document that failed five
+  times stays failed until it changes or someone uses "Retry failed" in the
+  Manager's source panel, which also shows the queue. When you
   give the resume time, include its date unless it is today. A run that
   FAILED with an error about the provider account's quota or billing
   (\`insufficient_quota\`) is not a throttle: waiting will not help, the

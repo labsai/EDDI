@@ -476,8 +476,14 @@ class IngestionPipelineThrottleTest {
         assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
         assertEquals(List.of("a"), connector.fetched, "b is not fetched once the provider has said no");
         assertEquals(2, report.documentsUnchanged());
-        assertEquals(2, report.documentsThrottled());
+        // Listed and queued: a was refused and is deferred; the drain stopped before
+        // b, which stays queued — neither is failed.
+        assertEquals(1, report.documentsThrottled());
         assertEquals(0, report.documentsFailed());
+        var work = stateStore.workCounts(sourceKey(), Instant.now());
+        assertEquals(1, work.waiting(), "a waits for the provider's reset");
+        assertEquals(1, work.queued(), "b is still due");
+        assertEquals(0, work.failed());
     }
 
     @Test
