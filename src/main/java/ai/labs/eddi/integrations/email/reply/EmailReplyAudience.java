@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.email.SenderPatterns;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -16,6 +17,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Who besides the {@code To} reads a conversation-mode reply — the one pure
@@ -41,6 +43,10 @@ import java.util.Set;
  * <li>minus the {@code To} itself;</li>
  * <li>minus anything matching {@code listAddresses};</li>
  * <li>only what matches {@code replyAllowedRecipients};</li>
+ * <li>only an address that was sent <em>every</em> reply the conversation has
+ * sent so far: a person copied later would otherwise get an answer that draws
+ * on mails sent privately before they joined (a new conversation has sent none,
+ * so everyone passes);</li>
  * <li>in header order ({@code To} before {@code Cc}), each once;</li>
  * <li>more than {@code maxReplyRecipients} → none at all, noted
  * {@code cc_capped}: a reply to the sender alone rather than to an arbitrary
@@ -55,6 +61,7 @@ public final class EmailReplyAudience {
     public static final String INVALID = "invalid";
     public static final String LIST = "list";
     public static final String NOT_ALLOWED = "not_allowed";
+    public static final String LATE_JOINER = "late_joiner";
     public static final String CC_CAPPED = "cc_capped";
 
     /**
@@ -116,6 +123,35 @@ public final class EmailReplyAudience {
      */
     public static Audience compute(String integrationId, EmailChannelSettings settings, Map<String, Object> stepMail, String to,
                                    String conversationUserId) {
+        return compute(integrationId, settings, stepMail, to, conversationUserId, address -> true);
+    }
+
+    /**
+     * Whether an address was sent every reply the conversation has sent so far. A
+     * conversation with no sent reply yet admits everyone; a ledger that cannot be
+     * read admits no one, so a failure narrows the audience rather than widening
+     * it.
+     */
+    public static Predicate<String> readEveryReply(IEmailMessageLedger ledger, String conversationId) {
+        if (conversationId == null) {
+            return address -> true;
+        }
+        try {
+            long sent = ledger.countSentReplies(conversationId);
+            return address -> sent == 0 || ledger.countSentRepliesTo(conversationId, address) == sent;
+        } catch (RuntimeException e) {
+            return address -> false;
+        }
+    }
+
+    /**
+     * @param readEveryReply
+     *            {@link #readEveryReply}: a {@code Cc} that fails it is dropped
+     *            ({@link #LATE_JOINER})
+     * @see #compute(String, EmailChannelSettings, Map, String, String)
+     */
+    public static Audience compute(String integrationId, EmailChannelSettings settings, Map<String, Object> stepMail, String to,
+                                   String conversationUserId, Predicate<String> readEveryReply) {
         if (settings == null || !settings.repliesToThread() || !EmailUserIdentity.isThreadIdentityOf(conversationUserId, integrationId)
                 || stepMail == null) {
             return Audience.senderOnly(to);
@@ -139,6 +175,8 @@ public final class EmailReplyAudience {
                     dropped.add(LIST);
                 } else if (!SenderPatterns.matchesAny(address, settings.replyAllowedRecipients())) {
                     dropped.add(NOT_ALLOWED);
+                } else if (!readEveryReply.test(address)) {
+                    dropped.add(LATE_JOINER);
                 } else {
                     cc.add(address);
                 }

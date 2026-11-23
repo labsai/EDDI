@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email.reply;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,8 @@ import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.settin
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Who reads a thread reply (email v2 plan §9.3). Each rule is tested alone
@@ -122,6 +125,36 @@ class EmailReplyAudienceTest {
                 "another integration's thread");
         assertEquals(List.of(), compute(thread(Map.of()), mail, EmailUserIdentity.anonymous()).cc());
         assertEquals(List.of(), compute(thread(Map.of()), null, THREAD).cc());
+    }
+
+    @Test
+    @DisplayName("a copy who was not sent every earlier reply is dropped; the rest stay (email v2 plan §9.3)")
+    void lateJoinerIsNotCopied() {
+        var mail = mailTo(List.of(MAILBOX), List.of(COLLEAGUE, "late@supplier.com"));
+        var audience = EmailReplyAudience.compute(INTEGRATION, thread(Map.of()), mail, SENDER, THREAD,
+                address -> !address.equals("late@supplier.com"));
+        assertEquals(List.of(COLLEAGUE), audience.cc());
+        assertEquals(List.of(EmailReplyAudience.OWN, EmailReplyAudience.LATE_JOINER), audience.dropped());
+    }
+
+    @Test
+    @DisplayName("the ledger test: no reply sent yet admits everyone; otherwise only who was sent all of them; an unreadable ledger admits no one")
+    void readEveryReplyFromTheLedger() {
+        IEmailMessageLedger ledger = mock(IEmailMessageLedger.class);
+        when(ledger.countSentReplies("fresh")).thenReturn(0L);
+        assertTrue(EmailReplyAudience.readEveryReply(ledger, "fresh").test("anyone@supplier.com"), "nothing was said yet");
+        assertTrue(EmailReplyAudience.readEveryReply(ledger, null).test("anyone@supplier.com"), "no conversation yet");
+
+        when(ledger.countSentReplies("conv")).thenReturn(2L);
+        when(ledger.countSentRepliesTo("conv", COLLEAGUE)).thenReturn(2L);
+        when(ledger.countSentRepliesTo("conv", "late@supplier.com")).thenReturn(1L);
+        var test = EmailReplyAudience.readEveryReply(ledger, "conv");
+        assertTrue(test.test(COLLEAGUE));
+        assertFalse(test.test("late@supplier.com"), "missed one reply");
+        assertFalse(test.test("never@supplier.com"), "was sent none of them");
+
+        when(ledger.countSentReplies("broken")).thenThrow(new IllegalStateException("store down"));
+        assertFalse(EmailReplyAudience.readEveryReply(ledger, "broken").test(COLLEAGUE));
     }
 
     @Test

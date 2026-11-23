@@ -625,6 +625,10 @@ With `replyAudience: thread`, colleagues on a mail read EDDI's answer too. The r
   genuine mail is not seen — minus the mailbox, its aliases and their plus-addresses, minus the `To`, minus anything
   matching `listAddresses`, keeping only addresses that match `replyAllowedRecipients`, in header order, each once. More
   than `maxReplyRecipients` and the reply goes to the sender alone.
+- **Someone copied later is not copied.** A `Cc` is kept only if they were sent **every** reply the conversation has
+  sent so far (a new conversation has sent none, so everyone passes). A person added to the thread halfway would
+  otherwise get an answer that draws on mails sent before they joined; they get the sender's reply without the copy, and
+  the drop is counted as `late_joiner`. If the ledger cannot be read the copies are dropped, not kept.
 - **The agent knows who will read its answer**: the turn's context carries `mail.audience` (`to`, `cc`, and
   `ccCapped: true` when the cap emptied the copies), computed by the same function before the turn runs.
 - **No long-term memory.** A person's long-term memory would otherwise reach whoever is copied, and later mails can
@@ -649,7 +653,11 @@ history through the agent, so the rule is strict:
 - `threadParticipants: originalSenderOnly` (the default): only the conversation's first sender.
 - `threadParticipants: anyAuthenticatedParticipant`: anyone who was sent **every** reply the conversation has sent so
   far (as `To` or `Cc`). Being copied once is not enough: after a reply someone was not sent — the first sender
-  following up without them, say — they cannot continue and ask the agent about it.
+  following up without them, say — they cannot continue and ask the agent about it. "Every reply" is measured against
+  every mail that ran a turn in the conversation, not only the replies sent: a private mail whose reply is still queued,
+  was refused or failed, or that EDDI never answered is already in the history the agent reads, so anyone who was not
+  sent a reply to it forks too (as does everyone, the first sender included, once a mail went unanswered — the
+  conversation fails closed).
 
 This applies on every path that finds a conversation — a reply to EDDI's Message-ID, the thread key from `References`
 (also when that conversation has ended, so nobody takes a thread's key over), and the race of two mails starting the

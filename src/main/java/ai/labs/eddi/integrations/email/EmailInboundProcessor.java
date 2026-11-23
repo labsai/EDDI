@@ -80,6 +80,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -523,7 +524,9 @@ public class EmailInboundProcessor {
             // send attempt applies again (email v2 plan §9.3), so the agent can write
             // for its real audience. An existing conversation keeps its own identity.
             String conversationUserId = owner != null && owner.userId() != null ? owner.userId() : userId;
-            addressed.put(AUDIENCE_KEY, audienceOf(id, settings, parsed, sender, conversationUserId).toMap());
+            addressed.put(AUDIENCE_KEY,
+                    audienceOf(id, settings, parsed, sender, conversationUserId, EmailReplyAudience.readEveryReply(ledger, existingConversation))
+                            .toMap());
         }
 
         // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
@@ -982,10 +985,10 @@ public class EmailInboundProcessor {
      * that every send attempt applies.
      */
     static EmailReplyAudience.Audience audienceOf(String integrationId, EmailChannelSettings settings, InboundMail mail, String sender,
-                                                  String conversationUserId) {
+                                                  String conversationUserId, Predicate<String> readEveryReply) {
         Map<String, Object> mailMap = mailData(mail, List.of(), false);
         String to = EmailReplyRecipients.recipientFor(settings, mailMap, sender);
-        return EmailReplyAudience.compute(integrationId, settings, mailMap, to, conversationUserId);
+        return EmailReplyAudience.compute(integrationId, settings, mailMap, to, conversationUserId, readEveryReply);
     }
 
     /** Every address mail from which is this integration's own. */
@@ -1150,7 +1153,13 @@ public class EmailInboundProcessor {
         if (sent == 0) {
             return firstSender;
         }
-        return ledger.countSentRepliesTo(conversationId, sender) == sent;
+        // The baseline is every mail that ran a turn here, not only the replies sent: a
+        // reply still queued, refused or failed, and a mail EDDI never answered, are
+        // all
+        // in the history the agent would read, yet appear in no one's sent count — so
+        // counting only sent replies would let a participant who missed that mail in.
+        long turns = Math.max(sent, ledger.countByConversationSince(conversationId, Kind.TRIGGER, Instant.EPOCH));
+        return ledger.countSentRepliesTo(conversationId, sender) == turns;
     }
 
     /**

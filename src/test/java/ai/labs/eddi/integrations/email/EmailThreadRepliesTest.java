@@ -298,6 +298,48 @@ class EmailThreadRepliesTest {
     }
 
     @Test
+    @DisplayName("a private mail whose reply is not sent yet (or never was) is already in the history: Bob forks rather than read it")
+    void unsentPrivateMailForks() {
+        EmailInboundProcessor processor = processor();
+        EmailTestMail first = startThread(processor);
+        String eddiId = sentReplyId(0);
+        EmailTestMail privately = EmailTestMail.mail().to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), privately.polled(2), Instant.now());
+        // Its turn has not completed: no reply row, so only the sent count (1 = Bob's)
+        // would admit him.
+
+        EmailTestMail fromBob = EmailTestMail.mail().from(BOB).to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), fromBob.polled(3), Instant.now());
+
+        assertNotEquals("conv-1", sayConversations.get(2));
+        assertEquals(EmailUserIdentity.threadForSender(INTEGRATION, first.messageId(), BOB), userIds.get(sayConversations.get(2)));
+    }
+
+    @Test
+    @DisplayName("a Cc who missed an earlier reply is not copied on a later one, and the agent is told so (v2 plan §9.3)")
+    void lateJoinerIsNotCopied() {
+        EmailInboundProcessor processor = processor();
+        EmailTestMail first = startThread(processor);
+        String eddiId = sentReplyId(0);
+        EmailTestMail privately = EmailTestMail.mail().to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), privately.polled(2), Instant.now());
+        complete(1, "Your private question: answered.");
+        assertEquals(List.of(ALICE), envelopes.get(1));
+
+        // Alice now copies Bob again — but he was not sent the second reply.
+        EmailTestMail again = EmailTestMail.mail().to(MAILBOX).header("Cc: " + BOB).header("In-Reply-To: " + sentReplyId(1))
+                .header("References: " + first.messageId() + " " + eddiId + " " + sentReplyId(1));
+        processor.process(context(ANY_PARTICIPANT), again.polled(3), Instant.now());
+        assertEquals("conv-1", sayConversations.get(2));
+        assertEquals(Map.of("to", ALICE, "cc", List.of()), mailContext(2).get("audience"));
+        complete(2, "Third answer.");
+        assertEquals(List.of(ALICE), envelopes.get(2), "Bob would read a conversation he missed half of");
+    }
+
+    @Test
     @DisplayName("hijack guard, reply path: a non-participant answering EDDI's reply gets a conversation of their own")
     void hijackThroughEddisReply() {
         EmailInboundProcessor processor = processor();

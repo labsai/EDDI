@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Who a conversation-mode reply goes to — the one place that decides it (email
@@ -112,6 +113,16 @@ public final class EmailReplyRecipients {
      */
     public static Decision decide(String integrationId, EmailChannelSettings settings, LedgerEntry inbound, Map<String, Object> stepMail,
                                   String conversationUserId) {
+        return decide(integrationId, settings, inbound, stepMail, conversationUserId, address -> true);
+    }
+
+    /**
+     * As above, with the conversation's test of who was sent every earlier reply
+     * ({@link EmailReplyAudience#readEveryReply}), which a copied address must
+     * pass.
+     */
+    public static Decision decide(String integrationId, EmailChannelSettings settings, LedgerEntry inbound, Map<String, Object> stepMail,
+                                  String conversationUserId, Predicate<String> readEveryReply) {
         if (settings == null || !settings.replies()) {
             return Decision.refuse("not_conversation_mode");
         }
@@ -149,7 +160,8 @@ public final class EmailReplyRecipients {
         if (isOwn(settings, recipient)) {
             return Decision.refuse("own_address");
         }
-        return new Decision(recipient, null, EmailReplyAudience.compute(integrationId, settings, stepMail, recipient, conversationUserId));
+        return new Decision(recipient, null,
+                EmailReplyAudience.compute(integrationId, settings, stepMail, recipient, conversationUserId, readEveryReply));
     }
 
     /**

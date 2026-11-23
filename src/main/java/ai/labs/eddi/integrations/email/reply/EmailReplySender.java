@@ -486,7 +486,7 @@ public class EmailReplySender {
      */
     Optional<LedgerEntry> enqueue(Request request, Instant now) {
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
-                request.stepMail(), request.userId());
+                request.stepMail(), request.userId(), EmailReplyAudience.readEveryReply(ledger, request.conversationId()));
         if (!decision.allowed()) {
             metrics.reply("refused");
             LOGGER.infof("Email integration %s: no %s for conversation %s (%s)", sanitize(request.integrationId()), request.kind().id(),
@@ -787,7 +787,7 @@ public class EmailReplySender {
             // again - with the current address as its From, which the transport also
             // uses for the envelope and the login - under the row's own Message-ID.
             EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, request.inbound(),
-                    request.stepMail(), request.userId());
+                    request.stepMail(), request.userId(), EmailReplyAudience.readEveryReply(ledger, row.conversationId()));
             if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
                 terminal(row, State.SUPPRESSED, RECIPIENT_REFUSED + (decision.allowed() ? "recipient_changed" : decision.refusal()), "refused", now);
                 return;
@@ -826,7 +826,7 @@ public class EmailReplySender {
             return;
         }
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, inbound.get(), request.get().stepMail(),
-                request.get().userId());
+                request.get().userId(), EmailReplyAudience.readEveryReply(ledger, row.conversationId()));
         if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
             // The rules are applied again on every attempt: what was allowed when the row
             // was written may not be now (the settings changed).
