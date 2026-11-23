@@ -4559,8 +4559,8 @@
       "exchangeFailed": "Le fournisseur n'a pas finalisé la liaison. Réessayez ; si l'échec persiste, un administrateur doit vérifier les réglages de cette connexion.",
       "unknown": "La liaison n'a pas abouti. Rien n'a été modifié — veuillez recommencer.",
       "mailboxAccountMismatch": "Vous vous êtes connecté avec un compte qui n’est pas la boîte, rien n’a donc été associé. Recommencez en vous connectant en tant que la boîte elle-même.",
-      "mailboxAccountUnverified": "Le compte de la boîte n’a pas pu être vérifié (l’API Gmail n’a pas répondu), rien n’a donc été associé. Réessayez dans un instant.",
-      "mailboxIsOwn": "C’est votre propre boîte aux lettres. Seule une boîte dédiée, et non celle d’une personne, peut être associée."
+      "mailboxAccountUnverified": "Le compte de la boîte n’a pas pu être lu via l’API Gmail (elle a renvoyé une erreur ou n’a pas répondu), rien n’a donc été associé. Vérifiez que l’API Gmail est activée pour le projet du client OAuth et que le scope https://mail.google.com/ a été accordé, puis associez à nouveau.",
+      "mailboxIsOwn": "C’est votre propre boîte aux lettres, et votre propre adresse ne peut pas être associée. Associez plutôt une boîte dédiée."
     },
     "validation": {
       "nameRequired": "Un nom est obligatoire — c'est ce que désigne ${connection:name}.",
@@ -5586,7 +5586,7 @@
     "modeNote": "Mode déclencheur : les e-mails lancent des tours de l'agent ; aucune réponse n'est jamais envoyée.",
     "openTriggerWarning": "N'importe qui sur Internet peut faire agir cet agent : il n'y a pas de liste d'expéditeurs autorisés, et les e-mails qui échouent à l'alignement DKIM/DMARC sont traités. Ajoutez des expéditeurs autorisés ou exigez l'authentification.",
     "connection": "Connexion",
-    "connectionHint": "Obligatoire. Le nom d'une connexion OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (mot de passe d'application) dont la liste autorisée contient imaps://<host> ou imap://<host>:143.",
+    "connectionHint": "Obligatoire. Le nom d’une connexion OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (mot de passe d’application), ou d’une connexion OAUTH2_AUTHORIZATION_CODE liée MAILBOX à laquelle cette adresse est associée (Google Workspace). Sa liste d’autorisation doit contenir imaps://<host> ou imap://<host>:143.",
     "address": "Adresse de la boîte",
     "addressHint": "Obligatoire. Chaque boîte ne peut appartenir qu'à une seule intégration.",
     "host": "Hôte IMAP",

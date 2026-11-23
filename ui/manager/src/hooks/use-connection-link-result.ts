@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import {
   isConnectionErrorCode,
+  listMailboxGrants,
   type ConnectionErrorCode,
 } from "@eddi/app-kit/lib/api/connections";
 import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
@@ -68,13 +69,27 @@ export function useConnectionLinkResult(): LinkOutcome {
       // An administrator's mailbox link. The list is refetched rather than
       // trusted: the parameter is a plain URL anyone can hand out.
       setOutcome({ kind: "mailboxLinked", connection: mailboxLinked });
-      void queryClient.invalidateQueries({ queryKey: mailboxGrantsKey(mailboxLinked) });
-      toast.success(
-        t("connections.mailbox.linked", {
-          name: mailboxLinked,
-          defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
-        }),
-      );
+      // As for `connected`: the refetch is the check. A hand-made URL, or a grant
+      // unlinked before this page rendered, is met with silence rather than a
+      // success claim; when the list cannot be read (it is eddi-admin only), the
+      // toast still fires, an unverifiable success being far more likely real.
+      // fetchQuery, not refetchQueries: the latter does nothing when no grants
+      // query exists yet, and the toast would then fire unchecked.
+      const announce = () =>
+        toast.success(
+          t("connections.mailbox.linked", {
+            name: mailboxLinked,
+            defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
+          }),
+        );
+      void queryClient
+        .fetchQuery({ queryKey: mailboxGrantsKey(mailboxLinked), queryFn: () => listMailboxGrants(mailboxLinked), staleTime: 0 })
+        .then(
+          (grants) => {
+            if (grants.some((g) => g.usable)) announce();
+          },
+          () => announce(),
+        );
     } else if (connected !== null) {
       setOutcome({ kind: "connected", connection: connected });
 
@@ -178,12 +193,12 @@ function linkErrorMessage(
     case "mailbox_account_unverified":
       return t(
         "connections.error.mailboxAccountUnverified",
-        "The mailbox's account could not be verified (the Gmail API did not answer), so nothing was linked. Try again shortly.",
+        "The mailbox's account could not be read from the Gmail API (it returned an error or did not answer), so nothing was linked. Check that the Gmail API is enabled for the OAuth client's project and the https://mail.google.com/ scope was granted, then link again.",
       );
     case "mailbox_is_own":
       return t(
         "connections.error.mailboxIsOwn",
-        "That is your own mailbox. Only a dedicated mailbox, not a person's, can be linked.",
+        "That is your own mailbox, and your own address cannot be linked. Link a dedicated mailbox instead.",
       );
     default:
       return t(

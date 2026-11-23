@@ -345,20 +345,32 @@ export function ConnectionDetailPage() {
     setDraft((prev) => {
       if (!prev) return prev;
       const next = bindingFor(prev.authType, binding);
+      const stored = baselineDocRef.current;
+      // Returning to the STORED binding (and type) restores what was saved with it,
+      // as changeAuthType does: a detour through MAILBOX must not quietly switch off
+      // a saved proxy-trust flag, nor lose a saved account check.
+      const returningToStored = stored !== null && prev.authType === stored.authType && next === stored.binding;
       // A MAILBOX connection needs its account check, and no other binding may
       // carry one; the proxy-trust flag is PER_USER-only.
       const oauth = prev.oauth
         ? {
             ...prev.oauth,
             accountCheck:
-              next === "MAILBOX" ? (prev.oauth.accountCheck ?? "google-gmail-profile") : null,
+              next === "MAILBOX"
+                ? ((returningToStored ? stored?.oauth?.accountCheck : null) ?? prev.oauth.accountCheck ?? "google-gmail-profile")
+                : null,
           }
         : prev.oauth;
       return {
         ...prev,
         binding: next,
         oauth,
-        allowUnverifiedPrincipal: next === "PER_USER" ? prev.allowUnverifiedPrincipal : false,
+        allowUnverifiedPrincipal:
+          next !== "PER_USER"
+            ? false
+            : returningToStored
+              ? (stored?.allowUnverifiedPrincipal ?? false)
+              : prev.allowUnverifiedPrincipal,
       };
     });
   }, []);

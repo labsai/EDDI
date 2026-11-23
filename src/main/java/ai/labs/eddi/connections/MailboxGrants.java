@@ -48,8 +48,21 @@ public class MailboxGrants {
      *             never echoes it)
      */
     public static String principalOf(String address) {
-        return PRINCIPAL_PREFIX + AddressNormalizer.normalize(address);
+        String normalized = AddressNormalizer.normalize(address);
+        if (normalized.length() > MAX_ADDRESS_LENGTH) {
+            throw new IllegalArgumentException("a mailbox address is at most " + MAX_ADDRESS_LENGTH + " characters");
+        }
+        return PRINCIPAL_PREFIX + normalized;
     }
+
+    /**
+     * The longest mailbox address a grant can be filed under: the grant store's
+     * principal column holds 255 characters (PostgreSQL {@code VARCHAR(255)}), and
+     * the prefix takes 8 of them. An addr-spec may be 254 characters, so the
+     * longest few are refused up front rather than failing as a store error after
+     * the provider has already issued a refresh token.
+     */
+    public static final int MAX_ADDRESS_LENGTH = 255 - PRINCIPAL_PREFIX.length();
 
     /**
      * The mailbox address a grant principal names, if it is a mailbox principal.

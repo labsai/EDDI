@@ -270,6 +270,19 @@ describe("MAILBOX — mirrors ConnectionConfiguration.validateAccountCheck", () 
     );
   });
 
+  it("compares origins canonically: an explicit default port is the same origin, another port is not", () => {
+    // The backend folds :443 away (ConnectionConfiguration.canonicalOrigin), so the
+    // Manager must not refuse what the server accepts.
+    expect(
+      validateConnection(mailbox("google-gmail-profile", ["imaps://imap.gmail.com", "https://GMAIL.googleapis.com:443/"])),
+    ).toEqual({});
+    expect(
+      validateConnection(mailbox("google-gmail-profile", ["imaps://imap.gmail.com", "https://gmail.googleapis.com:8443"]))[
+        "oauth.accountCheck"
+      ],
+    ).toBe("accountCheckOriginRequired");
+  });
+
   it("requires the Gmail API on the allowlist for google-gmail-profile", () => {
     expect(
       validateConnection(mailbox("google-gmail-profile", ["imaps://imap.gmail.com"]))["oauth.accountCheck"],

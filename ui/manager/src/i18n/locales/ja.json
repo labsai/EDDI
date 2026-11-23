@@ -4517,8 +4517,8 @@
       "exchangeFailed": "プロバイダーが連携を完了できませんでした。もう一度お試しください。続けて失敗する場合は、管理者がこの接続の設定を確認する必要があります。",
       "unknown": "連携は完了しませんでした。何も変更されていません — もう一度お試しください。",
       "mailboxAccountMismatch": "メールボックスではないアカウントでサインインしたため、何も連携されませんでした。最初からやり直し、メールボックス自体としてサインインしてください。",
-      "mailboxAccountUnverified": "メールボックスのアカウントを確認できなかったため（Gmail API が応答しませんでした）、何も連携されませんでした。しばらくしてからもう一度お試しください。",
-      "mailboxIsOwn": "それはあなた自身のメールボックスです。連携できるのは個人のものではない専用メールボックスだけです。"
+      "mailboxAccountUnverified": "Gmail API からメールボックスのアカウントを読み取れなかったため（API がエラーを返したか応答しませんでした）、何も連携されませんでした。OAuth クライアントのプロジェクトで Gmail API が有効になっていて、https://mail.google.com/ スコープが許可されていることを確認してから、再度連携してください。",
+      "mailboxIsOwn": "それはあなた自身のメールボックスで、自分のアドレスは連携できません。代わりに専用メールボックスを連携してください。"
     },
     "validation": {
       "nameRequired": "名前は必須です — ${connection:name} が指すのはこの名前です。",
@@ -5534,7 +5534,7 @@
     "modeNote": "トリガーモード：メールがエージェントのターンを開始します。返信は一切送信されません。",
     "openTriggerWarning": "インターネット上の誰でもこのエージェントを実行させられます。送信者の許可リストがなく、DKIM/DMARC アラインメントに失敗したメールも処理されます。許可する送信者を追加するか、認証を必須にしてください。",
     "connection": "接続",
-    "connectionHint": "必須。許可リストに imaps://<host> または imap://<host>:143 を含む、OAUTH2_CLIENT_CREDENTIALS（XOAUTH2）または BASIC（アプリパスワード）接続の名前。",
+    "connectionHint": "必須。OAUTH2_CLIENT_CREDENTIALS（XOAUTH2）または BASIC（アプリパスワード）接続の名前、またはこのアドレスが連携済みの MAILBOX バインドの OAUTH2_AUTHORIZATION_CODE 接続の名前（Google Workspace）。その許可リストには imaps://<host> または imap://<host>:143 が必要です。",
     "address": "メールボックスのアドレス",
     "addressHint": "必須。各メールボックスは 1 つの統合にのみ属せます。",
     "host": "IMAP ホスト",

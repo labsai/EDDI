@@ -348,6 +348,20 @@ export const ACCOUNT_CHECKS = ["google-gmail-profile"] as const;
 export const GMAIL_API_ORIGIN = "https://gmail.googleapis.com";
 
 /**
+ * `scheme://host[:port]` lower-cased with the default port folded away, as the
+ * backend's `ConnectionConfiguration.canonicalOrigin` compares origins; `null`
+ * for anything that does not parse. A non-default port stays distinct.
+ */
+function canonicalHttpsOrigin(origin: string): string | null {
+  try {
+    const url = new URL(origin.trim());
+    return `${url.protocol}//${url.host}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The bindings a given auth type may carry.
  *
  * The backend couples the two fields in both directions: `PER_USER` requires
@@ -616,7 +630,7 @@ export function validateConnection(config: ValidatableConnection): ConnectionErr
         errors["oauth.accountCheck"] = "accountCheckRequired";
       } else if (
         accountCheck === "google-gmail-profile" &&
-        !allowlist.some((origin) => origin.trim().replace(/\/+$/, "").toLowerCase() === GMAIL_API_ORIGIN)
+        !allowlist.some((origin) => canonicalHttpsOrigin(origin) === GMAIL_API_ORIGIN)
       ) {
         errors["oauth.accountCheck"] = "accountCheckOriginRequired";
       }

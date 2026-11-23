@@ -20,6 +20,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -170,7 +171,12 @@ class OAuthTokenServiceMailboxRecheckTest {
         // The next request refreshes and checks again rather than serving it.
         when(accountCheck.check(any(), any(), any())).thenReturn(MailboxAccountCheck.Outcome.MATCH);
         assertEquals("ya29.refreshed", service().accessToken(connection(), PRINCIPAL));
-        verify(tokenClient, times(2)).refresh(any(), anyString(), anyString());
+        // The retry must spend the refresh token the first refresh rotated to, or a
+        // provider
+        // that invalidates the previous one would log the mailbox out.
+        var refreshTokens = ArgumentCaptor.forClass(String.class);
+        verify(tokenClient, times(2)).refresh(any(), anyString(), refreshTokens.capture());
+        assertEquals(List.of("old-refresh", "1//rotated"), refreshTokens.getAllValues());
     }
 
     @Test

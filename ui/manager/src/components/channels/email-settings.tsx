@@ -184,7 +184,7 @@ export function EmailPlatformFields({
             {connectionNames.map((n) => (<option key={n} value={n} />))}
           </datalist>
           <p className={hintClass}>
-            {t("emailChannel.connectionHint", "Required. The name of an OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) or BASIC (app password) connection whose allowlist contains imaps://<host> or imap://<host>:143.")}
+            {t("emailChannel.connectionHint", "Required. The name of an OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) or BASIC (app password) connection, or of a MAILBOX-bound OAUTH2_AUTHORIZATION_CODE connection on which this address is linked (Google Workspace). Its allowlist must contain imaps://<host> or imap://<host>:143.")}
           </p>
           {problemFor("connectionRequired", "connectionReference")}
           {mailboxConnection && mailboxGrants.isSuccess && mailboxAddress && (

@@ -180,8 +180,14 @@ public class EmailOwnerNotifier {
                     + ".\n\nMail keeps being processed. No content of the conversation is included here.\n";
         } else {
             subject = "[EDDI] Email integration paused: " + name;
-            text = "The email integration '" + name + "' (" + integrationId + ") stopped taking new mail: " + reason.text
-                    + ".\n\nMail that arrives meanwhile stays in the mailbox and is processed later. Nothing was sent to any sender.\n";
+            text = "The email integration '" + name + "' (" + integrationId + ") stopped taking new mail: " + reason.text + ".\n\n"
+                    + (reason == Reason.MAILBOX_NOT_LINKED
+                            // A mailbox that was never read has no cursor yet: its first poll
+                            // after the link starts at the mail that arrives from then on.
+                            ? "Mail stays in the mailbox. Once it is linked again, mail that arrived meanwhile is processed if this "
+                                    + "integration had already read the mailbox before; a mailbox it never read is read from the first poll after the link on. "
+                            : "Mail that arrives meanwhile stays in the mailbox and is processed later. ")
+                    + "Nothing was sent to any sender.\n";
         }
         State state;
         String error = null;

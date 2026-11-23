@@ -353,6 +353,49 @@ describe("ConnectionDetailPage", () => {
     expect(sent[0]!.allowUnverifiedPrincipal).toBe(true);
   });
 
+  it("restores a stored proxy-trust flag after a detour through the MAILBOX binding", async () => {
+    const user = userEvent.setup();
+    const sent = captureSave();
+    server.use(
+      http.get("*/connectionstore/connections/:id", ({ request }) => {
+        if (new URL(request.url).pathname.endsWith("/descriptors")) return;
+        return HttpResponse.json({
+          name: "google-drive",
+          authType: "OAUTH2_AUTHORIZATION_CODE",
+          binding: "PER_USER",
+          allowUnverifiedPrincipal: true,
+          staticAuth: null,
+          oauth: {
+            authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+            tokenUrl: "https://oauth2.googleapis.com/token",
+            clientId: "id",
+            clientSecret: "${vault:google-client-secret}",
+            scopes: [],
+            extraAuthParams: {},
+            usePkce: true,
+            clientAuthMethod: "client_secret_basic",
+            discoveryUrl: null,
+          },
+          baseUrlAllowlist: ["https://www.googleapis.com"],
+          timeoutMs: null,
+        });
+      }),
+    );
+    renderDetail("proxied");
+    await screen.findByTestId("connection-name-input");
+    expect(screen.getByTestId("allow-unverified-principal")).toBeChecked();
+
+    await user.click(screen.getByTestId("connection-binding-choice-MAILBOX"));
+    await confirmAuthChange(user);
+    await user.click(screen.getByTestId("connection-binding-choice-PER_USER"));
+
+    expect(screen.getByTestId("allow-unverified-principal")).toBeChecked();
+    await user.click(screen.getByTestId("save-connection-btn"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.binding).toBe("PER_USER");
+    expect(sent[0]!.allowUnverifiedPrincipal).toBe(true);
+  });
+
   it("keeps a MAILBOX connection's account check across a type detour and back", async () => {
     // The check is dropped on any other binding (the backend refuses it there);
     // coming back to the stored MAILBOX binding must bring it back, or the draft

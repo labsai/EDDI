@@ -11,7 +11,15 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,6 +69,34 @@ class OAuthStateStorePostgresIT extends PostgresTestBase {
         assertEquals("68a1b2c3d4e5f60718293a4b", claimed.getConnectionId());
         assertEquals("nonce-hash", claimed.getNonceHash());
         assertFalse(store.claim(written.getState()).isPresent(), "single use");
+    }
+
+    @Test
+    @DisplayName("two concurrent claims of one mailbox-link state: exactly one wins, and it keeps the mailbox identity")
+    void concurrentClaimHasOneWinner() throws Exception {
+        var store = new PostgresOAuthStateStore(createDataSourceInstance());
+        OAuthState written = row("support@company.example", "linker-hash");
+        store.create(written);
+
+        var start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Callable<Optional<OAuthState>> claim = () -> {
+                start.await();
+                return store.claim(written.getState());
+            };
+            Future<Optional<OAuthState>> first = pool.submit(claim);
+            Future<Optional<OAuthState>> second = pool.submit(claim);
+            start.countDown();
+            List<Optional<OAuthState>> results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+
+            List<OAuthState> winners = results.stream().flatMap(Optional::stream).toList();
+            assertEquals(1, winners.size(), "a state is single-use under concurrency, not only on replay");
+            assertEquals("support@company.example", winners.get(0).getMailboxAddress());
+            assertEquals("linker-hash", winners.get(0).getLinkerEmailHash());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

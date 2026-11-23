@@ -4517,8 +4517,8 @@
       "exchangeFailed": "Der Anbieter hat die Verknüpfung nicht abgeschlossen. Versuchen Sie es erneut; bleibt es dabei, muss jemand mit Administrationsrechten die Einstellungen dieser Verbindung prüfen.",
       "unknown": "Die Verknüpfung wurde nicht abgeschlossen. Es wurde nichts geändert — bitte neu beginnen.",
       "mailboxAccountMismatch": "Sie haben sich mit einem Konto angemeldet, das nicht das Postfach ist, daher wurde nichts verknüpft. Beginnen Sie erneut und melden Sie sich als das Postfach selbst an.",
-      "mailboxAccountUnverified": "Das Konto des Postfachs konnte nicht geprüft werden (die Gmail-API antwortete nicht), daher wurde nichts verknüpft. Versuchen Sie es gleich noch einmal.",
-      "mailboxIsOwn": "Das ist Ihr eigenes Postfach. Nur ein dediziertes Postfach, nicht das einer Person, kann verknüpft werden."
+      "mailboxAccountUnverified": "Das Konto des Postfachs konnte nicht über die Gmail-API gelesen werden (sie meldete einen Fehler oder antwortete nicht), daher wurde nichts verknüpft. Prüfen Sie, ob die Gmail-API für das Projekt des OAuth-Clients aktiviert ist und der Scope https://mail.google.com/ gewährt wurde, und verknüpfen Sie dann erneut.",
+      "mailboxIsOwn": "Das ist Ihr eigenes Postfach, und Ihre eigene Adresse kann nicht verknüpft werden. Verknüpfen Sie stattdessen ein dediziertes Postfach."
     },
     "validation": {
       "nameRequired": "Ein Name ist erforderlich — darauf verweist ${connection:name}.",
@@ -5534,7 +5534,7 @@
     "modeNote": "Trigger-Modus: E-Mails starten Agenten-Turns; es wird nie eine Antwort gesendet.",
     "openTriggerWarning": "Jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und E-Mails ohne gültige DKIM/DMARC-Ausrichtung werden verarbeitet. Fügen Sie erlaubte Absender hinzu oder verlangen Sie Authentifizierung.",
     "connection": "Verbindung",
-    "connectionHint": "Pflichtfeld. Der Name einer OAUTH2_CLIENT_CREDENTIALS- (XOAUTH2) oder BASIC-Verbindung (App-Passwort), deren Allowlist imaps://<host> oder imap://<host>:143 enthält.",
+    "connectionHint": "Pflichtfeld. Der Name einer OAUTH2_CLIENT_CREDENTIALS- (XOAUTH2) oder BASIC-Verbindung (App-Passwort) oder einer MAILBOX-gebundenen OAUTH2_AUTHORIZATION_CODE-Verbindung, mit der diese Adresse verknüpft ist (Google Workspace). Ihre Allowlist muss imaps://<host> oder imap://<host>:143 enthalten.",
     "address": "Postfachadresse",
     "addressHint": "Pflichtfeld. Jedes Postfach kann nur zu einer Integration gehören.",
     "host": "IMAP-Host",

@@ -217,6 +217,13 @@ export function CreateConnectionDialog({
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
 
+  /**
+   * The account-check error that only an origin can fix (the Gmail API missing
+   * from the allowlist). It belongs to the origins step: on the credentials step
+   * it would block Next before the user has reached the field that fixes it.
+   */
+  const originDependentAccountCheck = errors["oauth.accountCheck"] === "accountCheckOriginRequired";
+
   /** Which errors belong to which step, so Next only blocks on this step's fields. */
   const stepErrors = useMemo(() => {
     switch (step) {
@@ -228,15 +235,19 @@ export function CreateConnectionDialog({
         // reached yet is the classic way a wizard becomes unusable.
         return Object.fromEntries(
           Object.entries(errors).filter(
-            ([field]) => field !== "name" && field !== "baseUrlAllowlist",
+            ([field]) =>
+              field !== "name" &&
+              field !== "baseUrlAllowlist" &&
+              !(field === "oauth.accountCheck" && originDependentAccountCheck),
           ),
         );
       case "origins":
-        return errors.baseUrlAllowlist
-          ? { baseUrlAllowlist: errors.baseUrlAllowlist }
-          : {};
+        return {
+          ...(errors.baseUrlAllowlist ? { baseUrlAllowlist: errors.baseUrlAllowlist } : {}),
+          ...(originDependentAccountCheck ? { "oauth.accountCheck": errors["oauth.accountCheck"] } : {}),
+        };
     }
-  }, [errors, step]);
+  }, [errors, step, originDependentAccountCheck]);
 
   const stepIsValid = Object.keys(stepErrors).length === 0;
 
@@ -401,7 +412,13 @@ export function CreateConnectionDialog({
                 onPatchStatic={patchStatic}
                 onPatchOAuth={patchOAuth}
                 onBindingChange={changeBinding}
-                errors={touched ? errors : {}}
+                errors={
+                  touched
+                    ? originDependentAccountCheck
+                      ? { ...errors, "oauth.accountCheck": undefined }
+                      : errors
+                    : {}
+                }
                 idPrefix="create-connection"
               />
             )}
@@ -427,6 +444,12 @@ export function CreateConnectionDialog({
                   error={touched ? errors.baseUrlAllowlist : undefined}
                   testId="create-connection-origins"
                 />
+                {touched && originDependentAccountCheck && (
+                  <ValidationMessage
+                    code={errors["oauth.accountCheck"]}
+                    testId="create-connection-origins-account-check-error"
+                  />
+                )}
               </div>
             )}
           </div>

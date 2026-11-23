@@ -804,8 +804,14 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
     private static String requireMailboxAddress(MailboxRequest request) {
         String raw = request == null ? null : request.address();
-        return AddressNormalizer.tryNormalize(raw)
+        String address = AddressNormalizer.tryNormalize(raw)
                 .orElseThrow(() -> new BadRequestException("'address' must be the dedicated mailbox's plain email address."));
+        if (address.length() > MailboxGrants.MAX_ADDRESS_LENGTH) {
+            // Refused before a state row or a provider round trip, not as a store
+            // failure after the provider has issued a refresh token.
+            throw new BadRequestException("'address' may be at most " + MailboxGrants.MAX_ADDRESS_LENGTH + " characters for a mailbox grant.");
+        }
+        return address;
     }
 
     /**

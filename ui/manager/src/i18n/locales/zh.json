@@ -4517,8 +4517,8 @@
       "exchangeFailed": "服务商未能完成关联。请重试；若持续失败，需要管理员检查此连接的设置。",
       "unknown": "关联未完成。没有任何改动 —— 请重新开始。",
       "mailboxAccountMismatch": "您登录的账户不是该邮箱，因此未关联任何内容。请重新开始，并以该邮箱本身登录。",
-      "mailboxAccountUnverified": "无法验证邮箱的账户（Gmail API 未响应），因此未关联任何内容。请稍后重试。",
-      "mailboxIsOwn": "这是您自己的邮箱。只能关联专用邮箱，不能关联个人邮箱。"
+      "mailboxAccountUnverified": "无法通过 Gmail API 读取邮箱的账户（API 返回了错误或未响应），因此未关联任何内容。请确认 OAuth 客户端所在项目已启用 Gmail API 并已授予 https://mail.google.com/ 范围，然后重新关联。",
+      "mailboxIsOwn": "这是您自己的邮箱，不能关联您自己的地址。请改为关联一个专用邮箱。"
     },
     "validation": {
       "nameRequired": "必须填写名称 —— 它正是 ${connection:name} 所指向的对象。",
@@ -5534,7 +5534,7 @@
     "modeNote": "触发模式：邮件会启动智能体轮次；永远不会发送任何回复。",
     "openTriggerWarning": "互联网上的任何人都能让此智能体运行：没有发件人允许列表，且未通过 DKIM/DMARC 对齐的邮件也会被处理。请添加允许的发件人或要求身份验证。",
     "connection": "连接",
-    "connectionHint": "必填。一个 OAUTH2_CLIENT_CREDENTIALS（XOAUTH2）或 BASIC（应用密码）连接的名称，其允许列表须包含 imaps://<host> 或 imap://<host>:143。",
+    "connectionHint": "必填。OAUTH2_CLIENT_CREDENTIALS（XOAUTH2）或 BASIC（应用密码）连接的名称，或已关联此地址的、绑定为 MAILBOX 的 OAUTH2_AUTHORIZATION_CODE 连接的名称（Google Workspace）。其允许列表必须包含 imaps://<host> 或 imap://<host>:143。",
     "address": "邮箱地址",
     "addressHint": "必填。每个邮箱只能属于一个集成。",
     "host": "IMAP 主机",

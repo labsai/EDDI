@@ -358,6 +358,21 @@ class RestConnectionMailboxGrantTest {
         }
 
         @Test
+        @DisplayName("an address whose principal would not fit the grant store is refused before any state or provider round trip")
+        void overlongAddressRefused() {
+            // A valid 251-character addr-spec: mailbox: + it would exceed the 255-character
+            // principal column.
+            String overlong = "a".repeat(64) + "@" + "x".repeat(60) + "." + "y".repeat(60) + "." + "z".repeat(60) + ".com";
+            assertTrue(overlong.length() > MailboxGrants.MAX_ADDRESS_LENGTH);
+
+            var refused = assertThrows(BadRequestException.class,
+                    () -> resource().authorizeMailbox(CONNECTION_NAME, new IRestConnectionAuthorization.MailboxRequest(overlong), null));
+            assertTrue(refused.getMessage().contains(String.valueOf(MailboxGrants.MAX_ADDRESS_LENGTH)), refused.getMessage());
+            verify(stateStore, never()).create(any());
+            assertThrows(IllegalArgumentException.class, () -> MailboxGrants.principalOf(overlong));
+        }
+
+        @Test
         @DisplayName("a malformed address is refused")
         void malformedAddress() {
             assertThrows(BadRequestException.class,

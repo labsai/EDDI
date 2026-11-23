@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -47,15 +47,30 @@ export function MailboxGrantsPanel({
     onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxGrantsKey(connectionName) }),
   });
 
+  // The editor above stays editable while the authorize call is in flight, so
+  // whether leaving would discard edits is read when the page actually leaves,
+  // not when the button was pressed: a top-level navigation is not covered by
+  // the in-app unsaved-changes guard.
+  const unsavedRef = useRef(unsavedChanges);
+  useEffect(() => {
+    unsavedRef.current = unsavedChanges;
+  }, [unsavedChanges]);
+
   const startLink = async () => {
     const target = address.trim();
-    if (!target || leaving) return;
+    if (!target || leaving || unsavedRef.current) return;
     setLeaving(true);
     try {
       const { authorizationUrl } = await authorizeMailbox(connectionName, target, location.pathname);
       if (!isSafeAuthorizationUrl(authorizationUrl)) {
         setLeaving(false);
         toast.error(t("connections.mailbox.linkStartFailed", "Could not start linking the mailbox."));
+        return;
+      }
+      if (unsavedRef.current) {
+        // Edited meanwhile: stay. The state row the backend wrote expires unused.
+        setLeaving(false);
+        toast.error(t("connections.mailbox.saveFirst", "Save or discard your changes first: linking leaves this page."));
         return;
       }
       navigateAway(authorizationUrl);

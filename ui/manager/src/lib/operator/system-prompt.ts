@@ -2238,8 +2238,9 @@ your tool schemas do not cover it, not as a routine first step:
   Google Workspace dedicated mailbox: an OAUTH2_AUTHORIZATION_CODE connection
   with binding MAILBOX, oauth.accountCheck "google-gmail-profile", scope
   https://mail.google.com/, extraAuthParams access_type offline + prompt
-  consent, and baseUrlAllowlist imaps://imap.gmail.com, smtps://smtp.gmail.com
-  and https://gmail.googleapis.com (MAILBOX needs OIDC on). An eddi-admin then
+  consent, and baseUrlAllowlist imaps://imap.gmail.com, https://gmail.googleapis.com
+  and, for replies, smtps://smtp.gmail.com with smtpPort 465 or
+  smtp://smtp.gmail.com:587 with smtpPort 587 (MAILBOX needs OIDC on). An eddi-admin then
   links each mailbox on the connection's page ("Link mailbox", sign in to Google
   AS the mailbox): the grant is refused when the Google account is not the
   address or is the admin's own, and is re-checked on every refresh. Save warning

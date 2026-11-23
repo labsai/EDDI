@@ -4559,8 +4559,8 @@
       "exchangeFailed": "O provedor não concluiu a associação. Tente de novo; se continuar falhando, um administrador precisa revisar as configurações desta conexão.",
       "unknown": "A associação não foi concluída. Nada foi alterado — comece de novo, por favor.",
       "mailboxAccountMismatch": "Você entrou com uma conta que não é a caixa, então nada foi vinculado. Comece de novo e entre como a própria caixa.",
-      "mailboxAccountUnverified": "Não foi possível verificar a conta da caixa (a API do Gmail não respondeu), então nada foi vinculado. Tente novamente em instantes.",
-      "mailboxIsOwn": "Essa é a sua própria caixa de correio. Só uma caixa dedicada, não a de uma pessoa, pode ser vinculada."
+      "mailboxAccountUnverified": "Não foi possível ler a conta da caixa pela API do Gmail (ela retornou um erro ou não respondeu), então nada foi vinculado. Verifique se a API do Gmail está ativada para o projeto do cliente OAuth e se o escopo https://mail.google.com/ foi concedido, e vincule novamente.",
+      "mailboxIsOwn": "Essa é a sua própria caixa de correio, e o seu próprio endereço não pode ser vinculado. Vincule uma caixa dedicada."
     },
     "validation": {
       "nameRequired": "Um nome é obrigatório — é a ele que ${connection:name} se refere.",
@@ -5586,7 +5586,7 @@
     "modeNote": "Modo gatilho: o e-mail inicia turnos do agente; nenhuma resposta é enviada, nunca.",
     "openTriggerWarning": "Qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail que falha no alinhamento DKIM/DMARC é processado. Adicione remetentes permitidos ou exija autenticação.",
     "connection": "Conexão",
-    "connectionHint": "Obrigatório. O nome de uma conexão OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (senha de aplicativo) cuja lista permitida contenha imaps://<host> ou imap://<host>:143.",
+    "connectionHint": "Obrigatório. O nome de uma conexão OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (senha de app), ou de uma conexão OAUTH2_AUTHORIZATION_CODE vinculada como MAILBOX na qual este endereço está vinculado (Google Workspace). Sua lista de permissões deve conter imaps://<host> ou imap://<host>:143.",
     "address": "Endereço da caixa postal",
     "addressHint": "Obrigatório. Cada caixa postal pode pertencer a apenas uma integração.",
     "host": "Host IMAP",
