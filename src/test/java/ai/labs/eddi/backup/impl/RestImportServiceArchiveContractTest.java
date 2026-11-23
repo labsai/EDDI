@@ -76,6 +76,7 @@ import static org.mockito.Mockito.*;
  * </ul>
  */
 @DisplayName("RestImportService — archive contract")
+@SharedWorkingDirTmp
 class RestImportServiceArchiveContractTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

@@ -17,3 +17,14 @@ data.
   sources, three times per class (104 s on CI, 126 s locally). A `contains()` pre-check that is a
   necessary condition of that regex, plus one scan per class, brings it to under 2 s. The
   extracted property map was diffed before and after: byte-identical.
+- **Unit tests run in three JVMs on CI.** `pom.xml` gains a `surefire.forkCount` property (default
+  1, so local builds are unchanged — other worktrees share dev machines) and Build & Test passes
+  `-Dsurefire.forkCount=3`. A dedicated property, not surefire's `forkCount`, because failsafe reads
+  that one too. A full local run with three forks surfaced one real cross-fork hazard: the 32
+  `backup.impl` tests that construct `RestExportService`/`RestImportService` share
+  `<working dir>/tmp/`, and one fork's cleanup deleted another's export mid-test (reproduced 1 in 2
+  runs). [`@SharedWorkingDirTmp`](../../src/test/java/ai/labs/eddi/backup/impl/SharedWorkingDirTmp.java)
+  now serialises exactly those classes across forks with an OS file lock (3 of 3 clean runs after),
+  and `SharedWorkingDirTmpGuardTest` fails if a test constructs either service without it, or if a
+  third production class starts deriving a path from `user.dir` (mutation-checked).
+  No unit test boots Quarkus, so forks cannot clash on Quarkus or Mongo dev-service ports.

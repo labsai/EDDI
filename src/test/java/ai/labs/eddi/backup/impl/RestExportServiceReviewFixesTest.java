@@ -77,6 +77,7 @@ import static org.mockito.Mockito.when;
  * leave in a field the generic scrubber cannot name.
  */
 @DisplayName("RestExportService — review fixes")
+@SharedWorkingDirTmp
 class RestExportServiceReviewFixesTest {
 
     private static final String AGENT_ID = "aaaa1111222233334444review";

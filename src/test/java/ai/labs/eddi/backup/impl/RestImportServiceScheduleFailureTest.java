@@ -71,6 +71,7 @@ import static org.mockito.Mockito.when;
  * operator's schedule stays replaced by the archive's.
  */
 @DisplayName("RestImportService — schedules that cannot be written")
+@SharedWorkingDirTmp
 class RestImportServiceScheduleFailureTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

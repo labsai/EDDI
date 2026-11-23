@@ -39,6 +39,7 @@ import static org.mockito.Mockito.when;
  * restores the target's own key. What an editor gets back must still be the
  * redacted copy.
  */
+@SharedWorkingDirTmp
 class RestImportServicePreviewRedactionTest {
 
     private static final String TARGET_AGENT_ID = "aaaaaaaaaaaaaaaaaaaaaaaa";

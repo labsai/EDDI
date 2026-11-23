@@ -44,6 +44,7 @@ import static org.mockito.Mockito.when;
  * space it is importing into.
  */
 @DisplayName("RestImportService — merge target scoping")
+@SharedWorkingDirTmp
 class RestImportServiceMergeScopeTest {
 
     private static final String ORIGIN = "6650f0c2a1b2c3d4e5f60718";

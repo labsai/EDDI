@@ -83,6 +83,7 @@ import static org.mockito.Mockito.when;
  * the four paths that unpack a ZIP.</li>
  * </ul>
  */
+@SharedWorkingDirTmp
 class RestImportServiceRollbackAndCleanupTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";

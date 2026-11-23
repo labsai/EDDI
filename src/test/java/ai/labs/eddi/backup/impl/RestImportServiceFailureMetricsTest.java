@@ -59,6 +59,7 @@ import static org.mockito.Mockito.when;
  * added for.
  */
 @DisplayName("RestImportService — what counts as a failed import")
+@SharedWorkingDirTmp
 class RestImportServiceFailureMetricsTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

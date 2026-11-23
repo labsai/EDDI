@@ -56,6 +56,7 @@ import static org.mockito.Mockito.*;
  * validateSourceUrl() calls.
  */
 @DisplayName("RestImportService — Live Sync Endpoint Coverage")
+@SharedWorkingDirTmp
 class RestImportServiceSyncCoverageTest {
 
     private IZipArchive zipArchive;

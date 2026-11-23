@@ -34,6 +34,7 @@ import static org.mockito.Mockito.verify;
  * instance used, and may not name another knowledge base's store.
  */
 @DisplayName("RestImportService — the store of an imported knowledge base")
+@SharedWorkingDirTmp
 class RestImportServiceRagStorageTest {
 
     private RestImportService importService;

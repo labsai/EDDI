@@ -51,6 +51,7 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * and prepareZipFilename branches.
  */
 @DisplayName("RestExportService — Extended Branch Coverage")
+@SharedWorkingDirTmp
 class RestExportServiceBranchTest {
 
     @Mock

@@ -1275,9 +1275,13 @@ jobs:
         # the UIs are built. They have their own ui-* jobs, and the image is built
         # once, by Build Image. The resource tests that read the SPA shells use the
         # stand-ins under src/test/resources.
-        run: ./mvnw clean test -DskipUi=true -B
+        # -Dsurefire.forkCount=3: the ~37k unit tests ran in one JVM on a 4-vCPU
+        # runner (13.5 min of pure test time). Three forks share the classes between
+        # them; tests that touch <working dir>/tmp are serialised across forks by
+        # @SharedWorkingDirTmp (see the surefire.forkCount property in pom.xml).
+        run: ./mvnw clean test -DskipUi=true -B -Dsurefire.forkCount=3
 
-      # Integration Tests restores this instead of running the unit tests again: the
+      # Coverage Gate restores this instead of running the unit tests again: the
       # merged 90/80 coverage gate needs their execution data, not a second run.
       - name: Upload unit-test coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

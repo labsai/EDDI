@@ -77,6 +77,7 @@ import static org.mockito.Mockito.when;
  * there.
  */
 @DisplayName("RestExportService — connections")
+@SharedWorkingDirTmp
 class RestExportServiceConnectionsTest {
 
     private static final String AGENT_ID = "d13connectionsexportagent";

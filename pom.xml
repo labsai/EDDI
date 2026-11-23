@@ -40,6 +40,14 @@
              coverage gate. It follows skipTests, so -DskipTests still skips both. -->
         <skipTests>false</skipTests>
         <skipUTs>${skipTests}</skipUTs>
+        <!-- How many JVMs run the unit tests in parallel. 1 locally, where other
+             worktrees' builds share the machine; CI's Build & Test passes
+             -Dsurefire.forkCount=3 on its 4-vCPU runner. A dedicated property, not
+             surefire's own `forkCount`, because failsafe reads that one too and the
+             integration tests must stay in one JVM (fixed Quarkus test ports).
+             Tests that share <working dir>/tmp are serialised across forks by
+             @SharedWorkingDirTmp (src/test/java/ai/labs/eddi/backup/impl). -->
+        <surefire.forkCount>1</surefire.forkCount>
         <!-- The three UIs (ui/manager, ui/workforce, ui/chat) are built by Maven in
              prepare-package and copied into target/classes just before the jar is
              assembled. compile, test and quarkus:dev therefore never run npm, while
@@ -758,6 +766,7 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <skipTests>${skipUTs}</skipTests>
+                    <forkCount>${surefire.forkCount}</forkCount>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg.
                          The jdk.incubator.vector add-modules flag mirrors the container
                          image (src/main/docker/Dockerfile) and mise.toml, so the test JVM

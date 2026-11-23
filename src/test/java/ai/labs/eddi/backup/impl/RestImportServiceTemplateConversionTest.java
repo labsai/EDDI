@@ -46,6 +46,7 @@ import static org.mockito.Mockito.mock;
  * private, so it is reached by reflection.
  */
 @DisplayName("RestImportService — template conversion on import")
+@SharedWorkingDirTmp
 class RestImportServiceTemplateConversionTest {
 
     private static final String ID = "aaaa11112222333344445555";

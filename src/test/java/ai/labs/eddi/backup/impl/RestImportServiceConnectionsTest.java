@@ -68,6 +68,7 @@ import static org.mockito.Mockito.when;
  * reason to read this instance's log.
  */
 @DisplayName("RestImportService — connections")
+@SharedWorkingDirTmp
 class RestImportServiceConnectionsTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

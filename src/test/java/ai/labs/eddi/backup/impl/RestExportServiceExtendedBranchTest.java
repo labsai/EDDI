@@ -66,6 +66,7 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * extraction, schedule export, and preview export branches.
  */
 @DisplayName("RestExportService — Extended Export Coverage")
+@SharedWorkingDirTmp
 class RestExportServiceExtendedBranchTest {
 
     @Mock

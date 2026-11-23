@@ -71,6 +71,7 @@ import static org.mockito.Mockito.when;
  * parser is rolled back with everything else.
  */
 @DisplayName("RestImportService — review fixes")
+@SharedWorkingDirTmp
 class RestImportServiceReviewFixesTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";

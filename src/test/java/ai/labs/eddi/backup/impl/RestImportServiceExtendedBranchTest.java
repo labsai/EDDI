@@ -44,6 +44,7 @@ import static org.mockito.Mockito.*;
  * normalizeLegacyUris/normalizeVaultReferences combinations.
  */
 @DisplayName("RestImportService — Extended Branch Coverage")
+@SharedWorkingDirTmp
 class RestImportServiceExtendedBranchTest {
 
     private IZipArchive zipArchive;

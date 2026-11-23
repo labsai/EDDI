@@ -70,6 +70,7 @@ import static org.mockito.Mockito.when;
  * document, and those have to import exactly as they always did.
  */
 @DisplayName("RestImportService — parser documents travel with the agent")
+@SharedWorkingDirTmp
 class RestImportServiceParserTravelTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

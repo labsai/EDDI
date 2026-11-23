@@ -52,6 +52,7 @@ import static org.mockito.Mockito.*;
  * snippet reference extraction, preview logic, export flow, schedules, and
  * helper methods.
  */
+@SharedWorkingDirTmp
 class RestExportServiceTest {
 
     private IDocumentDescriptorStore documentDescriptorStore;

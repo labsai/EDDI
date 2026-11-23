@@ -69,6 +69,7 @@ import static org.mockito.Mockito.when;
  * out, so the wizard still has something to show.
  */
 @DisplayName("RestImportService — snippet resilience")
+@SharedWorkingDirTmp
 class RestImportServiceSnippetResilienceTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

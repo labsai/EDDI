@@ -71,6 +71,7 @@ import static org.mockito.Mockito.when;
  * a failed merge must still bring back the content from <em>before</em> the
  * import — not the intermediate version the first workflow's update wrote.
  */
+@SharedWorkingDirTmp
 class RestImportServiceMergeSharedExtensionTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";

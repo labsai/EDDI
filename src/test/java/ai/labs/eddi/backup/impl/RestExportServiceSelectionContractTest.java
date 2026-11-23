@@ -73,6 +73,7 @@ import static org.mockito.Mockito.when;
  * The archive contents are sampled while the ZIP is being built, because the
  * export deletes its scratch tree as soon as it returns.
  */
+@SharedWorkingDirTmp
 class RestExportServiceSelectionContractTest {
 
     private static final String AGENT_ID = "b1selectiveexportagent";

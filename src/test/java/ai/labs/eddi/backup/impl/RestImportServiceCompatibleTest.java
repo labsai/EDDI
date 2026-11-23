@@ -82,6 +82,7 @@ import static org.mockito.Mockito.when;
  * conversations that had already followed onto the aborted import's content.
  */
 @DisplayName("RestImportService — declaring an import compatible")
+@SharedWorkingDirTmp
 class RestImportServiceCompatibleTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

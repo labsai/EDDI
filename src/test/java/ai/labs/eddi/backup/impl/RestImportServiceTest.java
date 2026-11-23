@@ -47,6 +47,7 @@ import static org.mockito.Mockito.*;
  * logic, sync endpoint edge cases, URI replacement, and buildResourceDiff via
  * the merge preview flow.
  */
+@SharedWorkingDirTmp
 class RestImportServiceTest {
 
     private IZipArchive zipArchive;

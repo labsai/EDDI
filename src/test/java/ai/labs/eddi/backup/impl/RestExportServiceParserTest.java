@@ -66,6 +66,7 @@ import static org.mockito.Mockito.when;
  * export deletes its scratch tree as soon as it returns.
  */
 @DisplayName("RestExportService — parser documents")
+@SharedWorkingDirTmp
 class RestExportServiceParserTest {
 
     private static final String AGENT_ID = "aaaa00001111222233334444";

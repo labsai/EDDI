@@ -42,6 +42,7 @@ import static org.mockito.Mockito.mock;
  * never matched, while every screen went on showing the source as scheduled.
  */
 @DisplayName("RestImportService — ingestion crons from an archive")
+@SharedWorkingDirTmp
 class RestImportServiceRagCronTest {
 
     private RestImportService importService;
