@@ -72,7 +72,11 @@ data.
   only once CodeRabbit has reviewed its current head, every finding is fixed or answered, every
   thread is resolved and it is approved and green — never armed early; the queue replaces the
   manual "check main's run before each merge" routine and the one-at-a-time rule, and a PR branch
-  takes `origin/main` only to resolve a conflict. CONTRIBUTING.md, `docs/release-versioning.md`
+  takes `origin/main` only to resolve a conflict. Queueing happens only when the user names the
+  PR; `.claude/skills/ship-pr/SKILL.md` §7 holds the readiness checklist (CodeRabbit's description
+  column and review SHA, the thread audit, body-only findings, approval and CI) and the commands —
+  `gh pr merge <n> --squash`, never `--auto`, confirmed through GraphQL `isInMergeQueue` because
+  `gh pr view --json` has no merge-queue field. CONTRIBUTING.md, `docs/release-versioning.md`
   and the Manager's AGENTS.md/CONTRIBUTING.md describe CI Gate, Coverage Gate and the Vitest
   shards.
 

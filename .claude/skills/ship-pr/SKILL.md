@@ -466,3 +466,39 @@ Report: what was fixed, what was pushed back on and why, what was left open for 
 what was deferred, whether CodeRabbit actually reviewed the current head or was rate
 limited, and the CI state you observed. Never claim a green run you did not read. **Do not
 merge** and do not enable auto-merge unless asked.
+
+## 7. Queueing — only when the user says so
+
+When `main` has a merge queue, "merge it" means "put it in the queue", and it still happens
+only on the user's word for a PR they name ("queue #1545"). Before running anything, check
+every item below on the PR's **current head**; if one fails, stop and report which, instead
+of queueing:
+
+1. **CodeRabbit reviewed the current head.** `gh pr checks <n> | grep -i coderabbit` must say
+   *Review completed* — `pass` alone is not enough, "rate limited" or "limit reached" means
+   not reviewed — and its latest review must be on the head SHA (the query below prints both).
+2. **Every thread is answered.** `bash .claude/skills/ship-pr/pr-threads.sh <n> --all`: every
+   bot-opened thread resolved, `0 with no reply from you`, and every open human thread has a
+   disposition in your report.
+3. **Every finding without a thread is answered** — nitpicks, outside-diff and suppressed
+   comments in review bodies (§4b), in the one PR comment that lists them.
+4. **Approved and green.** `gh pr view <n> --json reviewDecision,mergeable,mergeStateStatus`:
+   `APPROVED`, `MERGEABLE`; and `CI Gate` (or, before it is required, `Build & Test` and
+   `CodeQL Analysis`) green on the head.
+
+Then:
+
+```bash
+# the head SHA, the commit each recent review was on, and (after queueing) whether it is queued.
+# `gh pr view --json` has no merge-queue field, hence GraphQL.
+gh api graphql -F n=<n> -f query='query($n:Int!){repository(owner:"labsai",name:"EDDI"){pullRequest(number:$n){state isInMergeQueue headRefOid reviews(last:10){nodes{author{login} state commit{oid}}}}}}'
+
+gh pr merge <n> --squash        # adds the PR to the merge queue
+```
+
+Re-run the query afterwards: `isInMergeQueue: true` (or `state: MERGED`) is the confirmation.
+
+Never `--auto` (it arms a PR before it is ready, and fails when the repository disallows
+auto-merge), never `--admin`. If the queue ejects the PR, read the failed `merge_group` run
+before anything else: a failure there is real until shown otherwise, even if the PR's own run
+was green.
