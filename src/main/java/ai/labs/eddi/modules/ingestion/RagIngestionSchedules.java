@@ -59,6 +59,39 @@ public final class RagIngestionSchedules {
         return NAME_PREFIX + ragConfigId + ":" + sourceId;
     }
 
+    /**
+     * The name of a source's continuation: the one-shot schedule that wakes the
+     * drain of its work table when work is left after a run. Its own name, so
+     * syncing the cron schedule never deletes it, and at most one per source.
+     */
+    public static String continuationName(String ragConfigId, String sourceId) {
+        return scheduleName(ragConfigId, sourceId) + CONTINUATION_SUFFIX;
+    }
+
+    private static final String CONTINUATION_SUFFIX = ":cont";
+
+    /** Marks a continuation; see {@link #continuationName}. */
+    public static final String METADATA_CONTINUATION = "continuation";
+
+    /**
+     * A continuation's metadata. It names no version: the fire drains under the
+     * knowledge base's current configuration.
+     */
+    public static Map<String, Object> continuationMetadata(String ragConfigId, String sourceId) {
+        return Map.of(
+                METADATA_TYPE_KEY, Boolean.TRUE,
+                METADATA_CONTINUATION, Boolean.TRUE,
+                METADATA_RAG_CONFIG_ID, ragConfigId,
+                METADATA_SOURCE_ID, sourceId);
+    }
+
+    /**
+     * Whether an ingestion schedule is a continuation rather than a source's cron.
+     */
+    public static boolean isContinuation(Map<String, Object> metadata) {
+        return metadata != null && Boolean.TRUE.equals(metadata.get(METADATA_CONTINUATION));
+    }
+
     public static Map<String, Object> metadata(String ragConfigId, Integer version, String sourceId) {
         return Map.of(
                 METADATA_TYPE_KEY, Boolean.TRUE,

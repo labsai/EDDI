@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueue.WorkCounts;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
@@ -108,6 +109,14 @@ public class RagSourceIngestionService {
         this.ragStore = ragStore;
         this.fileStore = fileStore;
     }
+
+    /**
+     * Arms and withdraws the one-shot that drains a source's work table.
+     * Field-injected so the constructor keeps its shape; null in tests that build
+     * the service by hand.
+     */
+    @Inject
+    RagIngestionContinuations continuations;
 
     /**
      * How many previews may crawl at once across this instance. Small on purpose:
@@ -674,11 +683,15 @@ public class RagSourceIngestionService {
             return false;
         }
         try {
-            // Takes the claim's own row with it, which is what releases the claim.
+            // Takes the claim's own row with it, which is what releases the claim —
+            // and the source's work table, which is its document rows.
             stateStore.purgeSource(IngestionPipeline.stateKey(ragConfigId, source));
         } catch (RuntimeException e) {
             pipeline.releaseClaim(ragConfigId, source, claim.get());
             throw e;
+        }
+        if (continuations != null) {
+            continuations.disarm(ragConfigId, sourceIdOf(source));
         }
         return true;
     }
@@ -767,6 +780,75 @@ public class RagSourceIngestionService {
     }
 
     /**
+     * Fired by a source's continuation: drains the documents an earlier run left in
+     * its work table, under the knowledge base's current configuration, and lists
+     * nothing.
+     *
+     * <p>
+     * Starts no run when there is nothing to drain — a continuation armed as a
+     * safety net before a run that then finished everything — so the run history
+     * does not fill with empty runs. One the throttle gate holds is armed again for
+     * when the gate opens: it is the only wake-up a source without a cron has.
+     */
+    public IngestionReport processContinuationFire(String ragConfigId, String sourceId,
+                                                   Consumer<IngestionReport> onFinished) {
+        RagConfiguration knowledgeBase;
+        try {
+            Integer version = ragStore.getCurrentResourceId(ragConfigId).getVersion();
+            knowledgeBase = ragStore.read(ragConfigId, version);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            return IngestionReport.skipped(sourceId, "Knowledge base " + ragConfigId + " is gone; nothing to drain");
+        }
+        IngestionSource source = knowledgeBase.findSource(sourceId);
+        if (source == null || !source.isEnabled()) {
+            return IngestionReport.skipped(sourceId, source == null
+                    ? "Source " + sourceId + " no longer exists on this knowledge base"
+                    : "Source is disabled");
+        }
+        try {
+            source.validate();
+        } catch (IllegalArgumentException e) {
+            return IngestionReport.failed(null, source.effectiveId(), e.getMessage());
+        }
+        String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+        if (stateStore.workCounts(sourceKey, Instant.now()).outstanding() == 0) {
+            return IngestionReport.skipped(source.effectiveId(), "Nothing is queued for this source");
+        }
+        var heldUntil = pipeline.throttledUntil(ragConfigId, source);
+        if (heldUntil.isPresent()) {
+            if (continuations != null) {
+                continuations.arm(ragConfigId, sourceIdOf(source), heldUntil.get());
+            }
+            return IngestionReport.heldBackByThrottle(source.effectiveId(), heldUntil.get());
+        }
+        // ALREADY_RUNNING is fine: the run in flight drains, and arms the next
+        // continuation itself when it ends.
+        return runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.CONTINUATION, onFinished)
+                .map(runId -> IngestionReport.started(runId, source.effectiveId()))
+                .orElseGet(() -> IngestionReport.alreadyRunning(source.effectiveId()));
+    }
+
+    /** What a source's work table holds now — the drain's progress. */
+    public WorkCounts workProgress(String ragConfigId, IngestionSource source) {
+        return stateStore.workCounts(IngestionPipeline.stateKey(ragConfigId, source), Instant.now());
+    }
+
+    /**
+     * Re-arms a source's poisoned documents and wakes its drain. The caller is
+     * expected to have checked EDIT access.
+     *
+     * @return how many documents were re-armed
+     */
+    public int retryFailed(String ragConfigId, IngestionSource source) {
+        Instant now = Instant.now();
+        int rearmed = stateStore.retryFailedWork(IngestionPipeline.stateKey(ragConfigId, source), now);
+        if (rearmed > 0 && continuations != null) {
+            continuations.arm(ragConfigId, sourceIdOf(source), now.plusSeconds(5));
+        }
+        return rearmed;
+    }
+
+    /**
      * Makes the stored schedules match the knowledge base's sources.
      *
      * <p>
@@ -803,6 +885,12 @@ public class RagSourceIngestionService {
             String name = RagIngestionSchedules.scheduleName(ragConfigId, sourceId);
             try {
                 scheduleStore.deleteSchedulesByName(name);
+                if (!source.isEnabled()) {
+                    // A disabled source drains nothing either; its queued work stays in
+                    // the table for when it is enabled and listed again.
+                    scheduleStore.deleteSchedulesByName(RagIngestionSchedules.continuationName(ragConfigId,
+                            sourceId));
+                }
                 if (source.getCron() == null || source.getCron().isBlank() || !source.isEnabled()) {
                     continue;
                 }
@@ -1048,6 +1136,8 @@ public class RagSourceIngestionService {
     private void deleteScheduleQuietly(String ragConfigId, String sourceId) {
         try {
             scheduleStore.deleteSchedulesByName(RagIngestionSchedules.scheduleName(ragConfigId, sourceId));
+            // And its continuation: a removed source has nothing left to drain.
+            scheduleStore.deleteSchedulesByName(RagIngestionSchedules.continuationName(ragConfigId, sourceId));
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.errorf(e, "Could not remove the ingestion schedule for a removed source of knowledge base %s — "
                     + "it may keep crawling", LogSanitizer.sanitize(ragConfigId));
