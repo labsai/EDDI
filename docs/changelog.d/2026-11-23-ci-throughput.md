@@ -87,13 +87,15 @@ data.
 
 ### What's next (repository settings, admin only)
 
-1. After this merges: Settings → Rules (or Branches → `main`) → **Require merge queue**, squash,
+1. After this merges: Settings → Rules (or Branches → `main`) → **Require merge queue** (expected
+   to be offered for an organisation's public repository; confirm it is), squash,
    build concurrency 2–3, group size up to 5, "only merge non-failing pull requests".
    Rollback: untick it.
 2. **Require conversation resolution before merging**, so no PR merges with an open review thread.
 3. Make **`CI Gate`** a required status check *later*, once the open PRs have a run that reports it
-   (a re-run reuses the old workflow file; a push or close/reopen is needed) — until then every
-   open PR would wait on a check that never comes.
+   — until then every open PR would wait on a check that never comes. A re-run of an old run is
+   expected to reuse its old workflow file, so a push or close/reopen would be needed; confirm on
+   one open PR before relying on it.
 4. After the first runs: compare the PR run's unit-test count (1,958 classes) and merged
    coverage counts against `main`'s, and the new critical path against ~30 min.
 
@@ -115,3 +117,10 @@ data.
   `release-versioning.md`'s docker row lacked `coverage-gate`; two `pom.xml` comments still placed
   the gate in Integration Tests. Fixed.
 - **Verification:** full local unit suite with three forks: 40,817 tests, 0 failures, 1,959 classes.
+  The new re-scan step was executed in scratch repositories with the pinned gitleaks image: config
+  untouched → exit 0, no output; allowlisted fixture → pass, `passed=true`; allowlisted fixture
+  plus an un-allowlisted key → 1 leak found, exit 1. JUnit on the test classpath is 6.1.3, which
+  closes `AutoCloseable` store values, so the lock's store release is live.
+- **Not executed anywhere yet:** every `merge_group` path (until the queue is enabled) and the
+  PR-config tolerance on a real PR. The speedups are estimates until this PR's own CI run; the
+  first main push after merge is the first run where publishing depends on Coverage Gate.
