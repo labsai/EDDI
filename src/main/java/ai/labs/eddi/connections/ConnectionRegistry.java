@@ -94,39 +94,57 @@ public class ConnectionRegistry {
 
     /** The local half of {@link #invalidate}, for a change made on another node. */
     public void invalidateLocal() {
-        // The listeners run before the documents are dropped as well as after. Before:
-        // otherwise a caller could load the new binding, pass its grant check, and
-        // still be served what a listener's cache fetched with the old one, until the
-        // listener ran (#1179). After: something fetched in between still read the
-        // old document from this cache. What remains is a fetch that completes within
-        // these few statements, published between the drop and the second run.
-        fireInvalidationListeners();
-        cache.invalidateAll();
-        LOGGER.debug("Connection registry cache invalidated");
-        fireInvalidationListeners();
-    }
-
-    private void fireInvalidationListeners() {
-        for (Runnable listener : invalidationListeners) {
-            try {
-                listener.run();
-            } catch (RuntimeException e) {
-                LOGGER.warnf(e, "A connection invalidation listener failed");
+        // The listeners are told when the invalidation starts, before the documents are
+        // dropped, and when it has finished, after. A listener's cache treats the whole
+        // interval as in progress: what it fetched before the start, or during the
+        // interval (when this cache may still hand out the old document), is never
+        // served after it (#1179).
+        // One snapshot for both halves: a listener registered in between must not be
+        // told it finished an invalidation it was never told had started.
+        List<InvalidationListener> listeners = List.copyOf(invalidationListeners);
+        for (InvalidationListener listener : listeners) {
+            notify(listener::started);
+        }
+        try {
+            cache.invalidateAll();
+            LOGGER.debug("Connection registry cache invalidated");
+        } finally {
+            for (InvalidationListener listener : listeners) {
+                notify(listener::finished);
             }
         }
     }
 
+    private static void notify(Runnable call) {
+        try {
+            call.run();
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "A connection invalidation listener failed");
+        }
+    }
+
     /**
-     * Runs {@code listener} on every invalidation, local or announced by another
-     * node, both before this registry drops its documents and after: for a cache
-     * outside this registry that holds something fetched with a connection's
-     * credential, which must not outlive the binding it was fetched with (#1179).
+     * Told when an invalidation starts, before this registry drops its documents,
+     * and when it has finished, after; see {@link #onInvalidation}.
      */
-    public void onInvalidation(Runnable listener) {
+    public interface InvalidationListener {
+        void started();
+
+        void finished();
+    }
+
+    /**
+     * Tells {@code listener} of every invalidation, local or announced by another
+     * node, when it starts (before this registry drops its documents) and when it
+     * has finished: for a cache outside this registry that holds something fetched
+     * with a connection's credential, which must not outlive the binding it was
+     * fetched with (#1179).
+     */
+    public void onInvalidation(InvalidationListener listener) {
         invalidationListeners.add(listener);
     }
 
-    private final List<Runnable> invalidationListeners = new CopyOnWriteArrayList<>();
+    private final List<InvalidationListener> invalidationListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Cluster mode: announces connection writes to the other nodes. Field-injected

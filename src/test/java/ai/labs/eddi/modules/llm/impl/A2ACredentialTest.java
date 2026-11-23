@@ -13,8 +13,10 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.sun.net.httpserver.HttpServer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,10 +24,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,7 +43,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -222,15 +228,60 @@ class A2ACredentialTest {
     @DisplayName("a replaced vault value evicts the cached Agent Cards (#1179)")
     void secretValueChangeEvictsCachedCards() {
         var manager = manager();
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
-        verify(secretResolver).registerInvalidationListener(listener.capture());
+        ArgumentCaptor<SecretResolver.InvalidationInterval> interval = ArgumentCaptor.forClass(SecretResolver.InvalidationInterval.class);
+        verify(secretResolver).registerInvalidationInterval(interval.capture());
         manager.publishCard(AGENT_URL, new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "old"), System.currentTimeMillis()),
                 manager.cardGeneration());
 
-        listener.getValue().accept(new SecretReference("default", "peer-key"));
+        interval.getValue().started();
+        interval.getValue().finished();
 
         assertEquals(0, manager.getActiveConnectionCount());
+    }
+
+    @Test
+    @DisplayName("no card is published or read while a vault value is being invalidated, before the vault's caches are evicted (#1179)")
+    void secretInvalidationIsInProgressBeforeTheEvictions() throws Exception {
+        ISecretProvider provider = mock(ISecretProvider.class);
+        when(provider.isAvailable()).thenReturn(true);
+        var peerKey = new SecretReference("default", "peer-key");
+        when(provider.resolve(peerKey)).thenReturn("sk-old");
+        var vault = new SecretResolver(provider, new SimpleMeterRegistry(), 5, 100);
+        vault.init();
+        var session = SecretAccess.outsideAgentGrants("test");
+        assertEquals("sk-old", vault.resolveValue("${vault:peer-key}", session), "the value is now cached");
+        var stillCachedDuring = new AtomicReference<Boolean>();
+        var manager = new A2AToolProviderManager(globalVariableResolver, vault, false, connectionResolver);
+        var card = new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "peer"), System.currentTimeMillis());
+        manager.publishCard(AGENT_URL, card, manager.cardGeneration());
+        var publishedDuring = new AtomicReference<Boolean>();
+        var readDuring = new AtomicReference<A2AToolProviderManager.CachedAgentInfo>();
+        // Registered after the manager: started() runs once the manager's interval has
+        // opened and before the vault evicts anything, which is where a discovery could
+        // fetch the replacement card on a cache miss.
+        vault.registerInvalidationInterval(new SecretResolver.InvalidationInterval() {
+            @Override
+            public void started() {
+                // Pins the order: the vault has evicted nothing yet, so the value still
+                // comes from its cache, and the card cache is already closed.
+                vault.resolveValue("${vault:peer-key}", session);
+                stillCachedDuring.set(mockingDetails(provider).getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName().equals("resolve")).count() == 1);
+                readDuring.set(manager.cachedCard(AGENT_URL));
+                publishedDuring.set(manager.publishCard(AGENT_URL, card, manager.cardGeneration()));
+            }
+
+            @Override
+            public void finished() {
+            }
+        });
+
+        vault.invalidateLocal(peerKey);
+
+        assertTrue(stillCachedDuring.get(), "the interval opens before the vault evicts anything");
+        assertNull(readDuring.get(), "the card fetched before the replacement is not read while it is invalidated");
+        assertFalse(publishedDuring.get(), "nor is one fetched during the invalidation published");
+        assertNull(manager.cachedCard(AGENT_URL), "and the old card is gone afterwards");
     }
 
     @Test
@@ -290,5 +341,96 @@ class A2ACredentialTest {
 
         assertEquals(1, result.toolSpecs().size());
         verify(secretResolver, times(1)).requireGranted(any(Iterable.class), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("no card fetched under a connection's old binding is published or read while its invalidation runs (#1179)")
+    void connectionInvalidationIsInProgressThroughout() {
+        var registry = new ConnectionRegistry(mock(IConnectionStore.class));
+        var card = new A2AToolProviderManager.CachedAgentInfo(Map.of("name", "fetched with secret A"), System.currentTimeMillis());
+        var published = new AtomicReference<Boolean>();
+        var readAfterDrop = new AtomicReference<A2AToolProviderManager.CachedAgentInfo>();
+        var holder = new AtomicReference<A2AToolProviderManager>();
+        // Registered before the manager: its finished() runs after the registry dropped
+        // its documents and before the manager is told the invalidation finished.
+        registry.onInvalidation(new ConnectionRegistry.InvalidationListener() {
+            @Override
+            public void started() {
+            }
+
+            @Override
+            public void finished() {
+                // A caller granted secret B loads the new binding and asks for the card.
+                readAfterDrop.set(holder.get().cachedCard(AGENT_URL));
+            }
+        });
+        var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                new ConnectionResolver(registry, null, null, new SimpleMeterRegistry(), null, false));
+        holder.set(manager);
+        // Registered after: its started() runs after the manager's eviction started and
+        // before the registry drops its documents, while the old binding is still
+        // served.
+        registry.onInvalidation(new ConnectionRegistry.InvalidationListener() {
+            @Override
+            public void started() {
+                published.set(manager.publishCard(AGENT_URL, card, manager.cardGeneration()));
+            }
+
+            @Override
+            public void finished() {
+            }
+        });
+
+        registry.invalidateLocal();
+
+        assertFalse(published.get(), "a card fetched during the invalidation, with the old binding, is not published");
+        assertNull(readAfterDrop.get(), "nor read after the registry dropped the old binding");
+        assertTrue(manager.publishCard(AGENT_URL, card, manager.cardGeneration()), "once it finished, cards are cached again");
+    }
+
+    @Test
+    @DisplayName("a discovery that starts while an eviction runs reads the grant again before handing out the tools (#1179)")
+    void discoveryStartedDuringAnEvictionIsCheckedAgain() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        byte[] cardJson = "{\"name\":\"peer\",\"description\":\"fetched during the eviction\"}".getBytes(StandardCharsets.UTF_8);
+        server.createContext("/agent.json", exchange -> {
+            exchange.sendResponseHeaders(200, cardJson.length);
+            try (OutputStream body = exchange.getResponseBody()) {
+                body.write(cardJson);
+            }
+        });
+        server.start();
+        try {
+            var registry = new ConnectionRegistry(mock(IConnectionStore.class));
+            var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                    new ConnectionResolver(registry, null, null, new SimpleMeterRegistry(), null, false));
+            var peer = config("${vault:peer-key}");
+            peer.setUrl("http://127.0.0.1:" + server.getAddress().getPort());
+            peer.setTimeoutMs(5000L);
+            // The first grant read passes (the old binding's); the one after the fetch
+            // refuses.
+            doNothing().doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:peer-key} is not resolved for agent-a"))
+                    .when(secretResolver).requireGranted(any(Iterable.class), any(), anyString());
+            var result = new AtomicReference<A2AToolProviderManager.A2AToolsResult>();
+            // Registered after the manager: discovery runs inside the open interval, where
+            // the counter it samples does not move again before it ends.
+            registry.onInvalidation(new ConnectionRegistry.InvalidationListener() {
+                @Override
+                public void started() {
+                    result.set(manager.discoverTools(List.of(peer), SecretAccess.agent("agent-a")));
+                }
+
+                @Override
+                public void finished() {
+                }
+            });
+
+            registry.invalidateLocal();
+
+            assertTrue(result.get().toolSpecs().isEmpty(), "the card fetched during the eviction reached an agent the new grant refuses");
+            verify(secretResolver, times(2)).requireGranted(any(Iterable.class), any(), anyString());
+        } finally {
+            server.stop(0);
+        }
     }
 }

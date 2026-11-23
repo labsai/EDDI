@@ -110,10 +110,10 @@ public class ConnectionResolver {
     }
 
     /**
-     * Runs {@code listener} whenever a connection changes, on this node or another:
-     * see {@link ConnectionRegistry#onInvalidation}.
+     * Tells {@code listener} whenever a connection changes, on this node or
+     * another: see {@link ConnectionRegistry#onInvalidation}.
      */
-    public void onConnectionChange(Runnable listener) {
+    public void onConnectionChange(ConnectionRegistry.InvalidationListener listener) {
         if (connectionRegistry != null) {
             connectionRegistry.onInvalidation(listener);
         }

@@ -30,24 +30,33 @@ class ConnectionRegistryInvalidationTest {
     private static final ConnectionReference REFERENCE = new ConnectionReference("default", "peer");
 
     @Test
-    @DisplayName("listeners run before the documents are dropped, so no caller can load the new binding while a listener's cache still holds the old one")
-    void listenersRunBeforeAndAfterTheDrop() throws Exception {
+    @DisplayName("listeners are told before the documents are dropped and after, so a listener's cache can treat the interval as in progress")
+    void listenersAreToldBeforeAndAfterTheDrop() throws Exception {
         IConnectionStore store = mock(IConnectionStore.class);
         when(store.readByName(anyString(), anyString())).thenReturn(new ConnectionConfiguration());
         var registry = new ConnectionRegistry(store);
         registry.find(REFERENCE); // cached: one store read
         List<Integer> readsSeenByListener = new ArrayList<>();
-        registry.onInvalidation(() -> {
-            // A caller reloading the binding from inside the listener: the first run must
-            // still find the cached document, i.e. nothing was dropped before it.
-            registry.find(REFERENCE);
-            readsSeenByListener.add(mockingReads(store));
+        registry.onInvalidation(new ConnectionRegistry.InvalidationListener() {
+            // A caller reloading the binding from inside the listener: at the start it
+            // must still find the cached document, i.e. nothing was dropped before it.
+            @Override
+            public void started() {
+                registry.find(REFERENCE);
+                readsSeenByListener.add(mockingReads(store));
+            }
+
+            @Override
+            public void finished() {
+                registry.find(REFERENCE);
+                readsSeenByListener.add(mockingReads(store));
+            }
         });
 
         registry.invalidateLocal();
 
         assertEquals(List.of(1, 2), readsSeenByListener,
-                "first run before the drop (still cached), second after it (read again)");
+                "started before the drop (still cached), finished after it (read again)");
         verify(store, times(2)).readByName("default", "peer");
     }
 

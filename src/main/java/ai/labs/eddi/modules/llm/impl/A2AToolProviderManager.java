@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
@@ -119,6 +120,13 @@ public class A2AToolProviderManager {
     private final AtomicLong cardInvalidations = new AtomicLong();
 
     /**
+     * The evictions of {@link #cardInvalidations} that have finished. While the two
+     * differ an eviction is in progress, and no card is published or read: a
+     * connection's registry may still hand out the old binding until it finishes.
+     */
+    private final AtomicLong cardInvalidationsFinished = new AtomicLong();
+
+    /**
      * A cached card and the eviction generation it was published under. A reader
      * uses it only while that generation is current: {@code get} takes no lock, so
      * a card that slipped in between an eviction's counter bump and its clear could
@@ -221,13 +229,35 @@ public class A2AToolProviderManager {
             // on the secret the connection names; a rebound connection would otherwise
             // keep serving the card fetched with the old secret for its TTL (#1179).
             // Connection writes are rare, so every card goes.
-            connectionResolver.onConnectionChange(this::evictCards);
+            connectionResolver.onConnectionChange(new ConnectionRegistry.InvalidationListener() {
+                @Override
+                public void started() {
+                    startEviction();
+                }
+
+                @Override
+                public void finished() {
+                    finishEviction();
+                }
+            });
         }
         if (secretResolver != null) {
             // Likewise a card fetched with a ${vault:…} apiKey whose value was replaced:
-            // the key digests the reference, not the value. Grant-only writes fire no
-            // listener, so they keep the cards.
-            secretResolver.registerInvalidationListener(reference -> evictCards());
+            // the key digests the reference, not the value. The interval opens before the
+            // vault's caches are evicted, so a card fetched with the new value while the
+            // old grant may still be cached is never published or read. Grant-only
+            // writes report no interval, so they keep the cards.
+            secretResolver.registerInvalidationInterval(new SecretResolver.InvalidationInterval() {
+                @Override
+                public void started() {
+                    startEviction();
+                }
+
+                @Override
+                public void finished() {
+                    finishEviction();
+                }
+            });
         }
     }
 
@@ -326,27 +356,32 @@ public class A2AToolProviderManager {
 
                 // Before the agent-card cache, which is keyed on the peer and shared by
                 // every agent naming it (#1179).
-                long generation = cardInvalidations.get();
+                // Settled, or -1 while an eviction runs: a grant read then may be the old
+                // binding's while the card comes from the new one.
+                long generation = cardGeneration();
                 requireSecretGranted(config, access);
                 int specsBefore = toolSpecs.size();
                 Set<String> executorsBefore = new HashSet<>(executors.keySet());
                 Set<String> resolversBefore = new HashSet<>(requestResolvers.keySet());
-                discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
-                if (cardInvalidations.get() != generation) {
-                    // A credential changed while the card was looked up or fetched, so it
-                    // may be the new credential's: the grant is read again, for what is
-                    // current now, before its tools are handed out (#1179). A refusal takes
-                    // this peer's tools back out. One re-check: a grant keyed on the
-                    // reference covers every value the card could have been fetched with;
-                    // a chain of changes during one discovery is checked at its end.
-                    try {
+                try {
+                    discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
+                    if (generation < 0 || cardGeneration() != generation) {
+                        // A credential changed while the card was looked up or fetched, so it
+                        // may be the new credential's: the grant is read again, for what is
+                        // current now, before its tools are handed out (#1179). One
+                        // re-check: a grant keyed on the reference covers every value the
+                        // card could have been fetched with; a chain of changes during one
+                        // discovery is checked at its end.
                         requireSecretGranted(config, access);
-                    } catch (RuntimeException e) {
-                        toolSpecs.subList(specsBefore, toolSpecs.size()).clear();
-                        executors.keySet().retainAll(executorsBefore);
-                        requestResolvers.keySet().retainAll(resolversBefore);
-                        throw e;
                     }
+                } catch (Exception e) {
+                    // Nothing of a peer that did not finish is handed out: a card that failed
+                    // half-way through conversion, or one the re-check refused, would
+                    // otherwise leave the tools added before the failure in place.
+                    toolSpecs.subList(specsBefore, toolSpecs.size()).clear();
+                    executors.keySet().retainAll(executorsBefore);
+                    requestResolvers.keySet().retainAll(resolversBefore);
+                    throw e;
                 }
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
@@ -739,7 +774,7 @@ public class A2AToolProviderManager {
 
         // Check cache (5 min TTL)
         String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
-        long generation = cardInvalidations.get();
+        long generation = cardGeneration();
         CachedAgentInfo cached = cachedCard(cacheKey);
         if (cached != null) {
             return cached.agentCard();
@@ -771,6 +806,9 @@ public class A2AToolProviderManager {
      * @return whether the card was cached
      */
     boolean publishCard(String cacheKey, CachedAgentInfo card, long generation) {
+        if (generation < 0) {
+            return false;
+        }
         var tagged = new CachedAgentInfo(card.agentCard(), card.timestamp(), generation);
         CachedAgentInfo stored = agentCache.compute(cacheKey,
                 (key, previous) -> cardInvalidations.get() == generation ? tagged : previous);
@@ -785,7 +823,7 @@ public class A2AToolProviderManager {
      */
     CachedAgentInfo cachedCard(String cacheKey) {
         CachedAgentInfo cached = agentCache.get(cacheKey);
-        if (cached == null || cached.generation() != cardInvalidations.get()
+        if (cached == null || cached.generation() != cardGeneration()
                 || System.currentTimeMillis() - cached.timestamp() >= 300_000) {
             return null;
         }
@@ -799,20 +837,32 @@ public class A2AToolProviderManager {
     volatile Runnable evictionStartedHook;
 
     /**
-     * The current value of {@link #cardInvalidations}, for {@link #publishCard}.
+     * The current eviction generation, for {@link #publishCard} and
+     * {@link #cachedCard}, or {@code -1} while an eviction is in progress, when no
+     * card may be published or read.
      */
     long cardGeneration() {
-        return cardInvalidations.get();
+        long generation = cardInvalidations.get();
+        return cardInvalidationsFinished.get() == generation ? generation : -1;
     }
 
     /** Drops every cached card; see {@link #cardInvalidations}. */
     void evictCards() {
+        startEviction();
+        finishEviction();
+    }
+
+    private void startEviction() {
         cardInvalidations.incrementAndGet();
         Runnable hook = evictionStartedHook;
         if (hook != null) {
             hook.run();
         }
         agentCache.clear();
+    }
+
+    private void finishEviction() {
+        cardInvalidationsFinished.incrementAndGet();
     }
 
     /**

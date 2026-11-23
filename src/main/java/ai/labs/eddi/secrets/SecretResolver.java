@@ -838,12 +838,15 @@ public class SecretResolver {
         String cacheKey = cacheKey(reference);
         invalidations.incrementAndGet();
         startInvalidationOf(cacheKey);
+        List<InvalidationInterval> intervals = List.copyOf(invalidationIntervals);
         try {
+            intervalsStarted(intervals);
             cache.invalidate(cacheKey);
             invalidationStarted();
             grantCache.invalidate(cacheKey);
         } finally {
             finishInvalidationOf(cacheKey);
+            intervalsFinished(intervals);
         }
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
@@ -904,11 +907,14 @@ public class SecretResolver {
     public void invalidateAllLocal() {
         invalidations.incrementAndGet();
         allInvalidations.incrementAndGet();
+        List<InvalidationInterval> intervals = List.copyOf(invalidationIntervals);
         try {
+            intervalsStarted(intervals);
             cache.invalidateAll();
             grantCache.invalidateAll();
         } finally {
             allInvalidationsFinished.incrementAndGet();
+            intervalsFinished(intervals);
         }
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);
@@ -926,6 +932,48 @@ public class SecretResolver {
      */
     public void registerInvalidationListener(Consumer<SecretReference> listener) {
         invalidationListeners.add(listener);
+    }
+
+    /**
+     * Told when a value invalidation (a rotation, a delete, or all secrets) starts,
+     * before any cache is evicted, and when its evictions have finished. Unlike an
+     * {@link #registerInvalidationListener invalidation listener}, which runs after
+     * the evictions, this lets a cache of things fetched with a secret treat the
+     * whole interval as in progress: something fetched with the new value while the
+     * old grant may still be cached is never served on that grant's strength
+     * (#1179). Grant-only writes are not reported.
+     */
+    public interface InvalidationInterval {
+        void started();
+
+        void finished();
+    }
+
+    /** Registers {@code interval}; see {@link InvalidationInterval}. */
+    public void registerInvalidationInterval(InvalidationInterval interval) {
+        invalidationIntervals.add(interval);
+    }
+
+    private final List<InvalidationInterval> invalidationIntervals = new CopyOnWriteArrayList<>();
+
+    private static void intervalsStarted(List<InvalidationInterval> intervals) {
+        for (InvalidationInterval interval : intervals) {
+            try {
+                interval.started();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "A secret invalidation interval failed to start");
+            }
+        }
+    }
+
+    private static void intervalsFinished(List<InvalidationInterval> intervals) {
+        for (InvalidationInterval interval : intervals) {
+            try {
+                interval.finished();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "A secret invalidation interval failed to finish");
+            }
+        }
     }
 
     private void fireInvalidationListeners(SecretReference reference) {
