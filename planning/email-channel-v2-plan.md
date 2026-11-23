@@ -339,7 +339,8 @@ valid on both) and `InboundMail.anomalies()`.
 3. **Token**: `@` preceded by start-of-line, whitespace, `(` or `[` (HTML-only mail converts an Outlook mention to
    `[@Name](mailto:…)`), then a handle `[A-Za-z0-9][A-Za-z0-9_-]{0,39}`, then **not** followed by `@`, or by `.`
    + letter/digit (so `bob@finance.com`, `@finance.com`, URLs and addresses never match). Compare lower-cased to
-   the configured `mentions`.
+   the configured `mentions`. The handle is the **longest** run the pattern matches and is compared **whole**, never as
+   a prefix: with `financ` configured, neither `@finance` nor `@finance.com` matches it (add both as tests).
 4. Output: ordered distinct `MentionHit(handle, targetName)`; unknown handles ignored (they may be people).
 
 Missing a mention is acceptable (the user re-sends); a false route is not — when in doubt the extractor stops early.
@@ -369,8 +370,10 @@ message reference and must stay so); the conversation step already records it.
 In `EmailInboundProcessor`, when an existing conversation is found (row / `continuedConversation` / correlation):
 
 - The conversation's agent stays the owner. If the routed target (from addresses/mentions — not default/subject)
-  is a **different** target, add `mail.route.redirectRefused = <targetName>` to the context and log it at INFO;
-  the turn runs in the owner conversation. Phase 6 turns this into a consult request.
+  is a **different** target — or `alsoAddressed` (§7.4) holds an authorized target other than the owner (reply to A's
+  mail with `@b` while routing selects A) — add `mail.route.redirectRefused = <targetNames>` to the context and log
+  it at INFO; the turn runs in the owner conversation. Only targets that pass the existing target authorization are
+  listed; an unauthorized one is dropped. Phase 6 turns this into a consult request.
 - Test: reply to agent A's mail mentioning `@b` → runs in A's conversation, context carries the refusal, mail log
   shows `DONE`.
 
@@ -444,7 +447,7 @@ provider → `GET /connections/callback`, with state and PKCE, gated by the conn
 state records "mailbox link for `<address>` by admin `<principal>`", and branch on that in the existing callback
 (store under `mailbox:<address>` instead of the caller). Read the class end to end first.
 
-- `POST /connections/{name}/mailbox-grants/authorize` body `{ "address": "eddi@company.com" }`, role `eddi-admin`
+- `POST /connections/{name}/mailbox-grants/authorize` body `{ "address": "eddi@company.com", "confirmDedicated": true }`, role `eddi-admin`
   only → returns the provider authorization URL with `login_hint=<address>`, `access_type=offline`,
   `prompt=consent` (Google needs both for a refresh token). The state binds the admin principal, the connection and
   the address.
@@ -452,7 +455,12 @@ state records "mailbox link for `<address>` by admin `<principal>`", and branch 
   1. **Account check** (`google-gmail-profile`): `GET https://gmail.googleapis.com/gmail/v1/users/me/profile` with
      the new access token via `OutboundHttp` (never a raw `HttpClient`); `emailAddress` normalised must equal the
      requested address. Requires `https://gmail.googleapis.com` on the connection's `baseUrlAllowlist`.
-  2. **Dedicated check**: the address must not equal the linking admin's verified `email` claim.
+  2. **Dedicated check**: Google does not say whether a mailbox is a person's or a shared/service one, so this is an
+     enforced attestation plus one hard check, not a proof. The request body must carry `"confirmDedicated": true`
+     (refused otherwise; the Manager shows the D5 wording), the address must not equal the linking admin's verified
+     `email` claim, and the attestation (admin, address, time) goes into the `connection.mailbox.link` audit entry.
+     A person's own mailbox that an admin links on that person's behalf passes the technical checks, so D5 is an
+     admin responsibility, stated as such in the docs; the grant covers that one mailbox only.
   3. Store under `mailbox:<address>`; audit-ledger entry `connection.mailbox.link` (connection, address, admin).
 - `POST /connections/{name}/mailbox-grants/unlink` body `{address}` (admin) → deletes the grant, audit entry.
 - `GET /connections/{name}/mailbox-grants` (admin) → addresses and grant state (no tokens).
@@ -537,6 +545,7 @@ MCP, ingestion or LLM tools; linking a mailbox whose Google account differs from
 | Key | Default | Meaning / validation |
 |---|---|---|
 | `replyAudience` | `sender` | `sender`: today. `thread`: also Cc the answered mail's other To/Cc recipients that pass §9.3. Requires `actWhen: addressed` and non-empty `replyAllowedRecipients`, else refused at save. Warning `email.reply-audience-thread` |
+| `replyIncludeNewReaders` | `false` | `false`: a recipient who has not been on the thread before (not the From, or a delivered To/Cc, of an earlier mail of this conversation, §9.5) is **not** Cc'd; row note `new_reader_skipped`. `true`: a new reader is Cc'd too; the sender is then deliberately sharing the thread, and the warning `email.reply-new-readers` says the answer can draw on earlier mails that reader never received |
 | `replyAllowedRecipients` | empty | `SenderPatterns` syntax (`*@company.com`, `*@*.company.com`, exact addresses), max 50. Only recipients matching one are Cc'd |
 | `maxReplyRecipients` | `10` | 1–50, total Cc count. Over it → reply to the sender only, row note `cc_capped` |
 | `listAddresses` | empty | Patterns never Cc'd (distribution lists, groups) |
@@ -571,8 +580,12 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
   header instances. Otherwise a replayed genuine mail with an unsigned prepended `Cc: ceo@company.com` would make
   EDDI mail an internal person the attacker chose. Test exactly that case.
 - `cc` = (stepMail.to ∪ stepMail.cc), normalised, minus own addresses/aliases, minus `to`, minus anything matching
-  `listAddresses`, keeping only addresses matching `replyAllowedRecipients`, header order, deduplicated; capped
-  (`maxReplyRecipients` → empty cc + `cc_capped`).
+  `listAddresses`, keeping only addresses matching `replyAllowedRecipients`, header order, deduplicated; then, unless
+  `replyIncludeNewReaders: true`, minus every address that is not already a participant of this conversation (the
+  From of an inbound row, or a `delivered=true` To/Cc of an earlier SENT reply, §9.5) — a colleague the sender added
+  in this very mail is skipped; capped (`maxReplyRecipients` → empty cc + `cc_capped`). The turn reads the whole
+  conversation, so this is what keeps earlier mails from reaching someone who never received them. Test: a participant
+  adds an allowed colleague in Cc on a later mail → the reply goes to the sender only.
 - Used in **two** places with identical input: the inbound processor (to put `mail.audience = {to, cc}` into the
   turn context **before** the turn runs, so the agent knows who will read the answer) and `EmailReplyRecipients`
   at every send attempt.
@@ -590,10 +603,12 @@ static Audience compute(EmailChannelSettings s, Map<String,Object> stepMail, Str
 ### 9.5 Ledger and sending
 
 - New child store `email_reply_recipients` (Mongo collection / Postgres table): `rowId, integrationId,
-  conversationId, address, role (TO|CC), createdAt, expiresAt`; indexes on `rowId`, `(conversationId, address)`,
-  `address`. Written at enqueue for every recipient. The row's own `recipient` stays the To.
-- `hasSentReply(conversationId, address)` → true if the address is the row recipient **or** a CC in the child store
-  of a SENT row.
+  conversationId, address, role (TO|CC), delivered, createdAt, expiresAt`; indexes on `rowId`,
+  `(conversationId, address)`, `address`. Written at enqueue for every intended recipient with `delivered=false`.
+  The row's own `recipient` stays the To. When a send succeeds, the sender sets `delivered=true` for exactly the
+  addresses in the **final** recipient list (after suppression and retry narrowing); the rest stay `false`.
+- `hasSentReply(conversationId, address)` → true if the address is the row recipient of a SENT row **or** a CC with
+  `delivered=true` in the child store of a SENT row. A Cc suppressed before sending never counts as a participant.
 - GDPR: `findByRecipient`/`deleteByRecipient` and `EmailLedgerGdprParticipant` must cover the child store; erasing an
   address also identifies `email-thread:` conversations it took part in (inbound rows with that sender, reply rows
   with it as Cc) — decide with the owner whether those conversations are deleted or the address's mails redacted

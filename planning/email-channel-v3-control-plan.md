@@ -52,8 +52,9 @@ reachable from the Manager, REST and MCP.
 4. **Cc EDDI and ask it to send something.** "Send customer xyz the offer" from an authorised sender makes a dedicated
    send-out agent mail that customer — recipient from an admin-controlled set, approved by a human, the customer's
    answer handled in a separate, narrow conversation (C6).
-5. **Mail from EDDI is verifiably EDDI's.** Mail the integration sends is S/MIME-signed by default (product-owner
-   decision), and the admin is told plainly when the domain's DKIM signing is not active (C2).
+5. **Mail from EDDI is verifiably EDDI's.** Mail the integration sends is S/MIME-signed whenever a signing
+   certificate is configured — signing is on by default, unsigned only while none exists, and `required` makes that
+   a hold (product-owner decision) — and the admin is told plainly when the domain's DKIM signing is not active (C2).
 6. **Admin-friendly.** Sender lists, roles, held mail and policies are one screen per integration, and every one of
    them is an MCP tool so an agent (the Platform Operator, or the admin's own) can manage them (C1, C7).
 
@@ -71,7 +72,7 @@ reachable from the Manager, REST and MCP.
 
 | # | Question | Decision |
 |---|---|---|
-| D6 | Sign EDDI's mail? | **Yes, S/MIME, supported and on by default**; can be switched off in the integration's JSON (C2) |
+| D6 | Sign EDDI's mail? | **Yes, S/MIME, supported and on by default** — opportunistic: signed when a `SMIME_SIGNING` connection exists, unsigned (with a save warning) otherwise; `required` never sends unsigned; can be switched off in the integration's JSON (C2) |
 | D7 | Mail EDDI does not accept (not allowed, unauthenticated) | **The owner hears about it and decides** whether it is processed at all (C3) |
 | D8 | Mail EDDI processes that asks for something | **It can be made to ask first**, via HITL, before it acts (C4) |
 | D9 | Allow- and blocklists | **Configurable, and editable over MCP** so an agent can manage them (C1) |
@@ -334,7 +335,10 @@ tools. Refused on GROUP targets (group turns auto-reject tool approvals).
 
 **The email gate is its own gate, not a merge.** Merging `requireApproval: ["*"]` into the agent's block would be
 undone by the agent's `exempt` (exemptions always win), by `task-approvals.mode=replace`, and by an agent
-`timeoutPolicy: AUTO_APPROVE`. Instead, for a turn tainted `origin=email` (§5.3), after `TaskToolApprovalsResolver`:
+`timeoutPolicy: AUTO_APPROVE`. Instead, for a turn tainted `origin=email` (§5.3) **whose effective `approvalPolicy`
+(the target's, or the stricter one a role imposes, §9) is `actions`, `firstContact` or `everyTurn`**, after
+`TaskToolApprovalsResolver` — under `none` the gate is absent and the agent's own `toolApprovals` apply, as promised
+for upgrades:
 
 - a tool call not in `readOnlyTools` pauses, whatever the agent's and task's `exempt` say; timeout policy
   `AUTO_REJECT` after `emailControl.review.expiry`;
@@ -397,8 +401,9 @@ arrives, signed.
 
 - First matching entry wins. No match → role `default`: all targets, the target's own `approvalPolicy`, no tool
   restriction, `sendOut: false`, the integration's caps — i.e. today's behaviour.
-- Roles apply only to an **authenticated** sender (aligned pass). Unauthenticated or released mail is role
-  `anonymous`: `readOnlyTools` only, `sendOut: false`, never outgoing mail.
+- Roles apply only to an **authenticated** sender (aligned pass). Unauthenticated mail, and released mail without an
+  aligned pass, is role `anonymous`: `readOnlyTools` only, `sendOut: false`, never outgoing mail. Released mail with
+  an aligned pass (held only because the sender was not allowed yet, C3) keeps its sender's role.
 - A role policy can only **narrow**: `targets` ⊆ the integration's, `tools` intersected with the agent's,
   `approvalPolicy` at least the target's (strictness order, §8.1), caps (`maxTurnsPerSenderPerDay`, same name as the
   integration key) at most the integration's. Validation refuses a widening policy. Roles and v2 §7.6
@@ -436,10 +441,10 @@ may quote or attach, no long-term memory. Ship a starter configuration ("Mail cl
 | `emailControl.sendOut.enabled` | `false` | Assemble `sendMail` for send-out targets, for senders whose role has `sendOut: true` |
 | `emailControl.sendOut.outboundRecipients` | — (required when enabled) | Patterns (`*@customer-a.com`, exact addresses), max 500 |
 | `emailControl.sendOut.contactSource` | — | Optional lookup of a contact name (a global variable or an `httpcalls` call, e.g. a CRM) returning `{name, address}`. An ambiguous name is refused; a resolved address must **still** match `outboundRecipients` — the source can narrow, never widen |
-| `emailControl.sendOut.approveExternal` | `every` | `every`: each send to an address outside `internalDomains` is approved. `new`: only the first send to that address. Never off |
+| `emailControl.sendOut.approveExternal` | `every` | Fixed: each send to an address outside `internalDomains` is approved (product-owner decision D11; approving only the first send was rejected). Any other value is refused at save; the key exists so the JSON states the policy |
 | `emailControl.sendOut.approveInternal` | `new` | `every`, `new`, `never` |
 | `emailControl.sendOut.maxPerDay` | `20` | Per integration, counted from the ledger |
-| `emailControl.sendOut.copyRequester` | `true` | The requester is Cc'd |
+| `emailControl.sendOut.copyRequester` | `true` | The engine (never the model) Cc's the requester: the authenticated sender of the mail that asked. This is the one deliberate exception to `outboundRecipients` — it is the requester's own address, added by the send path, shown to the approver, and never editable by the agent. It is not a way to reach anyone else: only that address qualifies, and it is skipped if it equals a recipient |
 | `emailControl.sendOut.allowReplies` | `true` | The recipient's answer is handled (§10.4) |
 | `emailControl.sendOut.replyWindow` | `P14D` | How long answers are accepted |
 
@@ -462,9 +467,12 @@ digest counts; mail-log filter `kind=SENDOUT`.
 The requester's conversation holds internal context, memory and `sendMail`; the recipient must never run in it (a
 conversation's user id is fixed at start). With `allowReplies`:
 
-- An answer is accepted only when its `In-Reply-To` is a `SENDOUT` row's Message-ID, its **From equals that row's
-  recipient exactly**, with an aligned pass, within `replyWindow` (signed view, #1394). This replaces only the
-  allowlist check; loop, auto-reply, blocklist and suppression checks still run.
+- An answer is accepted only when its `In-Reply-To` (or, failing that, the last matching id in `References`)
+  resolves to a mail of a send-out thread, its **From equals the original `SENDOUT` row's recipient exactly**, with an
+  aligned pass, within `replyWindow` (signed view, #1394). Resolution: every mail the integration sends into that
+  conversation — the original and each later answer — is a ledger row carrying the original `SENDOUT` row's id
+  (`sendoutRowId`), so a reply to the agent's answer maps back to the same send-out; the window counts from the
+  original send. This replaces only the allowlist check; loop, auto-reply, blocklist and suppression checks still run.
 - It opens (or continues) a **separate conversation** keyed by the thread root, running as
   `email-sendout:<integrationId>:<sha256(threadRoot)>` (added to `ReservedPrincipals.PREFIXES`,
   `hasNoPersistentMemory`, `EmailUserIdentity.isEmailIdentity`), seeded only with the sent mail's text. `sendMail` is
@@ -559,7 +567,8 @@ are covered by `findByRecipient`/`deleteByRecipient` and the new requester colum
 
 - **No approval by replying to a mail**, ever (v1 §22, v2 §2.3).
 - **No outgoing mail caused by an unauthenticated mail**, even after a human released it.
-- **No address outside `outboundRecipients`**; no recipient edits by the approver; no Cc/Bcc added by the model.
+- **No address outside `outboundRecipients`** (the one exception is the engine-added requester copy,
+  `copyRequester`); no recipient edits by the approver; no Cc/Bcc added by the model.
 - **No storing mail bodies** for review; previews are fetched live.
 - **No email-originated turn that can change its integration, its senders, roles or policies, or decide an approval**
   — enforced at runtime, not only at save.
