@@ -87,7 +87,7 @@ import java.util.Optional;
  * the owning run's {@link #tombstoneMissing} reconciles it away over the
  * following runs.
  */
-public interface IIngestionStateStore {
+public interface IIngestionStateStore extends IngestionWorkQueue {
 
     /**
      * What is known about one document of one source. Absent means never
@@ -553,7 +553,12 @@ public interface IIngestionStateStore {
             /** "Run now", from the Manager or the REST API. */
             MANUAL,
             /** The source's cron. */
-            SCHEDULED;
+            SCHEDULED,
+            /**
+             * A continuation: drains the documents an earlier run queued in the work table
+             * and lists nothing ({@link RagIngestionSchedules#continuationName}).
+             */
+            CONTINUATION;
 
             /** Reads a stored trigger, tolerating one this build does not know. */
             public static Trigger parse(String stored) {

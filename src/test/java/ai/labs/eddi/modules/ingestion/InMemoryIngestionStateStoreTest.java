@@ -16,7 +16,7 @@ import org.junit.jupiter.api.DisplayName;
  * the pipeline tests rely on cannot quietly behave differently from production.
  */
 @DisplayName("InMemoryIngestionStateStore (test double)")
-class InMemoryIngestionStateStoreTest implements IngestionStateStoreContract {
+class InMemoryIngestionStateStoreTest implements IngestionStateStoreContract, IngestionWorkQueueContract {
 
     private InMemoryIngestionStateStore store;
 

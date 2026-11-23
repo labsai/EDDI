@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.IngestionStateStoreContract;
+import ai.labs.eddi.modules.ingestion.IngestionWorkQueueContract;
 import ai.labs.eddi.modules.ingestion.mongo.MongoIngestionStateStore;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
@@ -16,7 +17,7 @@ import org.junit.jupiter.api.DisplayName;
  * The shared {@link IngestionStateStoreContract} against MongoDB.
  */
 @DisplayName("MongoIngestionStateStore")
-class MongoIngestionStateStoreTest extends MongoTestBase implements IngestionStateStoreContract {
+class MongoIngestionStateStoreTest extends MongoTestBase implements IngestionStateStoreContract, IngestionWorkQueueContract {
 
     private MongoIngestionStateStore store;
 

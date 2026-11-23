@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -281,6 +282,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         String prefix = sourceId + KEY_SEPARATOR;
         fencingRunIds.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
         fencingGenerations.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
+        work.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
     }
 
     @Override
@@ -393,7 +395,274 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             String prefix = sourceId + KEY_SEPARATOR;
             fencingRunIds.entrySet().removeIf(
                     fence -> fence.getKey().startsWith(prefix) && reaped.contains(fence.getValue()));
+            // The dead runs' claims go back to pending at once, as in production.
+            for (Work row : work.values()) {
+                if (row.sourceId.equals(sourceId) && row.state == WorkState.CLAIMED
+                        && reaped.contains(row.claimedBy)) {
+                    row.state = WorkState.PENDING;
+                    row.claimedBy = null;
+                    row.claimUntil = null;
+                }
+            }
         }
         return reaped.size();
+    }
+
+    // === the work table ===
+
+    /**
+     * A row's work columns, kept beside its DocumentState as production keeps them
+     * on the row.
+     */
+    private static final class Work {
+        final String sourceId;
+        final String documentId;
+        WorkState state;
+        long version;
+        String token;
+        String payload;
+        Instant notBefore;
+        int attempts;
+        String lastError;
+        String claimedBy;
+        Instant claimUntil;
+
+        Work(String sourceId, String documentId) {
+            this.sourceId = sourceId;
+            this.documentId = documentId;
+        }
+    }
+
+    private final Map<String, Work> work = new LinkedHashMap<>();
+
+    /** Lets a test see a row's error without a getter in the interface. */
+    public synchronized String lastWorkError(String sourceId, String documentId) {
+        Work row = work.get(key(sourceId, documentId));
+        return row == null ? null : row.lastError;
+    }
+
+    @Override
+    public synchronized EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
+        if (request.payload() != null && request.payload().length() > MAX_PAYLOAD_LENGTH) {
+            throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH + " characters");
+        }
+        String documentKey = key(sourceId, request.documentId());
+        DocumentState existing = documents.get(documentKey);
+        if (existing == null) {
+            documents.put(documentKey, new DocumentState(sourceId, request.documentId(), null, null, null, null,
+                    null, runId, 0, true, null));
+            fencingRunIds.put(documentKey, runId);
+            Work row = new Work(sourceId, request.documentId());
+            arm(row, request, now, 1);
+            work.put(documentKey, row);
+            return EnqueueOutcome.QUEUED;
+        }
+        if (!owns(documentKey, runId)) {
+            return EnqueueOutcome.FENCED;
+        }
+        documents.put(documentKey, withRunId(existing, runId));
+        Work row = work.computeIfAbsent(documentKey, ignored -> new Work(sourceId, request.documentId()));
+        boolean equal = (row.state == WorkState.PENDING || row.state == WorkState.CLAIMED
+                || row.state == WorkState.POISON) && Objects.equals(row.token, request.versionToken());
+        if (equal) {
+            return EnqueueOutcome.ALREADY_QUEUED;
+        }
+        arm(row, request, now, row.version + 1);
+        return EnqueueOutcome.QUEUED;
+    }
+
+    private static void arm(Work row, WorkRequest request, Instant now, long version) {
+        row.state = WorkState.PENDING;
+        row.version = version;
+        row.token = request.versionToken();
+        row.payload = request.payload();
+        row.notBefore = now;
+        row.attempts = 0;
+        row.lastError = null;
+        row.claimedBy = null;
+        row.claimUntil = null;
+    }
+
+    private static DocumentState withRunId(DocumentState state, String runId) {
+        return new DocumentState(state.sourceId(), state.documentId(), state.contentHash(), state.etag(),
+                state.lastModified(), state.firstIngestedAt(), state.lastIngestedAt(), runId, state.missedRuns(),
+                state.tombstoned(), state.citationHash());
+    }
+
+    @Override
+    public synchronized List<WorkClaim> claimWork(String sourceId, String claimer, int limit, Instant now,
+                                                  Instant claimUntil) {
+        List<Work> due = new ArrayList<>();
+        for (Map.Entry<String, Work> entry : work.entrySet()) {
+            Work row = entry.getValue();
+            if (!row.sourceId.equals(sourceId) || !owns(entry.getKey(), claimer)) {
+                continue;
+            }
+            boolean pending = row.state == WorkState.PENDING && !row.notBefore.isAfter(now);
+            boolean lapsed = row.state == WorkState.CLAIMED && !row.claimUntil.isAfter(now);
+            if (pending || lapsed) {
+                due.add(row);
+            }
+        }
+        due.sort(Comparator.comparing((Work row) -> row.notBefore, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(row -> row.documentId));
+        List<WorkClaim> claims = new ArrayList<>();
+        for (Work row : due) {
+            if (claims.size() >= limit) {
+                break;
+            }
+            row.state = WorkState.CLAIMED;
+            row.claimedBy = claimer;
+            row.claimUntil = claimUntil;
+            claims.add(new WorkClaim(row.documentId, row.version, row.token, row.payload, row.attempts));
+        }
+        return claims;
+    }
+
+    private Work held(String sourceId, String documentId, String claimer, long workVersion) {
+        Work row = work.get(key(sourceId, documentId));
+        if (row == null || row.state != WorkState.CLAIMED || !claimer.equals(row.claimedBy)
+                || row.version != workVersion) {
+            return null;
+        }
+        return row;
+    }
+
+    @Override
+    public synchronized boolean completeWork(String sourceId, String documentId, String claimer, long workVersion) {
+        Work row = held(sourceId, documentId, claimer, workVersion);
+        if (row == null) {
+            return false;
+        }
+        row.state = WorkState.DONE;
+        row.claimedBy = null;
+        row.claimUntil = null;
+        row.notBefore = null;
+        row.attempts = 0;
+        row.lastError = null;
+        row.payload = null;
+        return true;
+    }
+
+    @Override
+    public synchronized boolean deferWork(String sourceId, String documentId, String claimer, long workVersion,
+                                          Instant notBefore) {
+        Work row = held(sourceId, documentId, claimer, workVersion);
+        if (row == null) {
+            return false;
+        }
+        row.state = WorkState.PENDING;
+        row.notBefore = notBefore;
+        row.claimedBy = null;
+        row.claimUntil = null;
+        return true;
+    }
+
+    @Override
+    public synchronized FailOutcome failWork(String sourceId, String documentId, String claimer, long workVersion,
+                                             String error, Instant notBefore, int maxAttempts) {
+        Work row = held(sourceId, documentId, claimer, workVersion);
+        if (row == null) {
+            return FailOutcome.NOT_CLAIMED;
+        }
+        row.attempts++;
+        row.lastError = error;
+        row.claimedBy = null;
+        row.claimUntil = null;
+        if (row.attempts >= Math.max(1, maxAttempts)) {
+            row.state = WorkState.POISON;
+            row.notBefore = null;
+            return FailOutcome.POISONED;
+        }
+        row.state = WorkState.PENDING;
+        row.notBefore = notBefore;
+        return FailOutcome.RETRY;
+    }
+
+    @Override
+    public synchronized int releaseClaims(String sourceId, String claimer) {
+        int released = 0;
+        for (Work row : work.values()) {
+            if (row.sourceId.equals(sourceId) && row.state == WorkState.CLAIMED && claimer.equals(row.claimedBy)) {
+                row.state = WorkState.PENDING;
+                row.claimedBy = null;
+                row.claimUntil = null;
+                released++;
+            }
+        }
+        return released;
+    }
+
+    @Override
+    public synchronized int cancelUnlistedWork(String sourceId, String runId) {
+        int cancelled = 0;
+        for (Map.Entry<String, Work> entry : work.entrySet()) {
+            Work row = entry.getValue();
+            DocumentState state = documents.get(entry.getKey());
+            if (!row.sourceId.equals(sourceId) || !owns(entry.getKey(), runId)
+                    || (row.state != WorkState.PENDING && row.state != WorkState.POISON)
+                    || (state != null && runId.equals(state.lastRunId()))) {
+                continue;
+            }
+            row.state = null;
+            row.payload = null;
+            row.notBefore = null;
+            row.attempts = 0;
+            row.lastError = null;
+            row.claimedBy = null;
+            row.claimUntil = null;
+            cancelled++;
+        }
+        return cancelled;
+    }
+
+    @Override
+    public synchronized WorkCounts workCounts(String sourceId, Instant now) {
+        long queued = 0;
+        long waiting = 0;
+        long inFlight = 0;
+        long done = 0;
+        long failed = 0;
+        Instant next = null;
+        for (Work row : work.values()) {
+            if (!row.sourceId.equals(sourceId) || row.state == null) {
+                continue;
+            }
+            switch (row.state) {
+                case PENDING -> {
+                    if (row.notBefore.isAfter(now)) {
+                        waiting++;
+                        next = next == null || row.notBefore.isBefore(next) ? row.notBefore : next;
+                    } else {
+                        queued++;
+                    }
+                }
+                case CLAIMED -> {
+                    if (row.claimUntil.isAfter(now)) {
+                        inFlight++;
+                    } else {
+                        queued++;
+                    }
+                }
+                case DONE -> done++;
+                case POISON -> failed++;
+            }
+        }
+        return new WorkCounts(queued, waiting, inFlight, done, failed, next);
+    }
+
+    @Override
+    public synchronized int retryFailedWork(String sourceId, Instant now) {
+        int rearmed = 0;
+        for (Work row : work.values()) {
+            if (row.sourceId.equals(sourceId) && row.state == WorkState.POISON) {
+                row.state = WorkState.PENDING;
+                row.attempts = 0;
+                row.lastError = null;
+                row.notBefore = now;
+                rearmed++;
+            }
+        }
+        return rearmed;
     }
 }

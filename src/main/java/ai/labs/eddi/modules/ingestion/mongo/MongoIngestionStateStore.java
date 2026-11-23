@@ -29,6 +29,7 @@ import org.bson.conversions.Bson;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -114,6 +115,21 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_DOCS_THROTTLED = "documentsThrottled";
     private static final String FIELD_RESUME_AFTER = "resumeAfter";
 
+    // The work table (IngestionWorkQueue), on the document rows. Absent on a row
+    // written before it, which reads as "no work".
+    private static final String FIELD_WORK_STATE = "workState";
+    private static final String FIELD_WORK_VERSION = "workVersion";
+    private static final String FIELD_WORK_TOKEN = "workToken";
+    private static final String FIELD_WORK_PAYLOAD = "workPayload";
+    private static final String FIELD_NOT_BEFORE = "notBefore";
+    private static final String FIELD_ATTEMPTS = "attempts";
+    private static final String FIELD_LAST_ERROR = "lastError";
+    private static final String FIELD_CLAIMED_BY = "claimedBy";
+    private static final String FIELD_CLAIM_UNTIL = "claimUntil";
+
+    /** The longest error text a work row keeps. */
+    private static final int MAX_WORK_ERROR_LENGTH = 1_000;
+
     private final MongoCollection<Document> documents;
     private final MongoCollection<Document> runs;
     private final MongoCollection<Document> sources;
@@ -129,6 +145,11 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
         this.documents.createIndex(Indexes.ascending(FIELD_SOURCE_ID, FIELD_DOCUMENT_ID),
                 new IndexOptions().name("idx_ingestion_doc").unique(true).background(true));
+        // The claim's index: only rows with work to claim, by due time. Partial on
+        // the field's presence, so rows that never had work cost it nothing.
+        this.documents.createIndex(Indexes.ascending(FIELD_SOURCE_ID, FIELD_WORK_STATE, FIELD_NOT_BEFORE),
+                new IndexOptions().name("idx_ingestion_work_due").background(true)
+                        .partialFilterExpression(Filters.exists(FIELD_WORK_STATE, true)));
         this.runs.createIndex(Indexes.ascending(FIELD_RUN_ID),
                 new IndexOptions().name("idx_ingestion_run").unique(true).background(true));
         this.runs.createIndex(Indexes.descending(FIELD_SOURCE_ID, FIELD_STARTED_AT),
@@ -520,8 +541,265 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                             Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
                                     Filters.in(FIELD_FENCING_RUN_ID, reaped)),
                             Updates.unset(FIELD_FENCING_RUN_ID)));
+            // The dead runs' claims go back to pending now, rather than once their
+            // leases pass: the crash costs the run its slice, not the documents.
+            translating("release a reaped run's claims",
+                    () -> documents.updateMany(
+                            Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                                    Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
+                                    Filters.in(FIELD_CLAIMED_BY, reaped)),
+                            Updates.combine(Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                                    Updates.unset(FIELD_CLAIMED_BY), Updates.unset(FIELD_CLAIM_UNTIL))));
         }
         return reaped.size();
+    }
+
+    // === the work table (IngestionWorkQueue) ===
+
+    @Override
+    public EnqueueOutcome enqueueWork(String sourceId, String runId, WorkRequest request, Instant now) {
+        String payload = request.payload();
+        if (payload != null && payload.length() > MAX_PAYLOAD_LENGTH) {
+            throw new IllegalArgumentException("A work payload is limited to " + MAX_PAYLOAD_LENGTH + " characters");
+        }
+        String documentId = request.documentId();
+        // Equal work: the same token (two nulls included), pending, claimed or
+        // poisoned. Such a row keeps its deferral and its attempts.
+        Bson equalWork = Filters.and(
+                Filters.in(FIELD_WORK_STATE, WorkState.PENDING.name(), WorkState.CLAIMED.name(),
+                        WorkState.POISON.name()),
+                Filters.eq(FIELD_WORK_TOKEN, request.versionToken()));
+        return translating("queue a document", () -> {
+            var rearmed = documents.updateOne(
+                    Filters.and(ownedDocument(sourceId, documentId, runId), Filters.nor(equalWork)),
+                    Updates.combine(
+                            Updates.set(FIELD_LAST_RUN_ID, runId),
+                            Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                            Updates.inc(FIELD_WORK_VERSION, 1L),
+                            Updates.set(FIELD_WORK_TOKEN, request.versionToken()),
+                            Updates.set(FIELD_WORK_PAYLOAD, payload),
+                            Updates.set(FIELD_NOT_BEFORE, Date.from(now)),
+                            Updates.set(FIELD_ATTEMPTS, 0),
+                            Updates.unset(FIELD_LAST_ERROR),
+                            Updates.unset(FIELD_CLAIMED_BY),
+                            Updates.unset(FIELD_CLAIM_UNTIL)));
+            if (rearmed.getMatchedCount() > 0) {
+                return EnqueueOutcome.QUEUED;
+            }
+            var stamped = documents.updateOne(ownedDocument(sourceId, documentId, runId),
+                    Updates.set(FIELD_LAST_RUN_ID, runId));
+            if (stamped.getMatchedCount() > 0) {
+                return EnqueueOutcome.ALREADY_QUEUED;
+            }
+            // A document this source never held: a row with no vectors (tombstoned, no
+            // content hash), owned by this run, with its work. A duplicate key means
+            // the row exists and another run owns it.
+            Document row = new Document(FIELD_SOURCE_ID, sourceId)
+                    .append(FIELD_DOCUMENT_ID, documentId)
+                    .append(FIELD_LAST_RUN_ID, runId)
+                    .append(FIELD_MISSED_RUNS, 0)
+                    .append(FIELD_TOMBSTONED, true)
+                    .append(FIELD_FENCING_RUN_ID, runId)
+                    .append(FIELD_WORK_STATE, WorkState.PENDING.name())
+                    .append(FIELD_WORK_VERSION, 1L)
+                    .append(FIELD_WORK_TOKEN, request.versionToken())
+                    .append(FIELD_WORK_PAYLOAD, payload)
+                    .append(FIELD_NOT_BEFORE, Date.from(now))
+                    .append(FIELD_ATTEMPTS, 0);
+            try {
+                documents.insertOne(row);
+                return EnqueueOutcome.QUEUED;
+            } catch (MongoWriteException e) {
+                if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                    fenced("queue a document", sourceId, documentId, runId);
+                    return EnqueueOutcome.FENCED;
+                }
+                throw e;
+            }
+        });
+    }
+
+    @Override
+    public List<WorkClaim> claimWork(String sourceId, String claimer, int limit, Instant now, Instant claimUntil) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        Date at = Date.from(now);
+        // One findOneAndUpdate per row: each moves exactly one row out of the
+        // filter's match set atomically, so two claimers on two nodes never come back
+        // with the same row. Fenced on the claimer, like every document write.
+        Bson due = Filters.and(
+                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                Filters.eq(FIELD_FENCING_RUN_ID, claimer),
+                Filters.or(
+                        Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                                Filters.lte(FIELD_NOT_BEFORE, at)),
+                        Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
+                                Filters.lte(FIELD_CLAIM_UNTIL, at))));
+        Bson claim = Updates.combine(
+                Updates.set(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
+                Updates.set(FIELD_CLAIMED_BY, claimer),
+                Updates.set(FIELD_CLAIM_UNTIL, Date.from(claimUntil)));
+        var options = new FindOneAndUpdateOptions()
+                .sort(Sorts.ascending(FIELD_NOT_BEFORE, FIELD_DOCUMENT_ID))
+                .returnDocument(ReturnDocument.AFTER);
+        return translating("claim queued documents", () -> {
+            List<WorkClaim> claims = new ArrayList<>();
+            Document claimed;
+            while (claims.size() < limit && (claimed = documents.findOneAndUpdate(due, claim, options)) != null) {
+                claims.add(new WorkClaim(claimed.getString(FIELD_DOCUMENT_ID), longOrZero(claimed, FIELD_WORK_VERSION),
+                        claimed.getString(FIELD_WORK_TOKEN), claimed.getString(FIELD_WORK_PAYLOAD),
+                        intOrZero(claimed, FIELD_ATTEMPTS)));
+            }
+            return claims;
+        });
+    }
+
+    /** The condition every claimed-row update carries. */
+    private static Bson held(String sourceId, String documentId, String claimer, long workVersion) {
+        return Filters.and(byDocument(sourceId, documentId),
+                Filters.eq(FIELD_CLAIMED_BY, claimer),
+                Filters.eq(FIELD_WORK_VERSION, workVersion),
+                Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()));
+    }
+
+    @Override
+    public boolean completeWork(String sourceId, String documentId, String claimer, long workVersion) {
+        return translating("complete a queued document", () -> documents.updateOne(
+                held(sourceId, documentId, claimer, workVersion),
+                Updates.combine(
+                        Updates.set(FIELD_WORK_STATE, WorkState.DONE.name()),
+                        Updates.set(FIELD_ATTEMPTS, 0),
+                        Updates.unset(FIELD_CLAIMED_BY),
+                        Updates.unset(FIELD_CLAIM_UNTIL),
+                        Updates.unset(FIELD_NOT_BEFORE),
+                        Updates.unset(FIELD_LAST_ERROR),
+                        Updates.unset(FIELD_WORK_PAYLOAD)))
+                .getMatchedCount() > 0);
+    }
+
+    @Override
+    public boolean deferWork(String sourceId, String documentId, String claimer, long workVersion,
+                             Instant notBefore) {
+        return translating("defer a queued document", () -> documents.updateOne(
+                held(sourceId, documentId, claimer, workVersion),
+                Updates.combine(
+                        Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                        Updates.set(FIELD_NOT_BEFORE, Date.from(notBefore)),
+                        Updates.unset(FIELD_CLAIMED_BY),
+                        Updates.unset(FIELD_CLAIM_UNTIL)))
+                .getMatchedCount() > 0);
+    }
+
+    @Override
+    public FailOutcome failWork(String sourceId, String documentId, String claimer, long workVersion, String error,
+                                Instant notBefore, int maxAttempts) {
+        int cap = Math.max(1, maxAttempts);
+        // A pipeline update, so the attempt count after this failure decides the
+        // state in the same atomic write.
+        Document attemptsAfter = new Document("$add",
+                List.of(new Document("$ifNull", List.of("$" + FIELD_ATTEMPTS, 0)), 1));
+        Document poisoned = new Document("$gte", List.of(attemptsAfter, cap));
+        List<Bson> update = List.of(
+                new Document("$set", new Document(FIELD_WORK_STATE,
+                        new Document("$cond", List.of(poisoned, WorkState.POISON.name(), WorkState.PENDING.name())))
+                        .append(FIELD_NOT_BEFORE, new Document("$cond", Arrays.asList(poisoned, null, Date.from(notBefore))))
+                        .append(FIELD_ATTEMPTS, attemptsAfter)
+                        .append(FIELD_LAST_ERROR, truncate(error))),
+                new Document("$unset", List.of(FIELD_CLAIMED_BY, FIELD_CLAIM_UNTIL)));
+        return translating("record a failed attempt", () -> {
+            Document after = documents.findOneAndUpdate(held(sourceId, documentId, claimer, workVersion), update,
+                    new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+            if (after == null) {
+                return FailOutcome.NOT_CLAIMED;
+            }
+            return WorkState.POISON.name().equals(after.getString(FIELD_WORK_STATE))
+                    ? FailOutcome.POISONED
+                    : FailOutcome.RETRY;
+        });
+    }
+
+    @Override
+    public int releaseClaims(String sourceId, String claimer) {
+        return translating("release claimed documents", () -> (int) documents.updateMany(
+                Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                        Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
+                        Filters.eq(FIELD_CLAIMED_BY, claimer)),
+                Updates.combine(Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                        Updates.unset(FIELD_CLAIMED_BY), Updates.unset(FIELD_CLAIM_UNTIL)))
+                .getModifiedCount());
+    }
+
+    @Override
+    public int cancelUnlistedWork(String sourceId, String runId) {
+        return translating("withdraw the work of unlisted documents", () -> (int) documents.updateMany(
+                Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                        Filters.eq(FIELD_FENCING_RUN_ID, runId),
+                        Filters.in(FIELD_WORK_STATE, WorkState.PENDING.name(), WorkState.POISON.name()),
+                        Filters.ne(FIELD_LAST_RUN_ID, runId)),
+                Updates.combine(
+                        Updates.unset(FIELD_WORK_STATE),
+                        Updates.unset(FIELD_WORK_PAYLOAD),
+                        Updates.unset(FIELD_NOT_BEFORE),
+                        Updates.set(FIELD_ATTEMPTS, 0),
+                        Updates.unset(FIELD_LAST_ERROR),
+                        Updates.unset(FIELD_CLAIMED_BY),
+                        Updates.unset(FIELD_CLAIM_UNTIL)))
+                .getModifiedCount());
+    }
+
+    @Override
+    public WorkCounts workCounts(String sourceId, Instant now) {
+        Date at = Date.from(now);
+        return translating("count queued documents", () -> {
+            long queued = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.or(
+                            Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                                    Filters.lte(FIELD_NOT_BEFORE, at)),
+                            Filters.and(Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()),
+                                    Filters.lte(FIELD_CLAIM_UNTIL, at)))));
+            Bson waitingFilter = Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_WORK_STATE, WorkState.PENDING.name()), Filters.gt(FIELD_NOT_BEFORE, at));
+            long waiting = documents.countDocuments(waitingFilter);
+            long inFlight = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_WORK_STATE, WorkState.CLAIMED.name()), Filters.gt(FIELD_CLAIM_UNTIL, at)));
+            long done = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_WORK_STATE, WorkState.DONE.name())));
+            long failed = documents.countDocuments(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_WORK_STATE, WorkState.POISON.name())));
+            Instant next = null;
+            if (waiting > 0) {
+                Document earliest = documents.find(waitingFilter).sort(Sorts.ascending(FIELD_NOT_BEFORE)).limit(1)
+                        .first();
+                next = earliest == null ? null : toInstant(earliest.getDate(FIELD_NOT_BEFORE));
+            }
+            return new WorkCounts(queued, waiting, inFlight, done, failed, next);
+        });
+    }
+
+    @Override
+    public int retryFailedWork(String sourceId, Instant now) {
+        return translating("re-arm failed documents", () -> (int) documents.updateMany(
+                Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                        Filters.eq(FIELD_WORK_STATE, WorkState.POISON.name())),
+                Updates.combine(
+                        Updates.set(FIELD_WORK_STATE, WorkState.PENDING.name()),
+                        Updates.set(FIELD_ATTEMPTS, 0),
+                        Updates.unset(FIELD_LAST_ERROR),
+                        Updates.set(FIELD_NOT_BEFORE, Date.from(now))))
+                .getModifiedCount());
+    }
+
+    private static String truncate(String error) {
+        if (error == null) {
+            return null;
+        }
+        return error.length() <= MAX_WORK_ERROR_LENGTH ? error : error.substring(0, MAX_WORK_ERROR_LENGTH);
+    }
+
+    private static long longOrZero(Document document, String field) {
+        Object value = document.get(field);
+        return value instanceof Number number ? number.longValue() : 0L;
     }
 
     /**
