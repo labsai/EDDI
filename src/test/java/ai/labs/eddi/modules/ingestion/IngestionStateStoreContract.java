@@ -995,6 +995,46 @@ public interface IngestionStateStoreContract {
         assertEquals(Optional.of("store-epoch=x"), store().storeFingerprint(OTHER_SOURCE));
     }
 
+    @Test
+    @DisplayName("the resolved scope and the scope signature are read back, kept per source, and independent of the fingerprint")
+    default void resolvedScopeAndSignatureAreRecordedPerSource() {
+        assertTrue(store().resolvedScope(SOURCE).isEmpty());
+        assertTrue(store().scopeSignature(SOURCE).isEmpty());
+
+        store().recordStoreFingerprint(SOURCE, "store-epoch=a");
+        store().recordResolvedScope(SOURCE, "{\"Sales/Offers\":\"1abc\"}");
+        store().recordScopeSignature(SOURCE, "sig-1");
+        store().recordResolvedScope(OTHER_SOURCE, "{}");
+
+        assertEquals(Optional.of("{\"Sales/Offers\":\"1abc\"}"), store().resolvedScope(SOURCE));
+        assertEquals(Optional.of("sig-1"), store().scopeSignature(SOURCE));
+        assertEquals(Optional.of("store-epoch=a"), store().storeFingerprint(SOURCE), "writing the scope must not "
+                + "touch the store fingerprint");
+
+        store().recordScopeSignature(SOURCE, "sig-2");
+        store().recordStoreFingerprint(SOURCE, "store-epoch=b");
+
+        assertEquals(Optional.of("sig-2"), store().scopeSignature(SOURCE));
+        assertEquals(Optional.of("{\"Sales/Offers\":\"1abc\"}"), store().resolvedScope(SOURCE), "writing the "
+                + "fingerprint must not touch the resolved scope");
+        assertEquals(Optional.of("{}"), store().resolvedScope(OTHER_SOURCE));
+        assertTrue(store().scopeSignature(OTHER_SOURCE).isEmpty());
+    }
+
+    @Test
+    @DisplayName("purging a source forgets its resolved scope and its scope signature")
+    default void purgeForgetsTheScope() {
+        store().recordResolvedScope(SOURCE, "{}");
+        store().recordScopeSignature(SOURCE, "sig-1");
+        store().recordScopeSignature(OTHER_SOURCE, "sig-x");
+
+        store().purgeSource(SOURCE);
+
+        assertTrue(store().resolvedScope(SOURCE).isEmpty());
+        assertTrue(store().scopeSignature(SOURCE).isEmpty());
+        assertEquals(Optional.of("sig-x"), store().scopeSignature(OTHER_SOURCE));
+    }
+
     // === purge ===
 
     @Test

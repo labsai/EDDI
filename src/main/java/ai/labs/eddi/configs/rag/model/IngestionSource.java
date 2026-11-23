@@ -564,7 +564,8 @@ public class IngestionSource {
      * "googleDrive": {
      *   "connection": "google-drive-sa",
      *   "sharedDriveId": "0AB…",
-     *   "folderIds": ["1xY…"],
+     *   "folders": [{ "path": "Sales/Offers" }, { "id": "1xY…", "label": "Legal" }],
+     *   "excludeFolders": [{ "path": "Sales/Offers/Archive" }],
      *   "includeSubfolders": true,
      *   "mimeTypes": ["google-docs", "google-sheets", "pdf"],
      *   "excludeNamePatterns": ["*DRAFT*"]
@@ -594,6 +595,7 @@ public class IngestionSource {
         public static final Pattern DRIVE_ID = Pattern.compile("^[A-Za-z0-9_-]{1,200}$");
 
         static final int MAX_FOLDERS = 50;
+        static final int MAX_EXCLUDE_FOLDERS = 50;
         static final int MAX_EXCLUDE_PATTERNS = 50;
         static final int DEFAULT_MAX_FILES = 2_000;
         static final long DEFAULT_MAX_FILE_BYTES = 25L * 1024 * 1024;
@@ -609,10 +611,31 @@ public class IngestionSource {
         private String sharedDriveId;
 
         /**
-         * Folders of that drive to read; empty means the whole drive. Each must be a
-         * folder of {@link #sharedDriveId}.
+         * Folders of that drive to read, by id — the form before {@link #folders}
+         * existed, kept for old configurations and ZIPs. Each id here reads exactly as
+         * a {@code folders} entry {@code {"id": …}} does; both lists may be used, and
+         * together they may name at most {@value #MAX_FOLDERS} folders.
          */
         private List<String> folderIds = new ArrayList<>();
+
+        /**
+         * Folders of that drive to read, each by {@code path} from the drive's root
+         * ({@code "Sales/Offers"}) or by {@code id}. Empty, with {@link #folderIds}
+         * empty too, means the whole drive.
+         * <p>
+         * A path is resolved to a folder id on the first run that sees it, and the id
+         * is recorded in the source's ingestion state — never in this configuration.
+         * Later runs read that id, so renaming or moving the folder does not move the
+         * scope; the run reports the folder's new path instead.
+         */
+        private List<DriveFolder> folders = new ArrayList<>();
+
+        /**
+         * Folders, by path or id, whose whole subtree is not read. Exclusion wins over
+         * inclusion at any depth: a configured folder inside an excluded one is not
+         * read either.
+         */
+        private List<DriveFolder> excludeFolders = new ArrayList<>();
 
         /** Read the folders' subfolders too, breadth-first. */
         private boolean includeSubfolders = true;
@@ -658,12 +681,23 @@ public class IngestionSource {
                         + "(drive.google.com/drive/folders/<id>)");
             }
             requireDriveId(sharedDriveId, prefix + ".sharedDriveId", sourceName);
-            if (folderIds.size() > MAX_FOLDERS) {
-                throw new IllegalArgumentException(prefix + ".folderIds of ingestion source '" + sourceName
-                        + "' may list at most " + MAX_FOLDERS + " folders, got: " + folderIds.size());
+            if (folderIds.size() + folders.size() > MAX_FOLDERS) {
+                throw new IllegalArgumentException(prefix + ".folders and " + prefix + ".folderIds of ingestion source '"
+                        + sourceName + "' may name at most " + MAX_FOLDERS + " folders together, got: "
+                        + (folderIds.size() + folders.size()));
             }
             for (String folderId : folderIds) {
                 requireDriveId(folderId, prefix + ".folderIds", sourceName);
+            }
+            for (DriveFolder folder : folders) {
+                validateFolder(folder, prefix + ".folders", sourceName);
+            }
+            if (excludeFolders.size() > MAX_EXCLUDE_FOLDERS) {
+                throw new IllegalArgumentException(prefix + ".excludeFolders of ingestion source '" + sourceName
+                        + "' may name at most " + MAX_EXCLUDE_FOLDERS + " folders, got: " + excludeFolders.size());
+            }
+            for (DriveFolder folder : excludeFolders) {
+                validateFolder(folder, prefix + ".excludeFolders", sourceName);
             }
             for (String format : mimeTypes) {
                 if (format == null || !FORMATS.contains(format)) {
@@ -706,9 +740,68 @@ public class IngestionSource {
             }
         }
 
-        /** The folders to read from: the listed ones, or the drive's root. */
+        private static void validateFolder(DriveFolder folder, String field, String sourceName) {
+            if (folder == null) {
+                throw new IllegalArgumentException(field + " of ingestion source '" + sourceName
+                        + "' contains an empty entry");
+            }
+            boolean hasId = folder.getId() != null && !folder.getId().isBlank();
+            boolean hasPath = folder.getPath() != null && !folder.getPath().isBlank();
+            if (hasId == hasPath) {
+                throw new IllegalArgumentException(field + " of ingestion source '" + sourceName
+                        + "' needs exactly one of 'id' and 'path' in every entry, got: "
+                        + (hasId ? "both" : "neither"));
+            }
+            if (hasId) {
+                requireDriveId(folder.getId(), field + ".id", sourceName);
+            } else {
+                try {
+                    DriveFolder.segmentsOf(folder.getPath());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(field + ".path of ingestion source '" + sourceName + "': "
+                            + e.getMessage(), e);
+                }
+            }
+            if (folder.getLabel() != null && folder.getLabel().length() > DriveFolder.MAX_LABEL_LENGTH) {
+                throw new IllegalArgumentException(field + ".label of ingestion source '" + sourceName
+                        + "' may be at most " + DriveFolder.MAX_LABEL_LENGTH + " characters");
+            }
+        }
+
+        /**
+         * The folders to read from by id: {@link #folderIds} and the {@code id} entries
+         * of {@link #folders}, or the drive's root when no folder is configured at all.
+         * Path entries are not here — they become ids only when a run resolves them.
+         */
         public List<String> rootFolderIds() {
-            return folderIds.isEmpty() ? List.of(sharedDriveId) : List.copyOf(new LinkedHashSet<>(folderIds));
+            if (!hasConfiguredFolders()) {
+                return List.of(sharedDriveId);
+            }
+            Set<String> ids = new LinkedHashSet<>(folderIds);
+            for (DriveFolder folder : folders) {
+                if (folder.getId() != null && !folder.getId().isBlank()) {
+                    ids.add(folder.getId());
+                }
+            }
+            return List.copyOf(ids);
+        }
+
+        /** Whether any folder is configured to read, by id or by path. */
+        public boolean hasConfiguredFolders() {
+            return !folderIds.isEmpty() || !folders.isEmpty();
+        }
+
+        /**
+         * Every folder to read as one list: {@link #folderIds} as {@code id} entries
+         * first, then {@link #folders}.
+         */
+        public List<DriveFolder> includedFolders() {
+            List<DriveFolder> all = new ArrayList<>();
+            for (String id : folderIds) {
+                all.add(DriveFolder.ofId(id));
+            }
+            all.addAll(folders);
+            return all;
         }
 
         /** The formats to read; never empty. */
@@ -746,6 +839,22 @@ public class IngestionSource {
 
         public void setFolderIds(List<String> folderIds) {
             this.folderIds = folderIds == null ? new ArrayList<>() : folderIds;
+        }
+
+        public List<DriveFolder> getFolders() {
+            return folders;
+        }
+
+        public void setFolders(List<DriveFolder> folders) {
+            this.folders = folders == null ? new ArrayList<>() : folders;
+        }
+
+        public List<DriveFolder> getExcludeFolders() {
+            return excludeFolders;
+        }
+
+        public void setExcludeFolders(List<DriveFolder> excludeFolders) {
+            this.excludeFolders = excludeFolders == null ? new ArrayList<>() : excludeFolders;
         }
 
         public boolean isIncludeSubfolders() {
@@ -794,6 +903,122 @@ public class IngestionSource {
 
         public void setCaptureAcl(Boolean captureAcl) {
             this.captureAcl = captureAcl;
+        }
+    }
+
+    /**
+     * One folder of a Shared Drive, named by its {@code path} from the drive's root
+     * or by its {@code id} — exactly one of the two. {@code label} is a name for
+     * people, shown in the Manager; it is not used to find the folder.
+     *
+     * <p>
+     * A path is a list of folder names separated by {@code /}, matched one level at
+     * a time. A name that itself contains {@code /} cannot be written as a path;
+     * name that folder by its id. Names are compared in Unicode NFC, exactly first
+     * and then ignoring case, and two folders that match at one level are an error
+     * naming both, never a guess.
+     */
+    public static class DriveFolder {
+
+        static final int MAX_PATH_LENGTH = 1024;
+        static final int MAX_SEGMENT_LENGTH = 255;
+        static final int MAX_DEPTH = 32;
+        static final int MAX_LABEL_LENGTH = 200;
+
+        private String id;
+        private String path;
+        private String label;
+
+        public DriveFolder() {
+        }
+
+        public static DriveFolder ofId(String id) {
+            DriveFolder folder = new DriveFolder();
+            folder.setId(id);
+            return folder;
+        }
+
+        public static DriveFolder ofPath(String path) {
+            DriveFolder folder = new DriveFolder();
+            folder.setPath(path);
+            return folder;
+        }
+
+        /**
+         * The folder names of a path, from the drive's root down. A leading or trailing
+         * {@code /} is ignored, and so are spaces around each name
+         * ({@code Sales / Offers} is {@code Sales/Offers}; a folder whose own name
+         * starts or ends with a space is named by its id). An empty name, a control
+         * character or a path deeper or longer than the limits is refused.
+         *
+         * @throws IllegalArgumentException
+         *             naming what is wrong with the path
+         */
+        public static List<String> segmentsOf(String path) {
+            if (path == null || path.isBlank()) {
+                throw new IllegalArgumentException("a folder path must not be empty");
+            }
+            if (path.length() > MAX_PATH_LENGTH) {
+                throw new IllegalArgumentException("a folder path may be at most " + MAX_PATH_LENGTH + " characters");
+            }
+            for (int i = 0; i < path.length(); i++) {
+                if (Character.getType(path.charAt(i)) == Character.CONTROL) {
+                    throw new IllegalArgumentException("a folder path must not contain control characters");
+                }
+            }
+            String trimmed = path;
+            if (trimmed.startsWith("/")) {
+                trimmed = trimmed.substring(1);
+            }
+            if (trimmed.endsWith("/")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 1);
+            }
+            String[] parts = trimmed.split("/", -1);
+            if (parts.length > MAX_DEPTH) {
+                throw new IllegalArgumentException("a folder path may be at most " + MAX_DEPTH + " folders deep");
+            }
+            List<String> segments = new ArrayList<>(parts.length);
+            for (String part : parts) {
+                if (part.isBlank()) {
+                    throw new IllegalArgumentException("'" + path + "' has an empty folder name; separate the names "
+                            + "with a single '/'");
+                }
+                if (part.length() > MAX_SEGMENT_LENGTH) {
+                    throw new IllegalArgumentException("a folder name may be at most " + MAX_SEGMENT_LENGTH
+                            + " characters");
+                }
+                segments.add(part.strip());
+            }
+            return segments;
+        }
+
+        /** The path as runs compare it: its segments joined by a single {@code /}. */
+        public String normalizedPath() {
+            return String.join("/", segmentsOf(path));
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+        }
+
+        public String getLabel() {
+            return label;
+        }
+
+        public void setLabel(String label) {
+            this.label = label;
         }
     }
 

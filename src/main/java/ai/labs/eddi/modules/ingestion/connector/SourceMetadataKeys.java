@@ -35,6 +35,19 @@ public final class SourceMetadataKeys {
     /** The {@link Partition} the document was found in. */
     public static final String PARTITION_ID = "partitionId";
 
+    /**
+     * The folder that holds the document, as the listing found it — for a Google
+     * Drive file, the id of its parent folder.
+     */
+    public static final String PARENT_ID = "parentId";
+
+    /**
+     * The folders above the document, as a chain of ids from the top down,
+     * {@code /a/b/} — for a Google Drive file, ending with its parent. Stored on
+     * every chunk, so retrieval can apply a source's current folder scope.
+     */
+    public static final String FOLDER_IDS = "folderIds";
+
     /** The document's title, capped before it is copied onto chunks. */
     public static final String TITLE = "title";
 
@@ -94,7 +107,7 @@ public final class SourceMetadataKeys {
     public static final String ACL_ANYONE = "anyone";
 
     /** Every standard key, for validation and documentation. */
-    public static final List<String> ALL = List.of(DOCUMENT_ID, SOURCE_KEY, PARTITION_ID, TITLE, CITATION_URL, PATH,
+    public static final List<String> ALL = List.of(DOCUMENT_ID, SOURCE_KEY, PARTITION_ID, PARENT_ID, FOLDER_IDS, TITLE, CITATION_URL, PATH,
             MIME_TYPE, FORMAT, AUTHOR, MODIFIED_AT, VERSION_TOKEN, PROVIDER, ACL_PRINCIPALS);
 
     private SourceMetadataKeys() {

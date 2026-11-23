@@ -43,6 +43,8 @@ public final class FakeDrive implements DriveTransport {
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern PARENT = Pattern.compile("^'([^']+)' in parents and trashed = false$");
+    private static final Pattern FOLDERS = Pattern.compile(
+            "^'([^']+)' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false$");
 
     /** One file or folder. */
     record Item(String id, String name, String mimeType, String parent, Long size, String md5, Long version,
@@ -89,6 +91,36 @@ public final class FakeDrive implements DriveTransport {
 
     public FakeDrive shortcut(String id, String name, String parent, String target, String targetMime) {
         items.put(id, new Item(id, name, SHORTCUT, parent, null, null, 1L, target, targetMime, false));
+        return this;
+    }
+
+    /** Renames an item, keeping its id. */
+    public FakeDrive rename(String id, String name) {
+        Item item = items.get(id);
+        items.put(id, new Item(item.id(), name, item.mimeType(), item.parent(), item.size(), item.md5(),
+                item.version(), item.shortcutTarget(), item.shortcutTargetMime(), item.trashed()));
+        return this;
+    }
+
+    /** Moves an item to another folder, keeping its id. */
+    public FakeDrive move(String id, String parent) {
+        Item item = items.get(id);
+        items.put(id, new Item(item.id(), item.name(), item.mimeType(), parent, item.size(), item.md5(),
+                item.version(), item.shortcutTarget(), item.shortcutTargetMime(), item.trashed()));
+        return this;
+    }
+
+    /** Deletes an item outright: it is neither listed nor found. */
+    public FakeDrive delete(String id) {
+        items.remove(id);
+        return this;
+    }
+
+    /** Items Drive reports as belonging to another drive. */
+    final Set<String> otherDrive = new HashSet<>();
+
+    public FakeDrive inOtherDrive(String id) {
+        otherDrive.add(id);
         return this;
     }
 
@@ -192,7 +224,11 @@ public final class FakeDrive implements DriveTransport {
                     : new DriveResponse(200, Map.of(), content, false);
         }
         ObjectNode file = JSON.createObjectNode().put("id", id).put("name", item.name())
-                .put("mimeType", item.mimeType()).put("driveId", driveId).put("trashed", item.trashed());
+                .put("mimeType", item.mimeType()).put("driveId", otherDrive.contains(id) ? "0AotherDrive" : driveId)
+                .put("trashed", item.trashed());
+        if (item.parent() != null) {
+            file.putArray("parents").add(item.parent());
+        }
         if (!omitCapabilities) {
             file.putObject("capabilities").put("canListChildren", !unlistable.contains(id));
         }
@@ -205,18 +241,27 @@ public final class FakeDrive implements DriveTransport {
                 || !"true".equals(query.get("includeItemsFromAllDrives"))) {
             return error(400, "invalid", "A Shared Drive listing needs corpora, driveId and the all-drives flags");
         }
-        Matcher parent = PARENT.matcher(query.getOrDefault("q", ""));
-        if (!parent.matches()) {
+        String q = query.getOrDefault("q", "");
+        Matcher parent = PARENT.matcher(q);
+        Matcher folders = FOLDERS.matcher(q);
+        boolean foldersOnly = folders.matches();
+        if (!parent.matches() && !foldersOnly) {
             return error(400, "invalidQuery", "Invalid Value");
         }
+        String parentId = foldersOnly ? folders.group(1) : parent.group(1);
         List<Item> children = new ArrayList<>();
         if (driveVisible) {
             for (Item item : items.values()) {
-                if (parent.group(1).equals(item.parent()) && !item.trashed()) {
+                if (parentId.equals(item.parent()) && !item.trashed() && (!foldersOnly || FOLDER.equals(item.mimeType()))) {
                     children.add(item);
                 }
             }
         }
+        if (foldersOnly && "name".equals(query.get("orderBy"))) {
+            children.sort((a, b) -> a.name().compareTo(b.name()));
+        }
+        int requestedPageSize = query.containsKey("pageSize") ? Integer.parseInt(query.get("pageSize")) : pageSize;
+        int effectivePageSize = Math.min(pageSize, requestedPageSize);
         int offset;
         try {
             offset = query.containsKey("pageToken") ? Integer.parseInt(query.get("pageToken").substring(1)) : 0;
@@ -226,7 +271,7 @@ public final class FakeDrive implements DriveTransport {
         if (offset < 0) {
             return error(400, "invalid", "Invalid pageToken");
         }
-        int end = Math.min(children.size(), offset + pageSize);
+        int end = Math.min(children.size(), offset + effectivePageSize);
         ObjectNode page = JSON.createObjectNode();
         ArrayNode files = page.putArray("files");
         for (Item item : children.subList(offset, end)) {

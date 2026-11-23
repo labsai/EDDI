@@ -9,6 +9,7 @@ import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.UnsupportedFeatureException;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -53,6 +54,12 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
     /** Simulates a store that accepts deletes and fails them — a sick backend. */
     public RecordingEmbeddingStore withFailingRemoval() {
         this.removalFails = true;
+        return this;
+    }
+
+    /** Ends {@link #withFailingRemoval}: the backend is well again. */
+    public RecordingEmbeddingStore withWorkingRemoval() {
+        this.removalFails = false;
         return this;
     }
 
@@ -180,8 +187,23 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
         segments.clear();
     }
 
+    private boolean searchable;
+
+    /**
+     * Makes {@link #search} answer every stored segment, in storage order and with
+     * score 1, up to the request's maximum — ignoring its filter. Off by default.
+     */
+    public RecordingEmbeddingStore searchingEverything() {
+        this.searchable = true;
+        return this;
+    }
+
     @Override
     public EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request) {
-        return new EmbeddingSearchResult<>(List.of());
+        if (!searchable) {
+            return new EmbeddingSearchResult<>(List.of());
+        }
+        return new EmbeddingSearchResult<>(segments.stream().limit(request.maxResults())
+                .map(segment -> new EmbeddingMatch<>(1.0, UUID.randomUUID().toString(), null, segment)).toList());
     }
 }

@@ -49,6 +49,16 @@ export const GOOGLE_DRIVE_FORMATS = [
 ] as const;
 
 /**
+ * One folder of a Shared Drive (`IngestionSource.DriveFolder`): exactly one of
+ * `path` (from the drive's root, `Sales/Offers`) and `id`. `label` is for people.
+ */
+export interface DriveFolder {
+  id?: string;
+  path?: string;
+  label?: string;
+}
+
+/**
  * A Google Shared Drive, or folders of one, read with a SERVICE-bound
  * connection (an `OAUTH2_JWT_BEARER` service account).
  */
@@ -56,8 +66,17 @@ export interface GoogleDriveSource {
   /** Name of a SERVICE-bound connection; a PER_USER one is refused at run time. */
   connection?: string;
   sharedDriveId?: string;
-  /** Folders of that drive to read; empty means the whole drive. */
+  /** Folders of that drive to read by id: the older form, still read. */
   folderIds?: string[];
+  /**
+   * Folders to read, by path or id. With `folderIds` also empty, the whole
+   * drive is read. A path is resolved to an id on the first run, and the id is
+   * kept in the source's state, so renaming the folder later does not move the
+   * scope.
+   */
+  folders?: DriveFolder[];
+  /** Folders whose whole subtree is not read. Exclusion wins over inclusion. */
+  excludeFolders?: DriveFolder[];
   includeSubfolders?: boolean;
   /** Formats to read, from {@link GOOGLE_DRIVE_FORMATS}; empty means all. */
   mimeTypes?: string[];
@@ -189,6 +208,40 @@ export function purgeSource(kbId: string, sourceId: string, version: number) {
   return api.delete<{ status: string; sourceId: string }>(
     `${base(kbId, sourceId)}/documents?version=${version}`,
   );
+}
+
+// ── Google Drive folder picker ───────────────────────────────────────────────
+
+/** One folder of a level the picker lists. */
+export interface DriveFolderEntry {
+  id: string;
+  name: string;
+}
+
+/** One page of one folder level; `nextPageToken` is null on the last page. */
+export interface DriveFolderPage {
+  folders: DriveFolderEntry[];
+  nextPageToken?: string | null;
+}
+
+/** The picker's name for the drive's top level. */
+export const DRIVE_ROOT = "root";
+
+/**
+ * The subfolders of one folder of a saved Google Drive source's Shared Drive —
+ * folders only, at most 200 per page, read with the source's connection. Needs
+ * EDIT on the knowledge base.
+ */
+export function listDriveFolders(
+  kbId: string,
+  sourceId: string,
+  version: number,
+  parentId: string = DRIVE_ROOT,
+  pageToken?: string | null,
+) {
+  const params = new URLSearchParams({ version: String(version), parentId });
+  if (pageToken) params.set("pageToken", pageToken);
+  return api.get<DriveFolderPage>(`${base(kbId, sourceId)}/drive/folders?${params.toString()}`);
 }
 
 // ── Uploaded files ───────────────────────────────────────────────────────────

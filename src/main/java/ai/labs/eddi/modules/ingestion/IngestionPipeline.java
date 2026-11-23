@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceDocument;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument.Content;
 import ai.labs.eddi.modules.ingestion.connector.SourceError;
 import ai.labs.eddi.modules.ingestion.connector.SourceException;
+import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.crawl.WebSourceConnector;
@@ -471,9 +472,14 @@ public class IngestionPipeline {
                     sourceRun.incompleteReason() != null ? sourceRun.incompleteReason() : sourceRun.stopReason());
             return 0;
         }
-        List<DocumentState> gone = stateStore.bumpAndFindMissing(
-                sourceKey, runId, source.settings().tombstoneAfterMissedRunsOrDefault());
+        int threshold = source.settings().tombstoneAfterMissedRunsOrDefault();
+        boolean scopeChanged = scopeChanged(source, sourceKey, sourceRun);
+        List<DocumentState> gone = stateStore.bumpAndFindMissing(sourceKey, runId, scopeChanged ? 1 : threshold);
+        if (scopeChanged) {
+            gone = outsideTheNewScope(gone, runId, threshold, collector.listed);
+        }
         if (gone.isEmpty()) {
+            recordAppliedScope(sourceKey, sourceRun);
             return 0;
         }
 
@@ -505,7 +511,85 @@ public class IngestionPipeline {
             }
         }
         stateStore.markTombstoned(sourceKey, sweptOrphans ? withMarker(removedIds) : removedIds);
+        long documentsGone = gone.stream().filter(document -> !SWEEP_MARKER.equals(document.documentId())).count();
+        if (removedIds.size() >= documentsGone) {
+            // Only once every document the new scope dropped has really gone: a
+            // vector that could not be removed is still retrievable, and the next run
+            // must still see the scope as changed and try again at once.
+            recordAppliedScope(sourceKey, sourceRun);
+        }
         return removedIds.size();
+    }
+
+    /**
+     * Whether the scope this run listed differs from the one the last completed
+     * reconciliation applied — a folder added to, removed from or excluded from a
+     * Google Drive source.
+     *
+     * <p>
+     * A source that never recorded a signature (its state predates folder scoping,
+     * or this is its first run) is not treated as changed: there is no earlier
+     * scope to compare with, and fast-tracking its first reconciliation would only
+     * drop the miss grace of documents that are simply missing.
+     */
+    private boolean scopeChanged(IngestionSource source, String sourceKey, SourceRun sourceRun) {
+        if (sourceRun.scopeSignature() == null) {
+            return false;
+        }
+        String applied = stateStore.scopeSignature(sourceKey).orElse(null);
+        if (applied == null || applied.equals(sourceRun.scopeSignature())) {
+            return false;
+        }
+        LOGGER.infof("The scope of source '%s' changed since its last completed listing; documents this listing did "
+                + "not see are removed now, not after tombstoneAfterMissedRuns runs",
+                LogSanitizer.sanitize(source.getName()));
+        return true;
+    }
+
+    /**
+     * Of the documents a scope-changed run found missing at a threshold of one,
+     * those that really left: not seen by this complete listing of the new scope.
+     *
+     * <p>
+     * The connector lists the whole new scope, so a document it did not see is
+     * outside it — or deleted, which reconciles it a run or two early and costs
+     * nothing. Two rows keep their normal grace: one this run stamped as
+     * unreachable (its miss count is from earlier runs, and this run learned
+     * nothing about it), and the orphan-sweep marker, whose wait is about a purge,
+     * not about the scope.
+     */
+    private static List<DocumentState> outsideTheNewScope(List<DocumentState> missing, String runId,
+                                                          int threshold, Set<String> listed) {
+        List<DocumentState> gone = new ArrayList<>();
+        for (DocumentState document : missing) {
+            if (runId.equals(document.lastRunId()) || listed.contains(document.documentId())) {
+                // Listed by this run, so inside the new scope whatever became of it
+                // after: a download or an embedding that failed is no reason to drop
+                // its old vectors early, even when marking it unreachable failed too.
+                continue;
+            }
+            if (SWEEP_MARKER.equals(document.documentId()) && document.missedRuns() < threshold) {
+                continue;
+            }
+            gone.add(document);
+        }
+        return gone;
+    }
+
+    /**
+     * Records the scope signature of a completed reconciliation. Best effort: a
+     * failure only means the next completed listing applies the change again.
+     */
+    private void recordAppliedScope(String sourceKey, SourceRun sourceRun) {
+        if (sourceRun.scopeSignature() == null) {
+            return;
+        }
+        try {
+            stateStore.recordScopeSignature(sourceKey, sourceRun.scopeSignature());
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not record the scope signature of source '%s'; the next completed listing "
+                    + "applies the scope again", LogSanitizer.sanitize(sourceKey));
+        }
     }
 
     private static List<String> withMarker(List<String> removedIds) {
@@ -821,7 +905,7 @@ public class IngestionPipeline {
      *            the connector's explanation when coverage fell short, for the log
      */
     private record SourceRun(WebCrawler.StopReason stopReason, Coverage coverage, boolean coveredWholeSource,
-            String incompleteReason, String summary) {
+            String incompleteReason, String summary, String scopeSignature) {
     }
 
     /**
@@ -849,7 +933,8 @@ public class IngestionPipeline {
             Partition partition = partitions.get(0);
             connector.verifyAccess(context, partition);
             Instant deadline = uploadDeadline(Instant.now(), source);
-            result = connector.discover(new Discovery(connector, context, partition, deadline, collector));
+            result = connector.discover(new Discovery(connector, context, partition, deadline, collector,
+                    stateStore, mode == Mode.INGEST));
         } catch (SourceException e) {
             throw new IllegalStateException(e.getMessage(), e);
         }
@@ -865,7 +950,7 @@ public class IngestionPipeline {
             case INCREMENTAL, PARTIAL -> false;
         };
         return new SourceRun(WebCrawler.StopReason.valueOf(result.stopReason().name()), result.coverage(), covered,
-                result.incompleteReason(), result.summary());
+                result.incompleteReason(), result.summary(), result.scopeSignature());
     }
 
     /**
@@ -931,14 +1016,30 @@ public class IngestionPipeline {
         private final Partition partition;
         private final Instant deadline;
         private final Collector collector;
+        private final IIngestionStateStore stateStore;
+        private final boolean writesState;
 
         private Discovery(SourceConnector connector, SourceContext context, Partition partition, Instant deadline,
-                Collector collector) {
+                Collector collector, IIngestionStateStore stateStore, boolean writesState) {
             this.connector = connector;
             this.context = context;
             this.partition = partition;
             this.deadline = deadline;
             this.collector = collector;
+            this.stateStore = stateStore;
+            this.writesState = writesState;
+        }
+
+        @Override
+        public Optional<String> resolvedScope() {
+            return stateStore.resolvedScope(context.sourceKey());
+        }
+
+        @Override
+        public void recordResolvedScope(String resolvedScope) {
+            if (writesState) {
+                stateStore.recordResolvedScope(context.sourceKey(), resolvedScope);
+            }
         }
 
         @Override
@@ -1117,6 +1218,17 @@ public class IngestionPipeline {
          */
         private boolean reembedAll;
         /**
+         * The folder chain of the document being processed, for its chunks and its
+         * citation fingerprint; null for a document without one. Documents are
+         * processed one at a time, on the run's own thread.
+         */
+        private String currentFolderIds;
+        /**
+         * Every document discovery handed over this run. A scope-changed reconciliation
+         * removes only documents outside it.
+         */
+        private final Set<String> listed = new HashSet<>();
+        /**
          * Why the in-memory store refused this run's writes, once it has; the run stops
          * there rather than failing every remaining document the same way.
          */
@@ -1259,6 +1371,9 @@ public class IngestionPipeline {
          * One discovered document, handled before discovery moves on.
          */
         void process(WorkItem item, SourceConnector connector, SourceContext context) {
+            if (item.action() != WorkItem.Action.DELETE) {
+                listed.add(item.documentId());
+            }
             switch (item.action()) {
                 case UNCHANGED -> onUnchanged(item.documentId());
                 case DELETE -> onDeleted(item.documentId());
@@ -1267,6 +1382,15 @@ public class IngestionPipeline {
         }
 
         private void upsert(WorkItem item, SourceConnector connector, SourceContext context) {
+            currentFolderIds = item.citation() == null ? null : item.citation().folderIds();
+            try {
+                upsertDocument(item, connector, context);
+            } finally {
+                currentFolderIds = null;
+            }
+        }
+
+        private void upsertDocument(WorkItem item, SourceConnector connector, SourceContext context) {
             SourceDocument document = item.prefetched();
             if (document == null) {
                 // Asked before the content is fetched: an unchanged document needs
@@ -1296,6 +1420,12 @@ public class IngestionPipeline {
                     throw new IllegalStateException("Source type '" + connector.type() + "' fetched document '"
                             + document.documentId() + "' for work item '" + item.documentId() + "'");
                 }
+            }
+            Object folders = document.metadata() == null
+                    ? null
+                    : document.metadata().get(SourceMetadataKeys.FOLDER_IDS);
+            if (folders != null) {
+                currentFolderIds = folders.toString();
             }
             switch (document.content()) {
                 case Content.HtmlPage page -> onPage(document, page);
@@ -1341,7 +1471,7 @@ public class IngestionPipeline {
          */
         private CitationCheck refreshCitation(DocumentState known, String title, String url) {
             String chunkTitle = cap(title, MAX_TITLE_LENGTH);
-            String current = ContentHashes.citation(chunkTitle, url);
+            String current = ContentHashes.citation(chunkTitle, url, currentFolderIds);
             if (mode != Mode.INGEST || current.equals(known.citationHash())) {
                 return CitationCheck.CURRENT;
             }
@@ -1351,6 +1481,14 @@ public class IngestionPipeline {
                 return CitationCheck.CURRENT;
             }
             if (!(store() instanceof SegmentMetadataUpdates updates)) {
+                if (currentFolderIds != null
+                        && ContentHashes.citation(chunkTitle, url).equals(known.citationHash())) {
+                    // Only the folder chain is new — chunks written before chains were
+                    // recorded. A store that cannot rewrite metadata would re-embed the
+                    // whole source for it; the chunks stay without a chain instead, which
+                    // retrieval keeps until the next complete listing decides.
+                    return CitationCheck.CURRENT;
+                }
                 return CitationCheck.REEMBED;
             }
             if (!stillOwnsRun(true)) {
@@ -1360,6 +1498,9 @@ public class IngestionPipeline {
             Map<String, String> values = new HashMap<>();
             values.put(METADATA_TITLE, chunkTitle);
             values.put(METADATA_URL, url);
+            if (currentFolderIds != null) {
+                values.put(SourceMetadataKeys.FOLDER_IDS, currentFolderIds);
+            }
             int updated;
             try {
                 updated = updates.updateMetadata(
@@ -1706,7 +1847,7 @@ public class IngestionPipeline {
             // while deciding whether to ingest, as the draft did — means one
             // provider timeout marks a page done forever.
             stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId,
-                    ContentHashes.citation(cap(title, MAX_TITLE_LENGTH), url));
+                    ContentHashes.citation(cap(title, MAX_TITLE_LENGTH), url, currentFolderIds));
 
             if (segments + discardedSegments >= source.settings().maxSegmentsPerRunOrDefault()) {
                 budgetExhausted = true;
@@ -1791,6 +1932,11 @@ public class IngestionPipeline {
                     // What retrieval filters on in the per-id layout. Without it a
                     // crawled chunk would be invisible to its own knowledge base.
                     .put(KnowledgeBaseStorage.METADATA_KB_ID, chunkKbId);
+            if (currentFolderIds != null) {
+                // Where the document sits, so retrieval can apply the source's current
+                // folder scope before the next complete listing has.
+                metadata.put(SourceMetadataKeys.FOLDER_IDS, currentFolderIds);
+            }
 
             var splitter = DocumentSplitters.recursive(
                     knowledgeBase.chunkSizeOrDefault(), knowledgeBase.chunkOverlapOrDefault());

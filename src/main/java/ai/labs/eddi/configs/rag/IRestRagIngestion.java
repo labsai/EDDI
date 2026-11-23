@@ -107,6 +107,26 @@ public interface IRestRagIngestion {
                            @QueryParam("version") Integer version);
 
     @GET
+    @Path("/{id}/sources/{sourceId}/drive/folders")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "One level of folders: {folders: [{id, name}], nextPageToken}.")
+    @APIResponse(responseCode = "400", description = "Not a Google Drive source, a malformed parentId or pageToken, "
+            + "or a folder of another drive.")
+    @APIResponse(responseCode = "404", description = "No such knowledge base, source or folder.")
+    @APIResponse(responseCode = "422", description = "The source's connection cannot read the drive or folder.")
+    @Operation(summary = "List one level of a Google Drive source's folders",
+               description = "Read-only, for the folder picker: the subfolders of one folder of the source's Shared "
+                       + "Drive (parentId=root for the top level), at most 200 per page, through the saved source's "
+                       + "own connection. Folders only — never a file or any file's content. Needs EDIT on the "
+                       + "knowledge base, like running the source.")
+    Response listDriveFolders(@PathParam("id") String ragConfigId,
+                              @PathParam("sourceId") String sourceId,
+                              @Parameter(name = "version", required = true, example = "1")
+                              @QueryParam("version") Integer version,
+                              @QueryParam("parentId") String parentId,
+                              @QueryParam("pageToken") String pageToken);
+
+    @GET
     @Path("/{id}/sources/{sourceId}/runs")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "Run history, newest first.")

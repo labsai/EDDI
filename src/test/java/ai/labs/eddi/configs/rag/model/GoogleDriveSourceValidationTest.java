@@ -12,6 +12,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,6 +94,65 @@ class GoogleDriveSourceValidationTest {
         drive.setFolderIds(List.of("1a", "1b", "1a"));
         assertDoesNotThrow(source::validate);
         assertEquals(List.of("1a", "1b"), drive.rootFolderIds());
+    }
+
+    @Test
+    @DisplayName("folders by path and id, and folderIds with them, all count as configured folders")
+    void foldersByPathAndId() {
+        drive.setFolderIds(List.of("1legacy"));
+        drive.setFolders(List.of(IngestionSource.DriveFolder.ofPath("/Sales/Offers/"),
+                IngestionSource.DriveFolder.ofId("1byId")));
+        drive.setExcludeFolders(List.of(IngestionSource.DriveFolder.ofPath("Sales/Offers/Archive")));
+
+        assertDoesNotThrow(source::validate);
+        assertEquals(List.of("1legacy", "1byId"), drive.rootFolderIds(), "paths become ids only when a run resolves them");
+        assertEquals(3, drive.includedFolders().size());
+        assertEquals("Sales/Offers", drive.getFolders().get(0).normalizedPath());
+    }
+
+    @Test
+    @DisplayName("a folder entry needs exactly one of id and path")
+    void folderEntryShape() {
+        var both = IngestionSource.DriveFolder.ofId("1a");
+        both.setPath("Sales");
+        drive.setFolders(List.of(both));
+        assertTrue(refusal().contains("exactly one of 'id' and 'path'"));
+
+        drive.setFolders(List.of(new IngestionSource.DriveFolder()));
+        assertTrue(refusal().contains("got: neither"));
+
+        drive.setFolders(List.of());
+        drive.setExcludeFolders(List.of(IngestionSource.DriveFolder.ofId("bad id")));
+        assertTrue(refusal().startsWith("googleDrive.excludeFolders.id"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Sales//Offers", "Sales/ /Offers", "Sales/\u0007Offers", "/", "Line\nBreak"})
+    @DisplayName("a path with an empty name or a control character is refused")
+    void badPaths(String path) {
+        drive.setFolders(List.of(IngestionSource.DriveFolder.ofPath(path)));
+        assertTrue(refusal().startsWith("googleDrive.folders.path"));
+    }
+
+    @Test
+    @DisplayName("a path deeper than the limit is refused")
+    void deepPath() {
+        drive.setFolders(List.of(IngestionSource.DriveFolder.ofPath("a/".repeat(40) + "z")));
+        assertTrue(refusal().contains("folders deep"));
+    }
+
+    @Test
+    @DisplayName("folders and folderIds share one limit; exclusions have their own")
+    void folderLimits() {
+        drive.setFolderIds(IntStream.range(0, 30).mapToObj(i -> "1f" + i).toList());
+        drive.setFolders(IntStream.range(0, 21)
+                .mapToObj(i -> IngestionSource.DriveFolder.ofPath("Team " + i)).toList());
+        assertTrue(refusal().contains("at most 50 folders together"));
+
+        drive.setFolders(List.of());
+        drive.setExcludeFolders(IntStream.range(0, 51)
+                .mapToObj(i -> IngestionSource.DriveFolder.ofId("1x" + i)).toList());
+        assertTrue(refusal().startsWith("googleDrive.excludeFolders"));
     }
 
     @Test

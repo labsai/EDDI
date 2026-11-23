@@ -16,6 +16,11 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.ingestion.connector.SourceContext;
+import ai.labs.eddi.modules.ingestion.connector.SourceCredentials;
+import ai.labs.eddi.modules.ingestion.connector.SourceError;
+import ai.labs.eddi.modules.ingestion.connector.SourceException;
+import ai.labs.eddi.modules.ingestion.drive.GoogleDriveSourceConnector;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
@@ -56,10 +61,27 @@ public class RestRagIngestion implements IRestRagIngestion {
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceReferenceGuard spaceReferenceGuard;
 
-    @Inject
+    /**
+     * Lists a Google Drive source's folders for the picker; null in tests that do
+     * not need it.
+     */
+    private final GoogleDriveSourceConnector driveConnector;
+    private final SourceCredentials sourceCredentials;
+
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
             RagSourceIngestionService sourceIngestionService, IngestedFileService ingestedFileService,
             KnowledgeBaseInspector inspector, ResourceAccessGuard resourceAccessGuard, SpaceReferenceGuard spaceReferenceGuard) {
+        this(restRagStore, ragIngestionService, sourceIngestionService, ingestedFileService, inspector,
+                resourceAccessGuard, spaceReferenceGuard, null, null);
+    }
+
+    @Inject
+    public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
+            RagSourceIngestionService sourceIngestionService, IngestedFileService ingestedFileService,
+            KnowledgeBaseInspector inspector, ResourceAccessGuard resourceAccessGuard, SpaceReferenceGuard spaceReferenceGuard,
+            GoogleDriveSourceConnector driveConnector, SourceCredentials sourceCredentials) {
+        this.driveConnector = driveConnector;
+        this.sourceCredentials = sourceCredentials;
         this.inspector = inspector;
         this.resourceAccessGuard = resourceAccessGuard;
         this.spaceReferenceGuard = spaceReferenceGuard;
@@ -324,6 +346,64 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .entity(Map.of("error", e.getMessage(), "sourceId", sourceId))
                     .build();
         }
+    }
+
+    @Override
+    public Response listDriveFolders(String ragConfigId, String sourceId, Integer version, String parentId,
+                                     String pageToken) {
+        // EDIT, through the same guard as runSource: the listing reads the drive
+        // with the source's service account, which a viewer of a published
+        // knowledge base must not be able to point at its folders.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        IngestionSource source = resolved.source();
+        if (!IngestionSource.TYPE_GOOGLE_DRIVE.equals(source.getType()) || source.getGoogleDrive() == null) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Source '" + sourceId + "' is not a Google Drive source")).build();
+        }
+        if (driveConnector == null || sourceCredentials == null) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The Google Drive folder picker is not available")).build();
+        }
+        SourceContext context = new SourceContext(source, IngestionPipeline.stateKey(ragConfigId, source), null, true,
+                sourceCredentials);
+        try {
+            GoogleDriveSourceConnector.FolderPage page = driveConnector.listFolders(context, parentId, pageToken);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("folders", page.folders());
+            body.put("nextPageToken", page.nextPageToken());
+            return Response.ok(body).build();
+        } catch (SourceException e) {
+            return pickerFailure(e.error(), sourceId);
+        }
+    }
+
+    /**
+     * What a picker failure means to the caller. Not 401 or 403: those would read
+     * as the caller's own EDDI session being refused, when it is the source's
+     * connection that Drive turned away.
+     */
+    private static Response pickerFailure(SourceError error, String sourceId) {
+        int status = switch (error.kind()) {
+            case REJECTED, PERMANENT, CURSOR_INVALID -> 400;
+            case NOT_FOUND -> 404;
+            case AUTH -> 422;
+            case THROTTLED -> 429;
+            case TRANSIENT -> 503;
+        };
+        Response.ResponseBuilder response = Response.status(status)
+                .entity(Map.of("error", error.reason() == null ? "Google Drive refused the request" : error.reason(),
+                        "sourceId", sourceId));
+        if (status == 429 || status == 503) {
+            response.header("Retry-After", String.valueOf(error.retryAfter()
+                    .filter(hint -> !hint.isNegative() && hint.getSeconds() > 0).map(hint -> hint.getSeconds())
+                    .orElse(30L)));
+        }
+        return response.build();
     }
 
     @Override
