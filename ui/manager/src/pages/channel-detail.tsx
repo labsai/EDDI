@@ -644,7 +644,13 @@ export function ChannelDetailPage() {
               if (channelType === draft.channelType) return;
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
-              const switched = { ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) };
+              // Approval fields belong to email targets only; the backend refuses them elsewhere.
+              const switched = {
+                ...draft,
+                channelType,
+                platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig),
+                ...(channelType !== "email" && draft.targets ? { targets: draft.targets.map(withoutEmailApproval) } : {}),
+              };
               // emailControl is email-only: the backend refuses it on any other type.
               if (channelType !== "email") delete switched.emailControl;
               setDraft(switched);

@@ -208,6 +208,17 @@ class EmailAgentToolsInspectorTest {
     }
 
     @Test
+    void anUnreadableLaterWorkflowKeepsWhatAnEarlierOneEstablished() throws Exception {
+        String secondId = "0123456789abcdef01234568";
+        workflow(step(LLM.toString()));
+        llm(agentTask());
+        agent.setWorkflows(List.of(WORKFLOW, URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + secondId + "?version=1")));
+        when(workflowStore.read(secondId, 1)).thenThrow(new RuntimeException("store down"));
+
+        assertEquals(List.of("support"), inspector.targetsWithUngatedTools(List.of(target("support", "agent-1", ChannelTarget.TargetType.AGENT))));
+    }
+
+    @Test
     void workflowUrisWithoutAValidIdAreSkipped() throws Exception {
         workflow(step(LLM.toString()));
         llm(agentTask());

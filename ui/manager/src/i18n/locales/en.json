@@ -5591,7 +5591,7 @@
       "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
       "approvalPolicyNone": "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
       "ruleCallsRefused": "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
-      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for approval. Name the read-only tools instead.",
+      "readOnlyEverything": "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for the email gate's approval. Name the read-only tools instead. The agent's own tool approvals still apply.",
       "replyReviewNoInternalDomains": "Saved. Reply review is set to external replies, but no internal domain is listed: every reply waits for review."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
@@ -5641,7 +5641,7 @@
         "everyTurn": "Every mail waits for an approver before the agent runs; rejected mail is answered with the reply below."
       },
       "readOnlyLabel": "Read-only tools",
-      "readOnlyHint": "Tool-approval patterns a mail may use without approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not.",
+      "readOnlyHint": "Tool-approval patterns a mail may use without the email gate's approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not. The agent's own tool approvals still apply.",
       "rejectedReplyLabel": "Reply when rejected",
       "rejectedReplyPlaceholder": "Your request was not approved.",
       "rejectedReplyHint": "Sent in conversation mode only; trigger mode never replies."

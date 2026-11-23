@@ -372,7 +372,7 @@ public final class SmimeCertificateCheck {
      * </ul>
      */
     static Chain internalChain(List<X509Certificate> chain, Instant now) {
-        return walk(chain.getFirst(), chain, new HashSet<>(), now, true);
+        return walk(chain.getFirst(), chain, new HashSet<>(), now, 0);
     }
 
     /**
@@ -380,7 +380,7 @@ public final class SmimeCertificateCheck {
      * best path the bundle holds and does not depend on the order of its
      * certificates.
      */
-    private static Chain walk(X509Certificate current, List<X509Certificate> chain, Set<X509Certificate> path, Instant now, boolean leaf) {
+    private static Chain walk(X509Certificate current, List<X509Certificate> chain, Set<X509Certificate> path, Instant now, int below) {
         if (!path.add(current)) {
             return Chain.BROKEN;
         }
@@ -388,6 +388,9 @@ public final class SmimeCertificateCheck {
             if (current.getIssuerX500Principal().equals(current.getSubjectX500Principal())) {
                 return verifies(current, current.getPublicKey()) ? Chain.COMPLETE : Chain.BROKEN;
             }
+            // The CAs between the leaf and any issuer of this certificate: those below it,
+            // and it, unless it is the leaf.
+            int under = current == chain.getFirst() || selfIssued(current) ? below : below + 1;
             boolean issuerShipped = false;
             Chain best = Chain.BROKEN;
             for (X509Certificate candidate : chain) {
@@ -395,10 +398,10 @@ public final class SmimeCertificateCheck {
                     continue;
                 }
                 issuerShipped = true;
-                if (!mayIssue(candidate, now) || !verifies(current, candidate.getPublicKey())) {
+                if (!mayIssue(candidate, now, under) || !verifies(current, candidate.getPublicKey())) {
                     continue;
                 }
-                Chain next = walk(candidate, chain, path, now, false);
+                Chain next = walk(candidate, chain, path, now, under);
                 if (next == Chain.COMPLETE) {
                     return Chain.COMPLETE;
                 }
@@ -410,26 +413,36 @@ public final class SmimeCertificateCheck {
                 return best; // the issuer is in the bundle: it either leads somewhere or the chain is broken
             }
             // The root is not shipped: fine after an intermediate, not for a lone leaf.
-            return leaf ? Chain.BROKEN : Chain.UNTRUSTED_ROOT;
+            return current == chain.getFirst() ? Chain.BROKEN : Chain.UNTRUSTED_ROOT;
         } finally {
             path.remove(current);
         }
     }
 
+    private static boolean selfIssued(X509Certificate certificate) {
+        return certificate.getIssuerX500Principal().equals(certificate.getSubjectX500Principal());
+    }
+
     /**
      * Whether a shipped certificate may vouch for another at {@code now}: valid
-     * then, a CA, and, when it states key usage, allowed to sign certificates. A
-     * version 1 certificate has no extensions to read, so a self-signed one passes
-     * as the root it is.
+     * then, a CA whose path length constraint allows {@code below} CAs under it,
+     * and, when it states key usage, allowed to sign certificates. A version 1
+     * certificate has no extensions to read, so a self-signed one passes as the
+     * root it is.
      */
-    private static boolean mayIssue(X509Certificate issuer, Instant now) {
+    private static boolean mayIssue(X509Certificate issuer, Instant now, int below) {
         Date at = Date.from(now);
         if (at.before(issuer.getNotBefore()) || at.after(issuer.getNotAfter())) {
             return false;
         }
         boolean legacyRoot = issuer.getVersion() == 1 && issuer.getIssuerX500Principal().equals(issuer.getSubjectX500Principal());
-        if (issuer.getBasicConstraints() < 0 && !legacyRoot) {
+        int pathLength = issuer.getBasicConstraints(); // -1: not a CA; Integer.MAX_VALUE: no limit
+        if (pathLength < 0 && !legacyRoot) {
             return false;
+        }
+        if (pathLength >= 0 && below > pathLength) {
+            return false; // RFC 5280 4.2.1.9: more CAs between it and the leaf than its pathLenConstraint
+                          // allows
         }
         boolean[] usage = issuer.getKeyUsage();
         return usage == null || (usage.length > KEY_USAGE_KEY_CERT_SIGN && usage[KEY_USAGE_KEY_CERT_SIGN]);
