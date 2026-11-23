@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.docs.DocsService;
+import ai.labs.eddi.engine.org.PlatformPlane;
 import io.quarkiverse.mcp.server.JsonRpcErrorCodes;
 import io.quarkiverse.mcp.server.McpException;
 import io.quarkiverse.mcp.server.Resource;
@@ -41,6 +42,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  * @author ginccc
  */
 @ApplicationScoped
+@PlatformPlane("the documentation catalog is platform content (plan §10.1)")
 public class McpDocResources {
 
     private final DocsService docsService;

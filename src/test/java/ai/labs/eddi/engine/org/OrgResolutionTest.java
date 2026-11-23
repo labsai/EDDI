@@ -221,6 +221,11 @@ class OrgResolutionTest {
         public String rest() {
             return "ok";
         }
+
+        @PlatformPlane("a scheduled job on an org-plane class")
+        public String job() {
+            return "ok";
+        }
     }
 
     private static InvocationContext invocation(String method) throws Exception {
@@ -255,6 +260,46 @@ class OrgResolutionTest {
 
         OrgResolutionException rest = assertThrows(OrgResolutionException.class, () -> interceptor.bind(invocation("rest")));
         assertEquals(OrgResolutionException.CLIENT_MESSAGE, rest.getMessage());
+    }
+
+    @Test
+    void aPlatformPlaneMethodOnAnOrgBoundClassRunsUnbound() throws Exception {
+        OrgResolution resolution = mock(OrgResolution.class);
+        InvocationContext job = invocation("job");
+        when(job.proceed()).thenAnswer(i -> OrgContext.current());
+
+        Object result = new OrgBoundInterceptor(new OrgRequest(resolution)).bind(job);
+
+        assertEquals(Optional.empty(), result);
+        verify(resolution, never()).resolve();
+    }
+
+    @Test
+    void anOrgThatIsAlreadyBoundIsKeptWithoutResolving() throws Exception {
+        OrgContext.configure(OrgMode.MULTI, null);
+        OrgResolution resolution = mock(OrgResolution.class);
+        when(resolution.resolve()).thenThrow(new OrgResolutionException("no request on this thread"));
+        OrgRequest request = new OrgRequest(resolution);
+        AtomicReference<Optional<OrgId>> seen = new AtomicReference<>();
+
+        Object result = OrgContext.callAs(ACME, () -> new OrgBoundInterceptor(request).bind(invocation("rest")));
+        OrgContext.runAs(ACME, () -> request.runBound(() -> seen.set(OrgContext.current())));
+
+        assertEquals(ACME, result);
+        assertEquals(Optional.of(ACME), seen.get());
+        verify(resolution, never()).resolve();
+    }
+
+    @Test
+    void insidePlatformScopeTheRequestOrgIsResolvedAndBound() throws Exception {
+        OrgContext.configure(OrgMode.MULTI, null);
+        OrgResolution resolution = mock(OrgResolution.class);
+        when(resolution.resolve()).thenReturn(ACME);
+
+        Object result = OrgScope.platform("test", () -> new OrgRequest(resolution).callBound(OrgContext::require));
+
+        assertEquals(ACME, result);
+        verify(resolution, times(1)).resolve();
     }
 
     @Test

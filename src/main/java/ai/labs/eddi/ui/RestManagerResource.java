@@ -5,7 +5,7 @@
 package ai.labs.eddi.ui;
 
 import ai.labs.eddi.configs.branding.BrandRequest;
-import ai.labs.eddi.engine.org.PlatformPlane;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.ForbiddenException;
@@ -25,7 +25,7 @@ import java.util.Optional;
  * @author ginccc
  */
 @ApplicationScoped
-@PlatformPlane("serves the Manager shell and its static auth config; reads no org data (host binding: plan §7.1)")
+@OrgBound
 public class RestManagerResource implements IRestManagerResource {
     private static final Logger LOGGER = Logger.getLogger(RestManagerResource.class);
     private static final String SPA_CLIENT_ID = "eddi-frontend";

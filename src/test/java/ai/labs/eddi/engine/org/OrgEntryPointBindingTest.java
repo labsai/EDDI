@@ -41,21 +41,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OrgEntryPointBindingTest {
 
     private static final Path MAIN = Path.of("src", "main", "java");
-    private static final Pattern REST_IMPL = Pattern.compile("class \\w+ (extends \\w+ )?implements [^{]*\\bIRest\\w+");
+    private static final Pattern REST_IMPL = Pattern.compile("class \\w+(<[^>{]*>)?\\s+(extends [^{]*?\\s)?implements [^{]*\\bIRest\\w+");
     private static final Pattern CLASS_PATH = Pattern.compile("(?m)^@Path\\(");
-    private static final Pattern PUBLIC_CLASS = Pattern.compile("(?m)^public (final |abstract )?class ");
-    private static final Pattern MCP_TOOL = Pattern.compile("(?m)^\\s+@Tool\\(");
+    private static final Pattern TOP_LEVEL_CLASS = Pattern.compile("(?m)^(public |protected )?(final |abstract |sealed |non-sealed )*class ");
+    /**
+     * An MCP feature method: a tool, a resource, a resource template or a prompt.
+     */
+    private static final Pattern MCP_FEATURE = Pattern.compile("(?m)^\\s+@(Tool|Resource|ResourceTemplate|Prompt)\\(");
+    private static final Pattern MCP_IMPORT = Pattern
+            .compile("import io\\.quarkiverse\\.mcp\\.server\\.(\\*|Tool|Resource|ResourceTemplate|Prompt);");
+    private static final Pattern SCHEDULED = Pattern.compile("(?m)^\\s+@Scheduled\\b");
+    private static final Pattern METHOD_BODY = Pattern.compile("(?m)\\{\\s*$");
     private static final Pattern PLATFORM = Pattern.compile("(?m)^@PlatformPlane\\(\"([^\"]+)\"\\)\\s*$");
 
     /** Classes that implement an IRest* interface without being a resource. */
-    private static final List<String> NOT_RESOURCES = List.of("RestInterfaceFactory");
+    private static final List<String> NOT_RESOURCES = List.of("RestInterfaceFactory",
+            // the shared delegate the IRest*Store resources call; not a bean, no @Path
+            "RestVersionInfo");
 
     /**
      * The platform-plane entry points. Adding one here is a decision: the class
      * then runs without an org binding.
      */
-    private static final List<String> PLATFORM_PLANE = List.of("RestBuildInfo", "RestClusterAdmin", "RestCoordinatorAdmin", "RestDocs",
-            "RestHtmlChatResource", "RestManagerResource", "RestTenantQuota", "RestUpdateCheck", "RestWelcomeResource");
+    private static final List<String> PLATFORM_PLANE = List.of("McpDocResources", "McpDocTools", "McpVersionTools", "RestBuildInfo",
+            "RestClusterAdmin", "RestCoordinatorAdmin", "RestDocs", "RestTenantQuota", "RestUpdateCheck");
 
     private record Source(String name, String text) {
     }
@@ -77,8 +86,8 @@ class OrgEntryPointBindingTest {
     }
 
     private static boolean isEntryPoint(Source s) {
-        boolean rest = REST_IMPL.matcher(s.text()).find() || CLASS_PATH.matcher(s.text()).find() && PUBLIC_CLASS.matcher(s.text()).find();
-        boolean mcp = s.text().contains("import io.quarkiverse.mcp.server.Tool;") && MCP_TOOL.matcher(s.text()).find();
+        boolean rest = REST_IMPL.matcher(s.text()).find() || CLASS_PATH.matcher(s.text()).find() && TOP_LEVEL_CLASS.matcher(s.text()).find();
+        boolean mcp = MCP_IMPORT.matcher(s.text()).find() && MCP_FEATURE.matcher(s.text()).find();
         return (rest || mcp) && !NOT_RESOURCES.contains(s.name());
     }
 
@@ -92,7 +101,7 @@ class OrgEntryPointBindingTest {
                 continue;
             }
             entryPoints++;
-            boolean bound = s.text().contains("\n@OrgBound\n") || s.text().contains("\n@OrgBound\r\n");
+            boolean bound = isOrgBound(s);
             boolean platform = PLATFORM.matcher(s.text()).find();
             if (!bound && !platform) {
                 unclassified.add(s.name());
@@ -122,6 +131,40 @@ class OrgEntryPointBindingTest {
         assertEquals(PLATFORM_PLANE, List.copyOf(found.keySet()), "The platform-plane entry points changed. A new one runs without an org "
                 + "binding: update PLATFORM_PLANE only after deciding that is right.");
         found.forEach((name, reason) -> assertTrue(reason.length() >= 20, name + " needs a reason that says why: '" + reason + "'"));
+    }
+
+    private static boolean isOrgBound(Source s) {
+        return s.text().contains("\n@OrgBound\n") || s.text().contains("\n@OrgBound\r\n");
+    }
+
+    /**
+     * A {@code @Scheduled} method of an {@link OrgBound} class is intercepted like
+     * any other, but it runs on a scheduler thread with no request to resolve an
+     * org from. It must say {@link PlatformPlane} so the interceptor lets it run
+     * unbound; it binds per item itself (plan §7.4).
+     */
+    @Test
+    void everyScheduledMethodOfAnOrgBoundClassIsPlatformPlane() throws IOException {
+        List<String> unmarked = new ArrayList<>();
+        int scheduled = 0;
+        for (Source s : sources()) {
+            if (!isOrgBound(s)) {
+                continue;
+            }
+            Matcher m = SCHEDULED.matcher(s.text());
+            while (m.find()) {
+                scheduled++;
+                int from = Math.max(s.text().lastIndexOf(';', m.start()), s.text().lastIndexOf('}', m.start()));
+                // the method body's brace ends a line; one inside "${config}" does not
+                Matcher body = METHOD_BODY.matcher(s.text());
+                int to = body.find(m.end()) ? body.start() : s.text().length();
+                if (!s.text().substring(from + 1, to).contains("@PlatformPlane(")) {
+                    unmarked.add(s.name() + " at offset " + m.start());
+                }
+            }
+        }
+        assertTrue(scheduled >= 3, "the scan found only " + scheduled + " @Scheduled methods on @OrgBound classes; the pattern is probably broken");
+        assertTrue(unmarked.isEmpty(), "Mark each @Scheduled method of an @OrgBound class with @PlatformPlane(\"why\"): " + unmarked);
     }
 
     @Test

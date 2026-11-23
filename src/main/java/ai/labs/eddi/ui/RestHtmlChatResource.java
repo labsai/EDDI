@@ -5,7 +5,7 @@
 package ai.labs.eddi.ui;
 
 import ai.labs.eddi.configs.branding.BrandRequest;
-import ai.labs.eddi.engine.org.PlatformPlane;
+import ai.labs.eddi.engine.org.OrgBound;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -22,7 +22,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
  * @author ginccc
  */
 @ApplicationScoped
-@PlatformPlane("serves the chat shell; reads no org data (host binding: plan §7.1)")
+@OrgBound
 public class RestHtmlChatResource implements IRestHtmlChatResource {
 
     private static final Logger LOGGER = Logger.getLogger(RestHtmlChatResource.class);

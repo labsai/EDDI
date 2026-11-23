@@ -17,8 +17,10 @@ import org.jboss.logging.Logger;
  * Binds the request's org around a method of an {@link OrgBound} bean.
  * <p>
  * It runs at {@code PLATFORM_BEFORE}, outermost, so every other interceptor and
- * the method itself already see the binding. When the same org is already bound
- * it adds nothing.
+ * the method itself already see the binding. When an org is already bound, it
+ * is kept and nothing is resolved ({@link OrgRequest#callBound}). A method that
+ * carries {@link PlatformPlane} itself, such as a {@code @Scheduled} job on an
+ * org-plane resource, runs without a binding.
  * <p>
  * The binding ends when the method returns. Work that outlives it
  * ({@code AsyncResponse}, {@code StreamingOutput}, SSE, LLM streaming
@@ -60,6 +62,10 @@ public class OrgBoundInterceptor {
 
     @AroundInvoke
     Object bind(InvocationContext context) throws Exception {
+        if (context.getMethod().isAnnotationPresent(PlatformPlane.class)) {
+            // not request work, such as a @Scheduled job
+            return context.proceed();
+        }
         try {
             return orgRequest.callBound(() -> {
                 if (LOGGER.isDebugEnabled()) {
