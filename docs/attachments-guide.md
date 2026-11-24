@@ -205,7 +205,7 @@ Quotas are enforced atomically: the usage is counted and the blob stored under o
 
 #### Derived files
 
-The store can also hold **derived files**: views EDDI makes of an uploaded file, such as a PDF's structure, the text of a page window, an extracted image or a page-range slice. The only one created so far is a PDF's **structure** (its chapters and their page ranges), stored the first time a part of the PDF is resolved (see [Sending part of a file](#sending-part-of-a-file)); the other kinds arrive with the document features, which are off by default. What is already true:
+The store can also hold **derived files**: views EDDI makes of an uploaded file, such as a PDF's structure, the text of a page window, an extracted image or a page-range slice. Two are created so far: a PDF's **structure** (its chapters and their page ranges), stored the first time a part of the PDF is resolved, and a **page-range slice**, the PDF of a part sent to a document-capable model (see [Sending part of a file](#sending-part-of-a-file)); the other kinds arrive with the document features, which are off by default. What is already true:
 
 - **A derived file belongs to the uploaded file's owner**, never to the conversation whose work produced it. When a group member reads a file shared with it and EDDI extracts a chapter, the extract belongs to the file's owner, any reader of the file can read it, and it is not deleted with the member.
 - **Access is decided on the uploaded file.** Whoever may read the file may read every view of it; a grant is always on the uploaded file. A conversation that may not read the file is told a view of it does not exist.
@@ -282,7 +282,28 @@ An error is reported in the turn's `attachments:errors` note, the turn continues
 
 Resolving a `unit` reads the PDF's structure once and keeps it as a derived file of the PDF (see [Derived files](#derived-files)), owned by the PDF's owner and deleted with it. A node-local cache of 30 minutes sits in front of it; the cache is never trusted for access, which is checked on every request.
 
-> **Rendering arrives in the next release.** This release resolves and carries parts end to end — through group conversations and agent-to-agent shares — but the model still receives the whole PDF, as before. Sending only the selected pages (a page-range PDF for document-capable models, the pages' text for others) is the next step.
+#### What the model receives
+
+Only the selected pages, never the rest of the file:
+
+| Model | Sent |
+|---|---|
+| Reads PDFs natively (see [LLM Multimodal Support](#llm-multimodal-support)) | A one-line header naming the file, the unit (if any) and the pages, then a **PDF of only those pages** |
+| Does not, or the PDF of those pages is too large | The same header, then **those pages' text**, capped like any extracted PDF text (`eddi.attachments.extraction.max-chars`) |
+
+```
+[Attachment report.pdf — u3, p.12–19 (application/pdf) — only pages 12–19 of the file, sent as a PDF of those pages]
+<PDF of pages 12–19>
+```
+
+- **The pages' PDF is built from the stored file** by copying those pages into a new document; links to other pages are dropped. Everything the pages use (fonts, images) comes along, so in a file whose pages share large resources the PDF of a few pages can be nearly as large as the file. Building stops as soon as the output passes the per-file limit or what is left of the request's attachment budget, whichever is less, and the pages' text is sent instead, with a note in `attachments:errors`.
+- **Limits.** `eddi.attachments.max-forward-bytes` (10 MB) applies to the pages' PDF, not to the file: a 30 MB file can send a 2 MB chapter. `eddi.attachments.max-forward-aggregate-bytes` (20 MB) is charged the pages' PDF; a part that no longer fits what is left of it is sent as text. The text is not charged.
+- **Kept for reuse.** The pages' PDF is stored as a derived file of the PDF (kind `PDF_SLICE`), so the next request for the same pages reuses it. It is a rebuildable cache: it counts toward no quota, and the per-file slice limits below evict the least recently used one. When the store will not keep it, it is sent anyway.
+- **Failures never widen the part.** A part whose pages cannot be read, a range outside the document or a file that cannot be loaded ends in a note naming the part, not in the whole file.
+- **A file withheld on an earlier turn stays withheld.** When an input guardrail refused the turn a file arrived with, naming a part of it later sends nothing.
+- **Only on the turn it arrives.** Like a whole PDF, a part is sent on the turn it is attached and not again on later turns; only images are re-sent on later turns.
+
+An attachment without `pages`, `unit` or `split` is sent exactly as before.
 
 ---
 
@@ -319,6 +340,7 @@ what the configured provider/model can actually accept, and emits accordingly:
 |---|---|---|
 | `image/*` | `ImageContent` — the URL is passed through when the provider fetches URLs itself, otherwise the bytes are downloaded and inlined as base64 | Metadata note |
 | `application/pdf` | Native `PdfFileContent` | PDFBox text extraction, inlined as `TextContent` |
+| `application/pdf`, a part of a stored file ([Sending part of a file](#sending-part-of-a-file)) | A header `TextContent`, then a `PdfFileContent` of only those pages | Those pages' text, inlined as `TextContent` |
 | `audio/*` | `AudioContent` | Metadata note |
 | text-like (`text/*`, JSON, XML, CSV, YAML) | Decoded and inlined as `TextContent` — **no capability required**, so this works on every model | — |
 | Anything else | Metadata note pointing the model at the `readAttachment` tool | Metadata note |
