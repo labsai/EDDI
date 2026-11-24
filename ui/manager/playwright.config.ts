@@ -35,7 +35,10 @@ const AGAINST_BACKEND =
   process.argv.includes("--project=auth") ||
   // The operator tier, likewise, needs its own compose stack (a model stub
   // beside EDDI) and drives the bundle that stack serves.
-  process.argv.includes("--project=operator");
+  process.argv.includes("--project=operator") ||
+  // …and so do its real-upgrade and OIDC variants, each on a stack of its own.
+  process.argv.includes("--project=operator-upgrade") ||
+  process.argv.includes("--project=operator-oidc");
 
 /**
  * Seeded localStorage (onboarding already dismissed), re-pointed at whatever
@@ -193,6 +196,27 @@ export default defineConfig({
     {
       name: "operator",
       testDir: "./e2e/operator",
+      // Its siblings below share the directory and need other stacks.
+      testMatch: "**/*.operator.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    // ── Tier 5b: Operator upgraded from the PREVIOUS release's image ──
+    // The spec starts and swaps its own compose stack (the previous release,
+    // then the image under test on the same MongoDB volume), so it needs Docker
+    // and EDDI_IMAGE, and nothing else running on :7070 / :8089.
+    {
+      name: "operator-upgrade",
+      testDir: "./e2e/operator",
+      testMatch: "**/*.upgrade.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    // ── Tier 5c: Operator under Keycloak, tool calls as the signed-in user ──
+    // Needs docker-compose.integration-keycloak.yml plus
+    // docker-compose.integration-keycloak-operator.yml (the model stub).
+    {
+      name: "operator-oidc",
+      testDir: "./e2e/operator",
+      testMatch: "**/*.oidc.spec.ts",
       use: { ...devices["Desktop Chrome"] },
     },
 

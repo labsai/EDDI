@@ -1,0 +1,12 @@
+{
+  "//": [
+    "The release the operator real-upgrade E2E (operator-real-upgrade.upgrade.spec.ts) upgrades FROM:",
+    "the latest published EDDI release, whose image and whose own Manager bundle activate the operator",
+    "before the image under test replaces it on the same MongoDB volume.",
+    "",
+    "Bump it to the new release after every GA release, once its image is on Docker Hub",
+    "(docs/release-versioning.md, 'After a GA Release'). OPERATOR_UPGRADE_FROM_IMAGE overrides it",
+    "for a one-off run against another release."
+  ],
+  "image": "labsai/eddi:6.7.1"
+}
