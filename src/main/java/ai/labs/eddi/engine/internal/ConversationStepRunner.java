@@ -705,18 +705,43 @@ class ConversationStepRunner {
      * slip a step in between this turn's read and its run (A3). The lease is
      * checked on both sides of the raise, so a turn whose lease went while the
      * raise was in flight does not start either.
+     * <p>
+     * A raise that did not take — the document already carries a higher fence —
+     * does not start the turn either: every write it made would be refused, after
+     * its reply had gone out as a success. Either another node holds the
+     * conversation now, or the stored fence came from a revision range the lease
+     * bucket no longer has: a JetStream stream-leader change can acknowledge writes
+     * at sequences its successor never had, and hand them out again, so a lease
+     * acquired just before the change may carry a fence above every lease acquired
+     * after it. The lease bucket tells the two apart: if it confirms this lease is
+     * still current, no holder after it can exist, and the stored fence is lifted
+     * one above itself by compare-and-set — fencing out the holder of the lost
+     * range, should it still run — and this lease writes with that.
+     * <p>
+     * A stored fence <i>equal</i> to this lease's is the same case unless this very
+     * handle put it there (a turn the lease was handed to raises its fence again).
+     * Fences are numbers, not identities: the bucket reissues a lost revision, and
+     * the sequence later reaches a lifted value, so another holder can carry the
+     * same token — and the stores admit every write at or above the stored fence.
+     * Lifting gives this lease a value no other holder has.
      *
      * @return {@code true} when the fence is raised and the lease still held
      */
     boolean fenceRaised(String conversationId, LeaseHandle lease) {
-        Long fence = lease.fence();
+        long fence = lease.fence();
         if (lease.isLost()) {
             LOGGER.warnf("Turn of conversation %s not run: its lease was lost before it started — reporting it as busy; "
                     + "the input was not consumed", sanitize(conversationId));
             return false;
         }
         try {
-            conversationMemoryStore.raiseFence(conversationId, fence);
+            long stored = conversationMemoryStore.raiseFence(conversationId, fence);
+            if (stored < fence) {
+                lease.establishFence(); // moved by this raise: the token is this lease's alone
+            } else if ((stored > fence || !lease.fenceEstablished())
+                    && !liftedAboveLostRange(conversationId, lease, fence, stored)) {
+                return false;
+            }
         } catch (Exception e) {
             LOGGER.warnf("Turn of conversation %s not run: could not raise its fence to %d (%s) — reporting it as busy; the "
                     + "input was not consumed", sanitize(conversationId), fence, e.getMessage());
@@ -727,6 +752,37 @@ class ConversationStepRunner {
                     + "busy; the input was not consumed", sanitize(conversationId));
             return false;
         }
+        return true;
+    }
+
+    /**
+     * The conversation carries {@code stored}, at or above this lease's
+     * {@code fence}, and not as a fence this handle established. Lifts it to
+     * {@code stored + 1} for this lease when the lease bucket confirms the lease is
+     * still current (see {@link #fenceRaised}).
+     *
+     * @return {@code true} when this lease now writes with the lifted fence
+     */
+    private boolean liftedAboveLostRange(String conversationId, LeaseHandle lease, long fence, long stored)
+            throws ResourceStoreException {
+        if (!lease.confirmHeld()) {
+            LOGGER.warnf("Turn of conversation %s not run: it carries fence %d, not below this lease's %d, and the lease is no "
+                    + "longer confirmed — another node holds the conversation; reporting it as busy, the input was not "
+                    + "consumed", sanitize(conversationId), stored, fence);
+            return false;
+        }
+        long lifted = stored + 1;
+        if (!conversationMemoryStore.liftFence(conversationId, stored, lifted)) {
+            LOGGER.warnf("Turn of conversation %s not run: its fence moved while this lease lifted it above %d — reporting "
+                    + "it as busy, the input was not consumed", sanitize(conversationId), stored);
+            return false;
+        }
+        lease.liftFence(lifted);
+        lease.establishFence();
+        LOGGER.warnf("Conversation %s carried fence %d, not below the fence %d of its current lease, from another holder: a "
+                + "revision the lease bucket reissued (a JetStream stream-leader change) or a lifted fence the sequence "
+                + "reached. Lifted to %d for this lease, so the other holder is fenced out", sanitize(conversationId), stored,
+                fence, lifted);
         return true;
     }
 
