@@ -11,7 +11,8 @@ reviews:
     # into the branch) are re-reviewed only on request: comment
     # "@coderabbitai review" (new commits) or "@coderabbitai full review".
     # The review allowance is small, and re-reviewing every push used it up,
-    # so the reviews that mattered came back "Review rate limited". Request a round for large or security-sensitive follow-ups.
+    # so the reviews that mattered came back "Review rate limited".
+    # Request a round for large or security-sensitive follow-ups.
     auto_incremental_review: false
     # Drafts are reviewed once they are marked ready for review.
     drafts: false
