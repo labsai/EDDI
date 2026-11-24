@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.QuotaReservationContract;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -46,14 +48,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * stored before {@code storageRef} existed.
  */
 @DisplayName("Attachment store (MongoDB GridFS)")
-class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreContract {
+class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreContract, QuotaReservationContract {
 
     private GridFsAttachmentStore store;
 
     @BeforeEach
     void setUp() {
         dropCollections("attachments.files", "attachments.chunks", GridFsAttachmentStore.LOCKS_COLLECTION,
-                GridFsAttachmentStore.GRANTS_COLLECTION, GridFsAttachmentStore.BACKFILL_COLLECTION, "migrationlog", "groupconversations");
+                GridFsAttachmentStore.GRANTS_COLLECTION, GridFsAttachmentStore.BACKFILL_COLLECTION, GridFsAttachmentStore.RESERVATIONS_COLLECTION,
+                "migrationlog",
+                "groupconversations");
         store = new GridFsAttachmentStore(getDatabase());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
@@ -111,6 +115,52 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store.maxTotalBytesPerConversation = bytesPerConversation;
         store.maxPerUser = perUser;
         store.maxTotalBytesPerUser = bytesPerUser;
+    }
+
+    @Override
+    public void expireReservations() {
+        // The server's clock, as the store reads it.
+        reservations().updateMany(new Document(), List.of(new Document("$set",
+                new Document(GridFsAttachmentStore.RESERVATION_EXPIRES_AT, new Document("$subtract", List.of("$$NOW", 1000L))))));
+    }
+
+    @Override
+    public Duration storedLifetime(String reservationId) {
+        Document stored = reservations().find(new Document("_id", reservationId)).first();
+        assertTrue(stored != null, "no reservation " + reservationId);
+        return Duration.ofMillis(stored.getDate(GridFsAttachmentStore.RESERVATION_EXPIRES_AT).getTime()
+                - stored.getDate(GridFsAttachmentStore.RESERVATION_CREATED_AT).getTime());
+    }
+
+    @Override
+    public long reservationRows() {
+        return reservations().countDocuments();
+    }
+
+    @Override
+    public String storeUncharged(String conversationId, String userId, byte[] bytes) {
+        long[] quotas = {store.maxPerConversation, store.maxTotalBytesPerConversation, store.maxPerUser, store.maxTotalBytesPerUser};
+        setQuotas(0, 0, 0, 0);
+        try {
+            return store.store(bytes, "text/plain", "uncharged.txt", conversationId, "default", userId).storageRef();
+        } catch (IAttachmentStore.AttachmentStoreException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            setQuotas(quotas[0], quotas[1], quotas[2], quotas[3]);
+        }
+    }
+
+    private static MongoCollection<Document> reservations() {
+        return getDatabase().getCollection(GridFsAttachmentStore.RESERVATIONS_COLLECTION);
+    }
+
+    @Test
+    void theReservationIndexesIncludeATtlBackstopOnTheExpiry() {
+        store.ensureReservationIndexes();
+
+        List<Document> indexes = reservations().listIndexes().into(new ArrayList<>());
+        assertTrue(indexes.stream().anyMatch(index -> index.get("key", Document.class).containsKey(GridFsAttachmentStore.RESERVATION_EXPIRES_AT)
+                && Long.valueOf(0).equals(((Number) index.get("expireAfterSeconds")).longValue())), indexes.toString());
     }
 
     @Override

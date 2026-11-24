@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.QuotaReservationContract;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +30,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -42,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the shared {@link AttachmentStoreContract}, plus the grant table's schema.
  */
 @DisplayName("Attachment store (PostgreSQL)")
-class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentStoreContract {
+class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentStoreContract, QuotaReservationContract {
 
     private static final DataSource DATA_SOURCE = createDataSource();
 
@@ -60,7 +62,7 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store.ensureGrantIndexes();
         migrationLog = new PostgresMigrationLogStore(createDataSourceInstance());
         migrationLog.readMigrationLog("schema");
-        truncateTables(DATA_SOURCE, "attachments", "attachment_grants", "attachment_grants_backfill", "migration_log");
+        truncateTables(DATA_SOURCE, "attachments", "attachment_grants", "attachment_grants_backfill", "attachment_reservations", "migration_log");
         json = new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         groupConversations = new GroupConversationStore(new PostgresResourceStorageFactory(createDataSourceInstance(), json), null);
     }
@@ -129,6 +131,48 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store.maxTotalBytesPerConversation = bytesPerConversation;
         store.maxPerUser = perUser;
         store.maxTotalBytesPerUser = bytesPerUser;
+    }
+
+    @Override
+    public void expireReservations() {
+        execute("UPDATE attachment_reservations SET expires_at = NOW() - INTERVAL '1 second'");
+    }
+
+    @Override
+    public Duration storedLifetime(String reservationId) {
+        try (Connection conn = DATA_SOURCE.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT (EXTRACT(EPOCH FROM (expires_at - created_at)) * 1000)::bigint FROM attachment_reservations WHERE id = ?")) {
+            ps.setString(1, reservationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "no reservation " + reservationId);
+                return Duration.ofMillis(rs.getLong(1));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public long reservationRows() {
+        try {
+            return countAll("SELECT COUNT(*) FROM attachment_reservations");
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public String storeUncharged(String conversationId, String userId, byte[] bytes) {
+        long[] quotas = {store.maxPerConversation, store.maxTotalBytesPerConversation, store.maxPerUser, store.maxTotalBytesPerUser};
+        setQuotas(0, 0, 0, 0);
+        try {
+            return store.store(bytes, "text/plain", "uncharged.txt", conversationId, "default", userId).storageRef();
+        } catch (IAttachmentStore.AttachmentStoreException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            setQuotas(quotas[0], quotas[1], quotas[2], quotas[3]);
+        }
     }
 
     private static long count(String sql, String param) {

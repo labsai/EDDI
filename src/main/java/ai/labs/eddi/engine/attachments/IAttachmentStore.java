@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -71,7 +72,8 @@ public interface IAttachmentStore {
      * the optional per-user quota ({@code eddi.attachments.max-per-user},
      * {@code max-total-bytes-per-user}) are checked and the blob inserted under one
      * lock per quota scope, so concurrent uploads cannot each pass the check and
-     * together exceed the limit.
+     * together exceed the limit. Usage is the stored blobs plus the live
+     * {@linkplain #reserve reservations} of the scope.
      *
      * @param userId
      *            the user the blob counts against — the owner of the conversation;
@@ -157,7 +159,9 @@ public interface IAttachmentStore {
      * lineage of every root it owned goes with it (derived blobs are stored under
      * their root owner's conversation), and one {@link AttachmentRootDeleted} is
      * fired per root, after the delete. Views this conversation produced of a root
-     * it was only granted belong to that root's owner and stay.
+     * it was only granted belong to that root's owner and stay. The
+     * {@linkplain #reserve quota reservations} held for the conversation go too, so
+     * an erasure during an upload leaves no quota held.
      *
      * @param conversationId
      *            the conversation ID
@@ -294,6 +298,90 @@ public interface IAttachmentStore {
      */
     void setPageCount(String rootRef, int pages);
 
+    // ------------------------------------------------------- quota reservations
+
+    /**
+     * Holds quota for a write that runs too long to hold the quota lock — a
+     * streaming upload, a job producing a file. The reservation is written under
+     * the bucket locks after the same check an upload makes, and from then on
+     * <b>counts as usage</b> of its buckets — for uploads, derived media and other
+     * reservations alike — until it is {@linkplain #convert converted},
+     * {@linkplain #release released} or expires. Expired reservations count for
+     * nothing and are swept from the buckets being reserved in.
+     * <p>
+     * <b>Lock order.</b> Every store takes its locks in one fixed order,
+     * conversation → user → team → source ({@link AttachmentLockOrder}); the stores
+     * have always locked conversation before user, so the scopes added since come
+     * after them and an old and a new node can never wait on each other in a cycle.
+     * <p>
+     * Expiry is decided by the database's clock, never a node's, so clock skew
+     * between nodes cannot stretch or cut a reservation.
+     * <p>
+     * Only {@link OwnerScope#CONVERSATION} owners can reserve in this release: the
+     * library buckets of {@link OwnerScope#USER} and {@link OwnerScope#TEAM} owners
+     * do not exist yet.
+     *
+     * @param owner
+     *            the bucket's owner; for a conversation owner its key is the
+     *            conversation id
+     * @param conversationId
+     *            the conversation the write is for; must be the owner's key
+     * @param userId
+     *            the user the write counts against; {@code null} when unknown,
+     *            which exempts it from the per-user quota, as for an upload
+     * @param bytes
+     *            the bytes to hold (may be zero when {@code count} is not)
+     * @param count
+     *            the files to hold (zero for bytes only, e.g. a job's output)
+     * @param ttl
+     *            how long it counts at most; at most
+     *            {@link QuotaReservation#MAX_TTL}
+     * @return the reservation, with its expiry by the database's clock
+     * @throws AttachmentQuotaExceededException
+     *             if the reservation would exceed a quota; nothing is held then
+     * @throws AttachmentStoreException
+     *             if the store fails or the locks cannot be taken in time
+     * @throws IllegalArgumentException
+     *             for an owner other than a conversation, a conversation that is
+     *             not the owner's, or amounts and a lifetime
+     *             {@link QuotaReservation#validateRequest} refuses
+     */
+    QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+            throws AttachmentStoreException;
+
+    /**
+     * Gives a reservation's quota back. Idempotent: an unknown, expired, released
+     * or converted reservation is ignored.
+     */
+    void release(String reservationId);
+
+    /**
+     * Completes a reservation with the blob it was taken for: the reservation stops
+     * counting and the blob counts in its place, under the same bucket locks the
+     * reservation was taken under.
+     * <p>
+     * The blob must be stored first, without being charged again: a write against a
+     * reservation stores its blob uncharged and then converts — on PostgreSQL in
+     * the same transaction. Converting only once the blob is visible is what keeps
+     * usage from ever reading "neither": in between it reads "both", which can
+     * refuse a concurrent upload but never admits one over the quota. No write
+     * stores against a reservation yet; the streaming store will.
+     *
+     * @param reservationId
+     *            the reservation
+     * @param storageRef
+     *            the uploaded blob (a root) the reservation was taken for
+     * @throws AttachmentNotFoundException
+     *             if the blob does not exist, is not a root, or is not in the
+     *             reservation's conversation and user buckets
+     * @throws AttachmentQuotaExceededException
+     *             if the reservation expired or was released before the write
+     *             completed (the blob was then never covered by quota, and the
+     *             writer must delete it), or the blob is larger than the bytes
+     *             reserved
+     */
+    void convert(String reservationId, String storageRef) throws AttachmentStoreException;
+
     /**
      * The owner of a lineage.
      *
@@ -338,11 +426,14 @@ public interface IAttachmentStore {
 
     /**
      * Thrown when storing a blob would exceed a quota. {@link #getScope()} says
-     * which: {@code "conversation"} or {@code "user"}.
+     * which: {@code "conversation"} or {@code "user"} — or {@code "reservation"}
+     * when a write outgrew, or outlived, the {@linkplain #convert reservation} that
+     * covered it.
      */
     class AttachmentQuotaExceededException extends AttachmentStoreException {
         public static final String SCOPE_CONVERSATION = "conversation";
         public static final String SCOPE_USER = "user";
+        public static final String SCOPE_RESERVATION = "reservation";
 
         private final String scope;
 

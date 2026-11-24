@@ -86,6 +86,10 @@ class GridFsAttachmentStoreTest {
         Field grantsField = GridFsAttachmentStore.class.getDeclaredField("grantsCollection");
         grantsField.setAccessible(true);
         grantsField.set(store, grantsCollection);
+        // No reservations: the usage counts and the conversation cascade find none.
+        Field reservationsField = GridFsAttachmentStore.class.getDeclaredField("reservationsCollection");
+        reservationsField.setAccessible(true);
+        reservationsField.set(store, mock(MongoCollection.class, RETURNS_DEEP_STUBS));
         return store;
     }
 

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
 import ai.labs.eddi.engine.attachments.AttachmentQuotas;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.Derivation;
@@ -14,6 +16,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.QuotaReservation;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,12 +28,14 @@ import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -67,6 +72,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * transaction-scoped advisory lock per quota scope (conversation, then user),
  * so two concurrent uploads cannot both pass the check. A derived write takes
  * the root's source lock after them.
+ * <p>
+ * <b>Reservations</b> ({@code attachment_reservations}) hold quota for writes
+ * in flight. Usage is the bucket's rows plus its live reservations, read in one
+ * statement; expiry is compared with the database's {@code NOW()}. A
+ * reservation is written under the same advisory locks as an upload, and
+ * deleted with its conversation.
  *
  * @since 6.0.0
  */
@@ -136,6 +147,28 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             )
             """;
     private static final String CREATE_INDEX_GRANTS_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_grants_conv ON attachment_grants (conversation_id)";
+    /**
+     * Quota held by writes in flight. The columns a bucket is selected by have the
+     * names they have in {@code attachments}, so one {@code WHERE} serves both
+     * tables in {@link #usage}.
+     */
+    private static final String CREATE_RESERVATIONS_TABLE = """
+            CREATE TABLE IF NOT EXISTS attachment_reservations (
+                id TEXT PRIMARY KEY,
+                owner_key TEXT NOT NULL,
+                conversation_id TEXT,
+                user_id TEXT,
+                bytes BIGINT NOT NULL,
+                count INT NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """;
+    private static final String CREATE_INDEX_RESERVATIONS_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_resv_conv ON attachment_reservations (conversation_id)";
+    private static final String CREATE_INDEX_RESERVATIONS_USER = "CREATE INDEX IF NOT EXISTS idx_attach_resv_user ON attachment_reservations (user_id)";
+    private static final String CREATE_INDEX_RESERVATIONS_EXPIRY = "CREATE INDEX IF NOT EXISTS idx_attach_resv_expiry ON attachment_reservations (expires_at)";
+    /** The most expired reservations one reserve deletes. */
+    static final int SWEEP_BATCH = 100;
     /**
      * A blob joined to the root of its lineage ({@code a} = the blob, {@code r} =
      * its root; the same row for a root), with whether the requester holds a
@@ -224,6 +257,10 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             stmt.execute(CREATE_GRANTS_TABLE);
             stmt.execute(CREATE_INDEX_GRANTS_CONV);
             stmt.execute(CREATE_BACKFILL_TABLE);
+            stmt.execute(CREATE_RESERVATIONS_TABLE);
+            stmt.execute(CREATE_INDEX_RESERVATIONS_CONV);
+            stmt.execute(CREATE_INDEX_RESERVATIONS_USER);
+            stmt.execute(CREATE_INDEX_RESERVATIONS_EXPIRY);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -613,6 +650,17 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             List<String> refs = new ArrayList<>();
             int held = inTransaction(conn, () -> {
+                // The quota this conversation's writes in flight held, before the blobs.
+                // Deleted after them, a blob committed after the blob DELETE's snapshot
+                // could still be converted, and would survive the erasure. Deleted
+                // first, every later convert is refused and its writer deletes the
+                // blob; a convert that already holds the row commits before this
+                // statement returns, and the blob DELETE below, a new statement, sees
+                // its blob.
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE conversation_id = ?")) {
+                    ps.setString(1, conversationId);
+                    ps.executeUpdate();
+                }
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachments WHERE conversation_id = ? RETURNING storage_ref, root_ref, owner_scope, owner_key, user_id")) {
                     ps.setString(1, conversationId);
@@ -822,13 +870,15 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             String[] stored = new String[1];
             Attachment result = inTransaction(conn, () -> {
                 // Lock order: conversation → user → source, as every writer takes them.
+                List<Lock> locks = new ArrayList<>();
                 if (conversationQuota) {
-                    advisoryLock(conn, LOCK_KEY_PREFIX + "conversation:" + from.conversationId());
+                    locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, from.conversationId()));
                 }
                 if (userQuota) {
-                    advisoryLock(conn, LOCK_KEY_PREFIX + "user:" + from.userId());
+                    locks.add(new Lock(AttachmentLockOrder.Scope.USER, from.userId()));
                 }
-                advisoryLock(conn, SOURCE_LOCK_KEY_PREFIX + rootRef);
+                locks.add(new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef));
+                lockAll(conn, locks);
                 // The root again, under the lock and held FOR SHARE: a delete that
                 // committed meanwhile reads as gone, one that starts now waits for this
                 // insert and then deletes it with the lineage (delete() locks the root
@@ -1068,12 +1118,14 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                                    byte[] bytes)
             throws SQLException, AttachmentStoreException {
         inTransaction(conn, () -> {
+            List<Lock> locks = new ArrayList<>();
             if (conversationQuota) {
-                advisoryLock(conn, LOCK_KEY_PREFIX + "conversation:" + conversationId);
+                locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
             }
             if (userQuota) {
-                advisoryLock(conn, LOCK_KEY_PREFIX + "user:" + userId);
+                locks.add(new Lock(AttachmentLockOrder.Scope.USER, userId));
             }
+            lockAll(conn, locks);
             if (conversationQuota) {
                 long[] usage = usage(conn, "conversation_id = ?", conversationId);
                 AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage, bytes.length, maxPerConversation,
@@ -1098,21 +1150,201 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     }
 
     /**
-     * {count, totalBytes} of the rows matching {@code where}: the count is of
+     * Takes the transaction-scoped advisory locks {@code wanted} needs, in the one
+     * order every writer uses ({@link AttachmentLockOrder}). The keys are the ones
+     * this store has always used, so a node of an older release serializes on the
+     * same locks.
+     */
+    private static void lockAll(Connection conn, List<Lock> wanted) throws SQLException {
+        for (Lock lock : AttachmentLockOrder.ordered(wanted)) {
+            advisoryLock(conn, lockKey(lock));
+        }
+    }
+
+    static String lockKey(Lock lock) {
+        return lock.scope() == AttachmentLockOrder.Scope.SOURCE
+                ? SOURCE_LOCK_KEY_PREFIX + lock.id()
+                : LOCK_KEY_PREFIX + lock.scope().name().toLowerCase(Locale.ROOT) + ":" + lock.id();
+    }
+
+    /**
+     * {count, totalBytes} of a bucket — the rows matching {@code where} plus the
+     * live reservations matching it, read in one statement so that a reservation
+     * converted meanwhile is seen either as itself or as its blob. The count is of
      * uploads (roots) only, the bytes are the uploads' plus their media views' —
-     * the only derived bytes that count toward an owner's quota.
+     * the only derived bytes that count toward an owner's quota. A reservation
+     * counts until it expires by the database's clock.
+     *
+     * @param where
+     *            {@code conversation_id = ?} or {@code user_id = ?}: the columns
+     *            have the same name in both tables
      */
     private static long[] usage(Connection conn, String where, String value) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT COUNT(*) FILTER (WHERE root_ref IS NULL), "
-                        + "COALESCE(SUM(size_bytes) FILTER (WHERE root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + "), 0) "
-                        + "FROM attachments WHERE " + where)) {
+                "SELECT a.files + r.files, a.bytes + r.bytes FROM "
+                        + "(SELECT COUNT(*) FILTER (WHERE root_ref IS NULL) AS files, "
+                        + "COALESCE(SUM(size_bytes) FILTER (WHERE root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + "), 0) AS bytes "
+                        + "FROM attachments WHERE " + where + ") a, "
+                        + "(SELECT COALESCE(SUM(count), 0) AS files, COALESCE(SUM(bytes), 0) AS bytes "
+                        + "FROM attachment_reservations WHERE " + where + " AND expires_at > NOW()) r")) {
             ps.setString(1, value);
+            ps.setString(2, value);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return new long[]{rs.getLong(1), rs.getLong(2)};
             }
         }
+    }
+
+    // ------------------------------------------------------- quota reservations
+
+    @Override
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+            throws AttachmentStoreException {
+        QuotaReservation.validateRequest(owner, conversationId, bytes, count, ttl);
+        ensureSchema();
+        boolean conversationQuota = maxPerConversation > 0 || maxTotalBytesPerConversation > 0;
+        boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
+        String id = UUID.randomUUID().toString();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return inTransaction(conn, () -> {
+                List<Lock> locks = new ArrayList<>();
+                if (conversationQuota) {
+                    locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
+                }
+                if (userQuota) {
+                    locks.add(new Lock(AttachmentLockOrder.Scope.USER, userId));
+                }
+                lockAll(conn, locks);
+                sweepExpired(conn);
+                if (conversationQuota) {
+                    long[] usage = usage(conn, "conversation_id = ?", conversationId);
+                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes,
+                            maxPerConversation, maxTotalBytesPerConversation);
+                }
+                if (userQuota) {
+                    long[] usage = usage(conn, "user_id = ?", userId);
+                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, usage[0], usage[1], count, bytes, maxPerUser,
+                            maxTotalBytesPerUser);
+                }
+                try (PreparedStatement ps = conn.prepareStatement("INSERT INTO attachment_reservations "
+                        + "(id, owner_key, conversation_id, user_id, bytes, count, expires_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, NOW() + ? * INTERVAL '1 millisecond') RETURNING expires_at")) {
+                    ps.setString(1, id);
+                    ps.setString(2, owner.ownerKey());
+                    ps.setString(3, conversationId);
+                    ps.setString(4, userId);
+                    ps.setLong(5, bytes);
+                    ps.setInt(6, count);
+                    ps.setLong(7, ttl.toMillis());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        return new QuotaReservation(id, owner.ownerKey(), bytes, count, rs.getTimestamp(1).toInstant());
+                    }
+                }
+            });
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to reserve attachment quota", e);
+        }
+    }
+
+    /**
+     * Deletes up to {@value #SWEEP_BATCH} expired reservations of any bucket. An
+     * expired row no longer counts, so this only keeps the table from growing:
+     * every reserve sweeps, whether quotas are on or not, so the rows of writers
+     * that crashed are removed by the next writer anywhere. {@code SKIP LOCKED}
+     * leaves rows a concurrent sweep or {@code convert} holds to them, so two
+     * sweeps never wait on each other.
+     */
+    private static void sweepExpired(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE id IN "
+                + "(SELECT id FROM attachment_reservations WHERE expires_at <= NOW() LIMIT " + SWEEP_BATCH
+                + " FOR UPDATE SKIP LOCKED)")) {
+            ps.executeUpdate();
+        }
+    }
+
+    @Override
+    public void release(String reservationId) {
+        ensureSchema();
+        executeUpdate("DELETE FROM attachment_reservations WHERE id = ?", reservationId);
+    }
+
+    @Override
+    public void convert(String reservationId, String storageRef) throws AttachmentStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            inTransaction(conn, () -> {
+                convert(conn, reservationId, storageRef);
+                return null;
+            });
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to convert an attachment quota reservation", e);
+        }
+    }
+
+    /**
+     * The conversion, inside the caller's transaction on {@code conn} — which a
+     * write against a reservation shares with its insert, so the blob and the
+     * reservation trade places in one commit. Takes the reservation's bucket locks
+     * (conversation → user), then deletes the reservation once the blob is in its
+     * buckets and fits.
+     */
+    private void convert(Connection conn, String reservationId, String storageRef) throws SQLException, AttachmentStoreException {
+        String conversationId;
+        String userId;
+        try (PreparedStatement ps = conn.prepareStatement("SELECT conversation_id, user_id FROM attachment_reservations WHERE id = ?")) {
+            ps.setString(1, reservationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw reservationGone();
+                }
+                conversationId = rs.getString(1);
+                userId = rs.getString(2);
+            }
+        }
+        List<Lock> locks = new ArrayList<>();
+        locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
+        locks.add(new Lock(AttachmentLockOrder.Scope.USER, userId));
+        lockAll(conn, locks);
+        long reserved;
+        try (PreparedStatement ps = conn.prepareStatement(
+                // clock_timestamp(), not NOW(): NOW() is when the transaction began, and
+                // the locks above may have been waited on for longer than the
+                // reservation had left.
+                "SELECT bytes FROM attachment_reservations WHERE id = ? AND expires_at > clock_timestamp() FOR UPDATE")) {
+            ps.setString(1, reservationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw reservationGone();
+                }
+                reserved = rs.getLong(1);
+            }
+        }
+        try (PreparedStatement ps = conn.prepareStatement("SELECT size_bytes FROM attachments WHERE storage_ref = ? AND root_ref IS NULL "
+                + "AND conversation_id = ? AND user_id IS NOT DISTINCT FROM ?")) {
+            ps.setString(1, storageRef);
+            ps.setString(2, conversationId);
+            ps.setString(3, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new AttachmentNotFoundException("No upload " + storageRef + " in the buckets of this quota reservation");
+                }
+                if (rs.getLong(1) > reserved) {
+                    throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                            "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(rs.getLong(1), reserved));
+                }
+            }
+        }
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE id = ?")) {
+            ps.setString(1, reservationId);
+            ps.executeUpdate();
+        }
+    }
+
+    private static AttachmentQuotaExceededException reservationGone() {
+        return new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                "The quota reservation for this upload expired or was released before the upload completed. Please retry.");
     }
 
     /**
