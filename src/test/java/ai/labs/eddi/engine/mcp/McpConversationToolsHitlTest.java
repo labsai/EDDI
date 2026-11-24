@@ -188,7 +188,7 @@ class McpConversationToolsHitlTest {
         doThrow(new IConversationService.ConversationAwaitingApprovalException("paused"))
                 .when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.talkToAgent("agent-1", "conv-1", "hi", "production");
+        String result = tools.talkToAgent("agent-1", "conv-1", "hi", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("conv-1"));
@@ -208,7 +208,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production");
+        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("conv-1"));
@@ -227,7 +227,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.talkToAgent("agent-1", "conv-1", "another message", "production");
+        String result = tools.talkToAgent("agent-1", "conv-1", "another message", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertFalse(result.contains("\"BUSY\""), result);
@@ -256,7 +256,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production");
+        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("\"pauseType\":\"TOOL_CALL\""), result);
@@ -283,7 +283,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production");
+        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("\"suggestNextTool\":\"resume_conversation\""), result);
@@ -300,7 +300,7 @@ class McpConversationToolsHitlTest {
         doThrow(new IConversationService.ConversationAwaitingApprovalException("paused"))
                 .when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.chatWithAgent("agent-1", "hi", "conv-1", "production");
+        String result = tools.chatWithAgent("agent-1", "hi", "conv-1", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("conv-1"));
@@ -318,7 +318,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.chatWithAgent("agent-1", "please delete prod", "conv-1", "production");
+        String result = tools.chatWithAgent("agent-1", "please delete prod", "conv-1", "production", null);
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("conv-1"));
@@ -341,7 +341,7 @@ class McpConversationToolsHitlTest {
             return null;
         }).when(conversationService).say(eq("auto-created-conv"), any(), any(), any(), any(), anyBoolean(), any());
 
-        String result = tools.chatWithAgent("agent-1", "hi", null, "production");
+        String result = tools.chatWithAgent("agent-1", "hi", null, "production", null);
 
         assertTrue(result.contains("BUSY"), result);
         // The real auto-created id must be preserved (O4) — never a stale null.

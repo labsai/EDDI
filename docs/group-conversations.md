@@ -785,6 +785,8 @@ A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and
 }
 ```
 
+Over MCP, `discuss_with_group` takes the same entries as its `attachments` argument (a JSON array string) and applies the same limits; like REST, it refuses a `storageRef`. See [MCP server → Sending files](mcp-server.md#sending-files-attachments).
+
 Inline `data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references pass through as-is. A ref carrying neither is skipped, as is a `url` ref with no `mimeType`.
 
 **How members receive them.** On a member's **first** turn the orchestrator grants that member's private conversation access to the group's blobs and injects them as `attachment_*` context — from there the ordinary single-agent attachment path applies (multimodal forwarding for vision models, PDF/text extraction otherwise). On **later** turns the member's own conversation history carries them: `AttachmentForwarder` notes the earlier attachments and the `readAttachment` tool is auto-enabled for any conversation that has them, independently of `builtInToolsWhitelist`. A recruited member gets the same grant on its own first turn, and a nested `GROUP` member propagates the whole set down.
