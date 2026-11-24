@@ -611,6 +611,14 @@ Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 **Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote
 resources — **always**, with no configuration.
 
+The `uri` of an inbound A2A file part (`eddi.a2a.files.inbound=inline-and-uri`,
+off by default) is the same case: a remote peer chooses it. It is fetched
+through `OutboundHttp` under `SsrfPolicy.STRICT`, on the URL and on every
+redirect hop. The fetch sends no credentials, refuses a URI with user info or a
+scheme other than `http`/`https`, and reads at most
+`eddi.attachments.max-size-bytes`. The peer learns only that the URI could not be
+fetched, never why. See [A2A — file parts](a2a-protocol.md#file-parts).
+
 Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side application into making requests to internal services. EDDI prevents this with `UrlValidationUtils.validateUrl(url)`:
 
 > ### ⚠️ Configured outbound calls are a separate, opt-in case

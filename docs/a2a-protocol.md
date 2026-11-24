@@ -147,8 +147,95 @@ specification says, and a version that is neither 0.x nor 1.x is refused with
 | Return without waiting | `configuration.returnImmediately: true` | `configuration.blocking: false` | — |
 
 A message may carry several text parts (joined with newlines) and data parts
-(read as JSON). A message made only of file parts is refused with `-32005`
-ContentTypeNotSupported.
+(read as JSON). File parts are off by default: a message made only of file
+parts is refused with `-32005` ContentTypeNotSupported, and the file parts of
+any other message are ignored. See [File parts](#file-parts) for switching
+them on.
+
+### File parts
+
+`eddi.a2a.files.inbound` decides what EDDI does with the file parts of an
+inbound message:
+
+| Value | Inline bytes | A part naming a URI |
+|---|---|---|
+| `off` (default) | ignored; a message of files alone → `-32005` | ignored; a message of files alone → `-32005` |
+| `inline` | stored, handed to the turn | refused with `-32005` |
+| `inline-and-uri` | stored, handed to the turn | fetched, stored, handed to the turn |
+
+Both shapes are read in every dialect:
+
+| | A2A 1.0 | A2A 0.3 / pre-0.2 |
+|---|---|---|
+| Inline bytes | `{"raw": "<base64>", "filename": "a.pdf", "mediaType": "application/pdf"}` | `{"kind": "file", "file": {"bytes": "<base64>", "name": "a.pdf", "mimeType": "application/pdf"}}` (pre-0.2: `"type": "file"`) |
+| By URI | `{"url": "https://…", "filename": …, "mediaType": …}` | `{"kind": "file", "file": {"uri": "https://…", "name": …, "mimeType": …}}` |
+
+A part must carry exactly one of the bytes and the URI. Base64 may use the
+standard or the URL-safe alphabet. A message may also be files alone; the turn's
+input text is then empty.
+
+**Where the files go.** Each file is stored through the attachment store into
+the **task's conversation**, as a REST upload would be, and the turn names it
+as `attachment_N` in its input context. So the forwarder sends it to the model,
+`readAttachment` can read it, and behavior rules see it, exactly as for any
+other upload. The store's rules apply unchanged:
+
+- the size limit, `eddi.attachments.max-size-bytes`;
+- the MIME check by signature: a declared type the content does not match is
+  refused, and with no declared type the content's signature decides;
+- the per-conversation and per-user quotas, with the calling peer's principal
+  as the user. A2A peers often share one key, and everything sent with that key
+  counts against one per-user quota.
+
+A file is owned by its conversation and nothing else. It is erased with the
+conversation (and so by a GDPR erasure of the peer). It never reaches a
+document library: an A2A principal is not a verified user.
+
+**URIs.** Under `inline-and-uri`, the server fetches the URI the peer named.
+That URI is chosen by a remote party, so the fetch goes through EDDI's outbound
+client under the strict SSRF policy: an absolute `http`/`https` URI without
+user info, no private, loopback, link-local or cloud-metadata address, checked
+again on every redirect hop. The fetch sends no credentials and reads at most
+`eddi.attachments.max-size-bytes`. A URI that cannot be fetched, for whatever
+reason, is refused with one message that does not say why. A body over the
+limit is refused with the limit named. Without a declared type, the response's
+`Content-Type` is the declared one.
+
+**Refusals.** The whole message is refused, and nothing is kept, when any of
+its files is refused. No turn runs, no task is recorded, files already stored
+for it are deleted, and a stream answers with a plain JSON-RPC error before its
+first event:
+
+| Why | Code |
+|---|---|
+| more than `eddi.a2a.files.max-per-message` file parts (default 5, never above `eddi.attachments.max-per-turn`) | `-32602` |
+| a URI part under `inline` | `-32005` |
+| a malformed part (both or neither of bytes and URI, not base64, a URI that is not absolute `http`/`https`) | `-32602` |
+| over the size limit, a type the content does not match, a quota exhausted, a URI that could not be fetched | `-32602` |
+| no attachment store on this deployment | `-32005` |
+
+Every check but the quota runs before a conversation is created: the count,
+the part's shape, the base64, the URI fetch, the size and the type against the
+signature. A quota is known only to the store, so it is checked as the files
+are stored. If it refuses a message that opened a new context, the
+conversation just started for it is ended.
+
+When a context's conversation has ended, the task carries on in a fresh
+conversation, and its files move there: each is deleted from the ended
+conversation, then stored into the fresh one, so a peer at its quota can still
+move them. The message's files are held in memory until they are stored, at
+most `eddi.a2a.files.max-per-message` × `eddi.attachments.max-size-bytes`.
+Inline bytes also arrive inside the JSON body, so the request-body limit
+(`eddi.http.limits.default-max-body-size`, raised automatically to fit one
+base64-encoded attachment: about 27.7 MB with the defaults) bounds them first.
+
+**The Agent Card.** With file parts on, the card's `defaultInputModes` add
+`application/pdf`, `image/png`, `image/jpeg`, `image/gif` and `image/webp`, the
+types the forwarder hands a model natively. With them off, the card is
+unchanged (`text/plain`, `application/json`). Other types are still accepted
+and stored, but a model only sees them through `readAttachment`.
+
+The meter `eddi_a2a_files_total{direction="inbound"}` counts the files stored.
 
 Identifiers the peer chooses — `contextId`, `taskId`, `messageId`, a legacy task
 `id` — are at most 256 characters (`-32602` InvalidParams otherwise), and the
@@ -421,6 +508,7 @@ Tools are named `{agentName}_{skillId}`, sanitized to `[a-z0-9_]`. Example: `sup
 | `engine/a2a/A2AWireFormat.java` | Reads requests and writes results in each dialect (1.0, 0.3, legacy) |
 | `engine/a2a/AgentCardService.java` | Generates Agent Cards from agent configs |
 | `engine/a2a/A2ATaskHandler.java` | Runs tasks as conversation turns; maps conversation state to task state |
+| `engine/a2a/A2AInboundFiles.java` | Stores inbound file parts into the task's conversation; fetches URI parts SSRF-checked |
 | `engine/a2a/IA2ATaskStore.java`, `CachedA2ATaskStore.java` | Where tasks and contexts are remembered (default: node-local cache) |
 | `engine/a2a/A2AInFlightLimiter.java` | The in-flight bound |
 | `engine/a2a/RestA2AEndpoint.java` | JAX-RS endpoints |
