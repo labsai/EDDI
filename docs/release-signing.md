@@ -9,7 +9,7 @@ EDDI's primary release artifacts are **Docker images** published to [Docker Hub:
 This includes all images pushed after signing was enabled:
 - Every build pushed from `main` (e.g., `labsai/eddi:6.0.0-b42`)
 - Every release candidate (e.g., `labsai/eddi:6.0.0-RC2`)
-- Every general availability release (e.g., `labsai/eddi:6.6.0`)
+- Every general availability release (e.g., `labsai/eddi:6.7.1`)
 - The `latest`, major and minor aliases (moved only by a stable `MAJOR.MINOR.PATCH` tag, never by a release candidate)
 
 The signature is made on the pushed image's **digest**, not on a tag, so it stays bound to the exact bytes CI tested; `cosign verify …:<tag>` resolves the tag to its digest and checks that. Each pushed image also gets a **SLSA build-provenance attestation** (`actions/attest-build-provenance`, pushed to the registry), and each GitHub release carries a `SHA256SUMS` of the files the installers download (the compose files, the Keycloak realm and theme, the monitoring assets) with a keyless cosign bundle, `SHA256SUMS.sigstore.json`.
@@ -85,7 +85,7 @@ sudo mv cosign-linux-amd64 /usr/local/bin/cosign
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp "^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$" \
-  labsai/eddi:6.6.0
+  labsai/eddi:6.7.1
 ```
 
 Replace the tag with any tag you want to verify (`latest`, a release candidate such as `6.0.0-RC2`, a build such as `6.0.0-b42`, etc.).
@@ -93,7 +93,7 @@ Replace the tag with any tag you want to verify (`latest`, a release candidate s
 **Successful output** will show the verified certificate chain and Rekor log entry:
 
 ```
-Verification for docker.io/labsai/eddi:6.6.0 --
+Verification for docker.io/labsai/eddi:6.7.1 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -106,8 +106,8 @@ For maximum security, verify by image digest instead of tag:
 
 ```bash
 # Get the digest
-docker pull labsai/eddi:6.6.0
-DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' labsai/eddi:6.6.0)
+docker pull labsai/eddi:6.7.1
+DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' labsai/eddi:6.7.1)
 
 # Verify the digest
 cosign verify \
@@ -125,7 +125,7 @@ cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp "^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$" \
   --output-text \
-  labsai/eddi:6.6.0
+  labsai/eddi:6.7.1
 ```
 
 This outputs the full certificate chain and Rekor log entry as JSON.
