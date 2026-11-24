@@ -912,13 +912,24 @@ public class OpenAiConversationBridge {
      * </ul>
      * Skipped when {@code eddi.streaming.cancel-on-client-disconnect} is off: the
      * turn then finishes and persists, as on {@code /stream}.
+     * <p>
+     * <b>Stateless cleanup</b> ({@link #afterTurn}) — ending the throwaway
+     * conversation of a stateless turn — raises the same cancel flag, so it waits
+     * whenever running it now would decide the turn's fate in the cancel's place:
+     * while a cancel request is still in progress (the cancel's own transition and
+     * audit actor go first), and, with the switch off, until an abandoned turn's
+     * terminal callback has finished — ending it earlier would stop the turn the
+     * switch says to let finish.
      */
     final class StreamAbandonment {
         private final String conversationId;
         private String abandonedBy;
         private boolean running;
         private boolean settled;
+        private boolean ended;
         private boolean cancelRequested;
+        private boolean cancelDone;
+        private Runnable deferredCleanup;
 
         StreamAbandonment(String conversationId) {
             this.conversationId = conversationId;
@@ -939,11 +950,31 @@ public class OpenAiConversationBridge {
             settled = true;
         }
 
+        /** A terminal callback has finished: the turn's outcome has been delivered. */
+        void ended() {
+            Runnable cleanup;
+            synchronized (this) {
+                ended = true;
+                cleanup = takeReleasedCleanup();
+            }
+            runCleanup(cleanup);
+        }
+
         /**
          * Nobody reads this stream any more; {@code actor} is recorded as who cancelled
          * the turn.
          */
         void abandon(String actor) {
+            abandon(actor, null);
+        }
+
+        /**
+         * {@link #abandon(String)}, running {@code beforeCancel} once the abandonment
+         * is recorded but before the cancel request: the request stops waiting without
+         * waiting for the cancel's store reads and writes, while the stateless cleanup
+         * it then reaches already sees the cancel pending.
+         */
+        void abandon(String actor, Runnable beforeCancel) {
             String cancelAs;
             synchronized (this) {
                 if (abandonedBy == null) {
@@ -951,7 +982,46 @@ public class OpenAiConversationBridge {
                 }
                 cancelAs = claimCancel();
             }
+            if (beforeCancel != null) {
+                beforeCancel.run();
+            }
             cancel(cancelAs);
+        }
+
+        /**
+         * Runs {@code cleanup} now, or — when running it now would decide the turn's
+         * fate in the cancel's place — once that no longer holds. Called once per
+         * stream.
+         */
+        void afterTurn(Runnable cleanup) {
+            synchronized (this) {
+                if (cleanupMustWait()) {
+                    deferredCleanup = cleanup;
+                    return;
+                }
+            }
+            runCleanup(cleanup);
+        }
+
+        private boolean cleanupMustWait() {
+            boolean cancelInProgress = cancelRequested && !cancelDone;
+            boolean letFinishing = abandonedBy != null && !cancelOnClientDisconnect && !ended;
+            return cancelInProgress || letFinishing;
+        }
+
+        private Runnable takeReleasedCleanup() {
+            if (deferredCleanup == null || cleanupMustWait()) {
+                return null;
+            }
+            Runnable cleanup = deferredCleanup;
+            deferredCleanup = null;
+            return cleanup;
+        }
+
+        private void runCleanup(Runnable cleanup) {
+            if (cleanup != null) {
+                cleanup.run();
+            }
         }
 
         /** The actor to cancel as, claimed at most once; {@code null} for none. */
@@ -971,6 +1041,19 @@ public class OpenAiConversationBridge {
             if (actor == null) {
                 return;
             }
+            try {
+                requestCancel(actor);
+            } finally {
+                Runnable cleanup;
+                synchronized (this) {
+                    cancelDone = true;
+                    cleanup = takeReleasedCleanup();
+                }
+                runCleanup(cleanup);
+            }
+        }
+
+        private void requestCancel(String actor) {
             String safeConversationId = sanitize(conversationId);
             if (!cancelOnClientDisconnect) {
                 LOGGER.infof("OpenAI-adapter stream of conversation %s abandoned (%s) — letting the turn finish and persist "
@@ -1047,9 +1130,11 @@ public class OpenAiConversationBridge {
                             if (writer.isBroken()) {
                                 // The client is gone: cancel the turn and stop waiting for it.
                                 // Nothing more this request could write would reach anyone.
+                                // The request is released before the cancel: the cancel reads
+                                // and writes the store, and a slow store must not hold the
+                                // request — and its permit — open.
                                 outcomeTag.compareAndSet("ok", OUTCOME_CLIENT_GONE);
-                                abandonment.abandon(CANCELLED_BY_CLIENT_DISCONNECT);
-                                finished.complete(null);
+                                abandonment.abandon(CANCELLED_BY_CLIENT_DISCONNECT, () -> finished.complete(null));
                             }
                         }
 
@@ -1059,8 +1144,10 @@ public class OpenAiConversationBridge {
                             try {
                                 if (snapshot != null && snapshot.getConversationState() == ConversationState.ERROR) {
                                     // A failed turn also reaches onError; whichever comes
-                                    // first terminates the stream, the other is a no-op.
-                                    outcomeTag.set("error");
+                                    // first terminates the stream, the other is a no-op. Only
+                                    // while unresolved: a client that already left stays
+                                    // client_gone whenever this callback lands.
+                                    outcomeTag.compareAndSet("ok", "error");
                                     writer.error(agentFailure(snapshot).toErrorResponse());
                                     return;
                                 }
@@ -1079,7 +1166,7 @@ public class OpenAiConversationBridge {
                                 boolean paused = snapshot != null
                                         && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
                                 if (paused) {
-                                    outcomeTag.set("paused");
+                                    outcomeTag.compareAndSet("ok", "paused");
                                     writer.content("\n\n" + PAUSE_NOTICE_PREFIX
                                             + " Conversation: " + snapshot.getConversationId());
                                 }
@@ -1087,6 +1174,7 @@ public class OpenAiConversationBridge {
                                 writer.finish(paused ? Choice.FINISH_STOP : extractFinishReason(snapshot));
                             } finally {
                                 finished.complete(null);
+                                abandonment.ended();
                             }
                         }
 
@@ -1108,6 +1196,7 @@ public class OpenAiConversationBridge {
                                 }
                             } finally {
                                 finished.complete(null);
+                                abandonment.ended();
                             }
                         }
 
@@ -1127,6 +1216,7 @@ public class OpenAiConversationBridge {
                                         AGENT_FAILED_MESSAGE).toErrorResponse());
                             } finally {
                                 finished.complete(null);
+                                abandonment.ended();
                             }
                         }
                     });
@@ -1165,7 +1255,10 @@ public class OpenAiConversationBridge {
                         .toErrorResponse());
             }
             if (turn.stateless()) {
-                endQuietly(turn.conversationId());
+                // Ending the conversation raises the turn's cancel flag: it waits for a
+                // cancel still in progress, and — with cancel-on-client-disconnect off —
+                // for an abandoned turn to finish (StreamAbandonment#afterTurn).
+                abandonment.afterTurn(() -> endQuietly(turn.conversationId()));
             }
             turnTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
             countTurn("stream", outcomeTag.get());

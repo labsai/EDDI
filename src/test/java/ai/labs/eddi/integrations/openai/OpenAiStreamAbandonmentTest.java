@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -58,6 +60,7 @@ class OpenAiStreamAbandonmentTest {
     private IConversationService conversationService;
     private SimpleMeterRegistry meterRegistry;
     private OpenAiConversationBridge bridge;
+    private final AtomicReference<Thread> pipelineThread = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
@@ -83,6 +86,36 @@ class OpenAiStreamAbandonmentTest {
             script.accept(invocation.getArgument(5));
             return null;
         }).when(conversationService).sayStreaming(any(), anyBoolean(), anyBoolean(), any(), any(), any());
+    }
+
+    /**
+     * A stateless turn: its throwaway conversation is ended once the turn is over.
+     */
+    private static OpenAiConversationBridge.PreparedTurn statelessTurn() {
+        return new OpenAiConversationBridge.PreparedTurn(CONVERSATION_ID, new InputData(), true);
+    }
+
+    /**
+     * As the real coordinator does: {@code sayStreaming} returns at once and the
+     * callbacks fire on another thread.
+     */
+    private void givenStreamingEmitsOnItsOwnThread(Consumer<IConversationService.StreamingResponseHandler> script)
+            throws Exception {
+        doAnswer(invocation -> {
+            IConversationService.StreamingResponseHandler handler = invocation.getArgument(5);
+            Thread thread = new Thread(() -> script.accept(handler), "pipeline");
+            pipelineThread.set(thread);
+            thread.start();
+            return null;
+        }).when(conversationService).sayStreaming(any(), anyBoolean(), anyBoolean(), any(), any(), any());
+    }
+
+    private void joinPipeline() throws InterruptedException {
+        Thread thread = pipelineThread.get();
+        if (thread != null) {
+            thread.join(5_000);
+            assertFalse(thread.isAlive(), "the pipeline thread did not finish");
+        }
     }
 
     private static SimpleConversationMemorySnapshot snapshot(ConversationState state) {
@@ -250,6 +283,155 @@ class OpenAiStreamAbandonmentTest {
         bridge.stream(statefulTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         verifyCancelledOnce(OpenAiConversationBridge.CANCELLED_BY_CLIENT_DISCONNECT);
+    }
+
+    @Test
+    void writeFailure_releasesTheRequestBeforeASlowCancelReturns() throws Exception {
+        // The cancel reads and writes the store; a slow store must not hold the
+        // request (and its permit) open until it answers.
+        var cancelEntered = new CountDownLatch(1);
+        var releaseCancel = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            cancelEntered.countDown();
+            releaseCancel.await(5, TimeUnit.SECONDS);
+            return IConversationService.CancelOutcome.CANCELLED;
+        }).when(conversationService).cancelConversation(any(), any(), any());
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmitsOnItsOwnThread(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+        });
+
+        try {
+            long start = System.nanoTime();
+            bridge.stream(statefulTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+            assertTrue(cancelEntered.await(5, TimeUnit.SECONDS), "the cancel was never requested");
+            assertTrue(elapsedMs < TimeUnit.SECONDS.toMillis(TIMEOUT_SECONDS),
+                    "returned after " + elapsedMs + " ms — it waited for the cancel");
+            assertEquals(1.0, outcomeCount(OpenAiConversationBridge.OUTCOME_CLIENT_GONE));
+        } finally {
+            releaseCancel.countDown();
+            joinPipeline();
+        }
+        verifyCancelledOnce(OpenAiConversationBridge.CANCELLED_BY_CLIENT_DISCONNECT);
+    }
+
+    @Test
+    void writeFailure_statelessTurn_endsItsConversationOnlyAfterTheCancel() throws Exception {
+        // Ending raises the same cancel flag: run first, it would take the turn's
+        // transition and audit actor from the cancel.
+        var releaseCancel = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            releaseCancel.await(5, TimeUnit.SECONDS);
+            return IConversationService.CancelOutcome.CANCELLED;
+        }).when(conversationService).cancelConversation(any(), any(), any());
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmitsOnItsOwnThread(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+        });
+
+        try {
+            bridge.stream(statelessTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+            verify(conversationService, never()).endConversation(any());
+        } finally {
+            releaseCancel.countDown();
+            joinPipeline();
+        }
+        var inOrder = inOrder(conversationService);
+        inOrder.verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL,
+                OpenAiConversationBridge.CANCELLED_BY_CLIENT_DISCONNECT);
+        inOrder.verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void cancelOnClientDisconnectOff_statelessTurn_isEndedOnlyOnceItFinished() throws Exception {
+        // Off means the turn runs to its end; ending its conversation early would
+        // raise the cancel flag and stop it all the same.
+        bridge.cancelOnClientDisconnect = false;
+        var captured = new AtomicReference<IConversationService.StreamingResponseHandler>();
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmits(handler -> {
+            captured.set(handler);
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+        });
+
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+
+        verify(conversationService, never()).endConversation(any());
+        captured.get().onComplete(snapshot(ConversationState.READY));
+        verify(conversationService, times(1)).endConversation(CONVERSATION_ID);
+        verifyNeverCancelled();
+    }
+
+    @Test
+    void cancelOnClientDisconnectOff_timedOutStatelessTurn_isEndedOnlyOnceItFinished() throws Exception {
+        bridge.cancelOnClientDisconnect = false;
+        var captured = new AtomicReference<IConversationService.StreamingResponseHandler>();
+        givenStreamingEmits(handler -> {
+            captured.set(handler);
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            // ...and the turn runs past the request timeout.
+        });
+
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(new ByteArrayOutputStream(), objectMapper, "id", "m", 1L, false));
+
+        verify(conversationService, never()).endConversation(any());
+        captured.get().onComplete(snapshot(ConversationState.READY));
+        verify(conversationService, times(1)).endConversation(CONVERSATION_ID);
+        verifyNeverCancelled();
+        assertEquals(1.0, outcomeCount("timeout"));
+    }
+
+    @Test
+    void statelessTurn_completingNormally_isEndedOnce() throws Exception {
+        givenStreamingEmits(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("all");
+            handler.onComplete(snapshot(ConversationState.READY));
+        });
+
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(new ByteArrayOutputStream(), objectMapper, "id", "m", 1L, false));
+
+        verify(conversationService, times(1)).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void writeFailure_thenAPausedCompletion_staysCountedAsClientGone() throws Exception {
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmits(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+            handler.onComplete(snapshot(ConversationState.AWAITING_HUMAN));
+        });
+
+        bridge.stream(statefulTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+
+        assertEquals(1.0, outcomeCount(OpenAiConversationBridge.OUTCOME_CLIENT_GONE));
+        assertEquals(0.0, outcomeCount("paused"));
+    }
+
+    @Test
+    void writeFailure_thenAFailedCompletion_staysCountedAsClientGone() throws Exception {
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmits(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+            handler.onComplete(snapshot(ConversationState.ERROR));
+        });
+
+        bridge.stream(statefulTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+
+        assertEquals(1.0, outcomeCount(OpenAiConversationBridge.OUTCOME_CLIENT_GONE));
+        assertEquals(0.0, outcomeCount("error"));
     }
 
     // ─── request timeout ───
