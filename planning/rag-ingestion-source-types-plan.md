@@ -1179,6 +1179,6 @@ checked by removing it and confirming the test fails. Keep that bar.
    member agent retrieves from an `OWNER` knowledge base, whose identity counts?
    Proposed: the verified user of the group conversation, and nothing if none —
    but it needs a decision alongside the connections question.
-6. **Multi-tenancy.** Sources, cursors and grants must carry `tenantId` when
+6. **Multi-tenancy.** Sources, cursors and grants must carry `orgId` when
    `multi-tenancy-plan.md` Phase 1 lands. Register the new cursor store in that
-   plan's store table rather than inventing scoping here.
+   plan's Appendix B rather than inventing scoping here.
