@@ -17,6 +17,13 @@
 //
 // Every request is also logged (tool count and the decision) so a failure in CI
 // can be read from the compose logs. No dependencies: plain node:http.
+//
+// Three tiers use it: the activation tier, the real upgrade from the previous
+// release (whose operator offers older tool shapes — the rules above key on
+// tool names and schemas, which both releases share), and the operator under
+// Keycloak. For the specs, GET /__e2e/tools lists the tools the model was
+// offered and GET /__e2e/system-prompt?contains=… says whether the latest
+// system prompt held a text.
 
 import http from "node:http";
 
@@ -33,6 +40,12 @@ let lastTools = [];
  * Nothing else reveals that failure outside the server log.
  */
 let unrenderedPrompts = 0;
+/**
+ * The system prompt of the latest chat request — see GET /__e2e/system-prompt.
+ * The real-upgrade spec asks whether an administrator's own line in the
+ * operator's instructions reached the model after an upgrade that kept them.
+ */
+let lastSystemPrompt = "";
 
 /** The text of an OpenAI message whose content may be a string or parts. */
 function textOf(message) {
@@ -113,10 +126,16 @@ function decide(body) {
 
   if (last?.role === "tool") {
     const result = textOf(last);
+    // The engine hands the model a tool result inside an untrusted-data
+    // envelope — "[tool result — tool 'x', source 'http'. …] {…} [end of tool
+    // result]" — so the payload is read from inside it. Testing the raw text
+    // for a leading `{"error"` let every refused call through as a success:
+    // a 401, or a ${caller:token} the backend would not resolve, answered OK.
+    const payload = result.replace(/^\s*\[tool result\b[^\]]*\]\s*/, "");
     // A transport or HTTP failure (`{"error": …}`, a 4xx/5xx), or a call the
     // engine refused to run (a schema violation answers NOT_EXECUTED).
     const failed =
-      /^\s*\{\s*"error"\s*:/.test(result) ||
+      /^\s*\{\s*"error"\s*:/.test(payload) ||
       /"httpCode"\s*:\s*[45]\d\d/.test(result) ||
       /"status"\s*:\s*"NOT_EXECUTED"/.test(result);
     const marker = failed ? "OPERATOR_E2E_TOOL_FAILED" : "OPERATOR_E2E_TOOL_OK";
@@ -239,6 +258,16 @@ const server = http.createServer((req, res) => {
       tools: lastTools.map((tool) => ({ name: toolName(tool), required: requiredOf(tool) })),
     });
   }
+  // For the spec: whether the latest request's system prompt contains a text.
+  // Only the verdict and the length are returned, never the prompt itself.
+  if (req.method === "GET" && url.pathname === "/__e2e/system-prompt") {
+    const needle = url.searchParams.get("contains") ?? "";
+    return send(res, 200, {
+      requests: sequence,
+      length: lastSystemPrompt.length,
+      contains: needle.length > 0 && lastSystemPrompt.includes(needle),
+    });
+  }
   if (req.method === "GET" && /\/models$/.test(url.pathname)) {
     return send(res, 200, { object: "list", data: [{ id: MODEL, object: "model", owned_by: "e2e" }] });
   }
@@ -261,7 +290,8 @@ const server = http.createServer((req, res) => {
       .filter((m) => m.role === "system")
       .map(textOf)
       .join("\n");
-    if (/\{#if |\{\/if\}/.test(system)) {
+    lastSystemPrompt = system;
+    if (/\{#if|\{\/if\}/.test(system)) {
       unrenderedPrompts += 1;
       console.log("[llm-stub] the system prompt arrived UNRENDERED (it still holds {#if} sections)");
     }
