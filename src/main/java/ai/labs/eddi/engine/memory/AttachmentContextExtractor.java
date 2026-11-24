@@ -306,21 +306,41 @@ public final class AttachmentContextExtractor {
      * turn that was not refused stays readable.
      */
     public static Set<String> withheldStorageRefs(IConversationMemory memory) {
+        return withheldStorageRefs(memory, false);
+    }
+
+    /**
+     * {@link #withheldStorageRefs(IConversationMemory)}, plus the files of the
+     * current step when an input guardrail refused it — for a tool that can run
+     * later in the same turn than the refusal, such as sharing a file with a
+     * delegate. A file accepted on an earlier turn stays shareable.
+     */
+    public static Set<String> withheldStorageRefsIncludingCurrentStep(IConversationMemory memory) {
+        return withheldStorageRefs(memory, true);
+    }
+
+    private static Set<String> withheldStorageRefs(IConversationMemory memory, boolean includeCurrentStep) {
         if (memory == null) {
             return Set.of();
         }
+        List<IConversationMemory.IConversationStep> steps = new ArrayList<>();
         IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
-        if (previousSteps == null || previousSteps.size() == 0) {
-            return Set.of();
+        if (previousSteps != null) {
+            for (int i = 0; i < previousSteps.size(); i++) {
+                steps.add(previousSteps.get(i));
+            }
+        }
+        if (includeCurrentStep && memory.getCurrentStep() != null) {
+            steps.add(memory.getCurrentStep());
         }
         Set<String> withheld = new HashSet<>();
         Set<String> accepted = new HashSet<>();
-        for (int i = 0; i < previousSteps.size(); i++) {
-            IData<List<?>> data = previousSteps.get(i).getData(MemoryKeys.ATTACHMENTS);
+        for (IConversationMemory.IConversationStep step : steps) {
+            IData<List<?>> data = step.getData(MemoryKeys.ATTACHMENTS);
             if (data == null || data.getResult() == null) {
                 continue;
             }
-            Set<String> target = ConversationLogGenerator.isInputWithheld(previousSteps.get(i)) ? withheld : accepted;
+            Set<String> target = ConversationLogGenerator.isInputWithheld(step) ? withheld : accepted;
             for (Object value : data.getResult()) {
                 Attachment attachment = asAttachment(value);
                 if (attachment != null && attachment.getStorageRef() != null) {

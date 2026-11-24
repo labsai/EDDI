@@ -40,7 +40,10 @@ public final class DocumentsConfigValidator {
      * key live adds it here, in a delimited block, in the same PR as the behaviour.
      */
     public static final Set<String> LIVE_KEYS = Set.of(
-    // --- WP-0.1: the block exists; no key is available yet ---
+            // --- WP-0.1: the block exists; no key is available yet ---
+            // --- WP-1.2: converseWithAgent(…, attachments) ---
+            "sharing.delegation", "sharing.maxFilesPerShare", "sharing.maxSharesPerTurn", "sharing.maxDepth"
+    // --- end WP-1.2 ---
     );
 
     /**

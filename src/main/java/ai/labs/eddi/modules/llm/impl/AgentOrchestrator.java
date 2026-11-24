@@ -21,7 +21,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.documents.DocumentSettings;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -61,6 +63,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import org.jboss.logging.Logger;
 
@@ -282,6 +285,26 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * File sharing through {@code converseWithAgent} (the agent's
+     * {@code documents.sharing.*}). Field-injected for the same reason as the
+     * stores above; null under direct construction, which means the three-argument
+     * tool and no sharing.
+     */
+    @Inject
+    volatile AttachmentShareService attachmentShareService;
+
+    @Inject
+    volatile DocumentSettings documentSettings;
+
+    /**
+     * {@code eddi.attachments.max-per-turn}: a delegate's turn takes no more files,
+     * so a share is capped at it. 0 under direct construction, read as the built-in
+     * default.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
+    int maxAttachmentsPerTurn;
 
     /**
      * I5's two dependencies, field-injected rather than constructor-injected for
@@ -1220,7 +1243,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // honouring "all"); this method's job is only to stop skipping it.
         // Constructed per call since deploymentStore is field-injected (see that
         // class's Javadoc).
-        dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
+        dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory, null, null, task.getDocuments());
 
         // Outside the whitelist branch on purpose: readAttachment is part of
         // attachment support, not a capability the built-in tools config governs.
@@ -1334,7 +1357,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
                 guard != null
                         ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
                                 caller != null && caller.isAdminActingAs(principal))
-                        : null);
+                        : null,
+                new DynamicAgentToolsProvider.FileSharing(attachmentShareService, attachmentStore, documentSettings, maxAttachmentsPerTurn));
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

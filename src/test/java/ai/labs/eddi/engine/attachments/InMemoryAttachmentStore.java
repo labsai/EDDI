@@ -16,24 +16,24 @@ import java.util.Set;
  * owner-or-grant read rule, for the share tests. Wrap it in a Mockito
  * {@code spy} to verify grants.
  */
-class InMemoryAttachmentStore implements IAttachmentStore {
+public class InMemoryAttachmentStore implements IAttachmentStore {
 
     private final Map<String, Attachment> blobs = new LinkedHashMap<>();
     private final Map<String, Set<String>> grants = new LinkedHashMap<>();
 
     /** Adds a blob owned by {@code ownerConversationId}. */
-    InMemoryAttachmentStore put(String storageRef, String filename, String mimeType, long size, String ownerConversationId) {
+    public InMemoryAttachmentStore put(String storageRef, String filename, String mimeType, long size, String ownerConversationId) {
         blobs.put(storageRef, new Attachment(storageRef, filename, mimeType, size, ownerConversationId));
         return this;
     }
 
     /** Whether {@code conversationId} holds a grant on {@code storageRef}. */
-    boolean isGranted(String storageRef, String conversationId) {
+    public boolean isGranted(String storageRef, String conversationId) {
         return grants.getOrDefault(storageRef, Set.of()).contains(conversationId);
     }
 
     /** The number of grants on {@code storageRef}. */
-    int grantCount(String storageRef) {
+    public int grantCount(String storageRef) {
         return grants.getOrDefault(storageRef, Set.of()).size();
     }
 
