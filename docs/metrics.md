@@ -1198,6 +1198,22 @@ eddi_connection_token_refresh_count_total   # Token endpoint outcomes; tag: outc
 eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: outcome (claimed, awaited, lease_released, lease_expired)
 ```
 
+### Organization Context Metrics
+
+These count how EDDI binds the organization (org) each piece of work runs for. Organizations are
+being built in phases: this release runs single mode only (`eddi.org.mode`, see
+[configuration-reference.md](configuration-reference.md#groups-tenancy--variables)).
+
+```text
+eddi_org_context_fallback_total             # Org lookups that found no binding and used the default org (single mode); tag: site (class#method). Expected to stay 0
+eddi_org_platform_scope_total               # Entries into OrgScope.platform, the audited way to cross orgs; tag: reason
+```
+
+A non-zero `eddi_org_context_fallback_total` is harmless in single mode, but the `site` it names
+has to be fixed before multi mode can be enabled. To keep the series bounded, only the first 200
+call sites and the first 100 reasons get a tag of their own. Later ones are counted under
+`(overflow)`.
+
 ### Deployed Agents
 
 ```text
