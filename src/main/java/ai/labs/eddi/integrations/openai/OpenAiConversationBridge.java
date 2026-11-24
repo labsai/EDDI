@@ -34,6 +34,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -202,6 +204,35 @@ public class OpenAiConversationBridge {
     @Inject
     @ConfigProperty(name = "eddi.streaming.cancel-on-client-disconnect", defaultValue = "true")
     boolean cancelOnClientDisconnect = true;
+
+    /**
+     * The engine's per-turn watchdog ({@code systemRuntime.agentTimeoutInSeconds}):
+     * no running turn outlives it, so it bounds how long a stateless conversation's
+     * end may wait for that turn (see {@link StreamAbandonment#afterTurn}).
+     */
+    @Inject
+    @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60")
+    int agentTimeoutSeconds = 60;
+
+    /**
+     * Added to {@link #agentTimeoutSeconds} before a waiting stateless cleanup runs
+     * anyway — room for the turn's terminal callback after the watchdog fired.
+     */
+    long deferredCleanupMarginMs = TimeUnit.SECONDS.toMillis(30);
+
+    /**
+     * Runs a waiting stateless cleanup once its bound is reached: the end does
+     * blocking store I/O, which belongs on the container's managed executor (MDC,
+     * class loader, its own pool) rather than on {@code ForkJoinPool.commonPool}.
+     * Set by the container through {@link #useManagedExecutor}; a directly
+     * constructed bridge (unit tests) runs it directly on the timer's thread.
+     */
+    Executor deferredCleanupExecutor = Runnable::run;
+
+    @Inject
+    void useManagedExecutor(ManagedExecutor managedExecutor) {
+        this.deferredCleanupExecutor = managedExecutor;
+    }
 
     @Inject
     public OpenAiConversationBridge(IConversationService conversationService,
@@ -915,11 +946,16 @@ public class OpenAiConversationBridge {
      * <p>
      * <b>Stateless cleanup</b> ({@link #afterTurn}) — ending the throwaway
      * conversation of a stateless turn — raises the same cancel flag, so it waits
-     * whenever running it now would decide the turn's fate in the cancel's place:
-     * while a cancel request is still in progress (the cancel's own transition and
-     * audit actor go first), and, with the switch off, until an abandoned turn's
-     * terminal callback has finished — ending it earlier would stop the turn the
-     * switch says to let finish.
+     * in two cases: while a cancel request this stream already claimed is in
+     * progress, so that request runs before the end; and, with the switch off,
+     * while an abandoned turn that has started running has not finished its
+     * terminal callback, since ending it earlier would stop the turn the switch
+     * says to let finish. A turn abandoned while still queued is ended at once, as
+     * before; should it start later, the cancel it then claims finds the
+     * conversation ended, which is harmless. The wait is bounded: after the
+     * engine's turn watchdog plus a margin the cleanup runs anyway, because a turn
+     * whose terminal callback never comes (dropped by the watchdog while queued, a
+     * failed completion, a hung body) must not leave its conversation open.
      */
     final class StreamAbandonment {
         private final String conversationId;
@@ -990,22 +1026,41 @@ public class OpenAiConversationBridge {
 
         /**
          * Runs {@code cleanup} now, or — when running it now would decide the turn's
-         * fate in the cancel's place — once that no longer holds. Called once per
-         * stream.
+         * fate in the cancel's place — once that no longer holds, or at the latest
+         * after the turn watchdog plus a margin. Called once per stream.
          */
         void afterTurn(Runnable cleanup) {
             synchronized (this) {
                 if (cleanupMustWait()) {
                     deferredCleanup = cleanup;
+                    long boundMs = TimeUnit.SECONDS.toMillis(Math.max(agentTimeoutSeconds, 0)) + deferredCleanupMarginMs;
+                    CompletableFuture.delayedExecutor(boundMs, TimeUnit.MILLISECONDS, deferredCleanupExecutor)
+                            .execute(this::boundReached);
                     return;
                 }
             }
             runCleanup(cleanup);
         }
 
+        /**
+         * The wait's upper bound: run a cleanup still waiting, whatever it waits for.
+         */
+        private void boundReached() {
+            Runnable cleanup;
+            synchronized (this) {
+                cleanup = deferredCleanup;
+                deferredCleanup = null;
+            }
+            if (cleanup != null) {
+                LOGGER.infof("Ending the stateless conversation %s of an abandoned OpenAI-adapter stream: its turn "
+                        + "did not report an end within the turn timeout", sanitize(conversationId));
+                runCleanup(cleanup);
+            }
+        }
+
         private boolean cleanupMustWait() {
             boolean cancelInProgress = cancelRequested && !cancelDone;
-            boolean letFinishing = abandonedBy != null && !cancelOnClientDisconnect && !ended;
+            boolean letFinishing = abandonedBy != null && !cancelOnClientDisconnect && running && !ended;
             return cancelInProgress || letFinishing;
         }
 
@@ -1018,9 +1073,23 @@ public class OpenAiConversationBridge {
             return cleanup;
         }
 
+        /**
+         * Runs with the calling thread's interrupt flag cleared, restored afterwards: a
+         * deferred cleanup runs on the turn's callback thread, which the watchdog's
+         * {@code cancel(true)} may have left interrupted, and the end's store read
+         * would then abort and leave the conversation open.
+         */
         private void runCleanup(Runnable cleanup) {
-            if (cleanup != null) {
+            if (cleanup == null) {
+                return;
+            }
+            boolean interrupted = Thread.interrupted();
+            try {
                 cleanup.run();
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
 
