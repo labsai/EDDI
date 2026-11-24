@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -151,6 +152,21 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         assertTrue(pair.getBoolean("unique", false), pair.toJson());
         assertTrue(indexes.stream().anyMatch(index -> index.get("key", Document.class).keySet().equals(Set.of("conversationId"))),
                 indexes.toString());
+    }
+
+    @Test
+    void aNullOrNonStringLegacyGranteeDoesNotStopTheBackfill() throws Exception {
+        String ref = store.store("odd".getBytes(StandardCharsets.UTF_8), "text/plain", "odd.txt", OWNER, "default", null).storageRef();
+        // Legacy data as it may be stored: a null and a non-string next to a real
+        // grantee.
+        files().updateOne(Filters.eq("metadata.storageRef", ref),
+                Updates.set("metadata.grants", Arrays.asList(null, 42, GRANTEE)));
+
+        AttachmentGrantBackfill.Result result = new AttachmentGrantBackfill(store, migrationLog, null, null).run(id -> GRANTEE.equals(id), 500,
+                10);
+
+        assertTrue(result.complete(), result.toString());
+        assertEquals(1, grantRowsHeldBy(GRANTEE));
     }
 
     @Test
