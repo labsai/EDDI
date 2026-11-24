@@ -4,21 +4,17 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.BoundedTextStripper;
 import ai.labs.eddi.modules.ingestion.extract.PdfDecodeBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfStreamBudget;
-import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.contentstream.operator.Operator;
-import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.apache.pdfbox.text.TextPosition;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -27,7 +23,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Calendar;
-import java.util.List;
 import java.util.Locale;
 
 /**
@@ -374,110 +369,6 @@ public class AttachmentTextExtractor {
 
         public AttachmentExtractionException(String message, Throwable cause) {
             super(message, cause);
-        }
-    }
-
-    /**
-     * A {@link PDFTextStripper} with a work budget: it counts every content-stream
-     * operator it interprets — form XObjects included, however often they are
-     * referenced — and gives up past {@code maxOperators}, past its deadline, or
-     * when its thread is interrupted (the tool timeout), instead of running to
-     * completion on a crafted document.
-     * <p>
-     * Once tripped it stays tripped: PDFBox logs and swallows an exception thrown
-     * while drawing a form ({@code Do}), so every later operator throws again until
-     * one outside a form ends the extraction.
-     */
-    static final class BoundedTextStripper extends PDFTextStripper {
-        private final long maxOperators;
-        private final long deadlineNanos;
-        private long operators;
-        private String tripped;
-        private long glyphsLeft;
-
-        BoundedTextStripper(long maxOperators, Duration deadline) {
-            this(maxOperators, deadline, Long.MAX_VALUE);
-        }
-
-        /**
-         * @param maxGlyphs
-         *            glyphs the whole extraction may lay out. A page's glyphs are all
-         *            held until the page is written, so a page claiming millions of
-         *            them used to fill the heap before the character cap was applied;
-         *            past this allowance the page in progress is written with what it
-         *            laid out and no later page is read — the text a cap would have cut
-         *            anyway
-         */
-        BoundedTextStripper(long maxOperators, Duration deadline, long maxGlyphs) {
-            this.maxOperators = maxOperators;
-            this.deadlineNanos = System.nanoTime() + deadline.toNanos();
-            this.glyphsLeft = maxGlyphs;
-        }
-
-        /**
-         * Charges the page's unfiltered content references to the decode budget before
-         * PDFBox parses them — the ingestion extractor's accounting: one unfiltered
-         * stream referenced thousands of times from {@code /Contents} is parsed in full
-         * each time, its operands held until an operator arrives, before
-         * {@link #processOperator} ever counts anything.
-         */
-        @Override
-        public void processPage(PDPage page) throws IOException {
-            // PDFBox calls this for every page with contents and applies the start/end
-            // range inside super.processPage; a page outside the requested range is
-            // never parsed, so it must not be charged either (no bookmarks are set, so
-            // the range is the whole check).
-            if (glyphsLeft < 0 || getCurrentPageNo() < getStartPage() || getCurrentPageNo() > getEndPage()) {
-                return;
-            }
-            PdfTextExtractor.chargePageContents(page);
-            try {
-                super.processPage(page);
-            } catch (GlyphsExhausted e) {
-                writePage();
-                endPage(page);
-            }
-        }
-
-        @Override
-        protected void processTextPosition(TextPosition text) {
-            if (--glyphsLeft < 0) {
-                throw new GlyphsExhausted();
-            }
-            super.processTextPosition(text);
-        }
-
-        @Override
-        protected void processOperator(Operator operator, List<COSBase> operands) throws IOException {
-            if (tripped == null) {
-                if (++operators > maxOperators) {
-                    tripped = "the PDF needs more than " + maxOperators + " content operators to extract";
-                } else if ((operators & 0x3FF) == 0 && System.nanoTime() - deadlineNanos > 0) {
-                    tripped = "text extraction exceeded " + EXTRACTION_DEADLINE.toSeconds() + " seconds";
-                } else if (Thread.currentThread().isInterrupted()) {
-                    tripped = "text extraction was interrupted";
-                }
-            }
-            if (tripped != null) {
-                throw new IOException("Refused: " + tripped);
-            }
-            super.processOperator(operator, operands);
-        }
-
-        @Override
-        public String getText(PDDocument document) throws IOException {
-            String text = super.getText(document);
-            if (tripped != null) {
-                throw new IOException("Refused: " + tripped);
-            }
-            return text;
-        }
-    }
-
-    /** The extraction's glyph allowance is spent. */
-    private static final class GlyphsExhausted extends RuntimeException {
-        GlyphsExhausted() {
-            super(null, null, false, false);
         }
     }
 }
