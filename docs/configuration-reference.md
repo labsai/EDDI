@@ -572,6 +572,14 @@ Bounds on reading the images a PDF embeds ([security.md](security.md#pdf-image-b
 |---|---|---|
 | `eddi.documents.images.max-pixels` | `40000000` (40 MP) | Most pixels one embedded image may declare, and also each of its masks, the masked image PDFBox builds from them, and a CCITT image's decode buffer. A larger one is refused before PDFBox builds a raster or decode buffer for it. So is one whose decoding would take more than the document's decode budget has left. Not a positive number means the default |
 
+**Daily document spend.** Cumulative ceilings on model spend for document work outside a conversation turn (the background summary of a large document, later the modality bridge), per UTC day. Admission checks the tenant's monthly budget, then the user's ceiling, then the team's; the refusal names the ceiling, the spend so far and the estimate. See [langchain.md → Daily document spend ceilings](langchain.md#daily-document-spend-ceilings). **Nothing charges them yet**: the summary job lands with large-document summaries.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.spend.max-per-user-per-day-usd` | (unset) | Dollars one user's document work may spend per UTC day. Unset or negative: no cumulative ceiling; `0` refuses all such work |
+| `eddi.documents.spend.max-per-team-per-day-usd` | (unset) | Dollars one team library's document work may spend per UTC day, on top of the user's ceiling. Unset or negative: no ceiling |
+| `eddi.documents.spend.retention-days` | `35` | UTC days of spend buckets kept, today included; older buckets are deleted by the store when it writes (MongoDB also has a TTL index). At least `1`. A user's buckets are erased with the user |
+
 ---
 
 ## Backup, export & import
