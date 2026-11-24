@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -34,6 +35,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Discovers RAG configurations from the workflow, performs retrieval, and
@@ -56,6 +59,12 @@ public class RagContextProvider {
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final IDataFactory dataFactory;
+
+    /**
+     * Workflow steps already warned about for naming a document index: one WARN per
+     * step URI and process, not one per turn. Holds URIs only.
+     */
+    private final Set<String> warnedDocumentIndexes = ConcurrentHashMap.newKeySet();
 
     @Inject
     public RagContextProvider(IAgentStore agentStore, IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
@@ -116,6 +125,27 @@ public class RagContextProvider {
         for (var step : ragSteps) {
             RagConfiguration ragConfig = step.config();
             String kbName = ragConfig.getName();
+
+            // A document index holds users' and conversations' files, and an agent's
+            // retrieval answers every user of the agent. Saving refuses a workflow
+            // step that names one (and the flag on a configuration a workflow
+            // uses); this is the runtime backstop for whatever got past that — a
+            // stored workflow, an import, a direct write. Before anything else, so
+            // neither a knowledge-base reference by name nor workflow discovery
+            // reaches its store.
+            if (DocumentIndexEligibility.isDocumentIndex(ragConfig)) {
+                String stepUri = step.stepConfig() == null ? null : String.valueOf(step.stepConfig().get("uri"));
+                if (warnedDocumentIndexes.add(String.valueOf(stepUri))) {
+                    LOGGER.warnf("Workflow RAG step %s names a document index (\"documentIndex\": true); it is skipped. "
+                            + "Remove it from the workflow: a document index is never an agent's knowledge base.",
+                            LogSanitizer.sanitize(stepUri));
+                }
+                Map<String, Object> skipped = new HashMap<>();
+                skipped.put("kb", kbName);
+                skipped.put("skipped", "documentIndex");
+                traceEntries.add(skipped);
+                continue;
+            }
 
             // Determine retrieval params
             int maxResults;

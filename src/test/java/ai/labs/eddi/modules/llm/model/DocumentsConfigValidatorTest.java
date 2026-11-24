@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.model;
 
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.documents.DocumentBounds;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -123,7 +124,9 @@ class DocumentsConfigValidatorTest {
         @DisplayName("every leaf key is accepted once live")
         void everyLeafIsAcceptedOnceLive(List<String> leaf) throws Exception {
             var config = parse(DocumentsDesignJson.withOnly(leaf.get(0), leaf.get(1)));
-            assertDoesNotThrow(() -> DocumentsConfigValidator.validate(config, PATH, Set.of(leaf.get(0)), DocumentBounds.none()));
+            // index.rag, once live, must also name an eligible document index.
+            assertDoesNotThrow(() -> DocumentsConfigValidator.validate(config, PATH, Set.of(leaf.get(0)), DocumentBounds.none(),
+                    () -> reference -> eligibleIndex()));
         }
 
         @ParameterizedTest
@@ -249,6 +252,85 @@ class DocumentsConfigValidatorTest {
             var e = assertThrows(IllegalArgumentException.class,
                     () -> DocumentsConfigValidator.validate(parse("{\"sharing\":{\"maxDepth\":99}}"), PATH, Set.of(), bounds));
             assertTrue(e.getMessage().endsWith("is not available in this version"), e.getMessage());
+        }
+    }
+
+    // --- WP-6.1 ---
+
+    static RagConfiguration eligibleIndex() {
+        var config = new RagConfiguration();
+        config.setName("documents");
+        config.setStoreType("pgvector");
+        config.setStoreNamespace("id");
+        config.setDocumentIndex(true);
+        return config;
+    }
+
+    @Nested
+    @DisplayName("index.rag (WP-6.1): names an eligible document index")
+    class IndexReference {
+
+        private static final String INDEX_ID = "65f0aa11bb22cc33dd44ee77";
+        private static final String INDEX_URI = "eddi://ai.labs.rag/ragstore/rags/" + INDEX_ID + "?version=2";
+        private final Set<String> live = Set.of("index.rag");
+
+        private DocumentsConfig withIndex(String reference) throws Exception {
+            return parse("{\"index\":{\"rag\":\"" + reference + "\"}}");
+        }
+
+        @Test
+        @DisplayName("not live in this version: refused before any lookup")
+        void notLiveYet() throws Exception {
+            var config = withIndex(INDEX_URI);
+            var e = assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator.validate(config, PATH, Set.of(),
+                    DocumentBounds.none(), () -> {
+                        throw new AssertionError("no lookup for a key that is not available");
+                    }));
+            assertEquals(PATH + ".index.rag is not available in this version", e.getMessage());
+        }
+
+        @Test
+        void eligibleIndexIsAccepted() throws Exception {
+            var config = withIndex(INDEX_URI);
+            assertDoesNotThrow(() -> DocumentsConfigValidator.validate(config, PATH, live, DocumentBounds.none(),
+                    () -> reference -> INDEX_ID.equals(reference.id()) && Integer.valueOf(2).equals(reference.version())
+                            ? eligibleIndex()
+                            : null));
+        }
+
+        @Test
+        @DisplayName("an ordinary knowledge base is refused — users' documents never go into an agent's knowledge base")
+        void ordinaryKnowledgeBaseIsRefused() throws Exception {
+            var config = withIndex(INDEX_URI);
+            var ordinary = eligibleIndex();
+            ordinary.setDocumentIndex(null);
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> DocumentsConfigValidator.validate(config, PATH, live, DocumentBounds.none(), () -> reference -> ordinary));
+            assertTrue(e.getMessage().startsWith(PATH + ".index.rag must name a document index"), e.getMessage());
+        }
+
+        @Test
+        void ineligibleIndexIsRefused() throws Exception {
+            var config = withIndex(INDEX_URI);
+            var nameLayout = eligibleIndex();
+            nameLayout.setStoreNamespace("name");
+            assertThrows(IllegalArgumentException.class,
+                    () -> DocumentsConfigValidator.validate(config, PATH, live, DocumentBounds.none(), () -> reference -> nameLayout));
+        }
+
+        @Test
+        void missingOrMalformedReferenceIsRefused() throws Exception {
+            assertThrows(IllegalArgumentException.class,
+                    () -> DocumentsConfigValidator.validate(withIndex(INDEX_URI), PATH, live, DocumentBounds.none(), () -> reference -> null));
+            assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator.validate(withIndex("not a reference"), PATH, live,
+                    DocumentBounds.none(), () -> reference -> eligibleIndex()));
+        }
+
+        @Test
+        @DisplayName("without a container the reference cannot be checked, so the save is refused")
+        void noContainerRefuses() throws Exception {
+            var config = withIndex(INDEX_URI);
+            assertThrows(IllegalStateException.class, () -> DocumentsConfigValidator.validate(config, PATH, live, DocumentBounds.none()));
         }
     }
 }
