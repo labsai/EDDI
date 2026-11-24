@@ -58,7 +58,21 @@ register(new URL("./lib/git-module-loader.mjs", import.meta.url), {
   data: { repoRoot },
 });
 
-const shas = execFileSync("git", ["log", "--format=%H", "--", PROMPT], { cwd: repoRoot, encoding: "utf8" })
+// The body is rendered from more than the prompt module: the endpoint
+// allow-list gates its sections and the model catalogue is built from the
+// suggestions, so a default changed whenever any of these did. Every commit that
+// touched one of them is rendered (a commit predating the prompt module fails to
+// load and is reported, not counted).
+const RENDER_INPUTS = [
+  PROMPT,
+  "ui/manager/src/lib/operator/tool-scopes.ts",
+  "ui/manager/src/lib/model-suggestions.ts",
+  "ui/manager/src/lib/llm-provider-catalog.ts",
+  "ui/packages/app-kit/src/lib/model-suggestions.ts",
+  "ui/packages/app-kit/src/lib/llm-provider-catalog.ts",
+];
+
+const shas = execFileSync("git", ["log", "--format=%H", "--", ...RENDER_INPUTS], { cwd: repoRoot, encoding: "utf8" })
   .trim()
   .split("\n")
   .filter(Boolean);
