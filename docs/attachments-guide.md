@@ -456,6 +456,29 @@ Files go only to the conversation the call starts, or to one this conversation s
 
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.
 - **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStore`.
-- **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
+- **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations; files larger than `eddi.attachments.max-size-bytes` keep their bytes in a blob backend ([Storage backends](#storage-backends)).
 - **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted, with every derived file of them.
 - **Lineage**: a derived file is a row (PostgreSQL) or GridFS file (MongoDB) of the same store with `root_ref` / `metadata.rootRef` naming the uploaded file, and its owner fields copied from it when it is written. The store announces every deleted uploaded file as a CDI event, `AttachmentRootDeleted`, so caches and jobs keyed by that file can clean up; `AttachmentOwnerChanged` is declared for the libraries of later releases and not fired yet. The new columns are additive (`ADD COLUMN IF NOT EXISTS` / new metadata fields, no backfill): `owner_key` empty reads as the conversation id, `page_count` empty as unknown.
+
+## Storage backends
+
+Each attachment store is a **metadata layer** (owner, grants, quotas, lineage, and where the bytes are) over the bytes themselves. Up to `eddi.attachments.max-size-bytes` (20 MB) the bytes stay where they have always been: the `attachments` GridFS bucket on MongoDB, the `data` column on PostgreSQL. Larger files go to a **blob backend**, which stores them chunk by chunk and never holds a whole file in memory:
+
+| Backend | Database | Where the bytes go |
+|---|---|---|
+| `gridfs` (MongoDB default) | MongoDB | Its own GridFS bucket, `attachment_blobs` |
+| `pg-chunks` (PostgreSQL default) | PostgreSQL | Rows of `eddi.attachments.blob.pg-chunks.chunk-bytes` (4 MiB) in `attachment_chunks` |
+
+`eddi.attachments.blob.backend` picks one (`auto`, the default, takes the database's own). A backend that cannot run on the configured database fails startup with the reason; `s3` and `pg-largeobject` are planned and refused as not available in this version. Every file records the backend its bytes went to, so changing the setting affects new files only. Keys in a backend are random and carry no user, team or file name.
+
+**Nothing stores large files yet.** The streaming store is in place, and large uploads are switched on by a later release; until then every file is at most `eddi.attachments.max-size-bytes` and is stored inline exactly as before.
+
+What the stores guarantee once large files arrive:
+
+- **Reading.** `IAttachmentStore.load` returns a file's bytes as one array only up to `eddi.attachments.max-size-bytes`; above it, it refuses with `AttachmentTooLargeForMemoryException` — judged on the file's size, so an inline file above a limit lowered later is refused too. Larger files are read as a stream (`open`, `openRange` for a byte range) or copied to a file of the store's naming in a work directory (`materialize`). A file whose bytes the backend cannot deliver is a store error, never "not found".
+- **Writing.** A streamed upload holds its quota with a [quota reservation](#path-c-file-upload) taken before the first byte, so the write holds no lock while it streams. The declared type is judged on the first 8 KiB, the SHA-256 is computed while the bytes stream, and a stream longer or shorter than declared is refused. Any failure leaves no file and no bytes behind.
+- **Large uploads and quotas.** A large upload (`QuotaMode.LARGE_PER_USER`) is exempt from the per-conversation **byte** quota and counted against its user's byte quota (`eddi.attachments.max-total-bytes-per-user`) instead; it still counts toward the conversation's file count, and it needs a known user.
+- **Deleting.** A file's row and a record of its bytes go together; the bytes are then deleted from the backend. If the backend cannot delete them at once, the record — a **tombstone** — stays, and a later delete or upload retries it (a few at a time, so nothing has to be scheduled). An upload whose writer stopped half-way leaves a tombstone too, which becomes due a minute after the upload's reservation (`eddi.attachments.blob.upload-ttl-seconds`, 1 h) has run out. `IAttachmentStore.pendingTombstones` counts what is still waiting, so an erasure can report it as pending. The `eddi_attachment_blob_tombstones_total` meter counts deletes the backend could not finish at once.
+
+A node of an earlier release reads a file stored in a blob backend as empty. That cannot happen before large uploads are switched on, which needs every node on this release or later.
+

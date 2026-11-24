@@ -16,7 +16,15 @@ import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.QuotaMode;
 import ai.labs.eddi.engine.attachments.QuotaReservation;
+import ai.labs.eddi.engine.attachments.blob.BlobBackend;
+import ai.labs.eddi.engine.attachments.blob.BlobBackendSelector;
+import ai.labs.eddi.engine.attachments.blob.BlobKeys;
+import ai.labs.eddi.engine.attachments.blob.BlobLocator;
+import ai.labs.eddi.engine.attachments.blob.BlobMetrics;
+import ai.labs.eddi.engine.attachments.blob.BlobStreams;
+import ai.labs.eddi.engine.attachments.blob.StreamedUpload;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.MongoWriteException;
@@ -50,7 +58,11 @@ import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -107,6 +119,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * in flight and count as usage of their buckets until they expire by the
  * server's {@code $$NOW}; a TTL index removes stragglers. They are written
  * under the same lease locks as an upload, and deleted with their conversation.
+ * <p>
+ * <b>Large files.</b> A streamed upload above
+ * {@code eddi.attachments.max-size-bytes} keeps its bytes in a blob backend
+ * ({@code gridfs}, its own {@code attachment_blobs} bucket); it is recorded as
+ * an empty file of this bucket whose metadata names the locator and the size
+ * ({@link #sizeOf}), so every query of the bucket sees it as before. A delete
+ * of such a file records a tombstone in {@value #TOMBSTONES_COLLECTION} before
+ * the file goes, then deletes the object; an upload records an intent tombstone
+ * before its first byte. See {@link #sweepTombstones}.
  *
  * @since 6.0.0
  */
@@ -132,6 +153,19 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     static final String META_SHA256 = "sha256";
     static final String META_PAGE_COUNT = "pageCount";
     static final String META_LAST_ACCESSED_AT = "lastAccessedAt";
+    static final String META_SIZE_BYTES = "sizeBytes";
+    /**
+     * Where a file's bytes live when they are not in the bucket: the backend and
+     * key of a {@link BlobLocator}. Such a file is stored empty, and
+     * {@value #META_SIZE_BYTES} is its size.
+     */
+    static final String META_BLOB_BACKEND = "blobBackend";
+    static final String META_BLOB_KEY = "blobKey";
+    /**
+     * The {@link QuotaMode} of a streamed upload; absent for
+     * {@link QuotaMode#STANDARD}.
+     */
+    static final String META_QUOTA_MODE = "quotaMode";
     static final String LOCKS_COLLECTION = BUCKET_NAME + ".quota_locks";
     static final String GRANTS_COLLECTION = "attachment_grants";
     static final String GRANT_STORAGE_REF = "storageRef";
@@ -144,6 +178,26 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     static final String RESERVATION_COUNT = "count";
     static final String RESERVATION_EXPIRES_AT = "expiresAt";
     static final String RESERVATION_CREATED_AT = "createdAt";
+    static final String RESERVATION_QUOTA_MODE = "quotaMode";
+    /**
+     * Backend objects waiting to be removed: of a deleted file whose backend could
+     * not delete its bytes (due at once), or of an upload in flight (due once its
+     * reservation could no longer be converted). See {@link #sweepTombstones}.
+     */
+    static final String TOMBSTONES_COLLECTION = "attachment_blob_tombstones";
+    static final String TOMBSTONE_BACKEND = "backend";
+    static final String TOMBSTONE_KEY = "key";
+    static final String TOMBSTONE_OWNER_KEY = "ownerKey";
+    static final String TOMBSTONE_NOT_BEFORE = "notBefore";
+    static final String TOMBSTONE_ATTEMPTS = "attempts";
+    static final String TOMBSTONE_CREATED_AT = "createdAt";
+    static final String TOMBSTONE_CLAIMED_UNTIL = "claimedUntil";
+    /** How long a sweep holds a tombstone it is working on. */
+    static final Duration TOMBSTONE_CLAIM = Duration.ofMinutes(5);
+    /** How long past its reservation an upload's intent tombstone waits. */
+    static final Duration INTENT_GRACE = Duration.ofMinutes(1);
+    /** The tombstones a delete or a streamed upload retries on its way out. */
+    static final int TOMBSTONE_SWEEP_BATCH = 5;
     /** A reservation that has not expired, by the database's clock. */
     private static final Bson LIVE_RESERVATION = Filters.expr(new Document("$gt", List.of("$" + RESERVATION_EXPIRES_AT, "$$NOW")));
     private static final Bson EXPIRED_RESERVATION = Filters.expr(new Document("$lte", List.of("$" + RESERVATION_EXPIRES_AT, "$$NOW")));
@@ -184,6 +238,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      * usage count.
      */
     private final MongoCollection<Document> reservationsCollection;
+    /** Read from the PRIMARY, like the reservations. */
+    private final MongoCollection<Document> tombstonesCollection;
 
     @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520") // 20 MB
     long maxSizeBytes;
@@ -218,6 +274,19 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     defaultValue = "" + DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE)
     long derivedMaxTextBytesPerSource = DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE;
 
+    /**
+     * The longest a streamed upload may take: the reservation the store takes for
+     * one lasts this long.
+     */
+    @ConfigProperty(name = "eddi.attachments.blob.upload-ttl-seconds", defaultValue = "3600")
+    long uploadTtlSeconds = 3600;
+
+    /**
+     * Where large blobs go; {@code null} outside CDI (tests), which stores none.
+     */
+    @Inject
+    BlobBackendSelector blobBackends;
+
     /** Announces deleted roots; {@code null} outside CDI (tests). */
     @Inject
     Event<AttachmentRootDeleted> rootDeletedEvent;
@@ -235,6 +304,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
         this.backfillCollection = database.getCollection(BACKFILL_COLLECTION).withReadPreference(ReadPreference.primary());
         this.reservationsCollection = database.getCollection(RESERVATIONS_COLLECTION).withReadPreference(ReadPreference.primary());
+        this.tombstonesCollection = database.getCollection(TOMBSTONES_COLLECTION).withReadPreference(ReadPreference.primary());
     }
 
     /**
@@ -466,6 +536,487 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
     }
 
+    // ---------------------------------------------------------------- streaming
+
+    @Override
+    public Attachment store(InputStream in, long declaredLength, String declaredMime, String filename, String conversationId,
+                            String tenantId, String userId, String reservationId, QuotaMode quotaMode)
+            throws AttachmentStoreException {
+        if (quotaMode == null) {
+            throw new IllegalArgumentException("A streamed upload needs a quota mode");
+        }
+        if (quotaMode == QuotaMode.LARGE_PER_USER && userId == null) {
+            throw new IllegalArgumentException("A large upload counts against its user, so it needs one");
+        }
+        if (in == null || declaredLength < 1) {
+            throw new AttachmentStoreException("Attachment data is empty");
+        }
+        boolean inline = declaredLength <= maxSizeBytes;
+        if (!inline && quotaMode == QuotaMode.STANDARD) {
+            throw new AttachmentStoreException(
+                    "Attachment exceeds max size: %d bytes (limit: %d)".formatted(declaredLength, maxSizeBytes));
+        }
+        if (!inline && blobBackends == null) {
+            throw new AttachmentStoreException("No blob backend is configured for large attachments");
+        }
+        // The quota is held from before the first byte until the blob is recorded.
+        QuotaReservation reservation = reservationId != null
+                ? requireCovering(reservationId, conversationId, userId, declaredLength, quotaMode)
+                : reserve(new OwnerRef(OwnerScope.CONVERSATION, conversationId, userId), conversationId, userId, declaredLength, 1,
+                        uploadTtl(), quotaMode);
+        boolean stored = false;
+        try {
+            StreamedUpload upload = StreamedUpload.begin(in, declaredLength, declaredMime);
+            Attachment attachment = inline
+                    ? storeStreamedInline(upload, filename, conversationId, tenantId, userId, reservation, quotaMode)
+                    : storeStreamedInBackend(upload, filename, conversationId, tenantId, userId, reservation, quotaMode);
+            stored = true;
+            LOGGER.debugf("Stored streamed attachment '%s' (%s, %d bytes, %s) for conversation '%s'", sanitize(filename),
+                    attachment.mimeType(), declaredLength, inline ? "inline" : "in its blob backend", sanitize(conversationId));
+            return attachment;
+        } finally {
+            if (!stored) {
+                // Used up either way: converted above, or given back here.
+                release(reservation.id());
+            }
+            sweepTombstonesQuietly();
+        }
+    }
+
+    private Duration uploadTtl() {
+        return Duration.ofSeconds(Math.max(1, Math.min(uploadTtlSeconds, QuotaReservation.MAX_TTL.toSeconds())));
+    }
+
+    /**
+     * A caller's reservation, if it can cover this upload: live, of this
+     * conversation, user and quota mode, and holding at least its bytes and one
+     * file. Checked before the first byte is read.
+     */
+    private QuotaReservation requireCovering(String reservationId, String conversationId, String userId, long bytes, QuotaMode mode)
+            throws AttachmentStoreException {
+        Document live = reservationsCollection.find(Filters.and(Filters.eq("_id", reservationId), LIVE_RESERVATION,
+                Filters.eq(META_CONVERSATION_ID, conversationId), Filters.eq(META_USER_ID, userId),
+                Filters.eq(RESERVATION_QUOTA_MODE, mode.stored()))).first();
+        if (live == null) {
+            throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                    "No live quota reservation of this conversation, user and quota mode covers this upload. Please retry.");
+        }
+        long reserved = ((Number) live.get(RESERVATION_BYTES)).longValue();
+        int count = ((Number) live.get(RESERVATION_COUNT)).intValue();
+        if (reserved < bytes || count < 1) {
+            throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                    "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(bytes, reserved));
+        }
+        return new QuotaReservation(reservationId, live.getString(RESERVATION_OWNER_KEY), reserved, count,
+                live.getDate(RESERVATION_EXPIRES_AT).toInstant());
+    }
+
+    /**
+     * The metadata of a streamed root; {@code locator} {@code null} for one stored
+     * inline.
+     */
+    private static Document streamedMetadata(String storageRef, String conversationId, String tenantId, String userId, String mime,
+                                             long size, String sha256, BlobLocator locator, QuotaMode mode) {
+        Document metadata = new Document()
+                .append(META_CONVERSATION_ID, conversationId)
+                .append(META_TENANT_ID, tenantId)
+                .append(META_MIME_TYPE, mime)
+                .append(META_SIZE_BYTES, size)
+                .append(META_STORAGE_REF, storageRef)
+                .append(META_GRANTS, new ArrayList<String>())
+                .append(META_OWNER_SCOPE, OwnerScope.CONVERSATION.name())
+                .append(META_OWNER_KEY, conversationId)
+                .append(META_SHA256, sha256);
+        if (userId != null) {
+            metadata.append(META_USER_ID, userId);
+        }
+        if (locator != null) {
+            metadata.append(META_BLOB_BACKEND, locator.backend()).append(META_BLOB_KEY, locator.key());
+        }
+        if (mode.stored() != null) {
+            metadata.append(META_QUOTA_MODE, mode.stored());
+        }
+        return metadata;
+    }
+
+    /**
+     * Small enough for the bucket: read whole (bounded by the memory guard, as
+     * every upload always was), stored uncharged, then converted — the blob is
+     * visible before the reservation goes, so usage never reads "neither".
+     */
+    private Attachment storeStreamedInline(StreamedUpload upload, String filename, String conversationId, String tenantId, String userId,
+                                           QuotaReservation reservation, QuotaMode mode)
+            throws AttachmentStoreException {
+        byte[] bytes = upload.readFully();
+        String storageRef = UUID.randomUUID().toString();
+        Document metadata = streamedMetadata(storageRef, conversationId, tenantId, userId, upload.resolvedMime(), bytes.length,
+                upload.sha256Hex(), null, mode);
+        ObjectId id = gridFSBucket.uploadFromStream(filename != null ? filename : "unnamed", new ByteArrayInputStream(bytes),
+                new GridFSUploadOptions().metadata(metadata));
+        try {
+            convert(reservation.id(), storageRef);
+        } catch (AttachmentStoreException | RuntimeException e) {
+            deleteQuietly(id);
+            throw e;
+        }
+        return new Attachment(storageRef, filename, upload.resolvedMime(), bytes.length, conversationId);
+    }
+
+    /**
+     * Too large for the bucket: streamed to the blob backend holding no lock, then
+     * recorded as an empty GridFS file whose metadata names the bytes' locator and
+     * size (so every query of the bucket sees it as before), then converted.
+     * <p>
+     * An <em>intent tombstone</em>, written before the first byte and due only once
+     * the reservation can no longer be converted, leaves the object of a writer
+     * that dies mid-upload to the sweep. The writer removes it once the blob is
+     * recorded and converted; a sweep that claims it first finds the blob and keeps
+     * the object.
+     */
+    private Attachment storeStreamedInBackend(StreamedUpload upload, String filename, String conversationId, String tenantId,
+                                              String userId, QuotaReservation reservation, QuotaMode mode)
+            throws AttachmentStoreException {
+        BlobBackend backend = blobBackends.forWrites();
+        BlobLocator locator = new BlobLocator(backend.name(), BlobKeys.random());
+        long length = upload.declaredLength();
+        writeTombstone(locator, conversationId, reservation.expiresAt().plus(INTENT_GRACE));
+        try {
+            backend.put(locator.key(), upload.stream(), length, length);
+        } catch (IOException e) {
+            if (StreamedUpload.keyTaken(e)) {
+                removeTombstone(locator);
+            } else {
+                discard(locator, conversationId);
+            }
+            throw StreamedUpload.putFailed(e);
+        } catch (RuntimeException e) {
+            discard(locator, conversationId);
+            throw e;
+        }
+        BlobMetrics.recordWritten(meterRegistry, backend.name(), length);
+        String storageRef = UUID.randomUUID().toString();
+        ObjectId id = null;
+        try {
+            Document metadata = streamedMetadata(storageRef, conversationId, tenantId, userId, upload.resolvedMime(), length,
+                    upload.sha256Hex(), locator, mode);
+            id = gridFSBucket.uploadFromStream(filename != null ? filename : "unnamed", new ByteArrayInputStream(new byte[0]),
+                    new GridFSUploadOptions().metadata(metadata));
+            convert(reservation.id(), storageRef);
+        } catch (AttachmentStoreException | RuntimeException e) {
+            if (id != null) {
+                deleteQuietly(id);
+            }
+            discard(locator, conversationId);
+            throw e;
+        }
+        removeTombstone(locator);
+        return new Attachment(storageRef, filename, upload.resolvedMime(), length, conversationId);
+    }
+
+    private void deleteQuietly(ObjectId id) {
+        try {
+            gridFSBucket.delete(id);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not remove an attachment whose upload failed: %s", sanitize(e.getMessage()));
+        }
+    }
+
+    @Override
+    public InputStream open(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile file = readableForRead(storageRef, requestingConversationId);
+        BlobLocator locator = locatorOf(file);
+        if (locator == null) {
+            return gridFSBucket.openDownloadStream(file.getObjectId());
+        }
+        try {
+            return openLocated(locator, 0, -1);
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to open the attachment's bytes in its blob backend", e);
+        }
+    }
+
+    @Override
+    public InputStream openRange(String storageRef, String requestingConversationId, long offset, long length)
+            throws AttachmentStoreException {
+        BlobStreams.requireValidRange(offset, length);
+        GridFSFile file = readableForRead(storageRef, requestingConversationId);
+        BlobLocator locator = locatorOf(file);
+        try {
+            if (locator == null) {
+                InputStream in = gridFSBucket.openDownloadStream(file.getObjectId());
+                try {
+                    in.skipNBytes(Math.min(offset, file.getLength()));
+                } catch (IOException | RuntimeException e) {
+                    in.close();
+                    throw e;
+                }
+                return BlobStreams.limit(in, length);
+            }
+            return openLocated(locator, offset, length);
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to open the attachment's bytes", e);
+        }
+    }
+
+    /**
+     * The file, authorized as {@link #load} authorizes it; a slice is touched
+     * (slices are a least-recently-used cache; nothing else is, so a read stays a
+     * read).
+     */
+    private GridFSFile readableForRead(String storageRef, String requester) throws AttachmentStoreException {
+        GridFSFile file = findFileByRef(storageRef);
+        if (file == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        authorize(file, storageRef, requester);
+        if (Kind.PDF_SLICE.name().equals(meta(file, META_KIND))) {
+            filesCollection.updateOne(Filters.eq("_id", file.getObjectId()), Updates.set("metadata." + META_LAST_ACCESSED_AT, new Date()));
+        }
+        return file;
+    }
+
+    /**
+     * A located blob's bytes from its backend — all of them for a negative
+     * {@code length}. A backend that has no object under a key a file still names
+     * has lost data: a store failure, never "not found".
+     */
+    private InputStream openLocated(BlobLocator locator, long offset, long length) throws IOException {
+        BlobBackend backend = backendFor(locator);
+        try {
+            InputStream in = length < 0 ? backend.get(locator.key()) : backend.getRange(locator.key(), offset, length);
+            return BlobMetrics.countingReads(meterRegistry, backend.name(), in);
+        } catch (NoSuchFileException e) {
+            throw new IOException("The blob backend has no object for this attachment", e);
+        }
+    }
+
+    private BlobBackend backendFor(BlobLocator locator) throws IOException {
+        if (blobBackends == null) {
+            throw new IOException("No blob backend is configured on this node");
+        }
+        return blobBackends.forLocator(locator);
+    }
+
+    /**
+     * Where a file's bytes are when they are not in the bucket; {@code null} for
+     * inline.
+     */
+    private static BlobLocator locatorOf(GridFSFile file) {
+        String key = meta(file, META_BLOB_KEY);
+        return key != null ? new BlobLocator(meta(file, META_BLOB_BACKEND), key) : null;
+    }
+
+    /**
+     * A file's size: its GridFS length, or — for one whose bytes live in a blob
+     * backend, recorded as an empty file — the size its metadata records.
+     */
+    static long sizeOf(GridFSFile file) {
+        Document metadata = file.getMetadata();
+        if (metadata != null && metadata.getString(META_BLOB_KEY) != null && metadata.get(META_SIZE_BYTES) instanceof Number size) {
+            return size.longValue();
+        }
+        return file.getLength();
+    }
+
+    // --------------------------------------------------------------- tombstones
+
+    /**
+     * Writes a tombstone for {@code locator}, due at {@code notBefore} (a database
+     * time) or, for {@code null}, at once — or makes an existing one due sooner.
+     * Times are the server's ({@code $$NOW}), as for reservations.
+     */
+    private void writeTombstone(BlobLocator locator, String ownerKey, Instant notBefore) throws AttachmentStoreException {
+        writeTombstone(locator, ownerKey, notBefore != null ? literal(Date.from(notBefore)) : "$$NOW");
+    }
+
+    /** As above, due at {@code due}: an aggregation expression for a date. */
+    private void writeTombstone(BlobLocator locator, String ownerKey, Object due) throws AttachmentStoreException {
+        Document set = new Document(TOMBSTONE_BACKEND, literal(locator.backend()))
+                .append(TOMBSTONE_KEY, literal(locator.key()))
+                .append(TOMBSTONE_OWNER_KEY, literal(ownerKey))
+                .append(TOMBSTONE_ATTEMPTS, new Document("$ifNull", List.of("$" + TOMBSTONE_ATTEMPTS, 0)))
+                .append(TOMBSTONE_CREATED_AT, new Document("$ifNull", List.of("$" + TOMBSTONE_CREATED_AT, "$$NOW")))
+                .append(TOMBSTONE_NOT_BEFORE, new Document("$min", List.of(
+                        new Document("$ifNull", List.of("$" + TOMBSTONE_NOT_BEFORE, due)), due)));
+        try {
+            tombstonesCollection.updateOne(Filters.eq("_id", tombstoneId(locator)), List.of(new Document("$set", set)),
+                    new UpdateOptions().upsert(true));
+        } catch (RuntimeException e) {
+            throw new AttachmentStoreException("Failed to record an attachment blob tombstone", e);
+        }
+    }
+
+    private static String tombstoneId(BlobLocator locator) {
+        return locator.backend() + "/" + locator.key();
+    }
+
+    private void removeTombstone(BlobLocator locator) {
+        try {
+            tombstonesCollection.deleteOne(Filters.eq("_id", tombstoneId(locator)));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not remove an attachment blob tombstone; the sweep will: %s", sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Deletes an object no file references any more, and its tombstone. If the
+     * backend cannot delete it now, the tombstone stays (due at once) and a later
+     * sweep retries — for every reader the blob is gone already.
+     */
+    private void discard(BlobLocator locator, String ownerKey) {
+        try {
+            backendFor(locator).delete(locator.key());
+        } catch (IOException | RuntimeException e) {
+            BlobMetrics.recordTombstone(meterRegistry, locator.backend());
+            LOGGER.warnf("Could not delete an attachment's bytes from blob backend '%s'; left for the tombstone sweep: %s", locator.backend(),
+                    sanitize(e.getMessage()));
+            try {
+                writeTombstone(locator, ownerKey, null);
+            } catch (AttachmentStoreException recordFailure) {
+                LOGGER.errorf("Could not record a tombstone for an undeleted attachment blob in backend '%s': %s", locator.backend(),
+                        sanitize(recordFailure.getMessage()));
+            }
+            return;
+        }
+        removeTombstone(locator);
+    }
+
+    private void sweepTombstonesQuietly() {
+        try {
+            sweepTombstones(TOMBSTONE_SWEEP_BATCH);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Attachment blob tombstone sweep failed; the next one retries: %s", sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Claims each due tombstone for {@link #TOMBSTONE_CLAIM} by the server's clock,
+     * so two sweeps never work on one; a sweep that dies leaves a claim that
+     * lapses. An object a file still references (an upload that completed before
+     * its writer removed the tombstone) is kept and only the tombstone goes. A
+     * failed delete is retried later, backing off by the minute.
+     */
+    @Override
+    public int sweepTombstones(int max) {
+        int cleared = 0;
+        for (int i = 0; i < max; i++) {
+            Document claimed = tombstonesCollection.findOneAndUpdate(
+                    Filters.and(Filters.expr(new Document("$lte", List.of("$" + TOMBSTONE_NOT_BEFORE, "$$NOW"))),
+                            Filters.or(Filters.exists(TOMBSTONE_CLAIMED_UNTIL, false),
+                                    Filters.expr(new Document("$lt", List.of("$" + TOMBSTONE_CLAIMED_UNTIL, "$$NOW"))))),
+                    List.of(new Document("$set", new Document(TOMBSTONE_CLAIMED_UNTIL,
+                            new Document("$add", List.of("$$NOW", TOMBSTONE_CLAIM.toMillis()))))));
+            if (claimed == null) {
+                break;
+            }
+            BlobLocator locator = new BlobLocator(claimed.getString(TOMBSTONE_BACKEND), claimed.getString(TOMBSTONE_KEY));
+            boolean referenced = primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_BLOB_KEY, locator.key()),
+                    Filters.eq("metadata." + META_BLOB_BACKEND, locator.backend()))).first() != null;
+            if (!referenced) {
+                try {
+                    backendFor(locator).delete(locator.key());
+                } catch (IOException | RuntimeException e) {
+                    int attempts = claimed.get(TOMBSTONE_ATTEMPTS) instanceof Number n ? n.intValue() + 1 : 1;
+                    tombstonesCollection.updateOne(Filters.eq("_id", claimed.get("_id")), List.of(new Document("$set",
+                            new Document(TOMBSTONE_ATTEMPTS, attempts)
+                                    .append(TOMBSTONE_NOT_BEFORE,
+                                            new Document("$add", List.of("$$NOW", Duration.ofMinutes(Math.min(attempts, 60)).toMillis())))),
+                            new Document("$unset", TOMBSTONE_CLAIMED_UNTIL)));
+                    LOGGER.debugf("Could not delete an attachment blob from backend '%s'; retrying later: %s", locator.backend(),
+                            sanitize(e.getMessage()));
+                    continue;
+                }
+            }
+            tombstonesCollection.deleteOne(Filters.eq("_id", claimed.get("_id")));
+            cleared++;
+        }
+        return cleared;
+    }
+
+    @Override
+    public long pendingTombstones(String ownerKeyOrNull) {
+        return ownerKeyOrNull == null
+                ? tombstonesCollection.countDocuments()
+                : tombstonesCollection.countDocuments(Filters.eq(TOMBSTONE_OWNER_KEY, ownerKeyOrNull));
+    }
+
+    /**
+     * The tombstone indexes and the index the sweep asks "does a file still
+     * reference this object?" with, within a budget of their own; called at startup
+     * by {@link GridFsIndexInitializer}.
+     */
+    public void ensureBlobIndexes() {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS);
+        List<Map.Entry<MongoCollection<Document>, Bson>> indexes = List.of(
+                Map.entry(tombstonesCollection, Indexes.ascending(TOMBSTONE_NOT_BEFORE)),
+                Map.entry(tombstonesCollection, Indexes.ascending(TOMBSTONE_OWNER_KEY)),
+                Map.entry(filesCollection, Indexes.ascending("metadata." + META_BLOB_KEY)));
+        for (Map.Entry<MongoCollection<Document>, Bson> index : indexes) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remainingMillis <= 0) {
+                LOGGER.warn("Ran out of time creating the attachment blob indexes; tombstone lookups fall back to a scan");
+                return;
+            }
+            try {
+                index.getKey().withTimeout(remainingMillis, TimeUnit.MILLISECONDS).createIndex(index.getValue(),
+                        new IndexOptions().sparse(true));
+            } catch (MongoTimeoutException e) {
+                LOGGER.warnf("Timed out creating an attachment blob index; tombstone lookups fall back to a scan: %s", sanitize(e.getMessage()));
+                return;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment blob index; tombstone lookups fall back to a scan: %s", sanitize(e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Marks a file's bytes for removal before the file goes, when they live in a
+     * blob backend: a node that stops between the two leaves a tombstone the sweep
+     * finds still referenced, and drops. Returns what to discard once the file is
+     * gone, or {@code null} for an inline file.
+     */
+    private BlobLocator retire(GridFSFile file) {
+        BlobLocator locator = locatorOf(file);
+        if (locator == null) {
+            return null;
+        }
+        String ownerKey = meta(file, META_OWNER_KEY) != null ? meta(file, META_OWNER_KEY) : meta(file, META_CONVERSATION_ID);
+        try {
+            // Due only after the file delete and the discard that follows have had time
+            // to run: a sweep that came in between would find the file still there and
+            // drop the tombstone, and a node stopping then would leave the object
+            // unmarked. The discard makes it due at once if it cannot delete.
+            writeTombstone(locator, ownerKey, new Document("$add", List.of("$$NOW", TOMBSTONE_CLAIM.toMillis())));
+        } catch (AttachmentStoreException e) {
+            // The delete goes ahead; the object is then discarded below or, failing
+            // that, reported by the backend's own listing.
+            LOGGER.warnf("Could not record a tombstone before deleting an attachment: %s", sanitize(e.getMessage()));
+        }
+        return locator;
+    }
+
+    /**
+     * Deletes a file, its bytes elsewhere marked first; collects them into
+     * {@code retired}.
+     */
+    private void deleteFile(GridFSFile file, List<Map.Entry<BlobLocator, String>> retired) {
+        BlobLocator locator = retire(file);
+        gridFSBucket.delete(file.getObjectId());
+        if (locator != null) {
+            String ownerKey = meta(file, META_OWNER_KEY) != null ? meta(file, META_OWNER_KEY) : meta(file, META_CONVERSATION_ID);
+            retired.add(Map.entry(locator, ownerKey));
+        }
+    }
+
+    private void discardAll(List<Map.Entry<BlobLocator, String>> retired) {
+        for (Map.Entry<BlobLocator, String> entry : retired) {
+            discard(entry.getKey(), entry.getValue());
+        }
+        if (!retired.isEmpty()) {
+            sweepTombstonesQuietly();
+        }
+    }
+
     @Override
     public byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         GridFSFile file = findFileByRef(storageRef);
@@ -473,9 +1024,23 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
         authorize(file, storageRef, requestingConversationId);
-
+        // On size, not on where the bytes are: an inline file above a guard lowered
+        // later is refused too, and a located one within one raised later loads.
+        long size = sizeOf(file);
+        if (size > maxSizeBytes) {
+            throw new AttachmentTooLargeForMemoryException(size, maxSizeBytes);
+        }
+        BlobLocator locator = locatorOf(file);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        gridFSBucket.downloadToStream(file.getObjectId(), out);
+        if (locator == null) {
+            gridFSBucket.downloadToStream(file.getObjectId(), out);
+        } else {
+            try (InputStream in = openLocated(locator, 0, -1)) {
+                in.transferTo(out);
+            } catch (IOException e) {
+                throw new AttachmentStoreException("Failed to read the attachment's bytes from its blob backend", e);
+            }
+        }
         if (Kind.PDF_SLICE.name().equals(meta(file, META_KIND))) {
             // Slices are a least-recently-used cache; nothing else is touched, so an
             // ordinary load stays a read.
@@ -502,7 +1067,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 ? metadata.getString(META_STORAGE_REF)
                 : fallbackRef;
         return new Attachment(ref, file.getFilename(),
-                mime != null ? mime : "application/octet-stream", file.getLength(), owner);
+                mime != null ? mime : "application/octet-stream", sizeOf(file), owner);
     }
 
     @Override
@@ -677,13 +1242,17 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                             .formatted(owner, requestingConversationId));
         }
         String canonicalRef = canonicalRef(file);
-        gridFSBucket.delete(file.getObjectId());
+        List<Map.Entry<BlobLocator, String>> retired = new ArrayList<>();
+        deleteFile(file, retired);
         grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef));
         if (meta(file, META_ROOT_REF) == null) {
             // The root's lineage: every view of it, whatever stored it.
             for (GridFSFile derived : primaryReadBucket.find(Filters.eq("metadata." + META_ROOT_REF, canonicalRef))) {
-                gridFSBucket.delete(derived.getObjectId());
+                deleteFile(derived, retired);
             }
+        }
+        discardAll(retired);
+        if (meta(file, META_ROOT_REF) == null) {
             DerivedBlobs.fireRootDeleted(rootDeletedEvent, List.of(rootDeleted(file, canonicalRef)));
         }
         return true;
@@ -707,6 +1276,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     public long deleteByConversation(String conversationId) {
         List<String> deletedRefs = new ArrayList<>();
         List<AttachmentRootDeleted> roots = new ArrayList<>();
+        List<Map.Entry<BlobLocator, String>> retired = new ArrayList<>();
         // The quota this conversation's writes in flight held, before the blobs:
         // deleted after them, a blob stored after the scan below could still be
         // converted and would survive the erasure. Deleted first, every later convert
@@ -714,7 +1284,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         // this line was stored before it, so the scan sees it.
         reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
         for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
-            gridFSBucket.delete(file.getObjectId());
+            deleteFile(file, retired);
             String ref = canonicalRef(file);
             deletedRefs.add(ref);
             if (meta(file, META_ROOT_REF) == null) {
@@ -727,9 +1297,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         if (!roots.isEmpty()) {
             for (GridFSFile derived : primaryReadBucket.find(
                     Filters.in("metadata." + META_ROOT_REF, roots.stream().map(AttachmentRootDeleted::rootRef).toList()))) {
-                gridFSBucket.delete(derived.getObjectId());
+                deleteFile(derived, retired);
             }
         }
+        discardAll(retired);
         // The grants on the blobs just deleted, and the grants this conversation held
         // on other blobs — in both shapes, or they would grow without bound.
         if (!deletedRefs.isEmpty()) {
@@ -792,7 +1363,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     metadata != null && metadata.getString(META_MIME_TYPE) != null
                             ? metadata.getString(META_MIME_TYPE)
                             : "application/octet-stream",
-                    file.getLength(),
+                    sizeOf(file),
                     metadata != null ? metadata.getString(META_CONVERSATION_ID) : null));
         }
         return results;
@@ -810,26 +1381,36 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      * primary. A write against a reservation makes its blob visible before it
      * removes the reservation, so in this order a conversion that happens between
      * the two reads is seen at least once; the other order could see neither.
+     * <p>
+     * In the conversation's bucket the bytes of {@link QuotaMode#LARGE_PER_USER}
+     * uploads and reservations do not count — they count in the user's — though
+     * their files do.
      *
      * @param field
      *            {@link #META_CONVERSATION_ID} or {@link #META_USER_ID}
      */
     private long[] usage(String field, String value) {
+        boolean largeExempt = META_CONVERSATION_ID.equals(field);
         long count = 0;
         long totalBytes = 0;
+        Object reservedBytes = largeExempt
+                ? new Document("$cond", List.of(new Document("$eq", List.of("$" + RESERVATION_QUOTA_MODE, QuotaMode.LARGE_PER_USER.name())), 0,
+                        "$" + RESERVATION_BYTES))
+                : "$" + RESERVATION_BYTES;
         for (Document sum : reservationsCollection.aggregate(List.of(
                 Aggregates.match(Filters.and(Filters.eq(field, value), LIVE_RESERVATION)),
                 Aggregates.group(null, Accumulators.sum(RESERVATION_COUNT, "$" + RESERVATION_COUNT),
-                        Accumulators.sum(RESERVATION_BYTES, "$" + RESERVATION_BYTES))))) {
+                        Accumulators.sum(RESERVATION_BYTES, reservedBytes))))) {
             count += ((Number) sum.get(RESERVATION_COUNT)).longValue();
             totalBytes += ((Number) sum.get(RESERVATION_BYTES)).longValue();
         }
         for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + field, value))) {
+            boolean bytesCount = !largeExempt || QuotaMode.fromStored(meta(file, META_QUOTA_MODE)) != QuotaMode.LARGE_PER_USER;
             if (meta(file, META_ROOT_REF) == null) {
                 count++;
-                totalBytes += file.getLength();
+                totalBytes += bytesCount ? sizeOf(file) : 0;
             } else if (DerivedCaps.countsTowardOwnerQuota(kindOf(file))) {
-                totalBytes += file.getLength();
+                totalBytes += bytesCount ? sizeOf(file) : 0;
             }
         }
         return new long[]{count, totalBytes};
@@ -1101,9 +1682,12 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     // ------------------------------------------------------- quota reservations
 
     @Override
-    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+                                    QuotaMode mode)
             throws AttachmentStoreException {
-        QuotaReservation.validateRequest(owner, conversationId, bytes, count, ttl);
+        QuotaReservation.validateRequest(owner, conversationId, userId, bytes, count, ttl, mode);
+        // A large upload's bytes are the user's to carry, not the conversation's.
+        long conversationBytes = mode == QuotaMode.LARGE_PER_USER ? 0 : bytes;
         boolean conversationQuota = maxPerConversation > 0 || maxTotalBytesPerConversation > 0;
         boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
         String id = UUID.randomUUID().toString();
@@ -1116,8 +1700,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             reservationsCollection.deleteMany(EXPIRED_RESERVATION);
             if (conversationQuota) {
                 long[] usage = usage(META_CONVERSATION_ID, conversationId);
-                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes, maxPerConversation,
-                        maxTotalBytesPerConversation);
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, conversationBytes,
+                        maxPerConversation, maxTotalBytesPerConversation);
             }
             if (userQuota) {
                 long[] usage = usage(META_USER_ID, userId);
@@ -1132,6 +1716,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     .append(META_USER_ID, literal(userId))
                     .append(RESERVATION_BYTES, literal(bytes))
                     .append(RESERVATION_COUNT, literal(count))
+                    .append(RESERVATION_QUOTA_MODE, literal(mode.stored()))
                     .append(RESERVATION_CREATED_AT, "$$NOW")
                     .append(RESERVATION_EXPIRES_AT, new Document("$add", List.of("$$NOW", ttl.toMillis())));
             reservationsCollection.updateOne(Filters.eq("_id", id), List.of(new Document("$set", fields)), new UpdateOptions().upsert(true));
@@ -1180,9 +1765,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 throw new AttachmentNotFoundException("No upload " + storageRef + " in the buckets of this quota reservation");
             }
             long reserved = ((Number) live.get(RESERVATION_BYTES)).longValue();
-            if (blob.getLength() > reserved) {
+            if (sizeOf(blob) > reserved) {
                 throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
-                        "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(blob.getLength(), reserved));
+                        "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(sizeOf(blob), reserved));
             }
             reservationsCollection.deleteOne(Filters.eq("_id", reservationId));
         } finally {

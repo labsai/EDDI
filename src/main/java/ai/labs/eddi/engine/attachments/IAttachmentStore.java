@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import ai.labs.eddi.engine.attachments.blob.StreamedUpload;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -95,6 +100,10 @@ public interface IAttachmentStore {
      *            the conversation requesting access (must own the blob or hold a
      *            grant)
      * @return the raw bytes
+     * @throws AttachmentTooLargeForMemoryException
+     *             if the blob is larger than
+     *             {@code eddi.attachments.max-size-bytes} — such a blob is read
+     *             with {@link #open} or {@link #materialize}, never into one array
      * @throws AttachmentStoreException
      *             if not found or access is denied (not owner and not granted)
      */
@@ -346,7 +355,23 @@ public interface IAttachmentStore {
      *             not the owner's, or amounts and a lifetime
      *             {@link QuotaReservation#validateRequest} refuses
      */
-    QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+    default QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+            throws AttachmentStoreException {
+        return reserve(owner, conversationId, userId, bytes, count, ttl, QuotaMode.STANDARD);
+    }
+
+    /**
+     * {@link #reserve(OwnerRef, String, String, long, int, Duration)} for a write
+     * of the given {@link QuotaMode}. A {@link QuotaMode#LARGE_PER_USER}
+     * reservation's bytes count against the user's byte quota only, never the
+     * conversation's (its files still count toward the conversation's file count),
+     * and it needs a known user.
+     *
+     * @throws IllegalArgumentException
+     *             as the shorter form does, or for {@link QuotaMode#LARGE_PER_USER}
+     *             without a user
+     */
+    QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl, QuotaMode mode)
             throws AttachmentStoreException;
 
     /**
@@ -364,8 +389,9 @@ public interface IAttachmentStore {
      * reservation stores its blob uncharged and then converts — on PostgreSQL in
      * the same transaction. Converting only once the blob is visible is what keeps
      * usage from ever reading "neither": in between it reads "both", which can
-     * refuse a concurrent upload but never admits one over the quota. No write
-     * stores against a reservation yet; the streaming store will.
+     * refuse a concurrent upload but never admits one over the quota. The streaming
+     * {@link #store(InputStream, long, String, String, String, String, String, String, QuotaMode)
+     * store} writes this way.
      *
      * @param reservationId
      *            the reservation
@@ -381,6 +407,116 @@ public interface IAttachmentStore {
      *             reserved
      */
     void convert(String reservationId, String storageRef) throws AttachmentStoreException;
+
+    // ---------------------------------------------------------------- streaming
+
+    /**
+     * Stores an upload from a stream, without ever holding it in memory whole.
+     * <p>
+     * <b>Where the bytes go.</b> A file up to
+     * {@code eddi.attachments.max-size-bytes} is stored where every file has always
+     * been (inline: the GridFS bucket, the {@code BYTEA} column), so {@link #load}
+     * keeps working for it. A larger one goes to the configured blob backend
+     * ({@code eddi.attachments.blob.backend}), streamed chunk by chunk, and only
+     * {@link #open}, {@link #openRange} and {@link #materialize} can read it.
+     * <p>
+     * <b>Quota.</b> The quota is held by a reservation from before the first byte
+     * until the blob is recorded, so the write holds no lock while it streams. With
+     * {@code reservationId} the caller's reservation is used — it must be live, of
+     * this conversation, user and quota mode, and hold at least
+     * {@code declaredLength} bytes and one file, which is checked before the first
+     * byte is read (one that does not qualify is refused and left as it is);
+     * without it the store takes one itself. A reservation that qualified is used
+     * up by this call: converted into the blob on success, released on failure —
+     * whole, even one taken for several files, so take one reservation per file.
+     * <p>
+     * <b>Checks.</b> The declared type is judged by {@link MimeValidator} on the
+     * first bytes, before anything is stored; the SHA-256 is computed while the
+     * bytes stream. A stream longer or shorter than {@code declaredLength} fails.
+     * Any failure leaves no object and no row behind (an object that cannot be
+     * deleted at once is left to the tombstone sweep).
+     *
+     * @param in
+     *            the bytes; read to its end, not closed
+     * @param declaredLength
+     *            the exact length, at least 1
+     * @param reservationId
+     *            a live reservation of this conversation and user covering the
+     *            upload, or {@code null} to let the store reserve
+     * @param quotaMode
+     *            {@link QuotaMode#STANDARD} for today's rules — at most
+     *            {@code eddi.attachments.max-size-bytes} — or
+     *            {@link QuotaMode#LARGE_PER_USER}, which needs a {@code userId}
+     * @throws AttachmentQuotaExceededException
+     *             if the quota is full, or the reservation is gone or too small
+     * @throws AttachmentStoreException
+     *             if the content does not match its type, the length is wrong or
+     *             too large for the mode, or the store or the backend fails
+     */
+    Attachment store(InputStream in, long declaredLength, String declaredMime, String filename, String conversationId,
+                     String tenantId, String userId, String reservationId, QuotaMode quotaMode)
+            throws AttachmentStoreException;
+
+    /**
+     * Opens a blob's bytes as a stream, whatever its size and wherever it lives;
+     * the caller closes it. Same authorization as {@link #load}.
+     *
+     * @throws AttachmentNotFoundException
+     *             if no such blob exists (as for {@link #load}); a blob whose
+     *             metadata exists but whose bytes the backend cannot deliver is a
+     *             plain {@link AttachmentStoreException}, never "not found"
+     */
+    InputStream open(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * Opens {@code length} bytes from {@code offset}, clipped at the end of the
+     * blob; a range starting at or past the end is empty. Reads only the chunks the
+     * range covers where the backend can; otherwise it skips. Same authorization as
+     * {@link #load}.
+     *
+     * @throws IllegalArgumentException
+     *             if {@code offset} or {@code length} is negative
+     */
+    InputStream openRange(String storageRef, String requestingConversationId, long offset, long length) throws AttachmentStoreException;
+
+    /**
+     * Copies a blob into a new file in {@code workDir} and returns it — for a
+     * reader that needs random access to a file it cannot hold in memory. The file
+     * gets a name the store chooses (never the upload's) and, where the file system
+     * supports it, owner-only permissions; the caller deletes it. On failure no
+     * file is left. Same authorization as {@link #load}.
+     */
+    default Path materialize(String storageRef, String requestingConversationId, Path workDir) throws AttachmentStoreException {
+        if (workDir == null) {
+            throw new IllegalArgumentException("materialize needs a work directory");
+        }
+        try (InputStream in = open(storageRef, requestingConversationId)) {
+            return StreamedUpload.copyToNewFile(in, workDir);
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to copy the attachment to a file", e);
+        }
+    }
+
+    /**
+     * How many backend objects are waiting to be removed: of blobs deleted while
+     * their backend could not delete the bytes, and of uploads whose writer did not
+     * finish. A sweep retries them; erasure reports them as pending.
+     *
+     * @param ownerKeyOrNull
+     *            only those of this owner key, or {@code null} for all
+     */
+    long pendingTombstones(String ownerKeyOrNull);
+
+    /**
+     * Retries up to {@code max} due tombstones: an object no blob references any
+     * more is deleted from its backend, and the tombstone with it; one a blob
+     * references (an upload that did complete, a delete that did not) is kept and
+     * only the tombstone goes. The stores also sweep a few after every delete and
+     * streamed upload, so nothing has to schedule this.
+     *
+     * @return the tombstones cleared
+     */
+    int sweepTombstones(int max);
 
     /**
      * The owner of a lineage.
@@ -444,6 +580,32 @@ public interface IAttachmentStore {
 
         public String getScope() {
             return scope;
+        }
+    }
+
+    /**
+     * Thrown by {@link #load} for a blob larger than
+     * {@code eddi.attachments.max-size-bytes}: it is never read into one array, so
+     * no code path can pull a large file onto the heap by accident. Read it with
+     * {@link #open}, {@link #openRange} or {@link #materialize}.
+     */
+    class AttachmentTooLargeForMemoryException extends AttachmentStoreException {
+        private final long sizeBytes;
+        private final long limitBytes;
+
+        public AttachmentTooLargeForMemoryException(long sizeBytes, long limitBytes) {
+            super("Attachment is too large to load into memory: %d bytes (limit: %d); read it as a stream".formatted(sizeBytes,
+                    limitBytes));
+            this.sizeBytes = sizeBytes;
+            this.limitBytes = limitBytes;
+        }
+
+        public long getSizeBytes() {
+            return sizeBytes;
+        }
+
+        public long getLimitBytes() {
+            return limitBytes;
         }
     }
 
