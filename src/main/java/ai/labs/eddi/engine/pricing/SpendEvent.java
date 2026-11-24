@@ -60,6 +60,12 @@ public record SpendEvent(String tenantId, String conversationId, String agentId,
          * A model-written conversation title ({@code titleGeneration}), charged after
          * the turn it titles.
          */
-        CONVERSATION_TITLE
+        CONVERSATION_TITLE,
+        /**
+         * Document work done for a document owner outside any turn (a summary job, the
+         * modality bridge), charged by {@code SystemSpendMeter.charge(SpendOwner,
+         * …)}; {@code userId} is the owner's user, when there is one.
+         */
+        DOCUMENT
     }
 }

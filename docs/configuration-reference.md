@@ -564,6 +564,14 @@ Bounds on designer values: a value above its bound is refused when the configura
 | --- | --- | --- |
 | `eddi.documents.index.default-rag` | unset | The deployment's default **document index**: a RAG configuration flagged `"documentIndex": true`, given by id or as `eddi://ai.labs.rag/ragstore/rags/<id>` (`?version=<n>` optional; without it, the current version). Validated when EDDI starts: a missing configuration, an ordinary knowledge base or one that cannot be a document index ([rag.md](rag.md#document-index)) fails startup with the reason. Nothing is written to a document index in this version |
 
+**Daily document spend.** Cumulative ceilings on model spend for document work outside a conversation turn (the background summary of a large document, later the modality bridge), per UTC day. Admission checks the tenant's monthly budget, then the user's ceiling, then the team's; the refusal names the ceiling, the spend so far and the estimate. See [langchain.md → Daily document spend ceilings](langchain.md#daily-document-spend-ceilings). **Nothing charges them yet**: the summary job lands with large-document summaries.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.spend.max-per-user-per-day-usd` | (unset) | Dollars one user's document work may spend per UTC day. Unset or negative: no cumulative ceiling; `0` refuses all such work |
+| `eddi.documents.spend.max-per-team-per-day-usd` | (unset) | Dollars one team library's document work may spend per UTC day, on top of the user's ceiling. Unset or negative: no ceiling |
+| `eddi.documents.spend.retention-days` | `35` | UTC days of spend buckets kept, today included; older buckets are deleted by the store when it writes (MongoDB also has a TTL index). At least `1`. A user's buckets are erased with the user |
+
 ---
 
 ## Backup, export & import
