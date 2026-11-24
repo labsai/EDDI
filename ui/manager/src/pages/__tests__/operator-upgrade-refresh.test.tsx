@@ -226,6 +226,8 @@ describe("OperatorPage — the operator upgrade, end to end against a stateful b
   afterEach(() => {
     observer?.disconnect();
     observer = null;
+    // Back to reading the document's own visibility, for the next file in this worker.
+    focusManager.setFocused(undefined);
   });
 
   it("preselects Replace, carries the grant over without a prompt, and never shows a stale banner", async () => {
