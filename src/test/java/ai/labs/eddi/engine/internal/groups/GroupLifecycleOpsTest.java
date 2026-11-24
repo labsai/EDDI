@@ -196,8 +196,11 @@ class GroupLifecycleOpsTest {
         var ops = ops();
         when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production)));
         doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(Environment.production, AGENT_A, null);
+        // Deletion-eligible, so the never() below fails if cleanup carries on after the
+        // throw.
+        stubOrigin(AGENT_A, "gc-1");
 
-        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
 
         verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.deployed);
         verify(agentStore, never()).deleteAllPermanently(any());
