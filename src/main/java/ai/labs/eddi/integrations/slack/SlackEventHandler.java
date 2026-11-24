@@ -232,11 +232,19 @@ public class SlackEventHandler {
         OVERLOADED
     }
 
+    /** How long shutdown waits for admitted events before interrupting them. */
+    private static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(10);
+
     @PreDestroy
     void shutdown() {
+        shutdown(SHUTDOWN_GRACE);
+    }
+
+    /** {@link #shutdown()} with the grace period as a parameter, for tests. */
+    void shutdown(Duration grace) {
         executorService.shutdown();
         try {
-            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+            if (!executorService.awaitTermination(grace.toMillis(), TimeUnit.MILLISECONDS)) {
                 executorService.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -375,6 +383,12 @@ public class SlackEventHandler {
         try {
             runningEvents.acquire();
         } catch (InterruptedException e) {
+            // Only shutdownNow() interrupts a waiting worker, once the shutdown grace
+            // period has passed with every slot still taken. Slack was answered 200
+            // when the event was admitted and will not redeliver it, so the event is
+            // lost — say so rather than dropping it silently.
+            LOGGER.warnf("Shutting down — dropping Slack event %s, which was accepted but was still waiting for a processing slot "
+                    + "(eddi.slack.max-concurrent-events). Slack will not redeliver it.", sanitize(eventId));
             admittedEvents.release();
             Thread.currentThread().interrupt();
             return;
@@ -708,53 +722,56 @@ public class SlackEventHandler {
         LOGGER.infof("[OBSERVE] Target '%s' answering an unaddressed message in channel %s",
                 sanitize(target.getName()), sanitize(channelId));
 
-        executorService.submit(() -> {
-            String conversationId = null;
-            OptionalDouble costBefore = OptionalDouble.empty();
-            try {
-                String intent = threadIntent(channelId, target.getTargetId(), threadTs);
-                ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
-                conversationId = thread.conversationId();
-                costBefore = conversationCost(conversationId);
-                String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
-                        threadTs, message, botToken);
-                if (!deliveredTo.equals(conversationId)) {
-                    // The conversation ended between opening and sending and the
-                    // thread was given a fresh one. Its spend so far is this turn's,
-                    // so it is measured from zero.
-                    conversationId = deliveredTo;
-                    costBefore = OptionalDouble.of(0.0);
-                }
-                // Locked only now, once the observer has actually spoken. The
-                // lock exists so a human replying under the observer's answer
-                // reaches the observer rather than the channel's DEFAULT target.
-                // Taken before the turn, a failure that posted nothing still left
-                // the thread bound: for the 24h the lock lives, a colleague
-                // replying there with an explicit `architect:` trigger would have
-                // been silently routed to an observer that never said anything.
-                if (threadTs != null) {
-                    channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
-                }
-            } catch (Exception e) {
-                LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
-                        sanitize(target.getName()), sanitize(channelId));
-            } finally {
-                // Both reads or neither. A baseline that failed and a total that
-                // did not would make the delta the conversation's ENTIRE history
-                // of tool spend, charged to this one turn — which would retire
-                // the observer's daily budget on its first reply.
-                OptionalDouble costAfter = conversationCost(conversationId);
-                if (costBefore.isPresent() && costAfter.isPresent()) {
-                    double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
-                    if (spent > 0) {
-                        observeGate.addCost("slack", channelId, target, spent);
-                    }
-                } else if (conversationId != null) {
-                    LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
-                            sanitize(conversationId));
-                }
+        // Inline, on the worker that admitted this event: submitted to the executor,
+        // the turn ran outside eddi.slack.max-concurrent-events — this handler
+        // returned,
+        // released its slot, and the next observed message started another turn while
+        // the first was still running.
+        String conversationId = null;
+        OptionalDouble costBefore = OptionalDouble.empty();
+        try {
+            String intent = threadIntent(channelId, target.getTargetId(), threadTs);
+            ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
+            conversationId = thread.conversationId();
+            costBefore = conversationCost(conversationId);
+            String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
+                    threadTs, message, botToken);
+            if (!deliveredTo.equals(conversationId)) {
+                // The conversation ended between opening and sending and the
+                // thread was given a fresh one. Its spend so far is this turn's,
+                // so it is measured from zero.
+                conversationId = deliveredTo;
+                costBefore = OptionalDouble.of(0.0);
             }
-        });
+            // Locked only now, once the observer has actually spoken. The
+            // lock exists so a human replying under the observer's answer
+            // reaches the observer rather than the channel's DEFAULT target.
+            // Taken before the turn, a failure that posted nothing still left
+            // the thread bound: for the 24h the lock lives, a colleague
+            // replying there with an explicit `architect:` trigger would have
+            // been silently routed to an observer that never said anything.
+            if (threadTs != null) {
+                channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
+                    sanitize(target.getName()), sanitize(channelId));
+        } finally {
+            // Both reads or neither. A baseline that failed and a total that
+            // did not would make the delta the conversation's ENTIRE history
+            // of tool spend, charged to this one turn — which would retire
+            // the observer's daily budget on its first reply.
+            OptionalDouble costAfter = conversationCost(conversationId);
+            if (costBefore.isPresent() && costAfter.isPresent()) {
+                double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
+                if (spent > 0) {
+                    observeGate.addCost("slack", channelId, target, spent);
+                }
+            } else if (conversationId != null) {
+                LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
+                        sanitize(conversationId));
+            }
+        }
         return true;
     }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -24,15 +25,25 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Admission of inbound Slack events: bounded concurrency with a bounded queue,
@@ -53,6 +64,9 @@ class SlackInboundAdmissionTest {
     private final AtomicInteger peak = new AtomicInteger();
     private final AtomicInteger processed = new AtomicInteger();
     private SlackEventHandler handler;
+    private final ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+    private final ObserveGate observeGate = mock(ObserveGate.class);
+    private final IUserConversationStore userConversationStore = mock(IUserConversationStore.class);
 
     @AfterEach
     void tearDown() {
@@ -70,9 +84,9 @@ class SlackInboundAdmissionTest {
         var cacheFactory = mock(ICacheFactory.class);
         doAnswer(invocation -> new CacheImpl<>(invocation.getArgument(0), Caffeine.newBuilder().build()))
                 .when(cacheFactory).getCache(anyString(), any(Duration.class));
-        handler = new SlackEventHandler(mock(ChannelTargetRouter.class), mock(ObserveGate.class), mock(ToolCostTracker.class),
+        handler = new SlackEventHandler(router, observeGate, mock(ToolCostTracker.class),
                 mock(SlackWebApiClient.class), mock(IConversationService.class), mock(IGroupConversationService.class),
-                mock(IUserConversationStore.class), cacheFactory,
+                userConversationStore, cacheFactory,
                 new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
                         SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS, maxConcurrent, maxQueued),
                 new InMemorySlackApprovalRecordStore(), mock(IUserMemoryStore.class));
@@ -181,6 +195,94 @@ class SlackInboundAdmissionTest {
         assertEquals(Admission.ACCEPTED, handler.handleEventAsync("  ", blockingEvent(), null));
         awaitValue(processed, 3);
         assertEquals(3, processed.get(), "each id-less event is handled on its own");
+    }
+
+    @Test
+    @DisplayName("an observer's turn keeps its processing slot until it finishes")
+    void observerTurnHoldsItsSlot() throws Exception {
+        var target = mock(ChannelTarget.class);
+        when(target.getTargetId()).thenReturn("agent-1");
+        when(target.getName()).thenReturn("observer");
+        when(router.observeCandidates("slack", "C1")).thenReturn(List.of(target));
+        when(router.getBotToken("slack", "C1")).thenReturn("test-bot-token");
+        when(observeGate.select(eq("slack"), eq("C1"), anyList(), any(), anyList()))
+                .thenReturn(Optional.of(new ObserveGate.Match(target, null)));
+        // The observer turn's first collaborator: block there, as a slow turn would.
+        doAnswer(invocation -> {
+            int now = inside.incrementAndGet();
+            peak.accumulateAndGet(now, Math::max);
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } finally {
+                inside.decrementAndGet();
+                processed.incrementAndGet();
+            }
+            return null;
+        }).when(userConversationStore).readUserConversation(anyString(), anyString());
+
+        var handler = handler(1, 0);
+        assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-observed-1", observableMessage("1.0"), null));
+        awaitValue(inside, 1);
+        Thread.sleep(200); // the admitted handler would have returned by now if the turn ran elsewhere
+
+        assertEquals(Admission.OVERLOADED, handler.handleEventAsync("evt-observed-2", observableMessage("2.0"), null),
+                "the only slot is still taken by the first observer turn");
+        release.countDown();
+        awaitValue(processed, 1);
+        assertEquals(1, peak.get(), "observer turns never run beyond max-concurrent-events");
+    }
+
+    private static HashMap<String, Object> observableMessage(String ts) {
+        var event = new HashMap<String, Object>();
+        event.put("type", "message");
+        event.put("channel", "C1");
+        event.put("user", "U12345");
+        event.put("text", "has anyone seen the build fail?");
+        event.put("ts", ts);
+        return event;
+    }
+
+    @Test
+    @DisplayName("an accepted event still waiting for a slot at shutdown is dropped with a warning, not silently")
+    void shutdownLogsAWaitingEventItDrops() throws Exception {
+        var handler = handler(1, 1);
+        assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-running", blockingEvent(), null));
+        awaitValue(inside, 1);
+        assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-waiting", blockingEvent(), null));
+
+        List<String> captured = new CopyOnWriteArrayList<>();
+        Handler logHandler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // logging.properties turns the ai.labs.eddi namespace OFF for plain unit tests.
+        Logger julLogger = Logger.getLogger(SlackEventHandler.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(logHandler);
+        try {
+            handler.shutdown(Duration.ofMillis(200));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (captured.stream().noneMatch(m -> m.contains("evt-waiting")) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+        } finally {
+            julLogger.removeHandler(logHandler);
+            julLogger.setLevel(previousLevel);
+        }
+
+        assertTrue(captured.stream().anyMatch(m -> m.contains("dropping Slack event evt-waiting")),
+                "the dropped event must be named in a warning; captured: " + captured);
     }
 
     @Test

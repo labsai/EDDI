@@ -23,6 +23,7 @@ import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.mcp.McpToolExecutor;
 import dev.langchain4j.mcp.McpToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -41,6 +42,7 @@ import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -131,6 +133,22 @@ public class McpToolProviderManager {
      * share the first caller's build; callers for other keys never wait on it.
      */
     private final AsyncCache<String, McpClient> clientCache;
+
+    /** Guards {@link #clientLeases} and {@link #closeOnRelease}. */
+    private final Object leaseLock = new Object();
+
+    /**
+     * Operations in flight per client (by identity): a tool call, or a discovery. A
+     * client removed from {@link #clientCache} while it holds a lease is closed
+     * when the last one is released rather than under the operation.
+     */
+    private final Map<McpClient, Integer> clientLeases = new IdentityHashMap<>();
+
+    /** Clients removed from the cache whose close waits for their last lease. */
+    private final Set<McpClient> closeOnRelease = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /** Lookups {@link #leaseClient} makes before it settles for the last client. */
+    private static final int LEASE_ATTEMPTS = 3;
 
     /**
      * Cache of discovered tool specs/executors, keyed like {@link #clientCache}.
@@ -286,7 +304,13 @@ public class McpToolProviderManager {
      * removals ({@link #closeClient}, {@link #closeAllClients}) are skipped here:
      * those close the client themselves, synchronously, so shutdown does not exit
      * with closes still queued. The evicted key's tool list goes with the client,
-     * because its executors are bound to the client that has just been closed.
+     * so the next discovery lists the tools again over a fresh connection.
+     * <p>
+     * A client an operation is still using is not closed here but when that
+     * operation releases it — see {@link #retireClient}. The executors handed out
+     * by discovery resolve their client per call
+     * ({@link ClientResolvingToolExecutor}), so a call after the eviction
+     * reconnects rather than reaching a closed client.
      */
     private void onClientRemoved(String key, McpClient client, RemovalCause cause) {
         if (!cause.wasEvicted() || client == null) {
@@ -296,7 +320,76 @@ public class McpToolProviderManager {
             toolCache.remove(key);
         }
         LOGGER.debugf("Closing MCP client evicted from the cache (%s)", cause);
+        retireClient(key, client);
+    }
+
+    /**
+     * Closes a client that has left the cache — now, or, while an operation still
+     * holds a lease on it, when the last such operation releases it. Eviction used
+     * to close the client outright, under a tool call that was using it.
+     */
+    private void retireClient(String key, McpClient client) {
+        synchronized (leaseLock) {
+            if (clientLeases.containsKey(client)) {
+                closeOnRelease.add(client);
+                return;
+            }
+        }
         closeQuietly(key, client);
+    }
+
+    /**
+     * Takes the cached client for {@code config} for the length of one operation,
+     * building it if the cache has none — which is how a call after an eviction
+     * reconnects. The lease is taken only on the client that is still the cache's
+     * current entry: one removed between the lookup and the lease may already be
+     * closed, so the lookup is retried. Every lease is given back with
+     * {@link #releaseClient}.
+     */
+    McpClient leaseClient(McpServerConfig config, String key) {
+        McpClient client = null;
+        for (int attempt = 0; attempt < LEASE_ATTEMPTS; attempt++) {
+            client = getOrCreateClient(config);
+            synchronized (leaseLock) {
+                if (isCachedClient(key, client)) {
+                    clientLeases.merge(client, 1, Integer::sum);
+                    return client;
+                }
+            }
+        }
+        // Removed again on every attempt — a cache far too small for its load. Use the
+        // last client anyway; the lease still defers a close that has not run yet.
+        synchronized (leaseLock) {
+            clientLeases.merge(client, 1, Integer::sum);
+        }
+        return client;
+    }
+
+    /**
+     * Gives back a lease from {@link #leaseClient}, closing a retired client last.
+     */
+    void releaseClient(String key, McpClient client) {
+        boolean close;
+        synchronized (leaseLock) {
+            Integer leases = clientLeases.get(client);
+            if (leases == null) {
+                return;
+            }
+            if (leases > 1) {
+                clientLeases.put(client, leases - 1);
+                return;
+            }
+            clientLeases.remove(client);
+            close = closeOnRelease.remove(client);
+        }
+        if (close) {
+            closeQuietly(key, client);
+        }
+    }
+
+    private boolean isCachedClient(String key, McpClient client) {
+        CompletableFuture<McpClient> current = clientCache.asMap().get(key);
+        return current != null && current.isDone() && !current.isCompletedExceptionally() && current.join() == client;
     }
 
     private static void closeQuietly(String key, McpClient client) {
@@ -321,14 +414,14 @@ public class McpToolProviderManager {
      * when its build finishes — a client still being built when its entry is
      * dropped would otherwise be handed to its caller and never closed.
      */
-    private static void closeWhenBuilt(String key, CompletableFuture<McpClient> future) {
+    private void closeWhenBuilt(String key, CompletableFuture<McpClient> future) {
         if (future.isDone()) {
             if (!future.isCompletedExceptionally()) {
-                closeQuietly(key, future.join());
+                retireClient(key, future.join());
             }
             return;
         }
-        future.thenAcceptAsync(client -> closeQuietly(key, client));
+        future.thenAcceptAsync(client -> retireClient(key, client));
     }
 
     /**
@@ -366,10 +459,12 @@ public class McpToolProviderManager {
      * <p>
      * Shared by shutdown and secret invalidation, because dropping a client without
      * closing it leaks its connection, and dropping it without dropping the tool
-     * cache leaves executors bound to a closed client. Each entry is removed and
-     * then closed, key by key, so a client cached concurrently is either closed
-     * here or left alone — never dropped without a close. Built clients are closed
-     * on this thread, so shutdown does not return with closes still pending.
+     * cache would keep serving a tool list discovered with the old credential. Each
+     * entry is removed and then closed, key by key, so a client cached concurrently
+     * is either closed here or left alone — never dropped without a close. Built
+     * clients are closed on this thread, so shutdown does not return with closes
+     * still pending — except a client a tool call still holds, which is closed when
+     * that call finishes.
      */
     private void closeAllClients() {
         var clients = clientCache.asMap();
@@ -569,9 +664,9 @@ public class McpToolProviderManager {
             // a live tools/list RPC per server per turn was pure overhead.
             CachedTools cached = toolCache.get(cacheKey(serverConfig));
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
-                // The cached executors use the cached client without going through
-                // getOrCreateClient, so touch its entry: otherwise a client in
-                // constant use would look idle to expire-after-access.
+                // Serving the cached tools counts as using the server's client, so
+                // touch its entry: otherwise a client whose tools are offered every
+                // turn would look idle to expire-after-access between calls.
                 clientCache.getIfPresent(circuitKey);
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
@@ -712,12 +807,79 @@ public class McpToolProviderManager {
      * {@link #discoverTools} without a live MCP server.
      */
     ToolProviderResult fetchToolsFromServer(McpServerConfig serverConfig) {
-        McpClient client = getOrCreateClient(serverConfig);
+        String key = cacheKey(serverConfig);
+        McpClient client = leaseClient(serverConfig, key);
+        try {
+            // Use McpToolProvider to discover tools from this server. Its executors are
+            // bound to this client; the wrapper re-resolves the client on every call,
+            // because the cache may evict and close this one long before the tools
+            // returned here — and cached for the tool-cache TTL — are used.
+            McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client))
+                    .toolWrapper(executor -> new ClientResolvingToolExecutor(serverConfig, key, client, executor)).build();
 
-        // Use McpToolProvider to discover tools from this server
-        McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
+            return toolProvider.provideTools(null);
+        } finally {
+            releaseClient(key, client);
+        }
+    }
 
-        return toolProvider.provideTools(null);
+    /**
+     * An MCP tool executor that holds no client of its own: each call leases the
+     * server's current cached client for its duration — reconnecting if the one the
+     * tool was discovered on has been evicted — and runs the call on it. The
+     * executor langchain4j built at discovery is reused while that client is still
+     * the current one.
+     */
+    final class ClientResolvingToolExecutor implements ToolExecutor {
+
+        private final McpServerConfig serverConfig;
+        private final String key;
+        private final McpClient discoveredWith;
+        private final ToolExecutor discovered;
+
+        ClientResolvingToolExecutor(McpServerConfig serverConfig, String key, McpClient discoveredWith, ToolExecutor discovered) {
+            this.serverConfig = serverConfig;
+            this.key = key;
+            this.discoveredWith = discoveredWith;
+            this.discovered = discovered;
+        }
+
+        private ToolExecutor executorFor(McpClient client) {
+            return client == discoveredWith ? discovered : new McpToolExecutor(client);
+        }
+
+        @Override
+        public String execute(ToolExecutionRequest request, Object memoryId) {
+            McpClient client = leaseClient(serverConfig, key);
+            try {
+                return executorFor(client).execute(request, memoryId);
+            } finally {
+                releaseClient(key, client);
+            }
+        }
+
+        @Override
+        public ToolExecutionResult executeWithContext(ToolExecutionRequest request, InvocationContext context) {
+            McpClient client = leaseClient(serverConfig, key);
+            try {
+                return executorFor(client).executeWithContext(request, context);
+            } finally {
+                releaseClient(key, client);
+            }
+        }
+
+        @Override
+        public CompletableFuture<ToolExecutionResult> executeAsync(ToolExecutionRequest request, InvocationContext context) {
+            McpClient client = leaseClient(serverConfig, key);
+            CompletableFuture<ToolExecutionResult> result;
+            try {
+                result = executorFor(client).executeAsync(request, context);
+            } catch (RuntimeException | Error e) {
+                releaseClient(key, client);
+                throw e;
+            }
+            return result.whenComplete((value, failure) -> releaseClient(key, client));
+        }
     }
 
     /* ___ MCP resource bridge ___________________________________________ */
@@ -1658,9 +1820,8 @@ public class McpToolProviderManager {
             return;
         }
         String prefix = url + "|";
-        // The cached executors hold a reference to the client, so they are keyed the
-        // same way and must be dropped with it — a bare toolCache.remove(url) would
-        // leave executors bound to a closed client behind.
+        // The cached tool lists are keyed the same way and are dropped with their
+        // clients, so the next discovery lists them again over a fresh connection.
         toolCache.keySet().removeIf(key -> key.startsWith(prefix));
         var clients = clientCache.asMap();
         for (var key : List.copyOf(clients.keySet())) {

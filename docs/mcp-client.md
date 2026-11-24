@@ -235,7 +235,8 @@ distinct server URL, credential and timeout. The cache is bounded:
 `eddi.mcp.client-cache.expire-after-access-ms` (default `1800000`, 30 minutes)
 without use. An evicted client's connection is closed in the background and the
 next call to that server reconnects, so eviction costs one handshake, not a failed
-turn.
+turn. A client that is still serving a tool call when it is evicted is closed once
+that call returns.
 
 ---
 

@@ -9,16 +9,21 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,8 +38,12 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * The MCP client cache is bounded, closes what it evicts, and builds a client
@@ -61,11 +70,14 @@ class McpClientCacheBoundsTest {
     }
 
     private McpToolProviderManager manager(int maxSize, Function<McpServerConfig, McpClient> builder) {
+        return manager(maxSize, McpToolProviderManager.DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS, builder);
+    }
+
+    private McpToolProviderManager manager(int maxSize, long idleMillis, Function<McpServerConfig, McpClient> builder) {
         return new McpToolProviderManager(mock(GlobalVariableResolver.class), mock(SecretResolver.class),
                 new CallerIdentityResolver(NO_CALLER, true), NO_CALLER, false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS,
                 McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES, McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER,
-                McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS, maxSize,
-                McpToolProviderManager.DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS, null) {
+                McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS, maxSize, idleMillis, null) {
             @Override
             McpClient buildClient(McpServerConfig config) {
                 builds.incrementAndGet();
@@ -85,6 +97,29 @@ class McpClientCacheBoundsTest {
             throw new IllegalStateException(e);
         }
         return client;
+    }
+
+    /**
+     * A recording client that advertises one tool, {@link #toolName}, and answers
+     * every call with its server's URL after running {@code onCall}.
+     */
+    private McpClient toolClient(String url, Runnable onCall) {
+        McpClient client = recordingClient(url);
+        when(client.listTools()).thenReturn(List.of(ToolSpecification.builder().name(toolName(url)).description("A tool.").build()));
+        when(client.executeTool(any(), any())).thenAnswer(invocation -> {
+            onCall.run();
+            return ToolExecutionResult.builder().resultText("answered by " + url).build();
+        });
+        return client;
+    }
+
+    private static String toolName(String url) {
+        return "tool_" + URI.create(url).getHost().replace('.', '_');
+    }
+
+    private static String call(McpToolProviderManager.McpToolsResult tools, String url) {
+        String name = toolName(url);
+        return tools.executors().get(name).execute(ToolExecutionRequest.builder().name(name).arguments("{}").build(), null);
     }
 
     private static McpServerConfig config(String url) {
@@ -241,6 +276,59 @@ class McpClientCacheBoundsTest {
         inFlight.get(10, TimeUnit.SECONDS);
         awaitClosed(3);
         assertTrue(closed.containsKey(inFlightUrl), "a client finished after shutdown dropped its entry is closed, not leaked");
+    }
+
+    @Test
+    @DisplayName("a discovered tool whose client was evicted reconnects instead of calling the closed client")
+    void evictedClientsToolsReconnect() throws Exception {
+        Map<String, List<McpClient>> clients = new ConcurrentHashMap<>();
+        var manager = manager(1, c -> {
+            McpClient client = toolClient(c.getUrl(), () -> {
+            });
+            clients.computeIfAbsent(c.getUrl(), url -> new CopyOnWriteArrayList<>()).add(client);
+            return client;
+        });
+        String a = "http://a.example/mcp";
+        String b = "http://b.example/mcp";
+
+        var tools = manager.discoverTools(List.of(config(a), config(b)));
+        assertEquals(2, tools.executors().size(), "both servers' tools are returned: " + tools.executors().keySet());
+        manager.runCacheMaintenance();
+        awaitClosed(1);
+        assertEquals(1, closed.size(), "one of the two clients is evicted and closed: " + closed.keySet());
+        String evicted = closed.keySet().iterator().next();
+        McpClient closedClient = clients.get(evicted).get(0);
+
+        assertEquals("answered by " + evicted, call(tools, evicted));
+        verify(closedClient, never()).executeTool(any(), any());
+        assertTrue(clients.get(evicted).size() >= 2, "the call builds a fresh client for the evicted server");
+    }
+
+    @Test
+    @DisplayName("a client evicted while a tool call is using it is closed only once the call returns")
+    void evictionWaitsForTheCallInFlight() throws Exception {
+        String url = "http://busy.example/mcp";
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        // Idle eviction after 50 ms: the call below outlasts it.
+        var manager = manager(16, 50, c -> toolClient(c.getUrl(), () -> {
+            entered.countDown();
+            await(release);
+        }));
+        var tools = manager.discoverTools(List.of(config(url)));
+
+        Future<String> inFlight = pool.submit(() -> call(tools, url));
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+        Thread.sleep(200);
+        manager.runCacheMaintenance();
+        assertEquals(0, manager.getActiveConnectionCount(), "the idle entry is evicted");
+        Thread.sleep(200); // give an (incorrect) close on Caffeine's executor time to run
+        assertTrue(closed.isEmpty(), "the client must stay open under the call that is using it");
+
+        release.countDown();
+        assertEquals("answered by " + url, inFlight.get(10, TimeUnit.SECONDS));
+        awaitClosed(1);
+        assertTrue(closed.containsKey(url), "the evicted client is closed once its last call finishes");
     }
 
     /**

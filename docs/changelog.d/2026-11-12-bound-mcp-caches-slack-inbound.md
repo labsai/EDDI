@@ -17,15 +17,22 @@ unrelated servers hashed to the same bin.
   `eddi.mcp.client-cache.expire-after-access-ms` (default `1800000`, 30 minutes).
   When the cache evicts a client, a removal listener closes it on Caffeine's
   executor, never on the caller's thread, and logs any close error without
-  rethrowing it. The evicted key's cached tool list is dropped with it, because
-  its executors are bound to the closed client.
+  rethrowing it. The evicted key's cached tool list is dropped with it, so the
+  next discovery lists the tools again over a fresh connection.
+- Discovered MCP tool executors no longer pin the client they were discovered
+  on. Each call leases the server's current cached client for its duration,
+  reconnecting if the old one was evicted. Before this, with
+  `max-size=1`, `discoverTools([A, B])` could evict and close A's client while
+  A's tools were already in the result, and every later call to them reached
+  the closed client. A client that is removed from the cache (by eviction,
+  `closeClient` or secret rotation) while a call or a discovery still holds it
+  is closed when the last of those finishes, not under it.
 - A client is built **outside** any lock. The first caller claims the key with an
   empty future and builds on its own thread. Concurrent callers for the same key
   wait for that future and share the one client. Callers for other keys never wait
   on it. If the build fails, the claim is released, so the next call tries again.
-- When the tool cache serves a hit, it touches the client's cache entry. Cached
-  executors use the client without calling `getOrCreateClient`, so without this
-  touch a client in constant use would look idle.
+- When the tool cache serves a hit, it touches the client's cache entry, so a
+  client whose tools are offered every turn does not look idle between calls.
 - The tool cache and the circuit-breaker map are bounded the same way. The
   circuit-breaker entry now expires one window (60 s) after its last failure. By
   then no timestamp in it can open the circuit, so the breaker gives the same
@@ -61,6 +68,13 @@ duplicate.
   (`ACCEPTED`/`DUPLICATE`/`OVERLOADED`), and only `OVERLOADED` changes the HTTP
   answer.
 - A missing or blank `event_id` skips de-duplication, and the event is processed.
+- An observer's (observe-mode) turn now runs on the worker that admitted its
+  event. It used to be submitted to the executor again, so the handler returned,
+  released its slot, and with `max-concurrent-events=1` a second observed
+  message started a second turn while the first was still running.
+- An accepted event that is still waiting for a slot when shutdown interrupts
+  it (after the 10 s grace period) is logged at WARN with its `event_id`. Slack
+  got a 200 for it and will not redeliver it, so it was lost without a trace.
 
 **Files:** [`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
 [`SlackConfig.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackConfig.java),
@@ -81,3 +95,10 @@ duplicate.
 - No dedup key is derived from `channel` + `ts` for an id-less event: Slack
   delivers a message and its `app_mention` as two events with the same `ts`.
 - `docs/slack-integration.md` is not touched, because open PR #1342 rewrites it.
+- Waiting events are not persisted across a shutdown. That needs a durable
+  inbound queue, and an event that is already running is interrupted at the
+  same point anyway. The 10 s grace period lets waiting events run, and an
+  event dropped after it is logged.
+- Group discussions stay outside the bound, as before: the discussion runs on
+  the group service's own background thread, and the waiter submitted for
+  follow-up routing only waits for it.
