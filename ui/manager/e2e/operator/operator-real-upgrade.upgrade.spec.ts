@@ -321,7 +321,9 @@ test.describe("Platform Operator upgraded from the previous release", () => {
         const current = await freshPage(browser);
         const page = current.page;
         const canaryReports: Record<string, unknown>[] = [];
+        let conversationEnds = 0;
         page.on("request", (req) => {
+          if (req.method() === "POST" && req.url().endsWith("/endConversation")) conversationEnds += 1;
           if (req.method() === "POST" && req.url().endsWith("/administration/operator/canary-result")) {
             try {
               canaryReports.push(JSON.parse(req.postData() ?? "{}") as Record<string, unknown>);
@@ -358,10 +360,13 @@ test.describe("Platform Operator upgraded from the previous release", () => {
         await page.getByRole("button", { name: /upgrade now/i }).click();
 
         const errorBox = page.getByTestId("operator-upgrade-error");
+        const grantDialog = page.getByTestId("grant-required-dialog");
         await expect
           .poll(
             async () => {
               if (await errorBox.isVisible()) return `failed: ${await errorBox.innerText()}`;
+              // Named rather than waited out: the upgrade would sit on this dialog until the timeout.
+              if (await grantDialog.isVisible()) return "stopped on the vault grant dialog";
               return (await page.getByTestId("operator-upgrade-notice").count()) === 0 ? "upgraded" : "running";
             },
             { message: "the upgrade did not finish", timeout: ACTIVATION_TIMEOUT },
@@ -384,6 +389,10 @@ test.describe("Platform Operator upgraded from the previous release", () => {
           .poll(() => canaryReports.length, { message: "the upgraded operator's write canary never reported", timeout: ACTIVATION_TIMEOUT })
           .toBeGreaterThanOrEqual(1);
         expect(canaryReports.at(-1)?.outcome, `write canary: ${JSON.stringify(canaryReports.at(-1))}`).toBe("pass");
+        // Both probes ended their conversations before the read canary's silence counts.
+        await expect
+          .poll(() => conversationEnds, { message: "the upgraded operator's probes did not finish", timeout: 60_000 })
+          .toBeGreaterThanOrEqual(2);
         await expect(page.getByTestId("operator-canary-warning")).toHaveCount(0);
 
         // ── A real tool call through the upgraded operator ──

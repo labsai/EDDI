@@ -73,6 +73,7 @@ test.describe("Platform Operator under Keycloak, calling as the signed-in user",
 
   test("activates with caller identity, and its tool calls run as the signed-in user", async ({ page, request }) => {
     const probeStarts: Request[] = [];
+    const conversationEnds: Request[] = [];
     const canaryReports: Record<string, unknown>[] = [];
     const consoleLines: string[] = [];
     page.on("console", (msg) => {
@@ -83,6 +84,7 @@ test.describe("Platform Operator under Keycloak, calling as the signed-in user",
       if (req.method() !== "POST") return;
       const url = req.url();
       if (url.includes("/start?") && url.includes(`userId=${PROBE_USER}`)) probeStarts.push(req);
+      if (url.endsWith("/endConversation")) conversationEnds.push(req);
       if (url.endsWith("/administration/operator/canary-result")) {
         try {
           canaryReports.push(JSON.parse(req.postData() ?? "{}") as Record<string, unknown>);
@@ -159,6 +161,11 @@ test.describe("Platform Operator under Keycloak, calling as the signed-in user",
       canaryReports[0]?.outcome,
       `write canary outcome: ${JSON.stringify(canaryReports[0])}\nbrowser console:\n${recentConsole()}`,
     ).toBe("pass");
+    // Both probes have finished (each ends its conversation) before the read
+    // canary's silence counts as a pass: it reports only by showing a warning.
+    await expect
+      .poll(() => conversationEnds.length, { message: "the probes did not end their conversations", timeout: 60_000 })
+      .toBeGreaterThanOrEqual(2);
     const canaryWarning = page.getByTestId("operator-canary-warning");
     await expect
       .poll(async () => ((await canaryWarning.count()) > 0 ? await canaryWarning.innerText() : ""), {

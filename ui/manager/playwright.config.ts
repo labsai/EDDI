@@ -211,8 +211,9 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     // ── Tier 5c: Operator under Keycloak, tool calls as the signed-in user ──
-    // Needs docker-compose.integration-keycloak.yml plus
-    // docker-compose.integration-keycloak-operator.yml (the model stub).
+    // Needs docker-compose.integration-keycloak.yml with
+    // docker-compose.integration-operator.yml layered on it (the model stub),
+    // and PORT=7070 so the onboarding seed applies to the served Manager.
     {
       name: "operator-oidc",
       testDir: "./e2e/operator",
