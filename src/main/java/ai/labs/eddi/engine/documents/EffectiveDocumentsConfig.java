@@ -440,9 +440,17 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 value = fallback; // and the default is bounded like any other value
             }
             var bound = bounds.boundFor(path);
-            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
-                warnClamped(path, bound.get());
-                return atOrBelow(bound.get());
+            if (bound.isPresent()) {
+                // The written value decides the warning, as it does at save time.
+                if (BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
+                    warnClamped(path, bound.get());
+                    return atOrBelow(bound.get());
+                }
+                // A value written at the bound (0.1 against 0.1) is no violation, but
+                // its nearest double can lie just above the bound: return one below it.
+                if (new BigDecimal(value).compareTo(bound.get()) > 0) {
+                    return atOrBelow(bound.get());
+                }
             }
             return value;
         }

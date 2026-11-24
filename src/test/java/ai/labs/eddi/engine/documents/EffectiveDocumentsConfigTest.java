@@ -355,6 +355,18 @@ class EffectiveDocumentsConfigTest {
         }
 
         @Test
+        @DisplayName("a value written at the bound is accepted silently, and its double never lies above the bound")
+        void valueAtBoundStaysAtOrBelowExactly() throws Exception {
+            BigDecimal bound = new BigDecimal("0.1"); // the double 0.1 is slightly above 0.1
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("large.summary.maxCostPerDocument", bound)));
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"large\":{\"summary\":{\"maxCostPerDocument\":0.1}}}"), settings,
+                    Set.of("large.summary.maxCostPerDocument"));
+            double clamped = e.large().summary().maxCostPerDocument();
+            assertTrue(new BigDecimal(clamped).compareTo(bound) <= 0, () -> "resolved to " + new BigDecimal(clamped));
+            assertTrue(e.clampWarnings().isEmpty(), e.clampWarnings().toString());
+        }
+
+        @Test
         @DisplayName("a stored blank reference to a key that is not available is reported; a live blank is unset, silently")
         void blankReference() throws Exception {
             var notLive = EffectiveDocumentsConfig.resolve(parse("{\"index\":{\"rag\":\" \"}}"), DocumentSettings.none(), Set.of());
