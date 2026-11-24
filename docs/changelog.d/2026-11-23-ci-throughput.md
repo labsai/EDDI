@@ -160,6 +160,23 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   path, no fingerprint, and the PR cases (fingerprint-only, `.gitleaks.toml` plus a commit-less
   entry, a `++` entry, `.gitleaks.toml` only).
 
+### CodeRabbit re-review (of `18aeae6`)
+
+- **`.gitattributes` could blind the scanner (Major, security).** gitleaks reads history through
+  `git log -p`, which honours the change's own `.gitattributes`: `leak.txt -diff` (or `binary`, or a
+  textconv driver) prints "Binary files differ" instead of the content, so a secret in that file was
+  never scanned. Shown with the pinned binary: a leak in such a file passed without the fix and is
+  found with it. Secret Scanning now writes `* diff` to `.git/info/attributes` before any scan; that
+  file outranks every `.gitattributes` in the tree. The same trick on `.gitleaksignore` itself hid
+  every added line from both diff parsers, so a commit-less entry slipped through: added lines are
+  now the head blob's lines that the base blob lacks (`git cat-file` plus `comm`), which no attribute
+  or diff driver can change, and the finding-line comparison reads blobs the same way. Both the PR
+  and the queue reject that entry now; the 11 earlier cases still behave as before.
+- `UI Workforce` was red on that run: `session-list.test.tsx` puts a conversation modified "ten
+  minutes ago" under Today, which is false between 00:00 and 00:10 UTC (the run hit it at 00:02).
+  Unrelated to this branch, which does not touch `ui/workforce`; the job was re-run, and the flake
+  is left for a separate fix.
+
 ### Considered and not done
 
 - **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that

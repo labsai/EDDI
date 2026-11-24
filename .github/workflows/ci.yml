@@ -2208,6 +2208,19 @@ jobs:
       # has checked. Fingerprints the group adds still count, but only through the
       # approval mapping in the scan step below, which accepts commit-scoped
       # fingerprints for exactly the findings this range introduces.
+      # gitleaks reads history through `git log -p`, and a change can steer that
+      # with .gitattributes: `secrets.txt -diff` (or `binary`, or a textconv
+      # driver) prints "Binary files differ" instead of the content, so a secret in
+      # that file is never scanned. .git/info/attributes outranks every
+      # .gitattributes in the tree, so `* diff` there restores plain text diffs
+      # for all paths, whatever the change under scan says.
+      - name: Ignore .gitattributes for the scans
+        run: |
+          set -euo pipefail
+          attributes=$(git rev-parse --git-path info/attributes)
+          mkdir -p "$(dirname "$attributes")"
+          printf '* diff\n' >> "$attributes"
+
       - name: Take the gitleaks config from the base branch
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
@@ -2295,13 +2308,16 @@ jobs:
             APPROVAL_BASE="$PUSH_BEFORE"; APPROVAL_HEAD="$PUSH_AFTER"
           fi
           FINGERPRINT='[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+'
+          ignore_lines() { git cat-file blob "$1:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u; }
+          ignore_lines_added() { LC_ALL=C comm -13 <(ignore_lines "$1") <(ignore_lines "$2"); }
           APPROVED=""
           if [ -n "$APPROVAL_BASE" ]; then
-            # Added lines read structurally: after a hunk header, until the next
-            # file header. Filtering out lines that start with "+++" instead would
-            # also drop an added line such as "++fixture.txt:rule:1".
-            IGNORE_ADDED=$(git diff --no-color -U0 "$APPROVAL_BASE" "$APPROVAL_HEAD" -- .gitleaksignore \
-              | awk '/^diff --git /{inhunk=0; next} /^@@/{inhunk=1; next} inhunk && /^\+/{print substr($0, 2)}' || true)
+            # The added lines are the head blob's lines that the base blob lacks,
+            # read with cat-file. A diff would honour .gitattributes (`-diff`,
+            # `binary` or a textconv driver turn the file's diff into "Binary files
+            # differ", hiding every addition) and needs care with "+++" headers;
+            # comparing the two blobs' line sets has neither problem.
+            IGNORE_ADDED=$(ignore_lines_added "$APPROVAL_BASE" "$APPROVAL_HEAD")
             NOT_FINGERPRINTS=$(printf '%s\n' "$IGNORE_ADDED" | grep -vE "^${FINGERPRINT}[[:space:]]*\$" \
               | grep -vE '^[[:space:]]*(#.*)?$' || true)
             if [ -n "$NOT_FINGERPRINTS" ]; then
@@ -2331,7 +2347,7 @@ jobs:
             # fingerprint approves at most one finding.
             UNAPPROVED=""
             USED=""
-            line_at() { git show "$1:$2" 2> /dev/null | sed -n "${3}p"; }
+            line_at() { git cat-file blob "$1:$2" 2> /dev/null | sed -n "${3}p"; }
             while IFS=$'\t' read -r f_commit f_file f_rule f_line; do
               finding=$(line_at "$f_commit" "$f_file" "$f_line")
               approved=""
@@ -2392,11 +2408,13 @@ jobs:
             IGNORE_CHANGED=yes
           fi
           # Validated before anything else, .gitleaks.toml changes included: every
-          # line the PR adds must be a fingerprint (or blank, or a comment). Added
-          # lines are read structurally (after a hunk header), so one that itself
-          # starts with "++" is not mistaken for the "+++" file header.
-          ADDED=$(git diff --no-color -U0 "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore \
-            | awk '/^diff --git /{inhunk=0; next} /^@@/{inhunk=1; next} inhunk && /^\+/{print substr($0, 2)}' || true)
+          # line the PR adds must be a fingerprint (or blank, or a comment). The
+          # added lines are the head blob's lines the fork point's blob lacks (read
+          # with cat-file, so no .gitattributes setting can hide them, and no
+          # "+++" header handling is needed).
+          ADDED=$(LC_ALL=C comm -13 \
+            <(git cat-file blob "$FORK_POINT:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u) \
+            <(git cat-file blob "$PR_HEAD:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u))
           OTHER=$(printf '%s\n' "$ADDED" | grep -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
             | grep -vE '^[[:space:]]*(#.*)?$' || true)
           if [ -n "$OTHER" ]; then

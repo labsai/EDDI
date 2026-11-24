@@ -1599,9 +1599,14 @@ class BuildQualityGatesTest {
                 "queue and push scans must accept a finding only when an added fingerprint names its path and rule AND"
                         + " the line it names has the finding's exact text: commit-scoped fingerprints cannot match"
                         + " squashed commits, and line numbers shift");
-        assertFalse(gitleaks.contains("grep -vE '^\\+\\+\\+'"),
-                "added .gitleaksignore lines must be read structurally (after a hunk header): filtering out lines that"
-                        + " start with +++ also drops an added '++path:rule:line' entry");
+        assertFalse(gitleaks.contains("git diff --no-color -U0"),
+                "added .gitleaksignore lines must come from comparing the two blobs' lines (git cat-file): a diff honours"
+                        + " .gitattributes, so `.gitleaksignore -diff` would hide every addition, and filtering +++ headers"
+                        + " drops an added '++path:rule:line' entry");
+        assertTrue(gitleaks.contains("attributes=$(git rev-parse --git-path info/attributes)")
+                && gitleaks.contains("printf '* diff\\n' >> \"$attributes\""),
+                "the scans must override .gitattributes (`* diff` in .git/info/attributes): a `-diff` or `binary`"
+                        + " attribute makes git log -p print \"Binary files differ\", so gitleaks never sees that file");
         assertTrue(gitleaks.contains("changes .gitleaks.toml, the rules; no tolerance applies"),
                 "the pull-request re-scan must refuse any change to .gitleaks.toml: only fingerprints may be added");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
