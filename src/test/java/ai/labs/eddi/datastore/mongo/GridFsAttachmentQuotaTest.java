@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Scope;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import com.mongodb.ErrorCategory;
@@ -36,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -65,6 +68,8 @@ class GridFsAttachmentQuotaTest {
         set("primaryReadBucket", gridFSBucket);
         set("filesCollection", mock(MongoCollection.class));
         set("locksCollection", locks);
+        // No reservations: usage is the files alone.
+        set("reservationsCollection", mock(MongoCollection.class, RETURNS_DEEP_STUBS));
         set("maxSizeBytes", 1_000_000L);
         set("maxPerConversation", 0L);
         set("maxTotalBytesPerConversation", 0L);
@@ -254,5 +259,14 @@ class GridFsAttachmentQuotaTest {
         ArgumentCaptor<GridFSUploadOptions> options = ArgumentCaptor.forClass(GridFSUploadOptions.class);
         verify(gridFSBucket).uploadFromStream(anyString(), any(InputStream.class), options.capture());
         assertEquals("u1", options.getValue().getMetadata().getString("userId"));
+    }
+
+    @Test
+    void theLockKeysAreTheOnesEveryReleaseUses() {
+        // An older node serializes on these exact keys; a changed spelling would let
+        // it and this one admit the same quota twice.
+        assertEquals("conversation:c1", GridFsAttachmentStore.lockKey(new Lock(Scope.CONVERSATION, "c1")));
+        assertEquals("user:u1", GridFsAttachmentStore.lockKey(new Lock(Scope.USER, "u1")));
+        assertEquals("source:r1", GridFsAttachmentStore.lockKey(new Lock(Scope.SOURCE, "r1")));
     }
 }
