@@ -95,10 +95,15 @@ export function adoptStoredVersion<
     if (!same(draft[k], base[k])) next[key] = draft[k];
   }
   const platformConfig: Record<string, string> = { ...stored.platformConfig };
-  for (const key of Object.keys(draft.platformConfig)) {
+  // Over the union of both key sets: a key the user cleared on this page is in
+  // the base but not in the draft, and must not come back from the store.
+  const keys = new Set([...Object.keys(base.platformConfig), ...Object.keys(draft.platformConfig)]);
+  for (const key of keys) {
     if (SENDER_KEYS.includes(key)) continue;
     const mine = draft.platformConfig[key];
-    if (mine !== undefined && !same(mine, base.platformConfig[key])) platformConfig[key] = mine;
+    if (same(mine, base.platformConfig[key])) continue;
+    if (mine === undefined) delete platformConfig[key];
+    else platformConfig[key] = mine;
   }
   next.platformConfig = platformConfig;
   return next as T;

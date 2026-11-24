@@ -85,6 +85,13 @@ describe("adoptStoredVersion", () => {
     const merged = adoptStoredVersion(cfg("mine", "a@x.com"), cfg("old", "a@x.com"), cfg("old", "b@x.com"));
     expect(merged.platformConfig).toEqual({ host: "mine", senderAllowlist: "b@x.com" });
   });
+
+  it("keeps a field the user cleared on this page cleared, instead of bringing the stored value back", () => {
+    const base = { name: "n", platformConfig: { host: "old", folder: "INBOX", senderAllowlist: "a@x.com" } as Record<string, string> };
+    const draft = { name: "n", platformConfig: { host: "old", senderAllowlist: "a@x.com" } as Record<string, string> };
+    const stored = { name: "n", platformConfig: { host: "old", folder: "INBOX", senderAllowlist: "b@x.com" } as Record<string, string> };
+    expect(adoptStoredVersion(draft, base, stored).platformConfig).toEqual({ host: "old", senderAllowlist: "b@x.com" });
+  });
 });
 
 describe("adoptStoredVersion routing", () => {
