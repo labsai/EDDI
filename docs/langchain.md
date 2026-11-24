@@ -1868,7 +1868,9 @@ The rules the tool follows:
 
 - **A continued conversation must still run the named agent.** If `agentId` is not the agent of the `conversationId` given, no file is shared.
 
-A share grants the delegate's conversation read access to the whole file, is audited in the calling conversation's ledger and counted in `eddi_attachment_shared_total{path="delegation"}`. The grant is made before the message is sent: if the delegate's turn does not run — the conversation is busy, or paused for an approval — the delegate keeps the grant but receives the file only on a later call that names it again. Parts of a file (a chapter, a page range) cannot be handed on yet.
+A share grants the delegate's conversation read access to the whole file, is audited in the calling conversation's ledger and counted in `eddi_attachment_shared_total{path="delegation"}`. The grant is made before the message is sent: if the delegate's turn does not run — the conversation is busy, or paused for an approval — the delegate keeps the grant but receives the file only on a later call that names it again.
+
+A PDF can also be handed on in part: `book.pdf#u3` (a chapter) or `book.pdf#p4-9` (pages). The part is resolved to pages once, in the calling conversation, and the delegate receives those pages with the file (`pages`, `unit` and `split` on its `attachment_<n>`); it never re-derives them from the chapter id. The grant is still on the whole file. A part that does not resolve is refused, never sent whole — see [Sending part of a file](attachments-guide.md#sending-part-of-a-file). Until rendering by pages arrives, the delegate's model still receives the whole PDF.
 
 ## Conversation Window Management
 

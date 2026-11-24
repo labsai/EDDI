@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -28,6 +29,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.documents.DocumentStructureService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
@@ -259,6 +261,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     TurnCostMeter turnCostMeter;
+
+    /**
+     * Resolves the part of a stored PDF an incoming {@code attachment_N} names
+     * ({@code pages}, {@code unit}, {@code split}). Field-injected for the same
+     * reason as {@link #attachmentStore}; {@code null} (a directly constructed
+     * instance) refuses every part.
+     */
+    @Inject
+    DocumentStructureService documentStructureService;
 
     /**
      * Self-continuation ({@code CONTINUE_CONVERSATION}): decides before a turn is
@@ -2837,6 +2848,19 @@ public class ConversationService implements IConversationService, UserErasurePar
             @Override
             public int getMaxAttachmentsPerTurn() {
                 return maxAttachmentsPerTurn;
+            }
+
+            @Override
+            public AttachmentContextExtractor.PartResolver getAttachmentPartResolver() {
+                // No task is known when a turn arrives: the receiving split is the one an
+                // agent gets without split settings - every agent's while no split.* key
+                // is available to designers.
+                // Resolved per part, so a turn without parts never reads the settings.
+                DocumentStructureService structure = documentStructureService;
+                return structure == null
+                        ? null
+                        : (storageRef, conversationId, unit, pages, split) -> structure.partResolver(structure.deploymentSplit())
+                                .resolve(storageRef, conversationId, unit, pages, split);
             }
 
             @Override

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.documents.SelectorException;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import org.jboss.logging.Logger;
@@ -42,6 +44,16 @@ import java.util.Set;
  * <p>
  * Context keys matching {@code attachment_*} are extracted. Other context keys
  * are ignored.
+ * <p>
+ * A stored reference may name a <strong>part</strong> of a PDF with the string
+ * fields {@code pages} ({@code "<from>-<to>"}, authoritative), {@code unit} (a
+ * chapter label such as {@code u3}) and {@code split} (the hash of the split
+ * configuration the label belongs to). They are kept in
+ * {@link Attachment#getMetadata()} under the {@link AttachmentSelector}
+ * constants and resolved by
+ * {@link #resolveAndGuard(List, IAttachmentStore, String, int, PartResolver)}.
+ * Nothing else is read into the metadata: a client cannot mark its attachment
+ * as a derived view.
  *
  * @since 6.0.0
  */
@@ -60,6 +72,23 @@ public final class AttachmentContextExtractor {
 
     /** Uploaded-blob reference field inside an attachment context value map. */
     public static final String FIELD_STORAGE_REF = "storageRef";
+
+    /** Page-range field of a stored reference: {@code "<from>-<to>"}. */
+    public static final String FIELD_PAGES = "pages";
+
+    /** Unit-label field of a stored reference, e.g. {@code u3}. */
+    public static final String FIELD_UNIT = "unit";
+
+    /** Split-hash field of a stored reference. */
+    public static final String FIELD_SPLIT = "split";
+
+    /** Longest part field read from a client; anything longer is cut. */
+    static final int MAX_PART_FIELD_CHARS = 64;
+
+    /**
+     * Field of the persisted map form that holds {@link Attachment#getMetadata()}.
+     */
+    private static final String FIELD_METADATA = "metadata";
 
     /** Default per-turn cap on the number of attachments forwarded. */
     public static final int DEFAULT_MAX_ATTACHMENTS_PER_TURN = 5;
@@ -128,6 +157,11 @@ public final class AttachmentContextExtractor {
             Attachment attachment = new Attachment();
             attachment.setStorageRef(storageRef);
             attachment.setFileName(getStringField(attachMap, "fileName"));
+            // A part of the file: only these three fields, so a client can neither mark
+            // its attachment derived nor name a root for it.
+            copyPartField(attachMap, FIELD_PAGES, attachment, AttachmentSelector.META_PAGES);
+            copyPartField(attachMap, FIELD_UNIT, attachment, AttachmentSelector.META_UNIT);
+            copyPartField(attachMap, FIELD_SPLIT, attachment, AttachmentSelector.META_SPLIT);
             return attachment;
         }
 
@@ -166,6 +200,46 @@ public final class AttachmentContextExtractor {
         return value instanceof String s ? s : null;
     }
 
+    private static void copyPartField(Map<String, Object> map, String field, Attachment attachment, String metadataKey) {
+        String value = getStringField(map, field);
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        String stripped = value.strip();
+        if (stripped.length() > MAX_PART_FIELD_CHARS) {
+            // Too long to be a page range, unit or split. Kept, cut and marked so it can
+            // never parse, so the part is refused rather than silently widened to the
+            // whole file or narrowed to a shorter range.
+            stripped = stripped.substring(0, MAX_PART_FIELD_CHARS - 1) + "…";
+        }
+        if (attachment.getMetadata() == null) {
+            attachment.setMetadata(new LinkedHashMap<>());
+        }
+        attachment.getMetadata().put(metadataKey, stripped);
+    }
+
+    /** Whether an attachment names a part of its file. */
+    static boolean hasPart(Attachment att) {
+        Map<String, String> m = att.getMetadata();
+        return m != null && (m.get(AttachmentSelector.META_PAGES) != null || m.get(AttachmentSelector.META_UNIT) != null
+                || m.get(AttachmentSelector.META_SPLIT) != null);
+    }
+
+    /**
+     * Resolves the part of a stored file an incoming attachment names into a
+     * pages-authoritative selector. Implemented by
+     * {@code DocumentStructureService#partResolver}.
+     */
+    @FunctionalInterface
+    public interface PartResolver {
+        /**
+         * @return the selector, with {@code pages} set
+         * @throws SelectorException
+         *             with a model-safe message when the part cannot be resolved
+         */
+        AttachmentSelector resolve(String storageRef, String conversationId, String unit, String pages, String split);
+    }
+
     /**
      * Result of resolving parsed attachments against the store and per-turn cap.
      *
@@ -200,6 +274,27 @@ public final class AttachmentContextExtractor {
      */
     public static ExtractionResult resolveAndGuard(List<Attachment> parsed, IAttachmentStore store,
                                                    String conversationId, int maxPerTurn) {
+        return resolveAndGuard(parsed, store, conversationId, maxPerTurn, null);
+    }
+
+    /**
+     * {@link #resolveAndGuard(List, IAttachmentStore, String, int)}, resolving the
+     * part a stored reference names ({@code pages}, {@code unit}, {@code split}).
+     * <p>
+     * Pages win: a part with {@code pages} keeps them (checked against the
+     * document); a {@code unit} without pages becomes that unit's pages under the
+     * receiving split, once, here — from then on it carries pages and split. A unit
+     * with another split's hash and no pages, an unknown unit, or pages outside the
+     * document is reported in {@link ExtractionResult#errors()} and the attachment
+     * is dropped; it never falls back to the whole file. Without a resolver, any
+     * part is dropped the same way. A part counts as one attachment against
+     * {@code maxPerTurn}, like any other.
+     *
+     * @param partResolver
+     *            resolves parts; {@code null} refuses every part
+     */
+    public static ExtractionResult resolveAndGuard(List<Attachment> parsed, IAttachmentStore store,
+                                                   String conversationId, int maxPerTurn, PartResolver partResolver) {
         List<Attachment> out = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         int cap = maxPerTurn > 0 ? maxPerTurn : Integer.MAX_VALUE;
@@ -223,6 +318,14 @@ public final class AttachmentContextExtractor {
                         att.setFileName(meta.filename());
                     }
                     att.setSizeBytes(meta.sizeBytes());
+                    if (hasPart(att)) {
+                        String refusal = resolvePart(att, conversationId, partResolver);
+                        if (refusal != null) {
+                            errors.add("Stored attachment '" + att.getStorageRef() + "': the requested part was not sent: "
+                                    + refusal + ".");
+                            continue;
+                        }
+                    }
                     out.add(att);
                 } catch (IAttachmentStore.AttachmentStoreException e) {
                     errors.add("Stored attachment '" + att.getStorageRef()
@@ -233,6 +336,37 @@ public final class AttachmentContextExtractor {
             }
         }
         return new ExtractionResult(out, errors);
+    }
+
+    /**
+     * Replaces the part fields of {@code att} with the resolved selector's.
+     *
+     * @return {@code null} on success, else a model-safe reason
+     */
+    private static String resolvePart(Attachment att, String conversationId, PartResolver resolver) {
+        Map<String, String> metadata = att.getMetadata();
+        if (resolver == null) {
+            return "parts of a file cannot be sent here";
+        }
+        AttachmentSelector selector;
+        try {
+            selector = resolver.resolve(att.getStorageRef(), conversationId, metadata.get(AttachmentSelector.META_UNIT),
+                    metadata.get(AttachmentSelector.META_PAGES), metadata.get(AttachmentSelector.META_SPLIT));
+        } catch (SelectorException e) {
+            return e.getMessage();
+        } catch (RuntimeException e) {
+            LOGGER.warnv("Could not resolve the part of a stored attachment: {0}", e.getClass().getSimpleName());
+            return "it could not be resolved";
+        }
+        if (selector == null || selector.pages() == null) {
+            return "it could not be resolved";
+        }
+        metadata.remove(AttachmentSelector.META_PAGES);
+        metadata.remove(AttachmentSelector.META_UNIT);
+        metadata.remove(AttachmentSelector.META_SPLIT);
+        metadata.putAll(selector.toMetadata());
+        att.setStorageRef(selector.storageRef());
+        return null;
     }
 
     /**
@@ -304,6 +438,11 @@ public final class AttachmentContextExtractor {
      * {@code readAttachment} tool must not serve, although the attachment store
      * still holds them for the conversation. A file that was also attached on a
      * turn that was not refused stays readable.
+     * <p>
+     * Decided on roots: a recorded view of a file
+     * ({@link AttachmentSelector#META_ROOT}) counts for its root, so a child of a
+     * withheld file is withheld too. The set holds the roots, and a view's own
+     * reference where it differs.
      */
     public static Set<String> withheldStorageRefs(IConversationMemory memory) {
         return withheldStorageRefs(memory, false);
@@ -345,6 +484,12 @@ public final class AttachmentContextExtractor {
                 Attachment attachment = asAttachment(value);
                 if (attachment != null && attachment.getStorageRef() != null) {
                     target.add(attachment.getStorageRef());
+                    // A recorded view only ever withholds its root, never releases it: the
+                    // root itself must be attached on an accepted turn for that.
+                    String root = rootRefOf(attachment);
+                    if (root != null && target == withheld) {
+                        target.add(root);
+                    }
                 }
             }
         }
@@ -428,7 +573,68 @@ public final class AttachmentContextExtractor {
         if (map.get("sizeBytes") instanceof Number sizeBytes) {
             attachment.setSizeBytes(sizeBytes.longValue());
         }
+        // The part a selector names, and a recorded view's marks: a resumed turn
+        // must not turn "pages 12-19" into the whole file.
+        if (map.get(FIELD_METADATA) instanceof Map<?, ?> metadata) {
+            Map<String, String> copy = new LinkedHashMap<>();
+            metadata.forEach((k, v) -> {
+                if (k instanceof String key && v instanceof String text) {
+                    copy.put(key, text);
+                }
+            });
+            attachment.setMetadata(copy);
+        }
         return attachment;
+    }
+
+    /**
+     * The root a recorded derived view names
+     * ({@link AttachmentSelector#META_ROOT}), or {@code null}.
+     */
+    private static String rootRefOf(Attachment attachment) {
+        Map<String, String> metadata = attachment.getMetadata();
+        String root = metadata != null ? metadata.get(AttachmentSelector.META_ROOT) : null;
+        return root != null && !root.isBlank() ? root : null;
+    }
+
+    /**
+     * The derived selectors recorded on this conversation's steps — the current
+     * step and every earlier one, skipping turns an input guardrail refused:
+     * {@link MemoryKeys#ATTACHMENTS} entries marked
+     * {@link AttachmentSelector#META_DERIVED}. Memory only; what
+     * {@code ConversationListing.of} lists beside the roots, after checking each
+     * against the store.
+     */
+    public static List<Attachment> recordedDerived(IConversationMemory memory) {
+        if (memory == null) {
+            return Collections.emptyList();
+        }
+        List<IConversationMemory.IConversationStep> steps = new ArrayList<>();
+        if (memory.getCurrentStep() != null) {
+            steps.add(memory.getCurrentStep());
+        }
+        IConversationMemory.IConversationStepStack previous = memory.getPreviousSteps();
+        for (int i = 0; previous != null && i < previous.size(); i++) {
+            steps.add(previous.get(i));
+        }
+        Map<String, Attachment> unique = new LinkedHashMap<>();
+        for (IConversationMemory.IConversationStep step : steps) {
+            if (ConversationLogGenerator.isInputWithheld(step)) {
+                continue;
+            }
+            IData<List<?>> data = step.getData(MemoryKeys.ATTACHMENTS);
+            if (data == null || data.getResult() == null) {
+                continue;
+            }
+            for (Object value : data.getResult()) {
+                Attachment attachment = asAttachment(value);
+                if (attachment != null && attachment.getStorageRef() != null && attachment.getMetadata() != null
+                        && "true".equals(attachment.getMetadata().get(AttachmentSelector.META_DERIVED))) {
+                    unique.putIfAbsent(identity(attachment), attachment);
+                }
+            }
+        }
+        return List.copyOf(unique.values());
     }
 
     /** Non-blank string field from a map of unknown key/value types. */
@@ -437,10 +643,20 @@ public final class AttachmentContextExtractor {
     }
 
     /**
-     * Stable de-duplication key: the storage ref if there is one, else the name.
+     * Stable de-duplication key: the storage ref and the part it names if there is
+     * one (two parts of one file are two attachments), else the URL or the name.
      */
-    private static String identity(Attachment att) {
+    static String identity(Attachment att) {
         if (att.getStorageRef() != null) {
+            Map<String, String> m = att.getMetadata();
+            String pages = m != null ? m.get(AttachmentSelector.META_PAGES) : null;
+            String unit = m != null ? m.get(AttachmentSelector.META_UNIT) : null;
+            if (pages != null) {
+                return "ref:" + att.getStorageRef() + "#p" + pages;
+            }
+            if (unit != null) {
+                return "ref:" + att.getStorageRef() + "#u" + unit;
+            }
             return "ref:" + att.getStorageRef();
         }
         if (att.getUrl() != null) {
