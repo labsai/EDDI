@@ -566,6 +566,12 @@ Bounds on designer values: a value above its bound is refused when the configura
 | --- | --- | --- |
 | `eddi.documents.index.default-rag` | unset | The deployment's default **document index**: a RAG configuration flagged `"documentIndex": true`, given by id or as `eddi://ai.labs.rag/ragstore/rags/<id>` (`?version=<n>` optional; without it, the current version). Validated when EDDI starts: a missing configuration, an ordinary knowledge base or one that cannot be a document index ([rag.md](rag.md#document-index)) fails startup with the reason. Nothing is written to a document index in this version |
 
+Bounds on reading the images a PDF embeds ([security.md](security.md#pdf-image-bounds)). Nothing extracts images yet in this version.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.images.max-pixels` | `40000000` (40 MP) | Most pixels one embedded image may declare, and also each of its masks, the masked image PDFBox builds from them, and a CCITT image's decode buffer. A larger one is refused before PDFBox builds a raster or decode buffer for it. So is one whose decoding would take more than the document's decode budget has left. Not a positive number means the default |
+
 ---
 
 ## Backup, export & import

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.modules.ingestion.extract.ImageLimits;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -102,5 +103,26 @@ class DocumentSettingsDefaultsTest {
         var expected = new DerivedCaps.Limits(200, 52_428_800L, 20, 52_428_800L, 209_715_200L);
         assertEquals(expected, DocumentSettings.none().derivedCaps());
         assertEquals(expected, new DocumentSettings().derivedCaps(), "no property set in the test configuration");
+    }
+
+    // --- WP-2b.2a ---
+
+    @Test
+    @DisplayName("WP-2b.2a: images.max-pixels is 40 MP unless the operator sets a positive number")
+    void imagesMaxPixels() {
+        assertEquals(40_000_000L, DocumentSettings.none().imagesMaxPixels());
+        assertEquals(ImageLimits.DEFAULT_MAX_PIXELS, DocumentSettings.DEFAULT_IMAGES_MAX_PIXELS);
+        var cdi = new DocumentSettings();
+        assertEquals(40_000_000L, cdi.imagesMaxPixels());
+        try {
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "1000000");
+            assertEquals(1_000_000L, cdi.imagesMaxPixels());
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "0");
+            assertEquals(40_000_000L, cdi.imagesMaxPixels());
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "lots");
+            assertEquals(40_000_000L, cdi.imagesMaxPixels());
+        } finally {
+            System.clearProperty(DocumentSettings.IMAGES_MAX_PIXELS);
+        }
     }
 }

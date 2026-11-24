@@ -92,6 +92,30 @@ public final class PdfDecodeBudget {
         }
     }
 
+    /**
+     * What this thread's budget still allows, or {@code -1} when no budget is open.
+     * An image decoder asks before it allocates a raster the counter never sees
+     * ({@link ImageDecodeGuard}).
+     */
+    static long remaining() {
+        Budget budget = CURRENT.get();
+        return budget == null ? -1 : Math.max(0, budget.max - budget.used);
+    }
+
+    /**
+     * Throws once this thread's budget has been passed, whether or not the code
+     * that passed it let the failure through.
+     *
+     * @throws BudgetExceeded
+     *             when the budget open on this thread is spent
+     */
+    static void requireNotExceeded() {
+        Budget budget = CURRENT.get();
+        if (budget != null && budget.exceeded) {
+            throw new BudgetExceeded();
+        }
+    }
+
     private static synchronized void install() {
         if (installed) {
             return;
