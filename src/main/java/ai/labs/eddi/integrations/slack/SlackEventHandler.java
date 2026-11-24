@@ -761,15 +761,23 @@ public class SlackEventHandler {
             // did not would make the delta the conversation's ENTIRE history
             // of tool spend, charged to this one turn — which would retire
             // the observer's daily budget on its first reply.
-            OptionalDouble costAfter = conversationCost(conversationId);
-            if (costBefore.isPresent() && costAfter.isPresent()) {
-                double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
-                if (spent > 0) {
-                    observeGate.addCost("slack", channelId, target, spent);
+            //
+            // Caught here, not left to the caller: the turn now runs inline, and a
+            // failure escaping from here would be logged as a failed selection.
+            try {
+                OptionalDouble costAfter = conversationCost(conversationId);
+                if (costBefore.isPresent() && costAfter.isPresent()) {
+                    double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
+                    if (spent > 0) {
+                        observeGate.addCost("slack", channelId, target, spent);
+                    }
+                } else if (conversationId != null) {
+                    LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
+                            sanitize(conversationId));
                 }
-            } else if (conversationId != null) {
-                LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
-                        sanitize(conversationId));
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "[OBSERVE] Could not record the cost of target '%s' answering in channel %s",
+                        sanitize(target.getName()), sanitize(channelId));
             }
         }
         return true;

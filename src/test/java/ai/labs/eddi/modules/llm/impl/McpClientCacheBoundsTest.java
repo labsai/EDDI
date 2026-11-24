@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.client.McpClient;
@@ -16,12 +17,14 @@ import dev.langchain4j.service.tool.ToolExecutionResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -29,7 +32,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,6 +69,7 @@ class McpClientCacheBoundsTest {
     /** URL of every client closed so far, with the thread that closed it. */
     private final Map<String, Thread> closed = new ConcurrentHashMap<>();
     private final AtomicInteger builds = new AtomicInteger();
+    private final SecretResolver secretResolver = mock(SecretResolver.class);
 
     @AfterEach
     void tearDown() {
@@ -74,7 +81,7 @@ class McpClientCacheBoundsTest {
     }
 
     private McpToolProviderManager manager(int maxSize, long idleMillis, Function<McpServerConfig, McpClient> builder) {
-        return new McpToolProviderManager(mock(GlobalVariableResolver.class), mock(SecretResolver.class),
+        return new McpToolProviderManager(mock(GlobalVariableResolver.class), secretResolver,
                 new CallerIdentityResolver(NO_CALLER, true), NO_CALLER, false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS,
                 McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES, McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER,
                 McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS, maxSize, idleMillis, null) {
@@ -113,13 +120,24 @@ class McpClientCacheBoundsTest {
         return client;
     }
 
+    private static void awaitCondition(BooleanSupplier condition, Runnable poll) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            poll.run();
+            Thread.sleep(10);
+        }
+    }
+
+    private static ToolExecutionRequest request(String url) {
+        return ToolExecutionRequest.builder().name(toolName(url)).arguments("{}").build();
+    }
+
     private static String toolName(String url) {
         return "tool_" + URI.create(url).getHost().replace('.', '_');
     }
 
     private static String call(McpToolProviderManager.McpToolsResult tools, String url) {
-        String name = toolName(url);
-        return tools.executors().get(name).execute(ToolExecutionRequest.builder().name(name).arguments("{}").build(), null);
+        return tools.executors().get(toolName(url)).execute(request(url), null);
     }
 
     private static McpServerConfig config(String url) {
@@ -319,16 +337,173 @@ class McpClientCacheBoundsTest {
 
         Future<String> inFlight = pool.submit(() -> call(tools, url));
         assertTrue(entered.await(10, TimeUnit.SECONDS));
-        Thread.sleep(200);
-        manager.runCacheMaintenance();
+        // Until the entry has expired and its removal has been handled — either as a
+        // deferred close (correct) or as a close (the bug).
+        awaitCondition(() -> manager.getActiveConnectionCount() == 0 && (manager.pendingCloseCount() == 1 || !closed.isEmpty()),
+                manager::runCacheMaintenance);
         assertEquals(0, manager.getActiveConnectionCount(), "the idle entry is evicted");
-        Thread.sleep(200); // give an (incorrect) close on Caffeine's executor time to run
         assertTrue(closed.isEmpty(), "the client must stay open under the call that is using it");
+        assertEquals(1, manager.pendingCloseCount());
 
         release.countDown();
         assertEquals("answered by " + url, inFlight.get(10, TimeUnit.SECONDS));
         awaitClosed(1);
         assertTrue(closed.containsKey(url), "the evicted client is closed once its last call finishes");
+    }
+
+    /**
+     * One server with a discovered tool whose call blocks until {@code release}.
+     */
+    private McpToolProviderManager busyServer(String url, CountDownLatch entered, CountDownLatch release) {
+        return manager(16, c -> toolClient(c.getUrl(), () -> {
+            entered.countDown();
+            await(release);
+        }));
+    }
+
+    @Test
+    @DisplayName("closeClient during a tool call defers the close until the call returns")
+    void closeClientWaitsForTheCallInFlight() throws Exception {
+        String url = "http://closing.example/mcp";
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var manager = busyServer(url, entered, release);
+        var tools = manager.discoverTools(List.of(config(url)));
+
+        Future<String> inFlight = pool.submit(() -> call(tools, url));
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+        manager.closeClient(url);
+        assertTrue(closed.isEmpty(), "closeClient must not close the client under the call");
+        assertEquals(1, manager.pendingCloseCount());
+
+        release.countDown();
+        assertEquals("answered by " + url, inFlight.get(10, TimeUnit.SECONDS));
+        assertTrue(closed.containsKey(url), "closed as soon as the call released it");
+        assertEquals(0, manager.pendingCloseCount());
+    }
+
+    @Test
+    @DisplayName("a vault secret change during a tool call defers that client's close until the call returns")
+    @SuppressWarnings("unchecked")
+    void secretRotationWaitsForTheCallInFlight() throws Exception {
+        String url = "http://rotating.example/mcp";
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var manager = busyServer(url, entered, release);
+        manager.registerSecretInvalidation();
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+        var tools = manager.discoverTools(List.of(config(url)));
+
+        Future<String> inFlight = pool.submit(() -> call(tools, url));
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+        listener.getValue().accept(null);
+        assertEquals(0, manager.getActiveConnectionCount(), "rotation drops every cached client");
+        assertTrue(closed.isEmpty(), "rotation must not close the client under the call");
+
+        release.countDown();
+        inFlight.get(10, TimeUnit.SECONDS);
+        assertTrue(closed.containsKey(url), "closed as soon as the call released it");
+    }
+
+    @Test
+    @DisplayName("a tool call that throws still releases its lease")
+    void failedCallReleasesItsLease() throws Exception {
+        String url = "http://failing.example/mcp";
+        var manager = manager(16, c -> toolClient(c.getUrl(), () -> {
+            throw new IllegalStateException("tool blew up");
+        }));
+        var tools = manager.discoverTools(List.of(config(url)));
+
+        assertThrows(IllegalStateException.class, () -> call(tools, url));
+        manager.closeClient(url);
+        assertTrue(closed.containsKey(url), "no lease is left behind, so the close is immediate");
+        assertEquals(0, manager.pendingCloseCount());
+    }
+
+    @Test
+    @DisplayName("a client retired between its lookup and its lease is not used; a fresh one is built")
+    void clientRetiredBeforeTheLeaseIsNotUsed() throws Exception {
+        String url = "http://racing.example/mcp";
+        var retireOnNextLookup = new AtomicBoolean();
+        List<McpClient> built = new CopyOnWriteArrayList<>();
+        var manager = new McpToolProviderManager(mock(GlobalVariableResolver.class), secretResolver,
+                new CallerIdentityResolver(NO_CALLER, true), NO_CALLER, false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS,
+                McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES, McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER,
+                McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS, 16,
+                McpToolProviderManager.DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS, null) {
+            @Override
+            McpClient buildClient(McpServerConfig config) {
+                McpClient client = toolClient(config.getUrl(), () -> {
+                });
+                built.add(client);
+                return client;
+            }
+
+            @Override
+            McpClient getOrCreateClient(McpServerConfig config) {
+                McpClient client = super.getOrCreateClient(config);
+                if (retireOnNextLookup.getAndSet(false)) {
+                    closeClient(config.getUrl()); // removed and closed after the lookup, before the lease
+                }
+                return client;
+            }
+        };
+        var tools = manager.discoverTools(List.of(config(url)));
+        retireOnNextLookup.set(true);
+
+        assertEquals("answered by " + url, call(tools, url));
+        assertEquals(2, built.size(), "the retired client is replaced");
+        verify(built.get(0), never()).executeTool(any(), any());
+        assertTrue(closed.containsKey(url), "the retired client was closed");
+    }
+
+    @Test
+    @DisplayName("cancelling an async tool call cancels the call itself and releases the lease")
+    void cancellingAnAsyncCallCancelsTheCall() throws Exception {
+        String url = "http://async.example/mcp";
+        var pending = new CompletableFuture<ToolExecutionResult>();
+        var manager = manager(16, c -> {
+            McpClient client = toolClient(c.getUrl(), () -> {
+            });
+            when(client.executeToolAsync(any(), any())).thenReturn(pending);
+            return client;
+        });
+        var tools = manager.discoverTools(List.of(config(url)));
+
+        var call = tools.executors().get(toolName(url)).executeAsync(request(url), null);
+        assertTrue(call.cancel(true));
+        assertTrue(pending.isCancelled(), "the cancellation must reach the MCP call");
+        manager.closeClient(url);
+        assertTrue(closed.containsKey(url), "the lease was released");
+    }
+
+    @Test
+    @DisplayName("rebuilding a client for a tool call goes through the circuit breaker")
+    void rebuildForACallUsesTheCircuitBreaker() throws Exception {
+        String url = "http://down.example/mcp";
+        var serverDown = new AtomicBoolean();
+        var manager = manager(16, c -> {
+            if (serverDown.get()) {
+                throw new IllegalStateException("connection refused");
+            }
+            return toolClient(c.getUrl(), () -> {
+            });
+        });
+        var tools = manager.discoverTools(List.of(config(url)));
+        manager.closeClient(url);
+        serverDown.set(true);
+
+        int buildsBefore = builds.get();
+        for (int i = 0; i < 3; i++) {
+            assertThrows(IllegalStateException.class, () -> call(tools, url));
+        }
+        assertEquals(buildsBefore + 3, builds.get(), "each failed rebuild is a connect attempt");
+        assertTrue(manager.isCircuitOpen(config(url)), "failed rebuilds count towards opening the circuit");
+
+        var refused = assertThrows(IllegalStateException.class, () -> call(tools, url));
+        assertTrue(refused.getMessage().contains("circuit breaker"), refused.getMessage());
+        assertEquals(buildsBefore + 3, builds.get(), "an open circuit fails the call without connecting");
     }
 
     /**

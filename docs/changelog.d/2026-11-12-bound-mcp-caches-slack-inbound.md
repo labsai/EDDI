@@ -26,7 +26,13 @@ unrelated servers hashed to the same bin.
   A's tools were already in the result, and every later call to them reached
   the closed client. A client that is removed from the cache (by eviction,
   `closeClient` or secret rotation) while a call or a discovery still holds it
-  is closed when the last of those finishes, not under it.
+  is closed when the last of those finishes, not under it. A removed client is
+  marked retired and is never leased again. The substitute executor keeps the
+  tool's fixed name and the attribute policy that `McpToolProvider` uses.
+  Cancelling an async call cancels the MCP call itself. A call that has to
+  rebuild its client goes through discovery's circuit breaker and failure
+  classification, so a server that is down fails fast instead of costing every
+  call a connect timeout.
 - A client is built **outside** any lock. The first caller claims the key with an
   empty future and builds on its own thread. Concurrent callers for the same key
   wait for that future and share the one client. Callers for other keys never wait

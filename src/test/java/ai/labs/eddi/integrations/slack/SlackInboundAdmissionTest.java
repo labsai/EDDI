@@ -121,6 +121,45 @@ class SlackInboundAdmissionTest {
         };
     }
 
+    /**
+     * An event that holds its slot until {@link #release} opens and ignores
+     * interrupts while it waits, so shutdownNow() cannot free its slot early.
+     */
+    private HashMap<String, Object> uninterruptibleEvent() {
+        return new HashMap<>() {
+            @Override
+            public Object get(Object key) {
+                if ("type".equals(key)) {
+                    inside.incrementAndGet();
+                    boolean interrupted = false;
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    try {
+                        while (release.getCount() > 0 && System.nanoTime() < deadline) {
+                            try {
+                                release.await(100, TimeUnit.MILLISECONDS);
+                            } catch (InterruptedException e) {
+                                interrupted = true;
+                            }
+                        }
+                    } finally {
+                        inside.decrementAndGet();
+                        processed.incrementAndGet();
+                        if (interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return "message";
+                }
+                return super.get(key);
+            }
+
+            @Override
+            public boolean containsKey(Object key) {
+                return "bot_id".equals(key) || super.containsKey(key);
+            }
+        };
+    }
+
     private static void awaitValue(AtomicInteger value, int expected) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (value.get() < expected && System.nanoTime() < deadline) {
@@ -246,7 +285,9 @@ class SlackInboundAdmissionTest {
     @DisplayName("an accepted event still waiting for a slot at shutdown is dropped with a warning, not silently")
     void shutdownLogsAWaitingEventItDrops() throws Exception {
         var handler = handler(1, 1);
-        assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-running", blockingEvent(), null));
+        // The running event ignores the interrupt, so its slot cannot pass to the
+        // waiting one before that one sees its own interrupt.
+        assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-running", uninterruptibleEvent(), null));
         awaitValue(inside, 1);
         assertEquals(Admission.ACCEPTED, handler.handleEventAsync("evt-waiting", blockingEvent(), null));
 
