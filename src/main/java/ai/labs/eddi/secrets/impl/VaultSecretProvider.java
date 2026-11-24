@@ -650,6 +650,29 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    /**
+     * The default tenant plus every tenant holding a DEK. A secret is sealed under
+     * its tenant's DEK, so a tenant with any secret has one — the DEK listing is
+     * the tenant registry this store already keeps.
+     */
+    @Override
+    public List<String> listTenants() throws SecretProviderException {
+        ensureAvailable();
+        try {
+            Set<String> tenants = new LinkedHashSet<>();
+            tenants.add(SecretReference.DEFAULT_TENANT);
+            for (EncryptedDek dek : persistence.listAllDeks()) {
+                if (dek.getTenantId() != null && !dek.getTenantId().isBlank()) {
+                    tenants.add(dek.getTenantId());
+                }
+            }
+            return List.copyOf(tenants);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while listing the vault's tenants", e);
+        }
+    }
+
     @Override
     public boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
         // Holds the keyed-checksum key, so it can verify both the current keyed form
