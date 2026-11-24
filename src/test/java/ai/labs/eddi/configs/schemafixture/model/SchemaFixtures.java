@@ -31,9 +31,9 @@ public final class SchemaFixtures {
     public static class StrictConfig {
         public String name;
         public Nested nested;
-        public List<Nested> nestedList;
+        public List<ListItem> nestedList;
         public Map<String, String> parameters;
-        public Map<String, Nested> nestedByKey;
+        public Map<String, MapValue> nestedByKey;
         public Tolerant tolerant;
         public Polymorphic polymorphic;
         public Object anything;
@@ -46,6 +46,16 @@ public final class SchemaFixtures {
     }
 
     public static class Nested {
+        public String value;
+    }
+
+    /** Reached only as a list element. */
+    public static class ListItem {
+        public String value;
+    }
+
+    /** Reached only as a map value. */
+    public static class MapValue {
         public String value;
     }
 

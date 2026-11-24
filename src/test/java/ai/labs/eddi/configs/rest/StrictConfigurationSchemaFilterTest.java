@@ -74,9 +74,9 @@ class StrictConfigurationSchemaFilterTest {
                     "properties": {
                       "name": {"type": "string"},
                       "nested": {"$ref": "#/components/schemas/Nested"},
-                      "nestedList": {"type": "array", "items": {"$ref": "#/components/schemas/Nested"}},
+                      "nestedList": {"type": "array", "items": {"$ref": "#/components/schemas/ListItem"}},
                       "parameters": {"type": "object", "additionalProperties": {"type": "string"}},
-                      "nestedByKey": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/Nested"}},
+                      "nestedByKey": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/MapValue"}},
                       "tolerant": {"$ref": "#/components/schemas/Tolerant"},
                       "polymorphic": {"$ref": "#/components/schemas/Polymorphic"},
                       "anything": {},
@@ -90,6 +90,8 @@ class StrictConfigurationSchemaFilterTest {
                   },
                   "StrictConfig1": {"type": "object", "properties": {"other": {"type": "string"}}},
                   "Nested": {"type": "object", "properties": {"value": {"type": "string"}}},
+                  "ListItem": {"type": "object", "properties": {"value": {"type": "string"}}},
+                  "MapValue": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "Tolerant": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "Polymorphic": {"type": "object", "properties": {"type": {"type": "string"}}},
                   "WithIgnoredName": {"type": "object", "properties": {"value": {"type": "string"}}},
@@ -133,8 +135,10 @@ class StrictConfigurationSchemaFilterTest {
 
     @Test
     void nestedObjectsReachedFromAStrictBodyAreClosed() {
-        // Reached directly, through a list and as a map value.
+        // One type per path, so each traversal is proven on its own.
         assertClosed("Nested");
+        assertClosed("ListItem");
+        assertClosed("MapValue");
     }
 
     @Test
