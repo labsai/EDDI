@@ -18,7 +18,9 @@ import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.EmailSenderLists;
+import ai.labs.eddi.configs.channels.model.EmailSenderRoles;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -1553,6 +1555,75 @@ public class McpAdminTools {
             return resultJson("updated", result);
         } catch (Exception e) {
             return toolFailure(LOGGER, "update_email_senders", "Failed to update the sender lists", e);
+        }
+    }
+
+    @Tool(name = "list_email_roles", description = "Read the sender roles of an email integration: {version, senderRoles, "
+            + "rolePolicies} of its current version. A role binds to the authenticated sender of an aligned DKIM pass only (first "
+            + "matching entry wins); an authenticated sender no role names is 'default', an unauthenticated mail 'anonymous'. Pass "
+            + "the version to update_email_roles as expectedVersion.")
+    public String listEmailRoles(@ToolArg(description = "Email integration resource ID (required)") String integrationId) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        try {
+            var view = getRestStore(IRestChannelIntegrationStore.class).readEmailRoles(integrationId);
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("version", view.version());
+            result.put("senderRoles", view.senderRoles());
+            result.put("rolePolicies", view.rolePolicies());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "list_email_roles", "Failed to read the sender roles", e);
+        }
+    }
+
+    @Tool(name = "update_email_roles", description = "Replace the sender roles and role policies of an email integration without "
+            + "rewriting it. roles is JSON: {\"senderRoles\": [{\"role\": \"customer\", \"senders\": [\"*@customer.com\"]}], "
+            + "\"rolePolicies\": {\"customer\": {\"targets\": [\"support\"], \"tools\": [\"kb_search\"], "
+            + "\"maxTurnsPerSenderPerDay\": 10}}}. The list is replaced as a whole (first match wins). A role can only narrow: "
+            + "targets among the integration's, tools as a ceiling, a cap of at most the integration's. Every role needs a policy; "
+            + "'default' and 'anonymous' may have one. A change is a new version of the integration with an audit entry. A stale "
+            + "expectedVersion is refused with the current roles. Never callable from a conversation an email started.")
+    public String updateEmailRoles(
+                                   @ToolArg(description = "Email integration resource ID (required)") String integrationId,
+                                   @ToolArg(description = "The version list_email_roles returned (required)") Integer expectedVersion,
+                                   @ToolArg(description = "JSON {senderRoles, rolePolicies}; {} removes every role (required)") String roles,
+                                   @ToolArg(description = "Why, for the audit trail", required = false) String reason) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        if (expectedVersion == null)
+            return errorJson("expectedVersion is required: read it with list_email_roles");
+        if (roles == null || roles.isBlank())
+            return errorJson("roles is required: a JSON object {senderRoles, rolePolicies}, or {} to remove every role");
+        try {
+            EmailControl parsed = readCallerJson("roles", () -> jsonSerialization.deserialize(roles, EmailControl.class));
+            var request = new EmailSenderRoles.UpdateRequest(expectedVersion, parsed == null ? null : parsed.getSenderRoles(),
+                    parsed == null ? null : parsed.getRolePolicies(), reason);
+            Response response;
+            try {
+                response = getRestStore(IRestChannelIntegrationStore.class).updateEmailRoles(integrationId, request);
+            } catch (WebApplicationException refused) {
+                if (refused.getResponse() == null || refused.getResponse().getStatus() != Response.Status.CONFLICT.getStatusCode()) {
+                    throw refused;
+                }
+                response = refused.getResponse();
+            }
+            Object body = entityOf(response);
+            if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                return errorJson("expectedVersion " + expectedVersion + " is not the current version; nothing was changed. Read the "
+                        + "roles again with list_email_roles and retry. Current: " + jsonSerialization.serialize(body), "CONFLICT", null);
+            }
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("status", response.getStatus());
+            result.put("result", body);
+            putWarnings(result, response);
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "update_email_roles", "Failed to update the sender roles", e);
         }
     }
 

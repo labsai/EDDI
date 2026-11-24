@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -78,6 +79,8 @@ public class ConversationMemory implements IConversationMemory {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     /** The origin taint (TurnOrigin), sticky once set. */
     private String origin;
+    /** The tool ceiling (TurnToolCeiling), sticky and only narrowing. */
+    private Set<String> toolCeiling;
     private volatile boolean cancelled;
     /**
      * Cluster mode: whether this turn's lease is lost; see
@@ -475,6 +478,16 @@ public class ConversationMemory implements IConversationMemory {
         if (origin != null) {
             this.origin = origin;
         }
+    }
+
+    @Override
+    public Set<String> getToolCeiling() {
+        return this.toolCeiling;
+    }
+
+    @Override
+    public void setToolCeiling(Set<String> toolCeiling) {
+        this.toolCeiling = TurnToolCeiling.intersect(this.toolCeiling, toolCeiling);
     }
 
     @Override

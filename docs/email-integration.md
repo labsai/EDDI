@@ -599,6 +599,85 @@ or an `httpcalls` write to one of those paths. That check is best effort: it can
 at runtime, skips GROUP targets and documents it cannot read, and does not run when the agent changes after the
 integration was saved.
 
+## Sender roles
+
+Who sent a mail can decide what it may do. **Sender roles** give authenticated senders a role, and a role a policy:
+which targets the mail may reach, which tools its turns may call, and how many turns a day the sender gets. They live
+in the integration's typed `emailControl` object, next to `platformConfig`:
+
+```json
+"emailControl": {
+  "senderRoles": [
+    { "role": "exec",     "senders": ["cfo@company.com", "ceo@company.com"] },
+    { "role": "staff",    "senders": ["*@company.com"] },
+    { "role": "customer", "senders": ["*@customer-a.com", "*@customer-b.de"] }
+  ],
+  "rolePolicies": {
+    "exec":     {},
+    "staff":    { "maxTurnsPerSenderPerDay": 30 },
+    "customer": { "targets": ["support"], "tools": ["kb_search"] },
+    "anonymous": { "targets": ["support"] }
+  }
+}
+```
+
+- **First matching entry wins**, so the list is ordered: put the narrow patterns first.
+- **A role binds to the authenticated sender only**: the `From` of an aligned DKIM pass, read from the signed view
+  after the sender lists, `requireAuthentication` and replay protection have run. A `From` that is merely claimed —
+  an unaligned pass, a failure, no signature — never earns a role, and a replayed copy of a signed mail is refused as
+  a replay before any role is looked at.
+- An authenticated sender no entry names is role **`default`**; an unauthenticated mail (only possible with
+  `requireAuthentication: false`) is role **`anonymous`**. Both may have a policy; without one, `default` is today's
+  behaviour, and `anonymous` reaches every target but **never gets a tool**, whatever is stored.
+- Every role in `senderRoles` needs a policy, even `{}`. A stored document whose role lacks one refuses that
+  sender's mail (`blocked:role_without_policy`) rather than guess.
+- Without any `senderRoles` **and** any `rolePolicies`, nothing changes: every sender is `default`. Roles apply as soon
+  as either is non-empty: a lone `anonymous` or `default` policy is a restriction and is enforced as one.
+- **Deviation until the approval gate (phase C4) ships:** the plan gives `anonymous` the target's `readOnlyTools`; that
+  field does not exist yet, so `anonymous` gets **no tools at all**, and once roles are active, unauthenticated mail
+  cannot reach a GROUP target either.
+
+**A role only narrows** — what applies is always the intersection of the role and what was already there:
+
+| Policy field | Meaning | Limit |
+|---|---|---|
+| `targets` | Target names the role may reach; `["*"]` or absent for all | A mail routed elsewhere is refused `blocked:role_target_not_allowed`, never rerouted. A target's own `allowedSenders` still apply: a role never lets a sender past them. A continued conversation is judged by its agent, as for [per-target senders](#per-target-senders) |
+| `tools` | The only tool names the role's turns may call | A ceiling, intersected with what the agent has: LLM tools of every source, `mcpcalls` and rule-driven `httpcalls` (by call name). It holds from the `CONVERSATION_START` turn on, survives a HITL resume, and is carried into an in-process delegation (`converseWithAgent`) and a follow-up check-back (`scheduleFollowup`, both conversation strategies). The model is only offered the permitted tools; LAZY loading is off under a ceiling (`discover_tools` is dropped and the permitted tools are offered directly). Tools that hand work to somewhere the ceiling cannot follow are **refused under any ceiling, even when named**: `handoff_to_team`, `addGroupTask` (the backlog a cadence works later), and EDDI's own MCP tools that start a group discussion, a conversation, a schedule or a cadence over the API (`discuss_with_group`, `start_group_discussion`, `add_team_task`, `chat_with_agent`, `talk_to_agent`, `create_conversation`, `create_schedule`, …). A tool that calls EDDI's API by other means (an httpcall, an A2A peer) runs its target under the target's own tools, since only the origin taint crosses an HTTP hop: name such a tool in a role only deliberately. A role with `tools` cannot reach a **GROUP** target — named, or through `["*"]` / no targets — whose members use their own tools |
+| `maxTurnsPerSenderPerDay` | The per-sender daily cap | At most the integration's `maxTurnsPerSenderPerDay`; absent or `0` inherits it; the lower one always applies |
+| `approvalPolicy` | Reserved for the email approval gate | Only `"none"` is accepted until the gate ships |
+| `sendOut` | Reserved for send-out to third parties | Only `false` is accepted until send-out ships |
+
+Saving refuses a widening policy (a cap above the integration's, a target it does not have), an `anonymous` policy
+with tools, reserved names (`default`, `anonymous`) in `senderRoles`, and `emailControl` on any other channel type.
+The runtime computes every limit as an intersection again, so a document that slipped past the check widens nothing.
+
+An unauthenticated mail never enters an existing conversation (conversation mode requires authentication, and thread
+correlation only binds authenticated senders), so a forged `From` cannot strip a conversation's tools. A conversation
+keeps the **narrowest** tool ceiling of any mail that ran in it: a ceiling is never widened or cleared
+by a later turn. Widening a role's tools therefore applies to new conversations. The turn sees its role as
+`mail.senderRole`, so a prompt can adapt its tone; nothing that matters is decided by it.
+
+**Trust.** DKIM authenticates the sender's **domain**, not the person. Within one Workspace or Microsoft 365 domain a
+person normally cannot send as a colleague, but aliases, "send mail as" and shared mailboxes can open that up. Roles
+bind to addresses, not EDDI users; identities stay `SELF_ASSERTED` and `PER_USER` connections stay refused.
+
+**Editing roles.** Like the sender lists, roles are edited without rewriting the integration:
+
+| Method | Path | Body |
+|---|---|---|
+| `GET` | `/channelstore/channels/{id}/email-roles` | — answers `{version, senderRoles, rolePolicies}` (view access) |
+| `PUT` | `/channelstore/channels/{id}/email-roles` | `{expectedVersion, senderRoles, rolePolicies, reason}` (edit access); replaces both as a whole |
+
+A stale `expectedVersion` answers `409` with the current roles. Every change is a new version of the integration
+and one `EMAIL_SENDER_ROLES_CHANGED` audit entry naming the roles and policies added, removed or changed, and for a
+changed policy which fields (`policy~:customer[targets,tools,cap]`) — by role and field name, never an address — and
+the reason. The MCP tools are `list_email_roles` and `update_email_roles`. A
+whole-document save that leaves `emailControl` out while the stored version has roles is refused, so a client that
+does not know the field cannot drop them silently; send `"emailControl": {}` to remove them on purpose. Like every
+channel write, a conversation that an email started can never change the roles: the tool and the path are on the
+[escalation guard](#managing-senders)'s lists. The Manager shows the roles under the sender lists; the Platform
+Operator can read them but not change them.
+
 ## Personal data
 
 - **No raw mail is stored.** The rendered input enters conversation memory like any user input; attachments are

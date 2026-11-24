@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import java.util.Set;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfig;
@@ -88,6 +90,24 @@ class FollowUpToolsTest {
         assertFalse(schedule.isCreatorAdmin());
         assertEquals(List.of("team-a"), schedule.getCreatorTeams());
         assertEquals(FollowUpTools.METADATA_TYPE_VALUE, schedule.getMetadata().get(FollowUpTools.METADATA_TYPE_KEY));
+    }
+
+    @Test
+    void aCheckBackBookedUnderASenderRoleCarriesItsToolCeiling() throws Exception {
+        // Email plan v3 §9: a "new"-strategy check-back starts a conversation that
+        // must be under the same sender role's tool ceiling as the turn that booked it.
+        var principals = new ResolutionPrincipalContext();
+        principals.bind(new ResolutionPrincipal("email:x:ann@customer-a.com", ResolutionPrincipal.Provenance.SELF_ASSERTED, TurnOrigin.EMAIL,
+                Set.of("kb_search", "scheduleFollowup")));
+        try {
+            assertTrue(parse(tools().scheduleFollowup(SOON, "again", "agent")).get("booked").asBoolean());
+        } finally {
+            principals.clear();
+        }
+        assertEquals(Set.of("kb_search", "scheduleFollowup"), TurnToolCeiling.fromMetadata(stored.get(0).getMetadata()));
+
+        assertTrue(parse(tools().scheduleFollowup(SOON, "again", "agent")).get("booked").asBoolean());
+        assertNull(TurnToolCeiling.fromMetadata(stored.get(1).getMetadata()), "a booking without a ceiling carries none");
     }
 
     @Test

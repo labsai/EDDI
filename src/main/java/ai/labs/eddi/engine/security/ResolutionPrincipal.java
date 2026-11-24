@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security;
 
+import java.util.Set;
+
 /**
  * Whose authority a per-user credential is resolved under for the turn
  * currently executing — and how much that identity is actually worth.
@@ -39,12 +41,25 @@ package ai.labs.eddi.engine.security;
  *            {@link #provenance()} a child inherits it whatever its user id is:
  *            the taint only narrows what a turn may do, so losing it is the
  *            failure, never keeping it.
+ * @param toolCeiling
+ *            the only tool names the turn may call ({@link TurnToolCeiling}),
+ *            set by an email sender role; {@code null} for no ceiling.
+ *            Inherited like {@code origin}, for the same reason.
  */
-public record ResolutionPrincipal(String userId, Provenance provenance, String origin) {
+public record ResolutionPrincipal(String userId, Provenance provenance, String origin, Set<String> toolCeiling) {
 
     /** A principal without an origin taint. */
     public ResolutionPrincipal(String userId, Provenance provenance) {
-        this(userId, provenance, null);
+        this(userId, provenance, null, null);
+    }
+
+    /** A principal without a tool ceiling. */
+    public ResolutionPrincipal(String userId, Provenance provenance, String origin) {
+        this(userId, provenance, origin, null);
+    }
+
+    public ResolutionPrincipal {
+        toolCeiling = toolCeiling == null ? null : Set.copyOf(toolCeiling);
     }
 
     /**

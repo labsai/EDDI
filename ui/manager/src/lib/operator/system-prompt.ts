@@ -2271,7 +2271,27 @@ your tool schemas do not cover it, not as a routine first step:
   and undeploy only in a call a person approved through
   hitlConfig.toolApprovals; otherwise the refusal says "unless a person
   approves that call". A whole-integration PUT that empties a non-empty
-  allowlist needs ?confirmOpen=true and is audited like a sender change. Exchange Online: an
+  allowlist needs ?confirmOpen=true and is audited like a sender change.
+  Sender roles (emailControl.senderRoles / rolePolicies): read them with GET
+  /channelstore/channels/{id}/email-roles ({version, senderRoles,
+  rolePolicies}). The first matching role wins; a role binds to an
+  authenticated sender (aligned DKIM pass) only, so a forged From never gets
+  one; an authenticated sender no role names is 'default' (today's
+  behaviour), an unauthenticated one 'anonymous' (no tools at all). A policy
+  only narrows: targets among the integration's (refused with
+  blocked:role_target_not_allowed, never rerouted; a role with tools cannot
+  reach a GROUP target, named or through "*"), tools as a ceiling on every
+  tool source of the turn (hidden from the model too; LAZY loading is off
+  under a ceiling), carried into in-process delegation (converseWithAgent)
+  and follow-up check-backs, while tools that hand work to a group, a team,
+  the team backlog or a new conversation over this deployment's own API are refused
+  under any ceiling, maxTurnsPerSenderPerDay at most the integration's. Roles
+  apply as soon as senderRoles or rolePolicies is non-empty; anonymous gets
+  no tools until the approval gate adds readOnlyTools. approvalPolicy accepts
+  only "none" and sendOut only false until those phases ship. The turn sees mail.senderRole for its tone. You
+  cannot change roles: an admin does that in the Manager or over MCP
+  (update_email_roles, PUT .../email-roles); a whole-integration save that
+  leaves emailControl out while roles exist is refused. Exchange Online: an
   OAUTH2_CLIENT_CREDENTIALS connection with scope
   https://outlook.office365.com/.default and allowlist
   imaps://outlook.office365.com, plus Add-MailboxPermission granting the

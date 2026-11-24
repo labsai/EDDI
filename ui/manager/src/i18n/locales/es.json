@@ -5717,6 +5717,26 @@
     "apply": "Aplicar cambios de remitentes",
     "discard": "Descartar"
   },
+  "emailRoles": {
+    "loading": "Cargando los roles de remitente…",
+    "invalidJson": "Los roles deben ser un objeto JSON con senderRoles y rolePolicies.",
+    "saved": "Roles de remitente guardados como versión {{version}}.",
+    "nothingChanged": "No ha cambiado nada.",
+    "conflict": "Alguien cambió esta integración mientras tanto. Los roles se recargaron; revíselos y aplíquelos de nuevo.",
+    "title": "Roles de remitente",
+    "none": "Sin roles: cada remitente permitido llega a cada destino con las herramientas del agente.",
+    "summary": "{{senders}} → destinos: {{targets}}; herramientas: {{tools}}",
+    "agentTools": "las herramientas del agente",
+    "trust": "Un rol confía en la firma del dominio del remitente (DKIM): depende de que su proveedor de correo impida que una persona envíe como otra (alias, buzones compartidos, «enviar como»). Ejecute la autoprueba para comprobar el dominio.",
+    "editLabel": "Roles y políticas (JSON)",
+    "hint": "Gana el primer rol que coincide. Un rol solo se asigna a un remitente autenticado; el correo no autenticado es 'anonymous' y no recibe herramientas. Un rol solo puede restringir: destinos, herramientas y un maxTurnsPerSenderPerDay menor. Una conversación iniciada por un correo nunca puede cambiar estos roles.",
+    "saveFirst": "Guarde o descarte primero sus otros cambios; los roles de remitente se aplican por separado.",
+    "reason": "Por qué (para el registro de auditoría)",
+    "apply": "Aplicar cambios de roles",
+    "discard": "Descartar",
+    "unauthenticated": "correo no autenticado",
+    "otherSenders": "otros remitentes autenticados"
+  },
   "feedback": {
     "title": "Valoraciones",
     "subtitle": "Lo que la gente dijo de tus agentes y lo que aún hay que revisar.",

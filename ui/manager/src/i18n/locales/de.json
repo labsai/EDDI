@@ -5665,6 +5665,26 @@
     "apply": "Absenderänderungen anwenden",
     "discard": "Verwerfen"
   },
+  "emailRoles": {
+    "loading": "Absenderrollen werden geladen…",
+    "invalidJson": "Die Rollen müssen ein JSON-Objekt mit senderRoles und rolePolicies sein.",
+    "saved": "Absenderrollen als Version {{version}} gespeichert.",
+    "nothingChanged": "Nichts geändert.",
+    "conflict": "Jemand hat diese Integration inzwischen geändert. Die Rollen wurden neu geladen; prüfen Sie sie und übernehmen Sie sie erneut.",
+    "title": "Absenderrollen",
+    "none": "Keine Rollen: Jeder zugelassene Absender erreicht jedes Ziel mit den Werkzeugen des Agenten.",
+    "summary": "{{senders}} → Ziele: {{targets}}; Werkzeuge: {{tools}}",
+    "agentTools": "die Werkzeuge des Agenten",
+    "trust": "Eine Rolle vertraut der Domain-Signatur des Absenders (DKIM): Sie setzt voraus, dass Ihr Mailanbieter verhindert, dass jemand als eine andere Person sendet (Aliase, geteilte Postfächer, „Senden als“). Prüfen Sie die Domain mit dem Selbsttest.",
+    "editLabel": "Rollen und Richtlinien (JSON)",
+    "hint": "Die erste passende Rolle gilt. Eine Rolle gilt nur für einen authentifizierten Absender; nicht authentifizierte Mail ist 'anonymous' und erhält keine Werkzeuge. Eine Rolle kann nur einschränken: Ziele, Werkzeuge und ein niedrigeres maxTurnsPerSenderPerDay. Eine von einer E-Mail gestartete Unterhaltung kann diese Rollen nie ändern.",
+    "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderrollen werden separat übernommen.",
+    "reason": "Warum (für das Audit-Protokoll)",
+    "apply": "Rollenänderungen übernehmen",
+    "discard": "Verwerfen",
+    "unauthenticated": "nicht authentifizierte Mail",
+    "otherSenders": "andere authentifizierte Absender"
+  },
   "feedback": {
     "title": "Feedback",
     "subtitle": "Was Menschen über Ihre Agenten gesagt haben – und was noch einen Blick braucht.",

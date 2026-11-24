@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffService;
@@ -39,6 +40,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.tools.impl.DiscoverToolsTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
@@ -902,13 +904,48 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
+        Set<String> ceiling = TurnToolCeiling.current();
         if (externalLazy) {
-            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+            return withAnswerTool(withinToolCeiling(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), ceiling), task);
         }
         var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
                 assembled.toolEndpoints(), assembled.toolRequestResolvers());
-        return withAnswerTool(setup, task);
+        return withAnswerTool(withinToolCeiling(setup, ceiling), task);
+    }
+
+    /**
+     * The setup under an email sender role's tool ceiling (email plan v3 §9): the
+     * model is offered only the tools the ceiling permits, so it never plans around
+     * a tool that would be refused. {@code ToolExecutionService} still refuses at
+     * run time; this only hides. LAZY loading is switched off under a ceiling: the
+     * {@code discover_tools} meta-tool is dropped and the permitted tools are
+     * offered directly (a role's list is short), so the meta-tool needs no
+     * exemption from the ceiling and cannot advertise hidden tools.
+     */
+    static ToolSetup withinToolCeiling(ToolSetup setup, Set<String> ceiling) {
+        if (ceiling == null || setup == null) {
+            return setup;
+        }
+        List<ToolSpecification> specs = new ArrayList<>();
+        for (ToolSpecification spec : setup.toolSpecs()) {
+            if (!DiscoverToolsTool.NAME.equals(spec.name()) && TurnToolCeiling.permits(ceiling, spec.name())) {
+                specs.add(spec);
+            }
+        }
+        Set<String> kept = new HashSet<>();
+        specs.forEach(spec -> kept.add(spec.name()));
+        Map<String, ToolExecutor> executors = copyOf(setup.toolExecutors());
+        executors.keySet().retainAll(kept);
+        Map<String, String> sources = copyOf(setup.toolSources());
+        sources.keySet().retainAll(kept);
+        Map<String, String> canonicalNames = copyOf(setup.toolCanonicalNames());
+        canonicalNames.keySet().retainAll(kept);
+        Map<String, String> endpoints = copyOf(setup.toolEndpoints());
+        endpoints.keySet().retainAll(kept);
+        Map<String, ToolRequestResolver> resolvers = copyOf(setup.toolRequestResolvers());
+        resolvers.keySet().retainAll(kept);
+        return new ToolSetup(specs, executors, sources, List.of(), canonicalNames, endpoints, resolvers, setup.answerTool());
     }
 
     /**

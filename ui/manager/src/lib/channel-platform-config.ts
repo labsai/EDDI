@@ -97,9 +97,18 @@ export function adoptStoredVersion<
 >(draft: T, base: T, stored: T): T {
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const next: Record<string, unknown> = { ...stored };
+  // The routing is one unit: the targets and the default among them. Merged
+  // field by field they could name a default the targets no longer hold, so
+  // either the user's pair is kept whole, or the stored pair is.
+  const ROUTING = ["targets", "defaultTargetName"];
+  const routingEdited = ROUTING.some((key) => !same((draft as Record<string, unknown>)[key], (base as Record<string, unknown>)[key]));
   for (const key of Object.keys(draft)) {
     if (key === "platformConfig") continue;
     const k = key as keyof T;
+    if (ROUTING.includes(key)) {
+      if (routingEdited) next[key] = draft[k];
+      continue;
+    }
     if (!same(draft[k], base[k])) next[key] = draft[k];
   }
   const platformConfig: Record<string, string> = { ...stored.platformConfig };

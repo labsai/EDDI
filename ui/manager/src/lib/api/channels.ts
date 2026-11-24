@@ -57,6 +57,8 @@ export interface ChannelIntegrationConfiguration {
   platformConfig: Record<string, string>;
   targets: ChannelTarget[];
   defaultTargetName: string;
+  /** Email only: sender roles and their policies; carried through every save. */
+  emailControl?: EmailControl;
 }
 
 export type ChannelDescriptor = AgentDescriptor;
@@ -225,6 +227,73 @@ export function getEmailSenders(id: string): Promise<EmailSenderLists> {
  */
 export function updateEmailSenders(id: string, change: EmailSenderChange): Promise<EmailSenderChangeResult> {
   return api.post<EmailSenderChangeResult>(`/channelstore/channels/${seg(id)}/email-senders`, change);
+}
+
+// ─── Email sender roles ─────────────────────────────────────────
+
+/** One role and the authenticated senders it is given to (first match wins). */
+export interface EmailSenderRole {
+  role: string;
+  senders: string[];
+}
+
+/** What a role may do. Every field narrows; an absent one inherits. */
+export interface EmailRolePolicy {
+  /** Target names, or `["*"]` / absent for all of them. */
+  targets?: string[];
+  /** The only tool names the role's turns may call; absent for no restriction. */
+  tools?: string[];
+  /** Reserved for the approval gate; only `none` is accepted today. */
+  approvalPolicy?: string;
+  /** Reserved for send-out; only `false` is accepted today. */
+  sendOut?: boolean;
+  /** At most the integration's `maxTurnsPerSenderPerDay`; absent inherits it. */
+  maxTurnsPerSenderPerDay?: number;
+}
+
+/** The typed email control settings (`emailControl`) of an email integration. */
+export interface EmailControl {
+  senderRoles?: EmailSenderRole[];
+  rolePolicies?: Record<string, EmailRolePolicy>;
+}
+
+/** An email integration's sender roles, as of one version. */
+export interface EmailSenderRoles {
+  version: number;
+  senderRoles: EmailSenderRole[];
+  rolePolicies: Record<string, EmailRolePolicy>;
+}
+
+/** The body of `PUT /channelstore/channels/{id}/email-roles`: replaces both, as a whole. */
+export interface EmailRolesChange {
+  expectedVersion: number;
+  senderRoles: EmailSenderRole[];
+  rolePolicies: Record<string, EmailRolePolicy>;
+  reason?: string;
+}
+
+/** What a sender-role change answers. */
+export interface EmailRolesChangeResult {
+  previousVersion: number;
+  version: number;
+  changed: boolean;
+  senderRoles: EmailSenderRole[];
+  rolePolicies: Record<string, EmailRolePolicy>;
+  changes: string[];
+  warnings: string[];
+}
+
+/** The current sender roles of an email integration. */
+export function getEmailRoles(id: string): Promise<EmailSenderRoles> {
+  return api.get<EmailSenderRoles>(`/channelstore/channels/${seg(id)}/email-roles`);
+}
+
+/**
+ * Replaces the sender roles without rewriting the integration: a new version,
+ * audited. A stale `expectedVersion` is refused with 409.
+ */
+export function updateEmailRoles(id: string, change: EmailRolesChange): Promise<EmailRolesChangeResult> {
+  return api.put<EmailRolesChangeResult>(`/channelstore/channels/${seg(id)}/email-roles`, change);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

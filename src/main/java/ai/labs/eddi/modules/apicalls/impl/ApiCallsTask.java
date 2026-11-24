@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.security.TurnToolCeiling;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -30,8 +31,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.String.format;
 
@@ -84,7 +87,17 @@ public class ApiCallsTask implements ILifecycleTask {
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
         List<String> actions = latestData.getResult();
 
+        // The tool ceiling of an email sender role (email plan v3 §9): a rule-driven
+        // call is a tool call too, so a call the role does not name is not sent. Read
+        // from the turn's bound principal, which carries the conversation's stored
+        // ceiling, as ToolExecutionService reads it.
+        Set<String> ceiling = TurnToolCeiling.current();
         for (var call : collectMatchingApiCalls(httpCallsConfig.getHttpCalls(), actions)) {
+            if (!TurnToolCeiling.permits(ceiling, call.getName())) {
+                LOGGER.warnf("Refused http call '%s' in conversation %s: the email sender role does not allow it",
+                        sanitize(call.getName()), sanitize(memory.getConversationId()));
+                continue;
+            }
             var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
             // ApiCallExecutor stores response in conversation memory via prePostUtils.
             // We also merge into templateDataObjects so subsequent calls in this loop can

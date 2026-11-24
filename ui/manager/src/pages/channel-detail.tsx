@@ -21,9 +21,13 @@ import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-sec
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
-import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
+import { useChannel, useUpdateChannel, useDeleteChannel, useEnrichedChannelDescriptors } from "@/hooks/use-channels";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes, EmailTargetRules } from "@/components/channels/email-settings";
+import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
+import { EmailSenderRolesEditor } from "@/components/channels/email-sender-roles";
 import {
   EMAIL_TARGET_RULE_FIELDS,
   emailConfigProblems,
@@ -260,6 +264,10 @@ export function ChannelDetailPage() {
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
   const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
+  // Edit access, for the targeted edits (sender roles) that need it: the backend
+  // refuses them anyway, this only keeps a viewer from being offered them.
+  const { data: channelDescriptors } = useEnrichedChannelDescriptors(50, 0, config?.name ?? "");
+  const access = accessForDetail(channelDescriptors, id, useSpaces().enforcement);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -552,7 +560,10 @@ export function ChannelDetailPage() {
               if (channelType === draft.channelType) return;
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
-              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+              // emailControl is email-only and refused on any other type: drop it with the type.
+              const { emailControl: _emailOnly, ...rest } = draft;
+              setDraft({ ...rest, ...(channelType === "email" ? { emailControl: _emailOnly } : {}), channelType,
+                platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
             }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
@@ -572,15 +583,28 @@ export function ChannelDetailPage() {
               id && config?.channelType === "email" ? (
                 // A sender-list change is a new version: moving the URL to it
                 // reseeds the draft, so a later save cannot write the old lists back.
-                <EmailSenderListsEditor
-                  key={id}
-                  integrationId={id}
-                  disabled={isDirty}
-                  onChanged={(newVersion) => {
-                    setPendingSenderVersion(newVersion);
-                    setSearchParams({ version: String(newVersion) }, { replace: true });
-                  }}
-                />
+                <>
+                  <EmailSenderListsEditor
+                    key={id}
+                    integrationId={id}
+                    disabled={isDirty}
+                    onChanged={(newVersion) => {
+                      setPendingSenderVersion(newVersion);
+                      setSearchParams({ version: String(newVersion) }, { replace: true });
+                    }}
+                  />
+                  {/* Sender roles are a new version too, adopted the same way. */}
+                  <EmailSenderRolesEditor
+                    key={`${id}-roles`}
+                    integrationId={id}
+                    canEdit={access.canEdit}
+                    disabled={isDirty}
+                    onChanged={(newVersion) => {
+                      setPendingSenderVersion(newVersion);
+                      setSearchParams({ version: String(newVersion) }, { replace: true });
+                    }}
+                  />
+                </>
               ) : undefined
             }
           />

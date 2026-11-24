@@ -30,6 +30,7 @@ public class ChannelIntegrationConfiguration {
     private Map<String, String> platformConfig;
     private List<ChannelTarget> targets;
     private String defaultTargetName;
+    private EmailControl emailControl;
 
     public ChannelIntegrationConfiguration() {
         this.platformConfig = new HashMap<>();
@@ -130,5 +131,19 @@ public class ChannelIntegrationConfiguration {
 
     public void setDefaultTargetName(String defaultTargetName) {
         this.defaultTargetName = defaultTargetName;
+    }
+
+    /**
+     * Email only: the typed control settings (email plan v3 §4) — today the sender
+     * roles. Absent for every other channel type; refused there on save.
+     *
+     * @since 6.8.0
+     */
+    public EmailControl getEmailControl() {
+        return emailControl;
+    }
+
+    public void setEmailControl(EmailControl emailControl) {
+        this.emailControl = emailControl;
     }
 }

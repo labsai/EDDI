@@ -5717,6 +5717,26 @@
     "apply": "Aplicar alterações de remetentes",
     "discard": "Descartar"
   },
+  "emailRoles": {
+    "loading": "Carregando os papéis de remetente…",
+    "invalidJson": "Os papéis devem ser um objeto JSON com senderRoles e rolePolicies.",
+    "saved": "Papéis de remetente salvos como versão {{version}}.",
+    "nothingChanged": "Nada mudou.",
+    "conflict": "Alguém alterou esta integração nesse meio-tempo. Os papéis foram recarregados; verifique-os e aplique novamente.",
+    "title": "Papéis de remetente",
+    "none": "Sem papéis: cada remetente permitido alcança cada destino com as ferramentas do agente.",
+    "summary": "{{senders}} → destinos: {{targets}}; ferramentas: {{tools}}",
+    "agentTools": "as ferramentas do agente",
+    "trust": "Um papel confia na assinatura do domínio do remetente (DKIM): depende de seu provedor de e-mail impedir que uma pessoa envie como outra (aliases, caixas compartilhadas, \"enviar como\"). Execute o autoteste para verificar o domínio.",
+    "editLabel": "Papéis e políticas (JSON)",
+    "hint": "Vale o primeiro papel correspondente. Um papel vale só para um remetente autenticado; e-mail não autenticado é 'anonymous' e não recebe ferramentas. Um papel só pode restringir: destinos, ferramentas e um maxTurnsPerSenderPerDay menor. Uma conversa iniciada por um e-mail nunca pode alterar estes papéis.",
+    "saveFirst": "Salve ou descarte primeiro suas outras alterações; os papéis de remetente são aplicados separadamente.",
+    "reason": "Por quê (para o registro de auditoria)",
+    "apply": "Aplicar alterações de papéis",
+    "discard": "Descartar",
+    "unauthenticated": "e-mail não autenticado",
+    "otherSenders": "outros remetentes autenticados"
+  },
   "feedback": {
     "title": "Avaliações",
     "subtitle": "O que as pessoas disseram sobre seus agentes — e o que ainda precisa de atenção.",

@@ -433,6 +433,22 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The tool ceiling of this conversation ({@code TurnToolCeiling}): the only
+     * tool names its turns may call, set by an email sender role, or {@code null}
+     * for none. Persisted for the same reason as {@link #getOrigin()}.
+     */
+    default Set<String> getToolCeiling() {
+        return null;
+    }
+
+    /**
+     * Narrows the tool ceiling: the stored one is intersected with
+     * {@code toolCeiling}; {@code null} changes nothing.
+     */
+    default void setToolCeiling(Set<String> toolCeiling) {
+    }
+
+    /**
      * Agent-level tool-approval config carried onto memory at conversation start
      * (NOT persisted).
      */

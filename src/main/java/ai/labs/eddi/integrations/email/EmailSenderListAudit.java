@@ -49,6 +49,12 @@ public class EmailSenderListAudit {
     /** The action recorded for a sender-list change. */
     public static final String ACTION = "EMAIL_SENDERS_CHANGED";
 
+    /** Task id of a sender-role change entry. */
+    public static final String ROLES_TASK_ID = "email.roles";
+
+    /** The action recorded for a sender-role change. */
+    public static final String ROLES_ACTION = "EMAIL_SENDER_ROLES_CHANGED";
+
     private final Instance<AuditLedgerService> ledger;
     private final Instance<GdprPseudonymizer> pseudonymizer;
     private final Instance<SecurityIdentity> identity;
@@ -87,6 +93,30 @@ public class EmailSenderListAudit {
                     Map.of("action", ACTION), output, null, null, List.of(ACTION), 0.0, Instant.now(), null, null));
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not write the sender-list audit entry of email integration %s: %s", LogSanitizer.sanitize(integrationId),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Records one change of the integration's sender roles (email plan v3 §9):
+     * which roles and policies were added, removed or changed — by role name, so no
+     * address reaches the immutable ledger — and why.
+     */
+    public void rolesChanged(String integrationId, Integer previousVersion, Integer newVersion, List<String> changes, String reason) {
+        try {
+            if (ledger == null || !ledger.isResolvable() || !ledger.get().isEnabled()) {
+                return;
+            }
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("integrationId", integrationId);
+            output.put("previousVersion", previousVersion);
+            output.put("version", newVersion);
+            output.put("changes", changes == null ? List.of() : List.copyOf(changes));
+            output.put("reason", scrubAddresses(reason));
+            ledger.get().submit(new AuditEntry(UUID.randomUUID().toString(), null, null, null, actor(), null, 0, ROLES_TASK_ID, "email", 0,
+                    0, Map.of("action", ROLES_ACTION), output, null, null, List.of(ROLES_ACTION), 0.0, Instant.now(), null, null));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not write the sender-role audit entry of email integration %s: %s", LogSanitizer.sanitize(integrationId),
                     LogSanitizer.sanitize(e.getMessage()));
         }
     }

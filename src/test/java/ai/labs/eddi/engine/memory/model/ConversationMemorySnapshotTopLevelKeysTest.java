@@ -81,7 +81,8 @@ class ConversationMemorySnapshotTopLevelKeysTest {
                 () -> "these emitted keys are not in TOP_LEVEL_KEYS, so an append-style write could never clear them: " + unknown);
         // Sanity: the probe must actually be populated, or the assertion above is
         // vacuous.
-        assertTrue(emitted.contains("_id") && emitted.contains("_rev") && emitted.contains("hitlPauseReason") && emitted.contains("origin"),
+        assertTrue(emitted.contains("_id") && emitted.contains("_rev") && emitted.contains("hitlPauseReason") && emitted.contains("origin")
+                && emitted.contains("toolCeiling"),
                 () -> "the probe snapshot did not emit the fields it sets: " + emitted);
     }
 
@@ -99,6 +100,7 @@ class ConversationMemorySnapshotTopLevelKeysTest {
         snapshot.setUserId("user-1");
         snapshot.setResolutionProvenance(ResolutionPrincipal.Provenance.VERIFIED);
         snapshot.setOrigin("email");
+        snapshot.setToolCeiling(Set.of("kb_search"));
         snapshot.setEnvironment(Deployment.Environment.test);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setHitlPausedWorkflowId("workflow-1");

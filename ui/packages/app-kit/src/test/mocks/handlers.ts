@@ -5729,6 +5729,33 @@ export const backupSyncHandlers = [
     });
   }),
 
+  // The sender roles of an email integration (email plan v3 §9): read, and a
+  // replace that writes the next version.
+  http.get("*/channelstore/channels/:id/email-roles", () =>
+    HttpResponse.json({
+      version: 1,
+      senderRoles: [{ role: "customer", senders: ["*@customer-a.com"] }],
+      rolePolicies: { customer: { targets: ["support"], tools: ["kb_search"] } },
+    }),
+  ),
+
+  http.put("*/channelstore/channels/:id/email-roles", async ({ request }) => {
+    const change = (await request.json()) as {
+      expectedVersion: number;
+      senderRoles: { role: string; senders: string[] }[];
+      rolePolicies: Record<string, unknown>;
+    };
+    return HttpResponse.json({
+      previousVersion: change.expectedVersion,
+      version: change.expectedVersion + 1,
+      changed: true,
+      senderRoles: change.senderRoles,
+      rolePolicies: change.rolePolicies,
+      changes: change.senderRoles.map((r) => `role~:${r.role}`),
+      warnings: [],
+    });
+  }),
+
   http.get("*/channelstore/channels/:id", ({ params }) => {
     const channelId = params.id as string;
     const configs: Record<string, object> = {

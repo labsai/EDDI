@@ -279,6 +279,20 @@ class McpCallsTaskFailurePathTest {
             verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq(RESPONSE_OBJECT), any());
             verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(500), eq(true));
         }
+
+        @Test
+        @DisplayName("an escalation-guard or sender-role refusal → failure path, not a stored response")
+        void guardRefusalIsAFailure() throws Exception {
+            meteringShortCircuitsWith("Error: Refused: the sender role of the email behind this conversation does not allow the tool "
+                    + "'wire_transfer'.");
+            var config = configWithOneCall(false, 1);
+
+            assertThrows(LifecycleException.class, () -> task.execute(memory, config));
+
+            verify(executor, never()).execute(any(), any());
+            verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq(RESPONSE_OBJECT), any());
+            verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(500), eq(true));
+        }
     }
 
     // ─── successful calls keep working ───────────────────────────────────

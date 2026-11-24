@@ -96,3 +96,21 @@ describe("adoptStoredVersion", () => {
     expect(merged.platformConfig).toEqual({ host: "mine", senderAllowlist: "b@x.com" });
   });
 });
+
+describe("adoptStoredVersion routing", () => {
+  type Routed = { targets: { name: string }[]; defaultTargetName: string; platformConfig: Record<string, string> };
+  const routed = (names: string[], def: string): Routed => ({ targets: names.map((name) => ({ name })), defaultTargetName: def, platformConfig: {} });
+
+  it("keeps the user's targets and default together, so the default is always among the targets", () => {
+    // The user made B the default; the stored version removed B.
+    const merged = adoptStoredVersion(routed(["A", "B"], "B"), routed(["A", "B"], "A"), routed(["A"], "A"));
+    expect(merged.defaultTargetName).toBe("B");
+    expect(merged.targets.map((t) => t.name)).toContain("B");
+  });
+
+  it("takes the stored targets and default together when the user did not touch the routing", () => {
+    const merged = adoptStoredVersion(routed(["A", "B"], "A"), routed(["A", "B"], "A"), routed(["A"], "A"));
+    expect(merged.targets.map((t) => t.name)).toEqual(["A"]);
+    expect(merged.defaultTargetName).toBe("A");
+  });
+});

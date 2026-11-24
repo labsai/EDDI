@@ -5665,6 +5665,26 @@
     "apply": "Apply sender changes",
     "discard": "Discard"
   },
+  "emailRoles": {
+    "loading": "Loading the sender roles…",
+    "invalidJson": "The roles must be a JSON object with senderRoles and rolePolicies.",
+    "saved": "Sender roles saved as version {{version}}.",
+    "nothingChanged": "Nothing changed.",
+    "conflict": "Someone changed this integration meanwhile. The roles were reloaded; check them and apply again.",
+    "title": "Sender roles",
+    "none": "No roles: every allowed sender reaches every target with the agent's own tools.",
+    "summary": "{{senders}} → targets: {{targets}}; tools: {{tools}}",
+    "agentTools": "the agent's tools",
+    "trust": "A role trusts the sender's domain signature (DKIM): it rests on your mail provider preventing one person from sending as another (aliases, shared mailboxes, \"send as\"). Run the self-test to check the domain.",
+    "editLabel": "Roles and policies (JSON)",
+    "hint": "First matching role wins. A role binds to an authenticated sender only; unauthenticated mail is 'anonymous' and gets no tools. A role can only narrow: targets, tools and a lower maxTurnsPerSenderPerDay. A conversation that an email started can never change these roles.",
+    "saveFirst": "Save or discard your other changes first; the sender roles are applied on their own.",
+    "reason": "Why (for the audit log)",
+    "apply": "Apply role changes",
+    "discard": "Discard",
+    "unauthenticated": "unauthenticated mail",
+    "otherSenders": "other authenticated senders"
+  },
   "feedback": {
     "title": "Feedback",
     "subtitle": "What people said about your agents — and what still needs a look.",
