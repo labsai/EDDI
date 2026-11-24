@@ -35,9 +35,10 @@ import java.util.Map;
  * {@code "development"}) matches {@code when}, ignoring case; a missing or
  * blank {@code when} matches every environment.
  * <p>
- * A non-blank {@code tagMatches} is refused by
- * {@link #validateConfiguration()}. It used to require the agent's tags to
- * contain the value, but agents carry no tags, so such a rule could never fire.
+ * A non-blank {@code tagMatches} is retired ({@link #retiredConfiguration()}):
+ * refused when a ruleset is saved, accepted with a WARN when a stored one is
+ * deployed or imported. It used to require the agent's tags to contain the
+ * value, but agents carry no tags, so the condition never matches with it.
  *
  * @since 6.0.0
  */
@@ -80,22 +81,34 @@ public class DeploymentContextCondition implements IRuleCondition {
     }
 
     /**
-     * Refuses a non-blank {@code tagMatches}. Nothing has ever written agent tags —
-     * {@code AgentConfiguration} has no tags field — so the condition always
+     * A non-blank {@code tagMatches} is retired. Nothing has ever written agent
+     * tags — {@code AgentConfiguration} has no tags field — so the condition always
      * failed, and a safety rule such as "be cautious for high-risk agents in
-     * production" silently never fired. Refusing it names the rule when the ruleset
-     * is saved or deployed instead.
+     * production" silently never fired. A ruleset carrying it is refused on save; a
+     * stored one still deploys, and the condition still never matches.
      */
     @Override
-    public void validateConfiguration() {
-        if (tagMatches != null && !tagMatches.isBlank()) {
-            throw new IllegalArgumentException(String.format("'%s' is not supported: agents carry no tags, so this condition could never"
-                    + " match. Remove it, or match a value the client sends with a 'contextmatcher' condition.", CONFIG_TAG_MATCHES));
+    public String retiredConfiguration() {
+        if (hasTagMatches()) {
+            return String.format("'%s' is not supported: agents carry no tags, so this condition could never"
+                    + " match. Remove it, or match a value the client sends with a 'contextmatcher' condition.", CONFIG_TAG_MATCHES);
         }
+        return null;
+    }
+
+    private boolean hasTagMatches() {
+        return tagMatches != null && !tagMatches.isBlank();
     }
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
+        if (hasTagMatches()) {
+            // A stored ruleset written before tagMatches was retired. The condition
+            // required the agent's tags to contain the value, and agents carry none,
+            // so it never matched: keep it that way. Under a negation such a rule
+            // fired on every turn, and still does.
+            return ExecutionState.FAIL;
+        }
         if (when == null || when.isBlank()) {
             return ExecutionState.SUCCESS;
         }
