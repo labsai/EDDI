@@ -4,14 +4,18 @@
  */
 package ai.labs.eddi.engine.a2a;
 
+import ai.labs.eddi.engine.attachments.Derivation;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
+import ai.labs.eddi.engine.attachments.QuotaReservation;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -142,5 +146,63 @@ final class FakeAttachmentStore implements IAttachmentStore {
             }
         });
         return result;
+    }
+
+    // --- not used by the inbound A2A tests: the derived-blob and quota methods
+    // (2a.2, 2a.3) ---
+
+    @Override
+    public Attachment storeDerived(byte[] bytes, String mimeType, String filename, Derivation derivation, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public Optional<Derivation> getDerivation(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public List<Attachment> listDerived(String rootRef, Derivation.Kind kind, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public Optional<Attachment> findDerived(String rootRef, Derivation.Kind kind, String unitId, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public String rootOf(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public OwnerRef ownerOf(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public Integer pageCount(String rootRef, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public void setPageCount(String rootRef, int pages) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public void release(String reservationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public void convert(String reservationId, String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
     }
 }
