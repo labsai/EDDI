@@ -1594,9 +1594,14 @@ class BuildQualityGatesTest {
                 && gitleaks.contains("for f in .gitleaksignore .gitleaks.toml; do"),
                 "pull-request and merge-queue runs must scan with main's .gitleaks.toml and .gitleaksignore, or a"
                         + " change loosens the rules it is scanned with");
-        assertTrue(gitleaks.contains("APPROVAL_BASE=\"$MG_BASE\"") && gitleaks.contains("comm -23"),
-                "queue and push scans must accept a finding only when the same range adds a fingerprint for exactly"
-                        + " its path, rule and line: commit-scoped fingerprints cannot match squashed commits");
+        assertTrue(gitleaks.contains("APPROVAL_BASE=\"$MG_BASE\"")
+                && gitleaks.contains("[ \"$(line_at \"$c\" \"$path\" \"$l\")\" = \"$finding\" ]"),
+                "queue and push scans must accept a finding only when an added fingerprint names its path and rule AND"
+                        + " the line it names has the finding's exact text: commit-scoped fingerprints cannot match"
+                        + " squashed commits, and line numbers shift");
+        assertFalse(gitleaks.contains("grep -vE '^\\+\\+\\+'"),
+                "added .gitleaksignore lines must be read structurally (after a hunk header): filtering out lines that"
+                        + " start with +++ also drops an added '++path:rule:line' entry");
         assertTrue(gitleaks.contains("changes .gitleaks.toml, the rules; no tolerance applies"),
                 "the pull-request re-scan must refuse any change to .gitleaks.toml: only fingerprints may be added");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),

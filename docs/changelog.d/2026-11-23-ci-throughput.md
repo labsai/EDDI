@@ -69,9 +69,10 @@ data.
   budget; UI Gate now requires the shard and merge jobs too. `ui/manager/.gitignore` ignores
   `.vitest/`.
 - **Docs.** AGENTS.md §2 rule 4: with a merge queue, a PR is queued only once CodeRabbit has reviewed its current head, every finding is fixed or answered, every
-  thread is resolved and it is approved and green — never armed early; the queue replaces the
-  manual "check main's run before each merge" routine and the one-at-a-time rule, and a PR branch
-  takes `origin/main` only to resolve a conflict. Queueing happens only when the user names the
+  thread is resolved and it is approved and green — never armed early. Once `CI Gate` is a
+  required check, the queue replaces the manual "check main's run before each merge" routine and
+  the one-at-a-time rule, and a PR branch takes `origin/main` only to resolve a conflict; until
+  then both rules still apply, queue or not. Queueing happens only when the user names the
   PR; `.claude/skills/ship-pr/SKILL.md` §7 holds the readiness checklist (CodeRabbit's description
   column and review SHA, the thread audit, body-only findings, approval and CI) and the commands —
   the GraphQL `enqueuePullRequest` mutation bound to the checked head (see "CodeRabbit review"
@@ -139,6 +140,26 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   and §7 has it as a checklist item.
 - Changelog passages that still described an earlier tolerance or `--auto` were corrected.
 
+### CodeRabbit re-review (of `29efd41`)
+
+- **Approval is content-verified, one fingerprint per finding.** Matching on `file:rule:line` broke
+  when lines shifted between PR commits before the squash, and let one fingerprint approve two
+  different findings at the same spot. A queue or push finding is now approved only when an added
+  fingerprint `c:path:rule:L` names its path and rule and line `L` of that path at commit `c` has
+  exactly the finding's text in the scanned commit; each fingerprint approves at most one finding.
+  The PR commit a fingerprint names is fetched by SHA if the checkout lacks it (not exercised on
+  GitHub yet; a fetch failure leaves the finding unapproved, so it fails closed).
+- **Added lines are read structurally.** Dropping lines that start with `+++` also dropped an added
+  `++path:rule:line` entry, a commit-less fingerprint that would have gone unvalidated. Both diff
+  parsers now take lines after a hunk header.
+- **Validation comes first on a PR.** A PR that changed `.gitleaks.toml` exited before its
+  `.gitleaksignore` additions were validated; the order is swapped.
+- **Backslash paths** in fingerprints are normalised to `/`, as gitleaks does.
+- Verified with the pinned gitleaks image in scratch repositories (11 cases): squash with and
+  without a line shift, a different secret at the same `file:rule:line`, a `++` entry, a backslash
+  path, no fingerprint, and the PR cases (fingerprint-only, `.gitleaks.toml` plus a commit-less
+  entry, a `++` entry, `.gitleaks.toml` only).
+
 ### Considered and not done
 
 - **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that
@@ -164,7 +185,7 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
 
 ### Review fixes (independent review before push)
 
-- **Gitleaks tolerance tightened** (an intermediate step; the next two sections replace it). A
+- **Gitleaks tolerance tightened** (an intermediate step; the "Second review round" and "CodeRabbit review" sections above replace it). A
   PR-level Secret Scanning failure was tolerated only when the PR changed the gitleaks config and a
   re-scan with the PR's own config passed (`pr_config_scan`).
 - **Queue strictness holds for every need.** On `merge_group` CI Gate fails on any skipped need,
