@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -150,10 +151,16 @@ public class AgentTestService {
         }
 
         final AgentTestRun started = run;
+        // Read on the request thread: a run a mail-started turn starts runs its test
+        // conversations tainted (email plan v3 §5.3).
+        final String origin = TurnOrigin.current();
         try {
             Thread.ofVirtual().name("agent-test-run-" + started.id()).start(() -> {
                 try {
-                    runner.run(started, suite);
+                    TurnOrigin.callWith(origin, () -> runner.run(started, suite));
+                } catch (Exception e) {
+                    // run() never throws; callWith only declares it.
+                    throw new IllegalStateException(e);
                 } finally {
                     concurrentRuns.release();
                 }

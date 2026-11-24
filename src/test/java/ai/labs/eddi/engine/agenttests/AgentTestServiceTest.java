@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agenttests.IAgentTestSuiteStore;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite;
@@ -33,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -112,6 +115,30 @@ class AgentTestServiceTest {
         verify(administration, never()).deployAgent(eq(Environment.production), anyString(), anyInt(), anyBoolean(), anyBoolean());
         verify(accessGuard).requireAccess(SUITE_ID, AccessLevel.VIEW, "agent test suite");
         verify(runner, timeout(5_000)).run(any(AgentTestRun.class), any(AgentTestSuite.class));
+    }
+
+    /**
+     * Email plan v3 §5.3: {@code run_agent_tests} from a tainted turn — the MCP or
+     * REST request carries {@code X-Eddi-Turn-Origin} — runs on its own virtual
+     * thread with the taint bound again.
+     */
+    @Test
+    @DisplayName("a run started for a tainted request runs with the taint bound; an untainted one without")
+    void taintedRequestRunsTainted() throws Exception {
+        deployAnswers("READY", 7);
+        var origins = new LinkedBlockingQueue<String>();
+        doAnswer(i -> {
+            origins.add(String.valueOf(TurnOrigin.current()));
+            return null;
+        }).when(runner).run(any(AgentTestRun.class), any(AgentTestSuite.class));
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            service.startRun(SUITE_ID, 3, AGENT_ID, 7, false);
+        }
+        assertEquals(TurnOrigin.EMAIL, origins.poll(5, TimeUnit.SECONDS));
+
+        service.startRun(SUITE_ID, 3, AGENT_ID, 7, false);
+        assertEquals("null", origins.poll(5, TimeUnit.SECONDS));
     }
 
     @Test

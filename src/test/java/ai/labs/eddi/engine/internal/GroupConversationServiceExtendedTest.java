@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -180,6 +181,29 @@ class GroupConversationServiceExtendedTest {
          * binds it; a nested discussion gets its parent's) stores it and hands it to
          * every member conversation it starts.
          */
+        /**
+         * Email plan v3 §5.3, the gap C1 left: an httpcall to {@code POST
+         * /groups/{id}/conversations} or MCP {@code discuss_with_group} /
+         * {@code start_group_discussion} from a tainted turn arrives with
+         * {@code X-Eddi-Turn-Origin: email}; the discussion it starts is tainted.
+         */
+        @Test
+        void discussionStartedForATaintedRequest_storesItAndTaintsEveryMember() throws Exception {
+            setupStore(voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION));
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("a3", "{\"vote\": \"Hold it\"}");
+
+            GroupConversation gc;
+            try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+                gc = service.discuss(GROUP_ID, "Release?", USER_ID, 0, mock(GroupDiscussionEventListener.class));
+            }
+
+            assertEquals(TurnOrigin.EMAIL, gc.getOrigin());
+            verify(conversationService, times(3)).startConversation(any(), any(), any(),
+                    argThat(context -> TurnOrigin.EMAIL.equals(TurnOrigin.fromContext(context))));
+        }
+
         @Test
         void discussionStartedUnderTheEmailTaint_storesItAndTaintsEveryMember() throws Exception {
             setupStore(voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION));

@@ -68,6 +68,23 @@ export function platformConfigForType(
 
 const SENDER_KEYS = ["senderAllowlist", "senderBlocklist"];
 
+function hasSenderEntries(list: string | undefined): boolean {
+  return (list ?? "").split(",").some((entry) => entry.trim() !== "");
+}
+
+/**
+ * Whether saving `next` over the stored `stored` platform config removes the
+ * last entry of a non-empty email sender allowlist — which opens the
+ * integration to every sender, and which the backend saves only with
+ * `confirmOpen`.
+ */
+export function emptiesSenderAllowlist(
+  stored: Record<string, string> | undefined,
+  next: Record<string, string> | undefined,
+): boolean {
+  return hasSenderEntries(stored?.senderAllowlist) && !hasSenderEntries(next?.senderAllowlist);
+}
+
 /**
  * The draft after the page adopts a newer stored version (the one a targeted
  * sender-list change wrote). Every field takes its stored value — another

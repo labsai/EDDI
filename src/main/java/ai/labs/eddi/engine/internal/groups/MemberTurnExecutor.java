@@ -386,6 +386,11 @@ public class MemberTurnExecutor {
         }
 
         putDynamicAgentContext(gc, context);
+        // Every turn, not only the member's first: a discussion tainted after its
+        // members started (a continuation from a tainted turn) taints them too.
+        if (gc.getOrigin() != null) {
+            context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, gc.getOrigin()));
+        }
 
         // Share discussion attachments with this member on its first turn: grant the
         // member conversation access to group-owned blobs and inject attachment_*.

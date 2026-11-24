@@ -9,8 +9,10 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
@@ -1278,13 +1280,13 @@ public class McpToolProviderManager {
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(
-                    callContext -> withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext),
-                            callContext));
+            transportBuilder.customHeaders(callContext -> withTurnOriginHeader(
+                    withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext),
+                    callContext));
         } else {
             // No credential configured: the server decides whether it needs one.
             // The trace context still goes out, mirrored from params._meta.
-            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
+            transportBuilder.customHeaders(callContext -> withTurnOriginHeader(withTraceHeaders(Map.of(), callContext), callContext));
         }
 
         return transportBuilder.build();
@@ -1300,7 +1302,78 @@ public class McpToolProviderManager {
      * calls its meta supplier synchronously before the transport is involved.
      */
     McpMetaSupplier traceMetaSupplier() {
-        return callContext -> traceMeta(tracePropagation);
+        // approvesHere, not isActive: the approval of one conversation's call must not
+        // be stated on the MCP requests of a conversation that call runs inline.
+        return callContext -> withTurnOriginMeta(traceMeta(tracePropagation), TurnOrigin.current(), ApprovedCallScope.approvesHere());
+    }
+
+    /**
+     * The {@code params._meta} key that says the call is the approved execution of
+     * a gated tool call ({@code ApprovedCallScope}), written on the calling thread
+     * next to {@link #META_TURN_ORIGIN}; {@link #withTurnOriginHeader} sends it as
+     * {@link TurnOrigin#APPROVED_HEADER}.
+     */
+    static final String META_APPROVED_CALL = "ai.labs.eddi/approvedCall";
+
+    /**
+     * The {@code params._meta} key the origin taint (email plan v3 §5.3) of the
+     * calling turn travels in, so {@link #withTurnOriginHeader} can send it as
+     * {@link TurnOrigin#HEADER} from whichever thread builds the request.
+     */
+    static final String META_TURN_ORIGIN = "ai.labs.eddi/turnOrigin";
+
+    /** {@code meta} plus {@link #META_TURN_ORIGIN} when {@code origin} is set. */
+    static Map<String, Object> withTurnOriginMeta(Map<String, Object> meta, String origin) {
+        return withTurnOriginMeta(meta, origin, false);
+    }
+
+    /**
+     * {@code meta} plus {@link #META_TURN_ORIGIN} when {@code origin} is set, and
+     * then {@link #META_APPROVED_CALL} when {@code approved}.
+     */
+    static Map<String, Object> withTurnOriginMeta(Map<String, Object> meta, String origin, boolean approved) {
+        if (origin == null) {
+            return meta;
+        }
+        Map<String, Object> tainted = new LinkedHashMap<>(meta);
+        tainted.put(META_TURN_ORIGIN, origin);
+        if (approved) {
+            tainted.put(META_APPROVED_CALL, Boolean.TRUE);
+        }
+        return tainted;
+    }
+
+    /**
+     * {@code headers} plus {@link TurnOrigin#HEADER} when the message carries the
+     * taint in its {@code params._meta} (written on the calling thread, like the
+     * trace context) or the thread building the request is itself tainted. Set
+     * last, replacing a configured value: EDDI's own MCP server then runs the tool
+     * call tainted, so a conversation, schedule or discussion it starts is too.
+     */
+    static Map<String, String> withTurnOriginHeader(Map<String, String> headers, McpCallContext callContext) {
+        String origin = TurnOrigin.current();
+        boolean approved = false;
+        if (callContext != null && callContext.message() instanceof McpClientRequest request && request.getParams() != null
+                && request.getParams().getMeta() != null) {
+            if (request.getParams().getMeta().get(META_TURN_ORIGIN) instanceof String value) {
+                origin = TurnOrigin.combine(origin, TurnOrigin.normalise(value));
+            }
+            approved = Boolean.TRUE.equals(request.getParams().getMeta().get(META_APPROVED_CALL));
+        }
+        if (origin == null) {
+            return headers;
+        }
+        // The approval header is engine-owned like the taint: a configured value is
+        // dropped, and only the approved execution of a gated call says true.
+        Map<String, String> tainted = new LinkedHashMap<>();
+        headers.forEach((name, value) -> {
+            if (!TurnOrigin.HEADER.equalsIgnoreCase(name) && !TurnOrigin.APPROVED_HEADER.equalsIgnoreCase(name)) {
+                tainted.put(name, value);
+            }
+        });
+        tainted.put(TurnOrigin.HEADER, origin);
+        tainted.put(TurnOrigin.APPROVED_HEADER, String.valueOf(approved));
+        return tainted;
     }
 
     static Map<String, Object> traceMeta(TracePropagation propagation) {

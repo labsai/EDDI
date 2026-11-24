@@ -29,6 +29,27 @@ class ApprovedCallScopeTest {
         assertFalse(ApprovedCallScope.isActive(), "the binding is removed afterwards");
     }
 
+    /**
+     * The approval of conversation A's call is stated only on A's own tool calls: a
+     * conversation that call runs inline runs its tool calls on the same thread.
+     */
+    @Test
+    void approvesOnlyTheToolCallsOfTheApprovedConversation() {
+        var protection = SelfUngatingGuard.Protection.ofAgent(AGENT);
+        assertFalse(ApprovedCallScope.approvesHere(), "nothing approved");
+        assertTrue(ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", ApprovedCallScope::approvesHere)));
+        assertFalse(ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a",
+                () -> ApprovedCallScope.inConversation("conv-b", ApprovedCallScope::approvesHere))), "a nested conversation's tool call");
+        assertTrue(ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", () -> {
+            ApprovedCallScope.inConversation("conv-b", () -> null);
+            return ApprovedCallScope.approvesHere();
+        })), "restored after the nested call");
+        assertFalse(ApprovedCallScope.run(protection, "conv-a", ApprovedCallScope::approvesHere), "no tool call bound");
+        assertFalse(ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation(null, ApprovedCallScope::approvesHere)));
+        assertTrue(ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-b", ApprovedCallScope::isActive)),
+                "isActive still restricts there");
+    }
+
     @Test
     void followsTheCallOntoTheToolExecutorThread() throws Exception {
         var executor = Executors.newSingleThreadExecutor();

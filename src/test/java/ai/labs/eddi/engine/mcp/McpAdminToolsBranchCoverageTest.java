@@ -744,13 +744,13 @@ class McpAdminToolsBranchCoverageTest {
         @Test
         @DisplayName("updateChannelIntegration — null resourceId → error")
         void updateNullId() {
-            assertTrue(tools.updateChannelIntegration(null, 1, "{}").contains("error"));
+            assertTrue(tools.updateChannelIntegration(null, 1, "{}", null).contains("error"));
         }
 
         @Test
         @DisplayName("updateChannelIntegration — null config → error")
         void updateNullConfig() {
-            assertTrue(tools.updateChannelIntegration("id", 1, null).contains("error"));
+            assertTrue(tools.updateChannelIntegration("id", 1, null, null).contains("error"));
         }
 
         @Test

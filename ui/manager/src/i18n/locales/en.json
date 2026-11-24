@@ -3566,6 +3566,9 @@
     "selectGroup": "Select a group…",
     "unknownGroup": "{{id}} (not found)",
     "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
+    "confirmOpenTitle": "Remove the last allowed sender?",
+    "confirmOpenDesc": "With an empty allowlist every sender can make the agent run, limited only by sender authentication, and only when it is enabled. The change is recorded in the audit log.",
+    "confirmOpenConfirm": "Save and open",
     "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
   },
   "hitl": {
@@ -5582,7 +5585,7 @@
       "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
       "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
       "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
-      "allowlistEmptied": "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication.",
+      "allowlistEmptied": "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication, and only when it is enabled.",
       "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
@@ -5631,7 +5634,7 @@
     "remove": "Remove {{entry}}",
     "addLabel": "Add to {{list}}",
     "add": "Add",
-    "hint": "Prefer exact addresses. Each applied change is a new version of this integration and is recorded in the audit log with its reason. A conversation that an email started can never change these lists.",
+    "hint": "Prefer exact addresses. Each applied change is a new version of this integration and is recorded in the audit log with its reason. EDDI refuses a conversation that an email started when it tries to change these lists.",
     "saveFirst": "Save or discard your other changes first; the sender lists are applied on their own.",
     "reason": "Why (for the audit log)",
     "reasonPlaceholder": "e.g. new supplier, contract 2026-114",

@@ -232,7 +232,7 @@ Neither an agent nor a model can influence its own promotion:
   `X-EDDI-Agent-Call: true`, set after the configured headers so no configuration removes or replaces it. "This
   deployment" is the own origin (`eddi.self.base-url`, or the derived listener address), any loopback address, and the
   hosts in `eddi.hitl.oversight.self-hosts` (the public or in-cluster names it is also reached by, `host` or
-  `host:port`). Calls to any other host carry no EDDI header. Any non-read request with the header to
+  `host:port`). Calls to any other host do not carry it (only a mail-started turn sends one EDDI header everywhere, [the origin taint](email-integration.md#a-mail-cannot-change-its-own-rules)). Any non-read request with the header to
   `/hitl/samples/**`, `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a
   forwarded `${caller:token}`. If agents reach this deployment under a name none of those cover, list it in
   `eddi.hitl.oversight.self-hosts`.

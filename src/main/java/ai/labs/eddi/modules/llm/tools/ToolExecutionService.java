@@ -360,7 +360,9 @@ public class ToolExecutionService {
         // decides an approval. Every tool source passes through here — the LLM tool
         // loop, the HITL resume loop, mcpcalls — so this is the boundary; the
         // save-time check in EmailAgentToolsInspector is best effort on top of it.
-        Optional<String> escalation = EscalationGuard.refuseTool(toolName);
+        // A configuration tool passes only as the approved execution of a gated call
+        // of this very conversation (ToolLoopResumer binds ApprovedCallScope).
+        Optional<String> escalation = EscalationGuard.refuseTool(toolName, ApprovedCallScope.isActiveFor(conversationId));
         if (escalation.isPresent()) {
             meterRegistry.counter("eddi.tool.execution.escalation_refused", "tool", toolName).increment();
             LOGGER.warnf("Refused tool %s in conversation %s: the turn was started by an email", sanitize(toolName),
@@ -427,7 +429,10 @@ public class ToolExecutionService {
             }
             String result;
             try {
-                result = executeBounded(toolExecution, timeoutMs);
+                // Bound on the thread the tool runs on (executeBounded may hand it to a
+                // worker): what tells an approved call's own requests from those of a
+                // conversation it runs inline (ApprovedCallScope#approvesHere).
+                result = executeBounded(() -> ApprovedCallScope.inConversation(conversationId, toolExecution), timeoutMs);
             } catch (ToolTimedOut | InterruptedException unknownOutcome) {
                 // Outcome unknown: the worker may still finish the side effect (an interrupt
                 // abandons it exactly as a timeout does). Keep the count.

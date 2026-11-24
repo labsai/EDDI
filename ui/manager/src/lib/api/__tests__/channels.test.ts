@@ -141,4 +141,17 @@ describe("channel save warnings (X-Eddi-Warnings)", () => {
       warnings: ["email.open-trigger"],
     });
   });
+
+  it("sends confirmOpen only when the caller confirmed emptying the allowlist", async () => {
+    const queries: string[] = [];
+    server.use(
+      http.put("*/channelstore/channels/:id", ({ request }) => {
+        queries.push(new URL(request.url).search);
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    await updateChannel("abc", 1, config);
+    await updateChannel("abc", 1, config, true);
+    expect(queries).toEqual(["?version=1", "?version=1&confirmOpen=true"]);
+  });
 });

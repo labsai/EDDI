@@ -3558,6 +3558,9 @@
     "selectGroup": "Escolher um grupo…",
     "unknownGroup": "{{id}} (não encontrado)",
     "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas.",
+    "confirmOpenTitle": "Remover o último remetente permitido?",
+    "confirmOpenDesc": "Com uma lista de permitidos vazia, qualquer remetente pode fazer o agente agir, limitado apenas pela autenticação do remetente, e só se esta estiver ativada. A alteração é registada no registo de auditoria.",
+    "confirmOpenConfirm": "Guardar e abrir",
     "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência."
   },
   "hitl": {
@@ -5634,7 +5637,7 @@
       "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
       "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
       "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta.",
-      "allowlistEmptied": "Salvo, mas a lista de permitidos agora está vazia: qualquer remetente pode fazer o agente agir, limitado apenas pela autenticação do remetente.",
+      "allowlistEmptied": "Salvo, mas a lista de permitidos agora está vazia: qualquer remetente pode fazer o agente agir, limitado apenas pela autenticação do remetente, e só se esta estiver ativada.",
       "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
@@ -5683,7 +5686,7 @@
     "remove": "Remover {{entry}}",
     "addLabel": "Adicionar a {{list}}",
     "add": "Adicionar",
-    "hint": "Prefira endereços exatos. Cada alteração aplicada é uma nova versão desta integração e fica registrada no log de auditoria com o motivo. Uma conversa iniciada por um e-mail nunca pode alterar estas listas.",
+    "hint": "Prefira endereços exatos. Cada alteração aplicada é uma nova versão desta integração e fica registrada no log de auditoria com o motivo. O EDDI recusa que uma conversa iniciada por um e-mail altere estas listas.",
     "saveFirst": "Salve ou descarte primeiro suas outras alterações; as listas de remetentes são aplicadas separadamente.",
     "reason": "Por quê (para o log de auditoria)",
     "reasonPlaceholder": "ex.: novo fornecedor, contrato 2026-114",

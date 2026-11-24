@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
+import { platformConfigForType, adoptStoredVersion, emptiesSenderAllowlist } from "@/lib/channel-platform-config";
+
+describe("emptiesSenderAllowlist", () => {
+  it("is true only when a non-empty stored allowlist would be saved empty", () => {
+    expect(emptiesSenderAllowlist({ senderAllowlist: "a@x.com" }, {})).toBe(true);
+    expect(emptiesSenderAllowlist({ senderAllowlist: "a@x.com" }, { senderAllowlist: " , " })).toBe(true);
+    expect(emptiesSenderAllowlist({ senderAllowlist: "a@x.com" }, { senderAllowlist: "b@x.com" })).toBe(false);
+    expect(emptiesSenderAllowlist({}, {})).toBe(false);
+    expect(emptiesSenderAllowlist(undefined, {})).toBe(false);
+  });
+});
 
 const WEBHOOK = {
   signingSecret: "${vault:hook-secret}",

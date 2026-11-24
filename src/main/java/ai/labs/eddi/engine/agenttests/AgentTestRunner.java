@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -428,6 +429,10 @@ public class AgentTestRunner {
         // One future per (case, repetition), submitted up front; the semaphore keeps at
         // most maxParallelCases of them talking to the engine at once.
         List<List<Future<AttemptResult>>> futures = new ArrayList<>();
+        // The origin taint of the run (email plan v3 §5.3: a run a mail-started turn
+        // started), bound again on every attempt's thread, so the test conversations
+        // start tainted.
+        String origin = TurnOrigin.current();
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int c = 0; c < cases.size(); c++) {
                 TestCase testCase = cases.get(c);
@@ -439,7 +444,7 @@ public class AgentTestRunner {
                     perCase.add(executor.submit(() -> {
                         limiter.acquire();
                         try {
-                            return runAttempt(ctx, caseIndex, testCase, repetition);
+                            return TurnOrigin.callWith(origin, () -> runAttempt(ctx, caseIndex, testCase, repetition));
                         } finally {
                             limiter.release();
                         }

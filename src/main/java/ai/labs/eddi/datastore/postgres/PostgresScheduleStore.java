@@ -406,7 +406,10 @@ public class PostgresScheduleStore implements IScheduleStore {
         String sql = """
                 UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, user_id=?, trigger_type=?, cron_expression=?,
                     heartbeat_interval_seconds=?, conversation_strategy=?, max_cost_per_fire=?,
-                    next_fire=?, metadata=?::jsonb, updated_at=?,
+                    next_fire=?,
+                    metadata=CASE WHEN metadata->>'turnOrigin' ~* '^[\\x01-\\x20]*email[\\x01-\\x20]*$'
+                        THEN COALESCE(?::jsonb, '{}'::jsonb) || '{"turnOrigin":"email"}'::jsonb ELSE ?::jsonb END,
+                    updated_at=?,
                     message=?, one_time_at=?, time_zone=?, environment=?, agent_version=?, allow_self_scheduling=?
                 WHERE id=?
                 """;
@@ -421,15 +424,20 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setString(8, schedule.getConversationStrategy());
             setNullableDouble(ps, 9, schedule.getMaxCostPerFire());
             setNullableEpoch(ps, 10, schedule.getNextFire());
-            ps.setString(11, serializeMetadata(schedule.getMetadata()));
-            setNullableEpoch(ps, 12, schedule.getUpdatedAt());
-            ps.setString(13, schedule.getMessage());
-            ps.setString(14, schedule.getOneTimeAt());
-            ps.setString(15, schedule.getTimeZone());
-            ps.setString(16, schedule.getEnvironment());
-            ps.setInt(17, schedule.getAgentVersion());
-            ps.setBoolean(18, schedule.isAllowSelfScheduling());
-            ps.setString(19, scheduleId);
+            // Twice: the CASE above keeps a stored origin taint (email plan v3 §5.3)
+            // inside this one UPDATE, so a caller's copy read before a tainted write
+            // landed cannot write the taint away.
+            String metadata = serializeMetadata(schedule.getMetadata());
+            ps.setString(11, metadata);
+            ps.setString(12, metadata);
+            setNullableEpoch(ps, 13, schedule.getUpdatedAt());
+            ps.setString(14, schedule.getMessage());
+            ps.setString(15, schedule.getOneTimeAt());
+            ps.setString(16, schedule.getTimeZone());
+            ps.setString(17, schedule.getEnvironment());
+            ps.setInt(18, schedule.getAgentVersion());
+            ps.setBoolean(19, schedule.isAllowSelfScheduling());
+            ps.setString(20, scheduleId);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
@@ -453,6 +461,40 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
+        }
+    }
+
+    /**
+     * One {@code UPDATE} of the {@code turnOrigin} key of {@code metadata} alone —
+     * see {@link IScheduleStore#setTurnOrigin}.
+     */
+    @Override
+    public void setTurnOrigin(String scheduleId, String origin)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        if (origin == null) {
+            return;
+        }
+        ensureSchema();
+        int rows;
+        // Only an object is merged into: SQL NULL and a JSON null alike start from {},
+        // since `'null'::jsonb || object` would build an array.
+        String sql = """
+                UPDATE eddi_schedules SET
+                    metadata=(CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+                        || jsonb_build_object('turnOrigin', ?::text),
+                    updated_at=?
+                WHERE id=?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, origin);
+            ps.setLong(2, Instant.now().toEpochMilli());
+            ps.setString(3, scheduleId);
+            rows = ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set the origin of schedule " + scheduleId, e);
+        }
+        if (rows == 0) {
+            throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
         }
     }
 

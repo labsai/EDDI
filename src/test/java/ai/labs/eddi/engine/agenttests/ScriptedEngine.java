@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -84,6 +85,11 @@ final class ScriptedEngine {
     final Map<String, ConversationMemorySnapshot> conversations = new ConcurrentHashMap<>();
     final Map<String, String> userIds = new ConcurrentHashMap<>();
     final List<String> environments = new ArrayList<>();
+    /**
+     * The origin taint bound on the thread of each conversation start ("null":
+     * none).
+     */
+    final List<String> startOrigins = new CopyOnWriteArrayList<>();
     final AtomicInteger active = new AtomicInteger();
     final AtomicInteger maxActive = new AtomicInteger();
     private final AtomicInteger ids = new AtomicInteger();
@@ -96,6 +102,7 @@ final class ScriptedEngine {
 
     ScriptedEngine(Step onStart, Function<String, Step> script) throws Exception {
         when(service.startConversation(any(), anyString(), anyString(), any())).thenAnswer(inv -> {
+            startOrigins.add(String.valueOf(TurnOrigin.current()));
             int now = active.incrementAndGet();
             maxActive.accumulateAndGet(now, Math::max);
             try {

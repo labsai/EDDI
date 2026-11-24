@@ -718,7 +718,7 @@ class McpAdminToolsCrudTest {
 
     @Test
     void updateChannelIntegration_malformedJson_isReportedAsInvalidJson() {
-        String result = toolsWithTheRealParser().updateChannelIntegration(RESOURCE_ID, 1, "{'name': 'x'}");
+        String result = toolsWithTheRealParser().updateChannelIntegration(RESOURCE_ID, 1, "{'name': 'x'}", null);
 
         assertMalformedJsonIsACallerError(result, "Failed to update channel integration");
     }

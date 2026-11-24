@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.engine.runtime.client.factory;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.client.ClientRequestContext;
@@ -66,6 +68,18 @@ public class LoopbackCallerAuthFilter implements ClientRequestFilter {
 
     @Override
     public void filter(ClientRequestContext requestContext) {
+        // The origin taint (email plan v3 §5.3) re-enters with the request, so the
+        // inner request is refused or tainted exactly as the outer one would be. It
+        // needs no credential: it only restricts.
+        String origin = TurnOrigin.current();
+        if (origin != null) {
+            requestContext.getHeaders().putSingle(TurnOrigin.HEADER, origin);
+            // So is a person's approval of the call that makes the loopback request: an
+            // approved update_resource or deploy_agent from a tainted MCP request writes
+            // through here, and TaintedRequestFilter would refuse it without this.
+            // Engine-owned like the taint, always set, so it is never inherited.
+            requestContext.getHeaders().putSingle(TurnOrigin.APPROVED_HEADER, String.valueOf(approved()));
+        }
         if (requestContext.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
             // An explicit header wins. Nothing sets one today, but a caller that does
             // has said what it wants and should not be silently overridden.
@@ -76,6 +90,23 @@ public class LoopbackCallerAuthFilter implements ClientRequestFilter {
         if (token != null) {
             requestContext.getHeaders().putSingle(HttpHeaders.AUTHORIZATION, BEARER_PREFIX + token);
         }
+    }
+
+    /**
+     * Whether the loopback request may state that a person approved it. Inside a
+     * turn only the engine's own approval of a call of that conversation counts
+     * ({@link ApprovedCallScope#approvesHere}): a conversation that an approved MCP
+     * call started inline runs its turn on this thread, and the inbound request's
+     * approval was given for that MCP call, not for the turn. A direct MCP call
+     * that runs no turn passes the inbound approval on, so an approved
+     * {@code update_resource} still writes through the loopback.
+     */
+    private static boolean approved() {
+        if (ApprovedCallScope.approvesHere()) {
+            return true;
+        }
+        boolean inTurn = TurnOrigin.inTurn() || ApprovedCallScope.inToolCall();
+        return !inTurn && TurnOrigin.inboundApproved();
     }
 
     /**

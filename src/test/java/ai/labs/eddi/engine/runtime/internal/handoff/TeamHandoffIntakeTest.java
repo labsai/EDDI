@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.SourceKind;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.Trigger;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffIntake.Edits;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffIntake.Status;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -86,6 +87,20 @@ class TeamHandoffIntakeTest {
         assertEquals(NOW, stored.reviewedAt());
         assertEquals("agent:agent-1", stored.sourceKey());
         assertFalse(ws.getBacklog().findExecutableTasks().isEmpty(), "only now can a cadence pull it");
+    }
+
+    @Test
+    void acceptingATaintedHandoffKeepsTheFilersTaintOnTheTask() throws Exception {
+        HandoffOrigin tainted = new HandoffOrigin("h-1", SourceKind.AGENT, "agent-1", 2, "conv-1", null, Trigger.TOOL, null, null, null, 1,
+                List.of("agent:agent-1"), "dk-h-1", NOW.minusSeconds(60), Intake.PENDING, null, TurnOrigin.EMAIL);
+        workspaces.mutate(GROUP, ws -> ws.getHandoffs().addInbox(new InboxItem("h-1", "Mail work", "from a mail", 5, tainted)));
+
+        // A person accepts it, from an untainted request.
+        intake.accept(GROUP, "h-1", null, "reviewer-1");
+
+        TaskItem task = workspace().getBacklog().getTasks().get(0);
+        assertEquals(TurnOrigin.EMAIL, task.origin(), "the reviewer's accept does not clear the taint of the text");
+        assertEquals(TurnOrigin.EMAIL, workspace().getHandoffs().originOf(task.id()).turnOrigin());
     }
 
     @Test
