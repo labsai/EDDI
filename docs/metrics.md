@@ -1019,6 +1019,9 @@ eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags:
 eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
 eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
+eddi_channel_config_rejected_total          # Channel integration saves refused by type validation; tags: type, reason
+eddi_channel_config_keys_dropped_total      # Undeclared platformConfig keys the router dropped from stored documents; tag: type
+eddi_channel_credential_refused_total       # Channel sends whose connection could not be resolved; tags: type, reason
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
@@ -1031,6 +1034,20 @@ a load signal, not a configuration one). `type` is the observer's
 target type — `AGENT` today, since observe mode is refused on anything else —
 not the channel platform. A rising throttle share with a flat `MATCHED` share is
 an observer whose triggers are too broad for its budget.
+
+The three `eddi_channel_config_*` / `eddi_channel_credential_*` counters cover
+connection-backed channel types, whose credential comes from an EDDI
+connection rather than `platformConfig`. `type` is a registered channel type
+id, or `other` for an unknown one. A save's `reason` is a short refusal code
+such as `platform_config` (an undeclared key), `routing_key_taken`,
+`connection_not_usable` or `application_needs_edit`, and a send's is the
+lower-cased `ConnectionException` reason (`target_not_allowed`,
+`unsupported_placement`, …). A
+non-zero dropped-key count means a document reached the store without save
+validation (a direct store write). It is counted once per document version and
+key, not on every refresh. A credential refusal means the connection changed
+after the integration was saved, for example it was switched to `PER_USER` or
+its allowlist no longer covers the platform.
 
 ### Backup, Export & Sync Metrics
 
