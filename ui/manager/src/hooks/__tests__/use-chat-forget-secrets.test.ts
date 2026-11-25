@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatConversation, useChatStore } from "@/hooks/use-chat";
+import { chatConversation, useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 /**
  * The chat's controller is app-wide and keeps the raw text of every secret

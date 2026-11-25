@@ -126,7 +126,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             sendEvent(eventSink, sse, entry, lastEventTime);
         });
 
-        // Clean up when client disconnects or after max lifetime
+        // Clean up when the client disconnects, the token expires or after max lifetime
         Thread.ofVirtual().name("sse-log-cleanup-" + listenerId).start(() -> {
             long maxLifetimeMs = TimeUnit.HOURS.toMillis(24);
             long start = clock.getAsLong();

@@ -13,7 +13,7 @@ import {
   ShieldUser,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import {
   useDeleteUserData,
   useExportUserData,
@@ -22,7 +22,7 @@ import {
   useIsProcessingRestricted,
   gdprRestrictedKey,
 } from "@/hooks/use-gdpr";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import type { GdprDeletionResult, UserDataExport } from "@/lib/api/gdpr";
 
 export function GdprPage() {

@@ -167,15 +167,17 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     }
 
     /**
-     * Refuses a {@code batchRequests.maxBatchSize} above the deployment ceiling.
+     * Refuses a {@code batchRequests.maxBatchSize} or a {@code forEach.maxItems}
+     * above the deployment ceiling, and any problem
+     * {@link ApiCallsConfigurationValidator#firstProblem} reports.
      * <p>
      * The executor would clamp it at run time, so the value the designer saved is
      * not the value that applies — and a batch between the two fails a turn with a
      * limit the designer never wrote down. Saying so at save time is the honest
      * place for that surprise.
      *
-     * @return a 400 naming the call and the ceiling, or null when every call is
-     *         within it
+     * @return a 400 naming the call and the problem or the ceiling, or null when
+     *         the configuration passes
      */
     private Response validateBatchLimits(ApiCallsConfiguration configuration) {
         if (configuration == null || configuration.getHttpCalls() == null) {

@@ -126,8 +126,10 @@ class SanitizedLogSinksTest {
                     sink("Group %s produced a debate judgment that could not be read as a verdict at phase '%s' —", "gc.getId()",
                             "phase.name()")),
 
-            sinksOf("src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java",
-                    sink("Agent signing skipped for agent '{0}': {1}", "e.getMessage()", "entry.agentId()")),
+            // Agent signing moved out of AuditLedgerService into AuditAgentSigner; the
+            // "signing skipped" debug line became this warning, same sanitized arguments.
+            sinksOf("src/main/java/ai/labs/eddi/engine/audit/AuditAgentSigner.java",
+                    sink("Audit entry '%s' of agent '%s' is not signed: %s", "e.getMessage()", "entry.agentId()")),
 
             sinksOf("src/main/java/ai/labs/eddi/configs/groups/mongo/AgentGroupStore.java",
                     sink("Group '%s' phase '%s' is restricted to MODERATOR but the group names no moderatorAgentId —",

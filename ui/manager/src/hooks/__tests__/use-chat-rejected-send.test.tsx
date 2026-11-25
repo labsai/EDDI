@@ -3,12 +3,12 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
+import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
 
 /**
  * A 409 on `say` is not one condition. The same status answers "awaiting human

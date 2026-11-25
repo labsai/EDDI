@@ -3,7 +3,7 @@ import {
   validateCascade,
   type CascadeIssue,
 } from "../cascade-validation";
-import type { LlmTask, ModelCascadeConfig } from "../../types";
+import type { LlmTask, ModelCascadeConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Build a task with an enabled cascade and a task-level apiKey (so cross-provider checks fire). */
 function mk(cascade: Partial<ModelCascadeConfig>, taskType = "openai"): LlmTask {

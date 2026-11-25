@@ -1,4 +1,4 @@
-import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "./types";
+import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "@eddi/app-kit/components/editors/llm/types";
 
 /**
  * Where a guardrail runs: on the user's message, on the model's answer, or on

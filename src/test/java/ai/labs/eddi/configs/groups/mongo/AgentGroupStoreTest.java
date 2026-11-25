@@ -129,6 +129,90 @@ class AgentGroupStoreTest {
         assertTrue(problems.contains("artifactConfig.maxArtifactsPerDiscussion must be at most"), problems);
     }
 
+    /**
+     * Prompts name every speaker by display name, and a signature proves which
+     * agent wrote an entry, not which seat it holds: two members under one name
+     * could not be told apart, verified or not.
+     */
+    @Test
+    void duplicateDisplayName_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "Alice", 1, null), new GroupMember("b", "Bob", 2, null),
+                new GroupMember("m", " alice ", 3, null), new GroupMember("n", null, 4, null), new GroupMember("o", null, 5, null)));
+
+        var problems = AgentGroupStore.memberAndLimitProblems(c);
+
+        assertEquals(1, problems.size(), problems.toString());
+        assertTrue(problems.get(0).startsWith("members[2] has the same displayName as members[0] ('alice')"), problems.get(0));
+        assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+    }
+
+    /**
+     * A member that requires peer verification is shown an entry no agent wrote as
+     * "User", "System" or "&lt;name&gt; (not an agent, unverified)". An agent
+     * member under one of those names would let an entry under a non-agent speaker
+     * id pass for its message. Other member types are shown with the suffix
+     * themselves, so they may keep such a name.
+     */
+    @Test
+    void agentDisplayNameANonAgentEntryIsShownUnder_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", " system ", 1, null), new GroupMember("d", "Bob (Not an agent, unverified)", 2, null),
+                new GroupMember("e", "Systems", 3, null), new GroupMember("h", "User", 4, null, MemberType.HUMAN),
+                new GroupMember("g", "Ops (not an agent, unverified)", 5, null, MemberType.GROUP)));
+        var userAgent = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        userAgent.setMembers(List.of(new GroupMember("b", "USER", 1, null), new GroupMember("e", "Eve", 2, null)));
+
+        var problems = AgentGroupStore.memberAndLimitProblems(c);
+
+        assertEquals(List.of("members[0]", "members[1]"), problems.stream().map(p -> p.substring(0, p.indexOf(' '))).toList(), problems.toString());
+        assertTrue(problems.get(0).contains("'system'"), problems.get(0));
+        assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+        assertEquals(1, AgentGroupStore.memberAndLimitProblems(userAgent).size());
+    }
+
+    /**
+     * The engine names a moderator that is not a member "Moderator" and signs the
+     * facilitator's notes as "Facilitator". Another agent member under that name
+     * would be a second verified voice under one name. A moderator or facilitator
+     * that is itself a member keeps its own name, so the name is free then, and
+     * only for a role the group actually has.
+     */
+    @Test
+    void agentDisplayNameOfAnEngineRole_isRejectedWhenAnotherAgentHoldsTheRole() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setFacilitator(new AgentGroupConfiguration.FacilitatorConfig(true, "fac", null, null, 0, null));
+        c.setMembers(List.of(new GroupMember("a", " moderator ", 1, null), new GroupMember("b", "FACILITATOR", 2, null),
+                new GroupMember("h", "Moderator (human)", 3, null, MemberType.HUMAN), new GroupMember("c", "Facilitators", 4, null)));
+        var roleHoldersAreMembers = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        roleHoldersAreMembers.setFacilitator(new AgentGroupConfiguration.FacilitatorConfig(true, "fac", null, null, 0, null));
+        roleHoldersAreMembers.setMembers(List.of(new GroupMember("mod", "Moderator", 1, null), new GroupMember("fac", "Facilitator", 2, null)));
+        var noSuchRoles = config(DiscussionStyle.ROUND_TABLE, null, null);
+        noSuchRoles.setFacilitator(new AgentGroupConfiguration.FacilitatorConfig(false, "fac", null, null, 0, null));
+        noSuchRoles.setMembers(List.of(new GroupMember("a", "Moderator", 1, null), new GroupMember("b", "Facilitator", 2, null)));
+
+        var problems = AgentGroupStore.memberAndLimitProblems(c);
+
+        assertEquals(List.of("members[0]", "members[1]"), problems.stream().map(p -> p.substring(0, p.indexOf(' '))).toList(), problems.toString());
+        assertTrue(problems.get(0).contains("'moderator'") && problems.get(0).contains("moderator"), problems.get(0));
+        assertTrue(problems.get(1).contains("facilitator"), problems.get(1));
+        assertEquals(List.of(), AgentGroupStore.memberAndLimitProblems(roleHoldersAreMembers));
+        assertEquals(List.of(), AgentGroupStore.memberAndLimitProblems(noSuchRoles));
+    }
+
+    /**
+     * A blank moderatorAgentId is no moderator to the engine (resolveParticipants
+     * falls back to the first member by speaking order, who speaks under its own
+     * name), so no speaker is ever named "Moderator" and the name stays free.
+     */
+    @Test
+    void agentDisplayNameModerator_isAllowedWhenTheModeratorIdIsBlank() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, " ");
+        c.setMembers(List.of(new GroupMember("a", "Moderator", 1, null), new GroupMember("b", "Bob", 2, null)));
+
+        assertEquals(List.of(), AgentGroupStore.memberAndLimitProblems(c));
+    }
+
     @Test
     void duplicateMember_isRejectedAtSaveTime() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");

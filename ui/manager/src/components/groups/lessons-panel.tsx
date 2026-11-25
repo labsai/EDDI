@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BookOpenCheck } from "lucide-react";
 import { ErrorState } from "@/components/shared/error-state";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@eddi/ui";
+import { Badge, Button } from "@eddi/ui";
 import {
   useConsolidationState,
   useGroupLessons,
@@ -14,9 +13,9 @@ import {
   useSharedLessons,
   useUnscheduleConsolidation,
 } from "@/hooks/use-group-lessons";
-import { getErrorMessage } from "@/lib/api-client";
-import type { ConsolidationResult } from "@/lib/api/group-lessons";
-import { listTimeZones } from "@/lib/api/schedules";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import type { ConsolidationResult } from "@eddi/app-kit/lib/api/group-lessons";
+import { listTimeZones } from "@eddi/app-kit/lib/api/schedules";
 
 /** The viewer's own IANA zone, as the workspace cadence form defaults to, or UTC. */
 function browserTimeZone(): string {

@@ -233,8 +233,8 @@ final class LlmFallbackHandler {
      * {@code {class, message}} for {@code llm:error:<taskId>}: the simple class
      * name of the root cause and its message — redacted with the log secret filter,
      * stripped of URLs (a URL can carry a key in its query string) and truncated.
-     * Never a stack trace and never a request body. R2 will classify failures
-     * properly; this is the one place to swap that in.
+     * Never a stack trace and never a request body. The class is the raw
+     * exception's simple name, not the {@code LlmFailureClassifier} class.
      */
     static Map<String, Object> describe(Throwable failure) {
         Throwable root = failure;

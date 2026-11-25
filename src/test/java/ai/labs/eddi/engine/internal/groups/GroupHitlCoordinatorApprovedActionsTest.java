@@ -73,7 +73,7 @@ class GroupHitlCoordinatorApprovedActionsTest {
         groupConversationService = mock(GroupConversationService.class);
         actions = mock(GroupApprovedResultActions.class);
         coordinator = new GroupHitlCoordinator(groupStore, conversationStore, mock(IScheduleStore.class), mock(AuditLedgerService.class),
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), executorService,
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), executorService,
                 new CallerIdentityContext(null, null), groupConversationService, new SimpleMeterRegistry().counter("p"),
                 new SimpleMeterRegistry().counter("r"), new SimpleMeterRegistry().counter("f"));
         coordinator.setApprovedResultActions(actions);

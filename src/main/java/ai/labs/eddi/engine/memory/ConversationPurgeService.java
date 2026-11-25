@@ -123,10 +123,11 @@ public class ConversationPurgeService {
      * allowed.
      *
      * @throws ResourceStoreException
-     *             when the vault slots, attachments, checkpoints or tool-journal
-     *             entries could not be deleted; the snapshot and descriptors are
-     *             then kept, so the conversation stays findable and a retry of the
-     *             same delete finishes the job
+     *             when the conversation could not first be set to {@code ENDED}
+     *             (nothing is deleted), or when the vault slots, attachments,
+     *             checkpoints or tool-journal entries could not be deleted; the
+     *             snapshot and descriptors are then kept, so the conversation stays
+     *             findable and a retry of the same delete finishes the job
      */
     public void purge(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");

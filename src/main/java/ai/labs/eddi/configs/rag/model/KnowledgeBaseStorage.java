@@ -26,9 +26,9 @@ import java.util.regex.Pattern;
  *
  * <h2>The two layouts</h2>
  * <ul>
- * <li>{@link #NAMESPACE_ID} — every knowledge base created from this release
- * on. The store is addressed by the RAG configuration's <strong>id</strong>,
- * which is stable across versions and unique. The default physical location is
+ * <li>{@link #NAMESPACE_ID} — every knowledge base created from 6.6 on. The
+ * store is addressed by the RAG configuration's <strong>id</strong>, which is
+ * stable across versions and unique. The default physical location is
  * {@code eddi_kbid_<id>}, every chunk is tagged {@code kbId=<id>}, and
  * retrieval filters on that tag — so even two knowledge bases that deliberately
  * share one physical table see only their own chunks.</li>
@@ -43,7 +43,7 @@ import java.util.regex.Pattern;
  */
 public final class KnowledgeBaseStorage {
 
-    /** Store addressed by the RAG configuration's id — the default for new KBs. */
+    /** Store addressed by the RAG configuration's id — stamped on every new KB. */
     public static final String NAMESPACE_ID = "id";
 
     /** Store addressed by the knowledge base's name — the 6.5.0 layout. */

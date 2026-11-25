@@ -7,13 +7,14 @@
    actions (`actions`) sit under the bubble.
    ────────────────────────────────────────────── */
 
-import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { RatingInput, RatingProfile, StoredRating } from "@eddi/core";
 import { FileText, ShieldAlert } from "lucide-react";
 import type { ConversationMessage, GuardrailNotice, MessageAttachment } from "../controller/state";
 import { CopyButton, MarkdownContent } from "../markdown/Markdown";
 import { useConversationText } from "../react/hooks";
-import { StepRating } from "./StepRating";
+// Reply thumbs only for an agent that asks for them: not in the widget's first load.
+const StepRating = lazy(() => import("./StepRating").then((m) => ({ default: m.StepRating })));
 
 export interface MessageProps {
   message: ConversationMessage;
@@ -25,6 +26,11 @@ export interface MessageProps {
   enableMarkdown?: boolean;
   enableMath?: boolean;
   enableCodeHighlight?: boolean;
+  /**
+   * The agent's `conversationControls.rawHtml` (D9). True renders HTML in the
+   * reply through the sanitizer; false — the default — shows it as the text
+   * it is.
+   */
   enableRawHtml?: boolean;
   /** Who is speaking, for screen readers. Defaults to a generic "Assistant". */
   agentName?: string | null;
@@ -81,7 +87,7 @@ export const Message = memo(function Message({
   enableMarkdown = true,
   enableMath = true,
   enableCodeHighlight = true,
-  enableRawHtml = true,
+  enableRawHtml = false,
   agentName,
   ratingStep,
   rating,
@@ -130,7 +136,12 @@ export const Message = memo(function Message({
         ) : enableMarkdown ? (
           <div className="markdown-body" dir="auto">
             {hasContent ? (
-              <MarkdownContent enableMath={enableMath} enableCodeHighlight={enableCodeHighlight} enableRawHtml={enableRawHtml}>
+              <MarkdownContent
+                enableMath={enableMath}
+                enableCodeHighlight={enableCodeHighlight}
+                enableRawHtml={enableRawHtml}
+                escapeRawHtml={!enableRawHtml}
+              >
                 {renderedContent}
               </MarkdownContent>
             ) : images.length ? null : message.isStreaming ? (
@@ -167,7 +178,9 @@ export const Message = memo(function Message({
           ratingStep !== null &&
           ratingProfile?.messageRating &&
           onRateStep && (
-            <StepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+            <Suspense fallback={null}>
+              <StepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+            </Suspense>
           )}
         {actions}
       </div>

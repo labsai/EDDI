@@ -1,6 +1,6 @@
-import { api } from "../api-client";
-import { ALL_AGENTS } from "./secrets";
-import { nameSeg } from "./path-segment";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { ALL_AGENTS } from "@eddi/app-kit/lib/api/secrets";
+import { nameSeg } from "@eddi/app-kit/lib/api/path-segment";
 
 /**
  * Secrets and variables that belong to a space — a person's own, or a team's.

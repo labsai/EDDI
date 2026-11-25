@@ -69,12 +69,14 @@ import java.util.stream.Collectors;
  * CAS pattern, and race-window comment carries over unchanged.
  * <p>
  * Holds a back-reference to the concrete {@link GroupConversationService} for
- * three calls that stay on the facade: {@code executeDiscussion} (the phase
- * loop {@code resumeDiscussion} re-enters), {@code resolvePhases}, and
- * {@code cleanupEphemeralAgents}. Same safety argument as
- * {@link MemberTurnExecutor}'s self-reference — this class's constructor only
- * stores it, never invokes a method on it before the facade's own constructor
- * (and therefore full field initialization) completes.
+ * the calls that stay on the facade: {@code executeDiscussion} (the phase loop
+ * {@code resumeDiscussion} re-enters), {@code effectivePhases},
+ * {@code resolveParticipants} / {@code rosterWithRecruits},
+ * {@code approvalContextRenderer}, {@code planHashStrict},
+ * {@code announceUserEvents} and {@code cleanupEphemeralAgents}. Same safety
+ * argument as {@link MemberTurnExecutor}'s self-reference — this class's
+ * constructor only stores it, never invokes a method on it before the facade's
+ * own constructor (and therefore full field initialization) completes.
  * <p>
  * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
@@ -398,9 +400,10 @@ public class GroupHitlCoordinator {
         // Only the persist itself may revert the in-memory state. Past the commit
         // below, CANCELLED is durable, and reverting memory to the paused state
         // would make executeDiscussion's finally block read the wrong state: it
-        // skips signingGuard.forgetConversation for paused states (leaking the
-        // verification cursor) and only runs cleanupEphemeralAgents for
-        // FAILED/CANCELLED — so dynamically created agents would stay deployed.
+        // skips signingGuard.forgetConversation for paused states (keeping its
+        // record of the withheld entries logged) and only runs
+        // cleanupEphemeralAgents for FAILED/CANCELLED — so dynamically created
+        // agents would stay deployed.
         // The realistic post-commit thrower is the listener: an SSE sink on a closed
         // stream. It used to sit inside this try.
         final GroupConversation.PendingHumanInput savedPending = gc.getPendingHumanInput();
@@ -624,6 +627,11 @@ public class GroupHitlCoordinator {
             // release resources that were kept alive across the pause.
             auditHitlCancellation(gc, mode, cancelledPausedAt);
             cleanupAfterTerminalState(gc);
+        }
+        // No running leg ends here, so the leg's own end-of-leg announcement never
+        // runs: tell the owner and the human members that it ended.
+        if (groupConversationService != null) {
+            groupConversationService.announceUserEvents(gc);
         }
         return true;
     }
@@ -1833,8 +1841,9 @@ public class GroupHitlCoordinator {
      * terminal state OUTSIDE the executeDiscussion finally block (cancel-of-paused,
      * REJECTED resume). executeDiscussion skips cleanup while AWAITING_APPROVAL —
      * without this, ephemeral dynamic agents stay deployed and the signing guard's
-     * verification cursor (see {@link GroupSigningGuard#forgetConversation}) leaks
-     * forever on every paused-then-terminal path.
+     * record of the withheld entries it logged (see
+     * {@link GroupSigningGuard#forgetConversation}) lingers until the guard's
+     * bounded cache evicts it.
      */
     public void cleanupAfterTerminalState(GroupConversation gc) {
         signingGuard.forgetConversation(gc.getId());

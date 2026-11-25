@@ -38,6 +38,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -125,6 +126,30 @@ class DatastoreParityTest extends MongoTestBase {
             assertEquals(new IConversationMemoryStore.StateAndRevision(null, null), store.getStateAndRevision(id), backend + " state+revision " + id);
             store.deleteConversationMemorySnapshot(id);
         }
+    }
+
+    // ─── soft delete ────────────────────────────────────────────
+
+    /**
+     * A soft delete removes the current row on both backends, so the current
+     * version is gone; the deleted version is still the newest, and audit
+     * verification reads a key revocation from it.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("resourceStorages")
+    @DisplayName("soft delete: the deleted version is still the newest; a permanent delete leaves none")
+    void theNewestVersionSurvivesASoftDelete(String backend, Supplier<IResourceStorage<Map<String, Object>>> factory) throws Exception {
+        var store = new HistorizedResourceStore<>(factory.get());
+        String id = store.create(new HashMap<>(Map.of("name", "first"))).getId();
+        store.update(id, 1, new HashMap<>(Map.of("name", "second")));
+        store.delete(id, 2);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.getCurrentResourceId(id), backend);
+        assertEquals(2, store.getNewestVersionIncludingDeleted(id), backend);
+        assertEquals("second", store.readIncludingDeleted(id, 2).get("name"), backend);
+
+        store.deleteAllPermanently(id);
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.getNewestVersionIncludingDeleted(id), backend);
     }
 
     // ─── sort order ─────────────────────────────────────────────

@@ -20,9 +20,9 @@ import java.util.Map;
  * Builds the {@code hitl} and {@code call} roots of the approval-context
  * template data from the paused conversation.
  * <p>
- * <b>Raw tool arguments are never read.</b> A call exposes
- * {@code argumentsRedacted} — the redacted, size-capped text stored when the
- * batch was built — re-redacted through the <em>current</em>
+ * <b>Raw tool arguments are never read.</b> A call exposes {@code arguments} —
+ * the redacted, size-capped text stored when the batch was built (its
+ * {@code argumentsRedacted} field) — re-redacted through the <em>current</em>
  * {@link SecretRedactionFilter}, as {@code approval-status} does at serve time.
  * {@code args} is that same text parsed as JSON (empty when it is not JSON).
  * Every string handed to a template is capped at {@value #MAX_STRING_CHARS}
