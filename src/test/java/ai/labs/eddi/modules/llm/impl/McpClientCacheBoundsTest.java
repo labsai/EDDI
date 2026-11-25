@@ -359,9 +359,9 @@ class McpClientCacheBoundsTest {
     }
 
     /**
-     * One server with a discovered tool whose call blocks until {@code release}.
+     * A manager whose discovered tools block every call until {@code release}.
      */
-    private McpToolProviderManager busyServer(String url, CountDownLatch entered, CountDownLatch release) {
+    private McpToolProviderManager busyServer(CountDownLatch entered, CountDownLatch release) {
         return manager(16, c -> toolClient(c.getUrl(), () -> {
             entered.countDown();
             await(release);
@@ -374,7 +374,7 @@ class McpClientCacheBoundsTest {
         String url = "http://closing.example/mcp";
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var manager = busyServer(url, entered, release);
+        var manager = busyServer(entered, release);
         var tools = manager.discoverTools(List.of(config(url)));
 
         Future<String> inFlight = pool.submit(() -> call(tools, url));
@@ -396,7 +396,7 @@ class McpClientCacheBoundsTest {
         String url = "http://rotating.example/mcp";
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var manager = busyServer(url, entered, release);
+        var manager = busyServer(entered, release);
         manager.registerSecretInvalidation();
         ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
         verify(secretResolver).registerInvalidationListener(listener.capture());
