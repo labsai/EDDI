@@ -12874,6 +12874,104 @@
             }
           },
           "description": "Addresses added to an integration's suppression list per hour (a reply bounced permanently). Nothing is sent to them until an administrator clears the entry (POST /channelstore/channels/{id}/email-suppressions/clear)."
+        },
+        {
+          "id": 462,
+          "type": "timeseries",
+          "title": "Channel config refusals",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Saves refused (`eddi_channel_config_rejected_total`), undeclared `platformConfig` keys the router dropped from stored documents (`eddi_channel_config_keys_dropped_total`, once per document version and key) and sends whose connection could not be resolved (`eddi_channel_credential_refused_total`), by channel `type`. A dropped key means a document reached the store without save validation; a credential refusal means a connection changed after the integration was saved.",
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 88
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, reason) (rate(eddi_channel_config_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rejected {{type}} {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (type) (rate(eddi_channel_config_keys_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped key {{type}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (type, reason) (rate(eddi_channel_credential_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "credential refused {{type}} {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
