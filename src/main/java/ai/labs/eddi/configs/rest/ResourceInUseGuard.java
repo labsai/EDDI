@@ -192,11 +192,11 @@ public class ResourceInUseGuard {
     }
 
     static boolean isGuarded(String resourceUri) {
-        String authority = authorityOf(resourceUri);
+        String authority = hostOf(resourceUri);
         return WORKFLOW_AUTHORITY.equals(authority) || STEP_RESOURCE_AUTHORITIES.contains(authority);
     }
 
-    private static String authorityOf(String resourceUri) {
+    private static String hostOf(String resourceUri) {
         int scheme = resourceUri.indexOf("://");
         if (scheme < 0) {
             return "";
@@ -218,7 +218,7 @@ public class ResourceInUseGuard {
         if (force || isUnguarded() || version == null || version < 1) {
             return;
         }
-        String authority = authorityOf(resourceUri);
+        String authority = hostOf(resourceUri);
         List<String> addressed = new ArrayList<>();
         for (int v = permanent ? 1 : version; v <= version; v++) {
             addressed.add(resourceUri + id + IRestVersionInfo.versionQueryParam + v);
