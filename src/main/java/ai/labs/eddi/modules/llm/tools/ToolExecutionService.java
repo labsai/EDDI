@@ -222,6 +222,23 @@ public class ToolExecutionService {
     }
 
     /**
+     * Removes the result {@link #executeToolWrapped} just stored for a call, when
+     * the caller learns afterwards that the call never ran: a tool that refuses its
+     * arguments answers with an error object, which the in-band failure test
+     * ({@code Error:} prefix) does not recognise, so the answer was cached and an
+     * identical later call would be served the refusal without the tool judging it
+     * again. Successful results are untouched.
+     *
+     * @param cacheScopeTag
+     *            the tag the call was made with; {@code null} removes nothing
+     */
+    public void discardCachedResult(String cacheScopeTag, ToolInvocation invocation, String arguments) {
+        if (cacheScopeTag != null) {
+            cacheService.invalidate(cacheScopeTag, invocation.dispatchName(), arguments);
+        }
+    }
+
+    /**
      * Returns the cost tracker for budget checking.
      */
     public ToolCostTracker getCostTracker() {

@@ -171,6 +171,62 @@ class ToolLoopRunnerToolPolicyTest {
         }
     }
 
+    /** An httpcall-like tool that counts how often it is really asked. */
+    private static final class CountingHttpTool implements ToolExecutor, RefusalAwareToolExecutor {
+        final AtomicInteger asked = new AtomicInteger();
+        private final boolean refuses;
+
+        CountingHttpTool(boolean refuses) {
+            this.refuses = refuses;
+        }
+
+        @Override
+        public String execute(ToolExecutionRequest request, Object memoryId) {
+            return executeJudged(request, null).result();
+        }
+
+        @Override
+        public Outcome executeJudged(ToolExecutionRequest request, ToolMockRegistry.MockResult mock) {
+            asked.incrementAndGet();
+            return refuses
+                    ? Outcome.refused("{\"error\": \"The request was NOT sent: the arguments cannot be placed.\"}")
+                    : Outcome.ran("{\"id\": 7}");
+        }
+    }
+
+    @Nested
+    @DisplayName("cache and argument refusals")
+    class RefusalCacheTests {
+
+        private String callTwice(CountingHttpTool tool) {
+            task.setToolCacheScopes(Map.of("createUser", "global"));
+            var request = ToolExecutionRequest.builder().id("c1").name("createUser").arguments("{\"name\":\"x\"}").build();
+            String first = null;
+            for (int i = 0; i < 2; i++) {
+                first = runner.executeSingleToolCallResult(request, memory("conv-1"), new ArrayList<>(), Map.of("createUser", tool), Map.of(),
+                        Map.of(), Map.of("createUser", "http"), 100, null, "conv-1", false, true, false, task, false, List.of(),
+                        new ArrayList<>());
+            }
+            return first;
+        }
+
+        @Test
+        @DisplayName("a refusal is judged again by the next identical call, not served from the cache")
+        void refusalIsNotCached() {
+            CountingHttpTool tool = new CountingHttpTool(true);
+            callTwice(tool);
+            assertEquals(2, tool.asked.get(), "the second call must reach the tool, not replay the refusal");
+        }
+
+        @Test
+        @DisplayName("a successful httpcall result is still cached")
+        void successIsStillCached() {
+            CountingHttpTool tool = new CountingHttpTool(false);
+            callTwice(tool);
+            assertEquals(1, tool.asked.get());
+        }
+    }
+
     @Test
     @DisplayName("discover_tools activates from its untruncated result even when a response limit applies")
     void discoverToolsParsesUntruncatedResult() {

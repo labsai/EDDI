@@ -467,7 +467,7 @@ class WebSearchToolTest {
         }
 
         @Test
-        void formatWikipediaResults_MissingSearchNode_ShouldReturnNoArticles() {
+        void formatWikipediaResults_MissingSearchNode_IsAFailedSearch() {
             String json = """
                     {
                       "query": {
@@ -476,9 +476,17 @@ class WebSearchToolTest {
                     }
                     """;
 
-            String result = webSearchTool.formatWikipediaResults(json, "test");
+            // Only an array with no hits is "nothing found"; a result without one is
+            // unreadable.
+            assertThrows(ToolFailureException.class, () -> webSearchTool.formatWikipediaResults(json, "test"));
+        }
 
-            assertTrue(result.contains("No Wikipedia articles found"));
+        @Test
+        void formatWikipediaResults_NullOrNonArraySearch_IsAFailedSearch() {
+            assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatWikipediaResults("{\"query\":{\"search\":null}}", "test"));
+            assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatWikipediaResults("{\"query\":{\"search\":{\"title\":\"x\"}}}", "test"));
         }
     }
 

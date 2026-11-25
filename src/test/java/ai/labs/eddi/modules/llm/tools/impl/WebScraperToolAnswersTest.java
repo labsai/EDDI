@@ -144,6 +144,18 @@ class WebScraperToolAnswersTest {
     }
 
     @Test
+    void aCommentOpenerInsideAQuotedAttributeDoesNotHideTheRealDeclaration() {
+        byte[] page = "<html data-note=\"<!--\"><head><meta charset=\"windows-1252\"></head><body>Café</body></html>"
+                .getBytes(StandardCharsets.ISO_8859_1);
+        assertEquals(Charset.forName("windows-1252"), WebScraperTool.charsetOf(null, page), "attribute text is not a comment");
+        byte[] singleQuoted = "<body title='<!--'><meta charset='windows-1252'>".getBytes(StandardCharsets.UTF_8);
+        assertEquals(Charset.forName("windows-1252"), WebScraperTool.charsetOf(null, singleQuoted));
+        // a real comment after such a tag still hides what it contains
+        byte[] realComment = "<html data-note=\"<!--\"><!-- <meta charset='windows-1252'> -->".getBytes(StandardCharsets.UTF_8);
+        assertEquals(StandardCharsets.UTF_8, WebScraperTool.charsetOf(null, realComment));
+    }
+
+    @Test
     void aCutThroughAMultiByteCharacterIsDroppedInAnyCharset() {
         byte[] utf16 = "ab".getBytes(StandardCharsets.UTF_16LE);
         byte[] cut = Arrays.copyOf(utf16, utf16.length + 1);

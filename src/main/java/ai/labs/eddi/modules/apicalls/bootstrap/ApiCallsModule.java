@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.apicalls.bootstrap;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallsTask;
+import ai.labs.eddi.modules.apicalls.impl.ToolArgumentBodyEscaper;
 import io.quarkus.runtime.Startup;
 import org.jboss.logging.Logger;
 
@@ -36,6 +37,7 @@ public class ApiCallsModule {
         lifecycleTaskProviders.put(ApiCallsTask.ID, () -> instance.select(ApiCallsTask.class).get());
         // V6 alias: ai.labs.httpcalls → ai.labs.apicalls
         lifecycleTaskProviders.put("ai.labs.apicalls", lifecycleTaskProviders.get(ApiCallsTask.ID));
+        ToolArgumentBodyEscaper.registerRefusalSeries();
         LOGGER.debug("Added ApiCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 

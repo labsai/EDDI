@@ -904,25 +904,61 @@ public class WebScraperTool {
 
     /**
      * {@code head} with every {@code <!-- ... -->} comment blanked (an unterminated
-     * one runs to the end), in one forward pass.
+     * one runs to the end), in one forward pass. A comment opener inside a tag's
+     * quoted attribute value is attribute text, not a comment: the prescan consumes
+     * such a value whole, so {@code <html data-note="<!--">} hides nothing after
+     * it.
      */
     static String withoutComments(String head) {
-        int open = head.indexOf("<!--");
-        if (open < 0) {
+        if (head.indexOf("<!--") < 0) {
             return head;
         }
         StringBuilder out = new StringBuilder(head.length());
-        int copied = 0;
-        while (open >= 0) {
-            out.append(head, copied, open);
-            int close = head.indexOf("-->", open + 4);
-            int end = close < 0 ? head.length() : close + 3;
-            out.append(" ".repeat(end - open));
-            copied = end;
-            open = close < 0 ? -1 : head.indexOf("<!--", end);
+        int n = head.length();
+        int i = 0;
+        while (i < n) {
+            if (head.startsWith("<!--", i)) {
+                int close = head.indexOf("-->", i + 4);
+                int end = close < 0 ? n : close + 3;
+                out.append(" ".repeat(end - i));
+                i = end;
+            } else if (head.charAt(i) == '<' && i + 1 < n && startsTag(head, i + 1)) {
+                // A tag: copy through its closing '>', skipping quoted values.
+                char quote = 0;
+                int j = i;
+                while (j < n) {
+                    char c = head.charAt(j);
+                    j++;
+                    if (quote != 0) {
+                        if (c == quote) {
+                            quote = 0;
+                        }
+                    } else if (c == '"' || c == '\'') {
+                        quote = c;
+                    } else if (c == '>') {
+                        break;
+                    }
+                }
+                out.append(head, i, j);
+                i = j;
+            } else {
+                out.append(head.charAt(i));
+                i++;
+            }
         }
-        out.append(head, copied, head.length());
         return out.toString();
+    }
+
+    /**
+     * Whether a tag name starts at {@code at}: an ASCII letter, or {@code /} and
+     * one.
+     */
+    private static boolean startsTag(String text, int at) {
+        char c = text.charAt(at);
+        if (c == '/' && at + 1 < text.length()) {
+            c = text.charAt(at + 1);
+        }
+        return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
     }
 
     /** {@code tag} with the characters inside each quoted value replaced. */

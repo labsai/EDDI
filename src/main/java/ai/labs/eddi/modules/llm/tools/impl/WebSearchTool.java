@@ -542,6 +542,10 @@ public class WebSearchTool {
             throw unreadableAnswer("Wikipedia");
         }
         JsonNode searchResults = queryNode.path("search");
+        if (!searchResults.isArray()) {
+            LOGGER.warnf("Wikipedia query result without a search array for query '%s'", sanitize(query));
+            throw unreadableAnswer("Wikipedia");
+        }
         try {
             int count = 0;
             for (JsonNode item : searchResults) {

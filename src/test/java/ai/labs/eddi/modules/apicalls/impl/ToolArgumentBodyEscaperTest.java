@@ -8,20 +8,29 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -276,5 +285,43 @@ class ToolArgumentBodyEscaperTest {
         call.setName("c");
         call.setRequest(request);
         return call;
+    }
+
+    // ------------------------------------------------ review follow-ups
+
+    @Test
+    void manyReferenceOpenersAreRefusedWithoutBuildingOverlappingSpans() {
+        // 100 000 openers and one closing brace at the end: the old scan kept a suffix
+        // per opener
+        // (about 350 million characters) before the caller could refuse the first
+        // reference.
+        String hostile = "${vars:".repeat(100_000);
+        String inert = "{\"q\":\"\"}";
+        String sent = "{\"q\":\"" + hostile + "\"}";
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> assertFalse(ToolArgumentBodyEscaper.referencesComeFromTheTemplate(inert, sent)));
+        // the same count of author-written references is still allowed, with
+        // multiplicity
+        String authored = "{\"a\":\"${vars:x}\",\"b\":\"${vars:x}\"}";
+        assertTrue(ToolArgumentBodyEscaper.referencesComeFromTheTemplate(authored, authored));
+        assertFalse(ToolArgumentBodyEscaper.referencesComeFromTheTemplate("{\"a\":\"${vars:x}\"}", authored));
+    }
+
+    @Test
+    void everyRefusalReasonHasItsSeriesAtZeroBeforeTheFirstRefusal() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ToolArgumentBodyEscaper.registerRefusalSeries(registry);
+        ToolArgumentBodyEscaper.registerRefusalSeries(registry); // idempotent
+        for (String reason : ToolArgumentBodyEscaper.REFUSAL_REASONS) {
+            assertNotNull(registry.find(ToolArgumentBodyEscaper.REFUSED_METRIC).tag("reason", reason).counter(), reason);
+            assertEquals(0.0, registry.get(ToolArgumentBodyEscaper.REFUSED_METRIC).tag("reason", reason).counter().count(), reason);
+        }
+        // and the list is the set of reasons refused() is called with
+        String source = Files.readString(Path.of("src/main/java/ai/labs/eddi/modules/apicalls/impl/ToolArgumentBodyEscaper.java"));
+        Set<String> used = new TreeSet<>();
+        Matcher m = Pattern.compile("throw refused\\(\"([a-z_]+)\"").matcher(source);
+        while (m.find()) {
+            used.add(m.group(1));
+        }
+        assertEquals(new TreeSet<>(ToolArgumentBodyEscaper.REFUSAL_REASONS), used);
     }
 }

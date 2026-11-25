@@ -1918,6 +1918,13 @@ class ToolLoopRunner {
                                     execution, enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
                     // The quota refused it, or the tool refused its arguments: it never ran.
                     notExecuted = refusedBeforeRunning.get() || quotaGate != null && quotaGate.refused();
+                    if (refusedBeforeRunning.get() && cacheThisCall) {
+                        // A refusal is not an answer: the cache stored it as one (its
+                        // JSON error object is not an in-band "Error:" string), and the
+                        // next identical call would be served it without the tool
+                        // judging the call again, nor counting it as refused.
+                        toolExecutionService.discardCachedResult(cacheScopeTag, invocation, toolRequest.arguments());
+                    }
                 }
             }
         } else {

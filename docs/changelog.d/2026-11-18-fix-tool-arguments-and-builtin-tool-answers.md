@@ -45,6 +45,14 @@ Proof: `ToolArgumentInjectionTest` drives the real `HttpCallToolsProvider` → `
 templating path for 47 template × value cases plus forEach, headers, gate fingerprint, opt-out,
 non-JSON and rule-path cases.
 
+### Review follow-ups (2026-11-25)
+
+- The reference comparison (`referencesComeFromTheTemplate`) now visits each `${namespace:` span as it is found and stops at the first one the template did not write; it used to collect every overlapping suffix first, which a value of thousands of openers turned into hundreds of millions of characters.
+- The `eddi.httpcalls.tool.argument.refused` series are registered at zero for every reason at startup (`ApiCallsModule`), so `rate()` shows the first refusal of each reason.
+- A tool refusal is no longer left in the result cache when an httpcall tool opts into `toolCacheScopes`: the next identical call reaches the tool again and is judged and counted as refused again (`ToolExecutionService.discardCachedResult`).
+- The HTML encoding prescan skips quoted tag attributes before it recognises a comment opener, so `<html data-note="<!--">` no longer hides the real `<meta charset>`.
+- A Wikipedia answer whose `query.search` is missing, `null` or not an array is a failed search; only an array with no hits means "nothing found".
+
 ### Upgrade note
 
 Stored configs keep deploying (warnings only). On the tool path, with a JSON body that names an

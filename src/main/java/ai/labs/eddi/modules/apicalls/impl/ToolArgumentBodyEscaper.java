@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 
 import java.util.ArrayDeque;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -94,6 +96,29 @@ public final class ToolArgumentBodyEscaper {
 
     /** Counter of tool calls refused because of their arguments. */
     static final String REFUSED_METRIC = "eddi.httpcalls.tool.argument.refused";
+
+    /**
+     * Every {@code reason} tag {@link #refused} passes. Kept next to it so the
+     * series can be registered before the first refusal; a source-scanning test
+     * fails when a reason is used that is not listed.
+     */
+    static final List<String> REFUSAL_REASONS = List.of("empty", "not_json", "structure", "reference", "header", "bare_value");
+
+    /**
+     * Creates the refusal counter once per reason at zero. A series that first
+     * appears with its first refusal has one sample and so no {@code rate()}, which
+     * would hide the first refusal of each reason from the dashboard panel.
+     * Idempotent; called at startup.
+     */
+    public static void registerRefusalSeries() {
+        registerRefusalSeries(Metrics.globalRegistry);
+    }
+
+    static void registerRefusalSeries(MeterRegistry registry) {
+        for (String reason : REFUSAL_REASONS) {
+            registry.counter(REFUSED_METRIC, "reason", reason);
+        }
+    }
 
     /**
      * What an inert stand-in string is made of: private-use characters, which are
@@ -1013,35 +1038,48 @@ public final class ToolArgumentBodyEscaper {
      */
     static boolean referencesComeFromTheTemplate(String inert, String sent) {
         Map<String, Integer> allowed = new HashMap<>();
-        for (String reference : references(inert)) {
+        eachReference(inert, reference -> {
             allowed.merge(reference, 1, Integer::sum);
-        }
-        for (String reference : references(sent)) {
+            return true;
+        });
+        // Checked as each reference is met, so the first one the template did not
+        // write ends the scan: a value made of thousands of openers costs one
+        // refusal, not a list of overlapping suffixes.
+        return eachReference(sent, reference -> {
             Integer left = allowed.get(reference);
             if (left == null || left == 0) {
                 return false;
             }
             allowed.put(reference, left - 1);
-        }
-        return true;
+            return true;
+        });
     }
 
     /**
-     * Each reference opener ({@link #REFERENCE_OPENER}) of {@code text} with what
-     * follows it up to the first closing brace (or the end): the span a resolver
-     * would read.
+     * Hands each reference opener ({@link #REFERENCE_OPENER}) of {@code text}, with
+     * what follows it up to the first closing brace (or the end) — the span a
+     * resolver would read — to {@code visitor}, and stops at the first
+     * {@code false}. Each reference is materialised only when it is visited, and
+     * the closing brace is searched once per brace rather than once per opener, so
+     * the scan is linear however many openers the text holds.
+     *
+     * @return {@code false} when the visitor stopped the scan
      */
-    private static List<String> references(String text) {
-        List<String> found = new ArrayList<>();
+    private static boolean eachReference(String text, Predicate<String> visitor) {
         Matcher opener = REFERENCE_OPENER.matcher(text);
         int from = 0;
+        int close = -2; // -2: not searched yet, -1: no closing brace at all
         while (from < text.length() && opener.find(from)) {
-            int close = text.indexOf('}', opener.end());
+            if (close == -2 || close >= 0 && close < opener.end()) {
+                close = text.indexOf('}', opener.end());
+            }
             int end = close < 0 ? text.length() : close + 1;
-            found.add(text.substring(opener.start(), end));
+            if (!visitor.test(text.substring(opener.start(), end))) {
+                return false;
+            }
             from = opener.end();
         }
-        return found;
+        return true;
     }
 
     private static JsonNode parseOrNull(String text) {
