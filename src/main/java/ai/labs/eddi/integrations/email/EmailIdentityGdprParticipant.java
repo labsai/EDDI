@@ -35,6 +35,12 @@ import java.util.Set;
  * ledger rows themselves (the address is their {@code recipient}) are erased by
  * {@code EmailLedgerGdprParticipant}.
  * <p>
+ * The agents a mail consulted ran as
+ * {@code email-consult:<integrationId>:<hash of the address>}, which is derived
+ * from the address the same way, so their conversations are erased and exported
+ * too — no conversation needs reading first, so the order of the cascades does
+ * not matter.
+ * <p>
  * Nothing is expanded for an id that already is an email identity, so the
  * nested cascades do not recurse. The one-off {@code email-anon:} ids of
  * unauthenticated senders hold no memory and are not linked to an address at
@@ -112,6 +118,9 @@ public class EmailIdentityGdprParticipant implements IGdprParticipant {
         }
         for (String integrationId : integrations) {
             ids.add(EmailUserIdentity.perSender(integrationId, address.get()));
+            // The conversations of agents this address's mail consulted (email v2 plan
+            // §10.3): memory-less, but they hold what the consulting agent told them.
+            ids.add(EmailUserIdentity.consult(integrationId, address.get()));
         }
         return ids;
     }

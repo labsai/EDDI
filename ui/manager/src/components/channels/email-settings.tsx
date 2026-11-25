@@ -622,6 +622,7 @@ export interface EmailTargetRuleValues {
   mentions?: string[];
   addresses?: string[];
   allowedSenders?: string[];
+  consultable?: string[];
 }
 
 /**
@@ -647,6 +648,7 @@ export function EmailTargetRules({
     mentions: (target.mentions ?? []).join(", "),
     addresses: (target.addresses ?? []).join(", "),
     allowedSenders: (target.allowedSenders ?? []).join(", "),
+    consultable: (target.consultable ?? []).join(", "),
   }));
   const update = (field: keyof EmailTargetRuleValues, value: string) => {
     setText((prev) => ({ ...prev, [field]: value }));
@@ -708,6 +710,23 @@ export function EmailTargetRules({
           {t(
             "emailChannel.targetAllowedSendersHint",
             "When set, only authenticated senders matching one of these reach this target, however the mail was routed. Anyone else is refused, never sent to the default target instead.",
+          )}
+        </p>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-consultable`} className={labelClass}>{t("emailChannel.targetConsultable", "Can consult")}</label>
+        <Input
+          id={`${uid}-consultable`}
+          data-testid={`email-target-consultable-${index}`}
+          className="h-8 text-sm"
+          value={text.consultable}
+          onChange={(e) => update("consultable", e.target.value)}
+          placeholder="legal"
+        />
+        <p className={hintClass}>
+          {t(
+            "emailChannel.targetConsultableHint",
+            "Names of other agent targets. When a mail this agent answers also names one of them (@legal), the agent may ask it and answer the thread itself. The consulted agent sees only the question, no memory of the sender, and never mails anyone. The agent needs converse_with_agent in its built-in tools.",
           )}
         </p>
       </div>

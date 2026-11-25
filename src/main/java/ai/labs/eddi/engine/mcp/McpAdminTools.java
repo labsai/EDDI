@@ -1337,10 +1337,15 @@ public class McpAdminTools {
             + "To before Cc), the address plus-tag, targets[].mentions (handles written as @handle in the sender's own text, never in "
             + "quotes or signatures; max 10 per target, unique), targets[].triggers as a subject word, then the default target. "
             + "targets[].allowedSenders (sender patterns) limits a target to matching authenticated senders on every path; others "
-            + "are refused blocked:target_not_allowed, never rerouted. mentions, addresses and allowedSenders are email-only. "
+            + "are refused blocked:target_not_allowed, never rerouted. targets[].consultable (names of other AGENT targets, max 10): "
+            + "when an authenticated mail run by this target's agent also names one of them by address, plus-tag or mention, and "
+            + "that target admits the sender, the agent may consult it with converse_with_agent (mail.consultRequested); it stays "
+            + "the only voice in the thread, and the consulted agent runs memory-less and mails nobody. "
+            + "mentions, addresses, allowedSenders and consultable are email-only. "
             + "Returns the new resource ID and URI, for a webhook "
             + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
-            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
+            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to, email.consult-not-enabled, email.consult-owner-cannot-use) when there "
+            + "are any.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("create_channel_integration"));
@@ -1436,6 +1441,10 @@ public class McpAdminTools {
                         + "(EU AI Act Art. 50 transparency)";
                 case "email.honor-reply-to" -> trimmed + ": replies go to the Reply-To, which DMARC does not authenticate — anyone who can "
                         + "send authenticated mail from an allowed domain chooses where the reply goes";
+                case "email.consult-not-enabled" -> trimmed + ": a target lists consultable targets, but its agent has no LLM task "
+                        + "with enableBuiltInTools and converse_with_agent in builtInToolsWhitelist, so it can never consult them";
+                case "email.consult-owner-cannot-use" -> trimmed + ": the integration's owner may not use a consulted target's agent "
+                        + "(an admin role and team shares do not count for a mail's turn), so that consultation is refused at run time";
                 default -> trimmed;
             });
         }

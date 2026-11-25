@@ -5585,13 +5585,21 @@
       "targetAddressInvalid": "每个目标地址都必须是有效的电子邮件地址。",
       "targetAddressNotReceived": "目标地址必须是某个别名或邮箱地址的加号地址，这样邮箱才能收到。",
       "targetAddressDuplicate": "每个目标地址只能对应一个目标。",
-      "targetAllowedSendersInvalid": "目标的每个允许发件人必须是 user@domain、*@domain 或 *@*.domain。"
+      "targetAllowedSendersInvalid": "目标的每个允许发件人必须是 user@domain、*@domain 或 *@*.domain。",
+      "consultableUnknown": "目标可咨询的每个目标都必须是此集成中另一个目标的名称。",
+      "consultableSelf": "目标不能咨询它自己的代理。",
+      "consultableNotAgent": "只有代理目标可以咨询或被咨询；群组讨论咨询的是它自己的成员。",
+      "consultableTooMany": "一个目标最多可咨询 {{max}} 个其他目标。",
+      "consultableDuplicate": "每个可咨询的目标只能列出一次。",
+      "consultableObserver": "不能咨询观察者；只能咨询可被点名的目标。"
     },
     "warning": {
       "openTrigger": "已保存，但互联网上的任何人都能让此智能体运行：没有发件人允许列表，且未经验证的邮件也会被处理。",
       "toolsWithoutApprovals": "已保存，但此集成指向的某个智能体有工具却没有工具审批。邮件内容是不可信的输入：请为会更改内容的工具添加 hitlConfig.toolApprovals。",
       "aiDisclosureDisabled": "已保存，但回复不再说明由 AI 撰写。欧盟《人工智能法案》等透明度规则要求人们知道自己在与 AI 交流。",
-      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。"
+      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。",
+      "consultNotEnabled": "已保存，但某个目标列出了可咨询的目标，而它的代理无法委派：请开启内置工具，并将 converse_with_agent 加入该代理的内置工具白名单。",
+      "consultOwnerCannotUse": "已保存，但集成的所有者无权使用某个可咨询目标的代理，因此该咨询会被拒绝。管理员角色或团队共享对邮件不计入；请直接将该代理共享给所有者。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5637,7 +5645,9 @@
     "targetAddresses": "地址",
     "targetAddressesHint": "“收件人”或“抄送”中含有其中某个地址的邮件会优先路由到这里。每个地址必须是此集成的别名，或其邮箱的加号地址（invoices+finance@…）。",
     "targetAllowedSenders": "此目标允许的发件人",
-    "targetAllowedSendersHint": "设置后，无论邮件如何路由，只有与其中之一匹配的已认证发件人才能到达此目标。其他人会被拒绝，绝不会改为发送到默认目标。"
+    "targetAllowedSendersHint": "设置后，无论邮件如何路由，只有与其中之一匹配的已认证发件人才能到达此目标。其他人会被拒绝，绝不会改为发送到默认目标。",
+    "targetConsultable": "可咨询",
+    "targetConsultableHint": "其他代理目标的名称。当此代理回复的邮件同时点名其中一个（@legal）时，代理可以向它咨询，并由自己回复该邮件线程。被咨询的代理只看到问题，看不到发件人的任何记忆，也从不给任何人发邮件。代理的内置工具中需要有 converse_with_agent。"
   },
   "feedback": {
     "title": "反馈",

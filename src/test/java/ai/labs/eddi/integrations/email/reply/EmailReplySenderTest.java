@@ -551,6 +551,26 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("an agent an email turn consulted never mails anyone: its pause, resume and answer send nothing")
+        void consultedAgentSendsNothing() throws Exception {
+            // The asking conversation has its mail; the consulted one (email v2 plan §10.3)
+            // runs as email-consult: and has no ledger row of its own.
+            ledger.put(inbound(State.TURN_SUBMITTED));
+            String consulted = "conv-consulted";
+            var stored = new ConversationMemorySnapshot();
+            stored.setHitlPausedAt(Instant.ofEpochMilli(1_700_000_000_000L));
+            stored.setHitlPauseType("TOOL_CALL");
+            when(conversations.getConversationMemorySnapshot(consulted)).thenReturn(stored);
+            when(conversations.readConversation(consulted, true, false, List.of())).thenReturn(snapshot(ConversationState.AWAITING_HUMAN,
+                    EmailUserIdentity.consult(INTEGRATION), output("Clause 4 is fine.", mail())));
+
+            assertTrue(sender.onPauseCommitted(consulted, "1700000000000", NOW).isEmpty());
+            assertTrue(sender.onResumeCompleted(consulted, HitlVerdict.APPROVED, NOW).isEmpty());
+            sender.sweep(NOW.plusSeconds(60));
+            assertTrue(transport.recipients.isEmpty(), "no mail leaves for the consulted conversation");
+        }
+
+        @Test
         @DisplayName("on resume: the continuation after an approval, a plain notice after a rejection — the approver never named")
         void resume() throws Exception {
             ledger.put(inbound(State.DONE));

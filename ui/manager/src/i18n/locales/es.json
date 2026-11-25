@@ -5637,13 +5637,21 @@
       "targetAddressInvalid": "Cada dirección de destino debe ser una dirección de correo válida.",
       "targetAddressNotReceived": "Una dirección de destino debe ser uno de los alias o una dirección con + del buzón, para que el buzón la reciba.",
       "targetAddressDuplicate": "Cada dirección de destino solo puede dirigirse a un destino.",
-      "targetAllowedSendersInvalid": "Cada remitente permitido de un destino debe ser user@domain, *@domain o *@*.domain."
+      "targetAllowedSendersInvalid": "Cada remitente permitido de un destino debe ser user@domain, *@domain o *@*.domain.",
+      "consultableUnknown": "Cada destino que un destino puede consultar debe ser el nombre de otro destino de esta integración.",
+      "consultableSelf": "Un destino no puede consultar a su propio agente.",
+      "consultableNotAgent": "Solo los destinos de agente pueden consultar o ser consultados; una discusión de grupo consulta a sus propios miembros.",
+      "consultableTooMany": "Un destino puede consultar como máximo {{max}} otros destinos.",
+      "consultableDuplicate": "Cada destino que un destino puede consultar solo puede figurar una vez.",
+      "consultableObserver": "Un observador no puede ser consultado; solo un destino direccionable."
     },
     "warning": {
       "openTrigger": "Guardado, pero cualquiera en internet puede hacer que este agente se ejecute: no hay lista de remitentes permitidos y se procesa el correo no autenticado.",
       "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas.",
       "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
-      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta."
+      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta.",
+      "consultNotEnabled": "Guardado, pero un destino indica destinos que puede consultar mientras su agente no puede delegar: active las herramientas integradas y añada converse_with_agent a la lista de herramientas integradas permitidas del agente.",
+      "consultOwnerCannotUse": "Guardado, pero el propietario de la integración no puede usar el agente de un destino consultable, así que esa consulta se rechaza. Un rol de administrador o un uso compartido de equipo no cuenta para el correo; comparta el agente directamente con el propietario."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5689,7 +5697,9 @@
     "targetAddresses": "Direcciones",
     "targetAddressesHint": "El correo a una de estas en Para o Cc se envía aquí primero. Cada una debe ser un alias de la integración o una dirección con + de su buzón (invoices+finance@…).",
     "targetAllowedSenders": "Remitentes permitidos para este destino",
-    "targetAllowedSendersHint": "Si se define, solo los remitentes autenticados que coincidan con alguno llegan a este destino, sin importar cómo se enrutó el correo. Los demás se rechazan; nunca se envían al destino predeterminado en su lugar."
+    "targetAllowedSendersHint": "Si se define, solo los remitentes autenticados que coincidan con alguno llegan a este destino, sin importar cómo se enrutó el correo. Los demás se rechazan; nunca se envían al destino predeterminado en su lugar.",
+    "targetConsultable": "Puede consultar",
+    "targetConsultableHint": "Nombres de otros destinos de agente. Cuando un correo que responde este agente también nombra uno de ellos (@legal), el agente puede consultarlo y responde él mismo al hilo. El agente consultado solo ve la pregunta, ninguna memoria del remitente, y nunca envía correos. El agente necesita converse_with_agent en sus herramientas integradas."
   },
   "feedback": {
     "title": "Valoraciones",

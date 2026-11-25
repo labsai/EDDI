@@ -49,6 +49,8 @@ export interface ChannelTarget {
   addresses?: string[];
   /** Email only: sender patterns; when set, only matching authenticated senders reach this target. */
   allowedSenders?: string[];
+  /** Email only: names of other AGENT targets this target's agent may consult when a mail names them. */
+  consultable?: string[];
 }
 
 export interface ChannelIntegrationConfiguration {

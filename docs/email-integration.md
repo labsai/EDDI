@@ -151,6 +151,8 @@ comma-separated; the Manager shows them, `create_channel_integration` lists them
 |---|---|
 | `email.open-trigger` | No `senderAllowlist` and `requireAuthentication: false` — anyone on the internet can make the agent run |
 | `email.tools-without-approvals` | A targeted agent can use tools (built-in, HTTP calls, MCP, A2A) but has no `toolApprovals`. Mail is untrusted input; see [Security](#security) |
+| `email.consult-not-enabled` | A target lists `consultable` targets, but its agent has no LLM task with `enableBuiltInTools: true` and `converse_with_agent` in `builtInToolsWhitelist`, so it can never consult them ([Bringing in another agent](#bringing-in-another-agent)) |
+| `email.consult-owner-cannot-use` | The integration's owner may not use a consulted target's agent (an administrator role and team shares do not count for a mail's turn), so that consultation is refused at run time ([Bringing in another agent](#bringing-in-another-agent)) |
 
 ## Every key
 
@@ -195,6 +197,7 @@ email-only, refused on any other channel type:
 | `mentions` | Handles that address this target when written as `@handle` in the sender's own text ([Mentions](#mentions)): `[a-z0-9][a-z0-9_-]{0,39}`, without the `@`, case-insensitive, at most 10 per target, unique across the integration's targets. Unlike `triggers` they never match a subject word |
 | `addresses` | Full addresses that address this target in `To` or `Cc`, e.g. `finance-agent@contoso.com`. Each must be in `aliases` or be a plus-address of `address` — otherwise the mailbox never receives it — and may address one target only |
 | `allowedSenders` | Sender patterns (the `senderAllowlist` syntax). When set, only an **authenticated** sender matching one may start a conversation with this target, by any path, the default included ([Per-target senders](#per-target-senders)) |
+| `consultable` | Names of other `AGENT` targets this target's agent may consult when a mail names them ([Bringing in another agent](#bringing-in-another-agent)): at most 10, each with a different agent |
 
 `observeMode` targets are refused. A `GROUP` target starts a group discussion with the rendered input as its question
 (no attachments). Which target a mail goes to is the [routing order](#routing-order).
@@ -290,6 +293,69 @@ integration's `address` and routes to the default target, and judging it by that
 reached the agent through its own target. When no target names the agent any more, the routed target decides, as it
 would for a new conversation.
 
+## Bringing in another agent
+
+"@legal can you check clause 4?" in a reply to the finance agent's mail does not move the conversation to legal
+([Threads in conversation mode](#threads-in-conversation-mode)). With `consultable` it makes the finance agent
+**consult** legal instead: finance asks legal, reads the answer, and answers the thread itself — the single reply
+comes from finance.
+
+```json
+"targets": [
+  { "name": "finance", "targetId": "<finance agent id>", "mentions": ["finance"], "consultable": ["legal"] },
+  { "name": "legal",   "targetId": "<legal agent id>",   "mentions": ["legal"] }
+]
+```
+
+`consultable` names other targets of the same integration (at most 10). Each must be an `AGENT` target with a
+different agent; a `GROUP` target can neither consult nor be consulted. Saving refuses anything else, and the field is
+refused on every other channel type. Absent or empty, nothing changes: a named target stays `redirectRefused`.
+
+**When a mail asks.** The inbound processor decides before the turn, and puts the answer in
+`mail.consultRequested` (`[{target, agentId}]`). A target is requested when all of these hold:
+
+- the sender is **authenticated**;
+- the mail named it explicitly — by address, plus-tag or mention, never by a subject word or by default. Every named
+  target counts, not only the routed one, so a new mail "@finance pay this, @legal check the terms" runs with finance
+  and may consult legal;
+- a target of the agent the mail runs with, one that **admits this sender**, lists it in `consultable`;
+- the named target's own `allowedSenders` admit the sender too: a consultation is one more path to that agent
+  ([Per-target senders](#per-target-senders)).
+
+Anything else stays as before: on a continued conversation, `mail.route.redirectRefused`.
+
+**The agent needs the tool.** The consulting agent's LLM task needs `enableBuiltInTools: true` and
+`converse_with_agent` in `builtInToolsWhitelist`; the save warns `email.consult-not-enabled` otherwise. Tell the
+agent in its prompt to call `converseWithAgent` with the `agentId` from `mail.consultRequested`.
+
+**What the consulted agent gets, and what it can do.** These rules hold for every `converse_with_agent` call a mail's
+turn makes, not only requested ones. A mail's turn gets no `create_sub_agent`, `find_agents_by_capability` or
+`recruit_agent` at all: they would act as the sender, with no such bound. Other ways an agent reaches another one —
+[`handoff_to_team`](team-handoff.md) and A2A tools — stay as the agent designer configured them; review them on an
+agent that answers mail.
+
+| Rule | |
+|---|---|
+| Only requested agents | A turn a mail started reaches only the agents in its `mail.consultRequested`, whatever the model tries. A standalone agent's delegation guardrails have no admin surface, so this list is the boundary. An unauthenticated sender's turn, a consulted agent's turn, and any turn of an email conversation that no mail started — a scheduled follow-up, a [self-continuation](long-jobs.md) — consult nobody |
+| Group members | A group member's turn in a discussion a mail started keeps its group's `allowedDelegationTargets`, but is checked as the email identity, which holds no workspace right: under workspace enforcement it reaches only published agents |
+| No memory | The consulted agent runs as `email-consult:<integrationId>:<hash of the sender's address>`, never as the sender: it neither reads the sender's long-term memory (`global` entries are visible to every agent, so scoping by agent would not do) nor writes anything about them, and has no memory tool. The hash names nobody to it |
+| Only what it is told | It gets the message the consulting agent writes, nothing of the mail: no `mail` context, no attachments, no integration |
+| Never mails | Its conversation has no mail of its own, so nothing is ever sent from it — not a reply, not a pause notice |
+| Depth 1 | It cannot consult anyone in turn, the agent that asked included |
+| One question | A consultation always starts a new conversation, which is ended as soon as the answer is back; continuing one by `conversationId` is refused |
+| No approvals inside | A consulted agent whose turn pauses for an approval cannot answer: its conversation is ended undecided and the consulting agent is told to answer without it. Put the approval on the consulting agent instead (below) |
+| Workspace rights | With workspaces enforced, the integration's **owner** must be allowed to use the consulted agent — by owning it, a direct grant or publication; an administrator role and team shares do not count, since a mail's turn carries neither. The save warns `email.consult-owner-cannot-use` otherwise. An owner that is no person (erased, synthetic) lends nothing |
+| Personal data | Every consultation of one sender runs under the same identity, so an erasure or export request for the sender's address reaches those conversations too |
+
+**Approval.** To have a person approve each consultation, gate the tool in the consulting agent's
+`hitlConfig.toolApprovals` — `"requireApproval": ["converseWithAgent"]` ([hitl.md](hitl.md#tool-level-approval-gating)). The
+sender gets the usual in-thread pause notice ([Approvals in the thread](#approvals-in-the-thread)) and an approver
+decides in the Manager or Slack; the consultation runs on approval. There is no approval by mail, and no approval
+inside the consulted agent.
+
+`honorReplyTo` changes nothing here: who may consult is decided by the authenticated `From`, and the consulted agent's
+answer reaches the `Reply-To` only inside the consulting agent's own reply.
+
 ## What the agent sees
 
 The turn's **input** is `inputTemplate` rendered with the mail. The default frames the mail as data:
@@ -321,6 +387,7 @@ The context key **`mail`** holds what the mail says about itself — every field
 | `attachments` | One entry per attachment: `filename`, `contentType`, `size`, `inline`, and `attachmentId` when stored or `skipped` (`executable`, `type_not_allowed`, `too_large`, `too_many`, …) when not |
 | `addressing` | EDDI's verdict, not the mail's claim: `addressed` and `why` ([Addressing EDDI](#addressing-eddi)) |
 | `route` | `target`, `source`, `alsoAddressed` ([Routing order](#routing-order)), and `redirectRefused` — the target a mail named while it continued another agent's conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
+| `consultRequested` | Present only when the mail asks for one: `[{target, agentId}]`, the targets this agent may consult for this mail ([Bringing in another agent](#bringing-in-another-agent)) |
 
 `mail.text` is available to the template but not repeated in the context. Stored attachments also reach the turn as
 `attachment_<n>` context entries (`storageRef`), so the [multimodal pipeline](attachments-guide.md) hands them to a
@@ -617,8 +684,9 @@ conversation. A mail for a conversation that is busy or waiting for an approval 
 **The conversation keeps its agent.** A reply in a thread EDDI answered continues that conversation even when the
 mail names another target — by address, plus-tag or mention (`@legal can you check?` in a reply to the finance
 agent). The turn runs in the owner's conversation, and `mail.route.redirectRefused` names the target it asked for
-(logged at INFO), so the agent can tell the sender to write to that target in a new mail. A subject word or the default
-never counts as asking. Who may continue is decided by the conversation's agent, not by the routed target: the
+(logged at INFO), so the agent can tell the sender to write to that target in a new mail — unless the owner may
+consult that target, which then appears in `mail.consultRequested` instead
+([Bringing in another agent](#bringing-in-another-agent)). A subject word or the default never counts as asking. Who may continue is decided by the conversation's agent, not by the routed target: the
 sender passes when any target of that agent admits it, and only when no target names the agent any more does the routed
 target decide ([Per-target senders](#per-target-senders)). In trigger mode with `correlateThreads`, the thread key includes the routed agent, so a mail routed to another
 target starts that agent's own conversation instead.

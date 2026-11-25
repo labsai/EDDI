@@ -1139,6 +1139,108 @@ class EmailInboundProcessorTest {
                 assertEquals(List.of("conv-A"), sayConversations);
                 assertEquals(Map.of("addressed", true, "why", "reply_to_eddi"), mailContext(0).get("addressing"));
             }
+
+            // --- Consulting another agent (email v2 plan §10) ---
+
+            @Test
+            @DisplayName("consult: @legal in a reply to A's mail, with legal consultable by A, requests the consultation instead of refusing")
+            void consultRequested() throws Exception {
+                existingConversation();
+                var intake = target("intake", AGENT);
+                intake.setConsultable(List.of("legal"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal can you check clause 4?");
+
+                processor.process(conversationContext(intake, finance, legal), mail.polled(1), Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations, "A stays the owner");
+                assertEquals(List.of(Map.of("target", "legal", "agentId", LEGAL)), mailContext(0).get("consultRequested"));
+                assertFalse(((Map<?, ?>) mailContext(0).get("route")).containsKey("redirectRefused"));
+            }
+
+            @Test
+            @DisplayName("consult: a target A does not list stays a refused redirect, with no consultation")
+            void notConsultable() throws Exception {
+                existingConversation();
+                var intake = target("intake", AGENT);
+                intake.setConsultable(List.of("finance"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal can you check clause 4?");
+
+                processor.process(conversationContext(intake, finance, legal), mail.polled(1), Instant.now());
+
+                assertFalse(mailContext(0).containsKey("consultRequested"));
+                assertEquals("legal", ((Map<?, ?>) mailContext(0).get("route")).get("redirectRefused"));
+            }
+
+            @Test
+            @DisplayName("consult: the consulted target's allowedSenders must admit the sender — a consultation is a path too")
+            void consultedTargetMustAdmitSender() throws Exception {
+                existingConversation();
+                var intake = target("intake", AGENT);
+                intake.setConsultable(List.of("legal"));
+                legal.setAllowedSenders(List.of("boss@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal can you check clause 4?");
+
+                processor.process(conversationContext(intake, finance, legal), mail.polled(1), Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations);
+                assertFalse(mailContext(0).containsKey("consultRequested"));
+                assertEquals("legal", ((Map<?, ?>) mailContext(0).get("route")).get("redirectRefused"));
+            }
+
+            @Test
+            @DisplayName("consult: only a target of A that admits the sender lends its consultable list")
+            void consultableOfARejectingTargetDoesNotCount() throws Exception {
+                existingConversation();
+                var restricted = target("restricted", AGENT);
+                restricted.setAllowedSenders(List.of("boss@supplier.com"));
+                restricted.setConsultable(List.of("legal"));
+                var open = target("open", AGENT);
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal please");
+
+                processor.process(conversationContext(open, restricted, legal), mail.polled(1), Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations);
+                assertFalse(mailContext(0).containsKey("consultRequested"));
+            }
+
+            @Test
+            @DisplayName("consult: a new mail naming two targets runs with the first and may consult the second")
+            void newMailAlsoAddressedConsult() throws Exception {
+                finance.setConsultable(List.of("legal"));
+                EmailTestMail mail = EmailTestMail.mail().body("@finance please pay this, @legal check the terms first");
+
+                processor.process(conversationContext(target("intake", AGENT), finance, legal), mail.polled(1), Instant.now());
+
+                verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+                assertEquals(List.of(Map.of("target", "legal", "agentId", LEGAL)), mailContext(0).get("consultRequested"));
+            }
+
+            @Test
+            @DisplayName("consult: an unauthenticated sender requests no consultation")
+            void unauthenticatedNoConsult() throws Exception {
+                verdict = new MailAuthentication(MailAuthentication.Verdict.NONE, null);
+                finance.setConsultable(List.of("legal"));
+                EmailTestMail mail = EmailTestMail.mail().body("@finance please pay this, @legal check the terms first");
+
+                processor.process(context(Map.of("requireAuthentication", "false"), target("intake", AGENT), finance, legal), mail.polled(1),
+                        Instant.now());
+
+                verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+                assertFalse(mailContext(0).containsKey("consultRequested"));
+            }
+
+            @Test
+            @DisplayName("consult: a subject word naming the target requests nothing — only address, plus-tag or mention do")
+            void subjectWordDoesNotConsult() throws Exception {
+                existingConversation();
+                var intake = target("intake", AGENT);
+                intake.setConsultable(List.of("finance"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).subject("Re: money");
+
+                processor.process(conversationContext(intake, finance, legal), mail.polled(1), Instant.now());
+
+                assertFalse(mailContext(0).containsKey("consultRequested"));
+            }
         }
     }
 

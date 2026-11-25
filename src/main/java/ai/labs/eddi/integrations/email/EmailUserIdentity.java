@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.integrations.email;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -72,4 +76,81 @@ public final class EmailUserIdentity {
     public static boolean isEmailIdentity(String userId) {
         return userId != null && (userId.startsWith(PREFIX) || userId.startsWith(ANONYMOUS_PREFIX));
     }
+
+    /**
+     * A fresh {@code email-consult:<integrationId>:<random>}: what an agent an
+     * email turn consults runs as (email v2 plan §10.3). One-off and memory-less
+     * ({@code ReservedPrincipals#hasNoPersistentMemory}), so the consulted agent
+     * neither reads nor writes the sender's long-term memory — {@code global}
+     * entries are visible across agents, so scoping by agent would not do — and
+     * owns nothing the sender owns.
+     */
+    public static String consult(String integrationId) {
+        return CONSULT_PREFIX + (integrationId == null || integrationId.isBlank() ? "unknown" : integrationId) + ":"
+                + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * {@code email-consult:<integrationId>:<hash>}: what an agent runs as when a
+     * mail from {@code normalizedAddress} consults it. Memory-less like
+     * {@link #consult(String)}, but the same for every consultation of that sender
+     * on that integration, so an erasure or export request for the address finds
+     * the consulted conversations ({@code EmailIdentityGdprParticipant}). The hash
+     * names nobody to the consulted agent.
+     */
+    public static String consult(String integrationId, String normalizedAddress) {
+        String id = integrationId == null || integrationId.isBlank() ? "unknown" : integrationId;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((id + "\n" + normalizedAddress).getBytes(StandardCharsets.UTF_8));
+            return CONSULT_PREFIX + id + ":" + HexFormat.of().formatHex(digest, 0, 16);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    /** Whether {@code userId} is a consulted agent's identity. */
+    public static boolean isConsultIdentity(String userId) {
+        return userId != null && userId.startsWith(CONSULT_PREFIX);
+    }
+
+    /**
+     * Whether a turn of {@code userId} came from a mail: a sender's identity of any
+     * kind, or a consulted agent's.
+     */
+    public static boolean originatesFromEmail(String userId) {
+        return isEmailIdentity(userId) || isConsultIdentity(userId) || (userId != null && userId.startsWith(THREAD_PREFIX));
+    }
+
+    /**
+     * Prefix of the thread identity email v2 Phase 5 introduces
+     * ({@code email-thread:<integrationId>:<hash>}); reserved here already so no
+     * signed-in user can carry it and a turn of it counts as email-originated.
+     */
+    public static final String THREAD_PREFIX = "email-thread:";
+
+    /**
+     * The integration id of {@code email:<integrationId>[:<address>]} or
+     * {@code email-consult:<integrationId>:<random>}; empty for an anonymous sender
+     * (whose id names no integration) and every other id.
+     */
+    public static Optional<String> integrationIdOf(String userId) {
+        if (userId == null) {
+            return Optional.empty();
+        }
+        String rest;
+        if (userId.startsWith(PREFIX)) {
+            rest = userId.substring(PREFIX.length());
+        } else if (userId.startsWith(CONSULT_PREFIX)) {
+            rest = userId.substring(CONSULT_PREFIX.length());
+        } else {
+            return Optional.empty();
+        }
+        int colon = rest.indexOf(':');
+        String id = colon < 0 ? rest : rest.substring(0, colon);
+        return id.isBlank() ? Optional.empty() : Optional.of(id);
+    }
+
+    /** Prefix of the one-off user id a consulted agent runs as. */
+    public static final String CONSULT_PREFIX = "email-consult:";
 }

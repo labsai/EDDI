@@ -477,13 +477,28 @@ public class EmailInboundProcessor {
             if (!ownerAdmits(ctx.integration(), owner.agentId(), target, sender, authenticated)) {
                 return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
             }
-            if (owner.agentId() != null && route.source().explicit() && !owner.agentId().equals(target.getTargetId())) {
-                routeData.put("redirectRefused", target.getName());
-                LOGGER.infof("Email integration %s: mail %s addressed target %s but continues conversation %s of another agent", sanitize(id),
-                        row.id(), sanitize(target.getName()), sanitize(existingConversation));
-            }
         }
-        Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData);
+        // 12b. Consultations (email v2 plan §10.1): other targets the mail named that
+        // the agent it runs with may consult. A named target it may not consult, on a
+        // continued conversation of another agent, stays mail.route.redirectRefused.
+        String runAgentId = existingConversation != null
+                ? owner.agentId()
+                : target.getType() == ChannelTarget.TargetType.AGENT ? target.getTargetId() : null;
+        List<ChannelTarget> consults = EmailConsults.requested(ctx.integration(), runAgentId, route, sender, authenticated);
+        if (owner != null && owner.agentId() != null && route.source().explicit() && !owner.agentId().equals(target.getTargetId())
+                && consults.stream().noneMatch(consult -> consult.getName().equalsIgnoreCase(target.getName()))) {
+            routeData.put("redirectRefused", target.getName());
+            LOGGER.infof("Email integration %s: mail %s addressed target %s but continues conversation %s of another agent", sanitize(id),
+                    row.id(), sanitize(target.getName()), sanitize(existingConversation));
+        }
+        Map<String, Object> addressed = new LinkedHashMap<>();
+        addressed.put(ADDRESSING_KEY, addressing.toMap());
+        addressed.put(ROUTE_KEY, routeData);
+        if (!consults.isEmpty()) {
+            addressed.put(EmailConsults.CONSULT_REQUESTED_KEY, EmailConsults.toMaps(consults));
+            LOGGER.infof("Email integration %s: mail %s may consult target(s) %s", sanitize(id), row.id(),
+                    sanitize(String.join(", ", consults.stream().map(ChannelTarget::getName).toList())));
+        }
 
         // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
         // no sender hears anything.

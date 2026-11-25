@@ -33,6 +33,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -80,6 +81,32 @@ class EmailChannelPiecesTest {
             assertTrue(ReservedPrincipals.hasNoPersistentMemory(anonymous));
             assertFalse(ReservedPrincipals.hasNoPersistentMemory(perSender));
             assertFalse(ReservedPrincipals.hasNoPersistentMemory("alice"));
+        }
+
+        @Test
+        @DisplayName("a consulted agent's id is one-off, reserved, memory-less, and names its integration but no sender")
+        void consultIdentity() {
+            String first = EmailUserIdentity.consult("int1");
+            String second = EmailUserIdentity.consult("int1");
+            assertTrue(first.startsWith("email-consult:int1:"), first);
+            assertNotEquals(first, second, "one-off");
+            assertTrue(ReservedPrincipals.isReserved(first), "no signed-in user may carry it");
+            assertTrue(ReservedPrincipals.hasNoPersistentMemory(first));
+            assertTrue(EmailUserIdentity.isConsultIdentity(first));
+            assertFalse(EmailUserIdentity.isEmailIdentity(first), "not a sender: no reply, no pause notice is ever addressed to it");
+            assertTrue(EmailUserIdentity.originatesFromEmail(first));
+            assertEquals(Optional.of("int1"), EmailUserIdentity.integrationIdOf(first));
+            assertEquals(Optional.of("int1"), EmailUserIdentity.integrationIdOf("email:int1:alice@x.com"));
+            assertEquals(Optional.of("int1"), EmailUserIdentity.integrationIdOf("email:int1"));
+            assertEquals(Optional.empty(), EmailUserIdentity.integrationIdOf(EmailUserIdentity.anonymous()));
+            assertEquals(Optional.empty(), EmailUserIdentity.addressOf(first));
+            String keyed = EmailUserIdentity.consult("int1", "alice@x.com");
+            assertEquals(keyed, EmailUserIdentity.consult("int1", "alice@x.com"), "an address keeps one consult identity per integration");
+            assertNotEquals(keyed, EmailUserIdentity.consult("int2", "alice@x.com"));
+            assertFalse(keyed.contains("alice"), "the address is hashed");
+            assertTrue(ReservedPrincipals.hasNoPersistentMemory(keyed));
+            assertTrue(EmailUserIdentity.originatesFromEmail("email-thread:int1:abc"));
+            assertTrue(ReservedPrincipals.isReserved("email-thread:int1:abc"));
         }
     }
 
@@ -176,8 +203,14 @@ class EmailChannelPiecesTest {
                     State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
             var participant = new EmailIdentityGdprParticipant(instance, directory, ledger);
 
-            assertEquals(Set.of("email:current:alice@x.com", "email:deleted-since:alice@x.com"), participant.emailUserIdsOf("Alice@X.com"));
-            assertEquals(4, participant.erase("alice@x.com"));
+            String consultedCurrent = EmailUserIdentity.consult("current", "alice@x.com");
+            String consultedDeleted = EmailUserIdentity.consult("deleted-since", "alice@x.com");
+            assertEquals(Set.of("email:current:alice@x.com", consultedCurrent, "email:deleted-since:alice@x.com", consultedDeleted),
+                    participant.emailUserIdsOf("Alice@X.com"), "the conversations of the agents her mail consulted too");
+            assertEquals(8, participant.erase("alice@x.com"));
+            verify(service).deleteUserData(consultedCurrent);
+            verify(service).deleteUserData(consultedDeleted);
+            assertTrue(participant.emailUserIdsOf(consultedCurrent).isEmpty(), "a consult identity is not expanded");
             verify(service).deleteUserData("email:current:alice@x.com");
             verify(service).deleteUserData("email:deleted-since:alice@x.com");
             assertTrue(participant.emailUserIdsOf("email:current:alice@x.com").isEmpty(), "an email identity is not expanded again");

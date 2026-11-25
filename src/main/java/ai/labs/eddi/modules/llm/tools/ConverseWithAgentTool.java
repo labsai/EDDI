@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -177,6 +178,46 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, delegationCount, null);
+    }
+
+    /**
+     * Who a delegation runs as when the caller's own identity must not be used for
+     * it — an email turn (email v2 plan §10.3).
+     *
+     * @param delegateUserId
+     *            the user id a new delegate conversation starts as
+     * @param accessPrincipal
+     *            the principal the USE check asks about
+     * @param onlyTargets
+     *            the only agent ids this turn may talk to; {@code null} narrows
+     *            nothing (the {@code allowedDelegationTargets} guardrail still
+     *            applies)
+     * @param newConversationsOnly
+     *            whether a model-supplied {@code conversationId} is refused: a
+     *            delegate conversation of another identity can never be this
+     *            caller's to continue
+     */
+    public record CallerScope(String delegateUserId, String accessPrincipal, Set<String> onlyTargets, boolean newConversationsOnly) {
+        public CallerScope {
+            onlyTargets = onlyTargets == null ? null : Set.copyOf(onlyTargets);
+        }
+    }
+
+    /**
+     * The scope this tool runs under; {@code null} when the caller's own identity
+     * serves every purpose.
+     */
+    private final CallerScope scope;
+
+    /**
+     * @param scope
+     *            who the delegation runs as and whom it may reach, or {@code null}
+     *            for the caller itself
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount, CallerScope scope) {
+        this.scope = scope;
         this.delegationCount = delegationCount != null ? delegationCount : TurnCounter.local();
         this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
@@ -218,11 +259,26 @@ public class ConverseWithAgentTool {
                 return "⚠️ Agent '%s' is not an allowed delegation target. Allowed: %s".formatted(agentId, allowedTargets);
             }
 
+            // --- Guardrail: the caller's scope (email v2 plan §10) ---
+            // A turn a mail started may reach only the agents the mail asked for and the
+            // integration allows; the set is decided before the turn, not by the model.
+            if (scope != null && scope.onlyTargets() != null && !scope.onlyTargets().contains(agentId)) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: not a consultation this turn may make", sanitize(agentId));
+                return ("⚠️ Agent '%s' cannot be consulted from this conversation: only an agent the sender named and the "
+                        + "integration lists as consultable can be.").formatted(agentId);
+            }
+            if (scope != null && scope.newConversationsOnly() && conversationId != null && !conversationId.isBlank()) {
+                LOGGER.warnf("[CONVERSE] Continuation of conversation '%s' refused: this caller always consults in a new conversation",
+                        sanitize(conversationId));
+                return "⚠️ A consultation from this conversation always starts a new conversation; call again without conversationId.";
+            }
+
             // --- Guardrail: the user may use the target (M-A1) ---
             // For a continuation too: the ownership check below admits any conversation
             // of this user's, which says nothing about whether the user may still use the
             // agent behind it. Before the per-task counter, so a refusal burns no slot.
-            if (useCheck != null && !useCheck.test(agentId, userId)) {
+            String accessPrincipal = scope != null ? scope.accessPrincipal() : userId;
+            if (useCheck != null && !useCheck.test(agentId, accessPrincipal)) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the user has no access to it", sanitize(agentId));
                 return "⚠️ Agent '%s' is not available to this user, so it cannot be consulted.".formatted(agentId);
             }
@@ -280,7 +336,7 @@ public class ConverseWithAgentTool {
             if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
-                            DEFAULT_ENV, agentId, userId, delegationContext);
+                            DEFAULT_ENV, agentId, scope != null ? scope.delegateUserId() : userId, delegationContext);
                     conversationId = convResult.conversationId();
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
@@ -334,6 +390,21 @@ public class ConverseWithAgentTool {
             // this turn. Return a structured, actionable result so the delegating
             // LLM can inform its user, rather than reporting "[no response]" and
             // silently losing the eventual approved output.
+            if (scope != null && scope.newConversationsOnly()) {
+                // A scoped consultation is one question in a conversation nobody can
+                // continue: end it now, so it holds nothing open. One that paused for an
+                // approval could never deliver its answer to this caller (the delegate
+                // conversation is another identity's, and the asking turn is over by the
+                // time anyone decides), so it is ended undecided and refused — approval of
+                // a consultation belongs on the caller's converseWithAgent.
+                boolean paused = snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+                endQuietly(convId, paused ? "consult_needs_approval" : "consult_answered");
+                if (paused) {
+                    LOGGER.warnf("[CONVERSE] Consultation of agent '%s' paused for approval; ended without an answer", sanitize(agentId));
+                    return ("⚠️ Agent '%s' needs a human approval to answer, which a consultation from this conversation cannot "
+                            + "wait for; its conversation was ended. Answer without it.").formatted(agentId);
+                }
+            }
             if (snapshot != null
                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                 return pausedForApprovalMessage(convId, snapshot);
@@ -427,6 +498,17 @@ public class ConverseWithAgentTool {
                 .map(PendingToolCall::getToolName)
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    /**
+     * Ends a scoped consultation's conversation; a failure only costs retention.
+     */
+    private void endQuietly(String conversationId, String reason) {
+        try {
+            conversationService.endConversation(conversationId, "system:consult", reason);
+        } catch (Exception e) {
+            LOGGER.debugf("[CONVERSE] Consultation conversation '%s' could not be ended: %s", sanitize(conversationId), e.getMessage());
+        }
     }
 
     private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";

@@ -21,6 +21,8 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.integrations.email.EmailConsults;
+import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
@@ -45,6 +47,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -149,6 +152,9 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      */
     private final BiPredicate<String, String> useCheck;
 
+    /** See the constructor; may be {@code null}. */
+    private final Function<String, String> resourceOwner;
+
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
@@ -161,6 +167,22 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
             IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck) {
+        this(agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore, deploymentStore,
+                liveDiscussionRegistry, agentGroupStore, useCheck, null);
+    }
+
+    /**
+     * @param resourceOwner
+     *            {@code resourceId -> owner principal or null}: whose USE rights an
+     *            email turn's delegation is checked against (the email
+     *            integration's owner). {@code null} leaves the email identity
+     *            itself as the principal, which owns nothing.
+     */
+    DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
+            IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck, Function<String, String> resourceOwner) {
+        this.resourceOwner = resourceOwner;
         this.useCheck = useCheck;
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
@@ -320,7 +342,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
 
         boolean anyDynamicToolAdded = false;
-        if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
+        // Email v2 plan §10.3: a turn a mail started may reach only the agents the
+        // inbound processor allowed (converse_with_agent's scope below). Creating,
+        // discovering or recruiting agents would run as the sender's own identity,
+        // with their memory and no such bound, so those tools are not assembled.
+        boolean fromEmail = EmailUserIdentity.originatesFromEmail(userId);
+        if (fromEmail && (allows(whitelist, whitelistOmitted, "create_sub_agent") || allows(whitelist, whitelistOmitted, "find_agents_by_capability")
+                || allows(whitelist, whitelistOmitted, "recruit_agent"))) {
+            LOGGER.debugf("[DYNAMIC] create_sub_agent, find_agents_by_capability and recruit_agent withheld from an email turn of agent='%s'",
+                    sanitize(parentAgentId));
+        }
+        if (!fromEmail && allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
                     sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
@@ -351,15 +383,22 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // Counted on the step: this method runs once per tool assembly, and a turn
             // assembles once per cascade step and again on a HITL resume.
             TurnCounter delegations = TurnCounter.onStep(memory, KEY_DELEGATIONS_PREFIX + (taskId != null ? taskId : "default"));
+            ConverseWithAgentTool.CallerScope scope = emailScope(memory, userId);
+            Integer ceiling = resolveDelegationCeiling(memory);
+            if (scope != null) {
+                // Email v2 plan §10.3: depth 1. The consulted agent consults nobody, and
+                // the ceiling rides into its conversation as delegationDepthMax.
+                ceiling = ceiling == null ? EMAIL_MAX_DELEGATION_DEPTH : Math.min(ceiling, EMAIL_MAX_DELEGATION_DEPTH);
+            }
             tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
-                    resolveDelegationCeiling(memory), delegations));
+                    ceiling, delegations, scope));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
         // Finding I4: allowRecruitment was documented as an enforced cap but was
         // never read. Capability lookup is the recruitment entry point, so it is
         // gated here.
-        if (allows(whitelist, whitelistOmitted, "find_agents_by_capability") && capabilityRegistryService != null) {
+        if (!fromEmail && allows(whitelist, whitelistOmitted, "find_agents_by_capability") && capabilityRegistryService != null) {
             if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
                 // The caller's USE rule filters discovery as it does the REST search;
                 // without it the model learned every agent's id and metadata.
@@ -385,7 +424,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // before here. A guard only on this line implied a nullability the rest of the
         // method does not honour, which reads as though one path were safe and the
         // others overlooked.
-        if (allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
+        if (!fromEmail && allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null) {
             var liveDiscussion = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
             // The roster must be READ, not merely attempted: without it the tool
@@ -429,6 +468,74 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             currentStep.storeData(new Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
             currentStep.storeData(new Data<>(KEY_DYNAMIC_TORN_DOWN_AGENT_IDS, sharedTornDownIds));
         }
+    }
+
+    /** Delegation depth ceiling of a turn a mail started (email v2 plan §10.3). */
+    static final int EMAIL_MAX_DELEGATION_DEPTH = 1;
+
+    /**
+     * How a turn a mail started delegates (email v2 plan §10.3), or {@code null}
+     * for every other caller:
+     * <ul>
+     * <li>The delegate runs as an {@code email-consult:} identity, which has no
+     * long-term memory — never as the sender, whose {@code global} entries every
+     * agent would see.</li>
+     * <li>For the processor's consultations the USE check asks about the email
+     * integration's owner: the sender owns nothing in any workspace, the owner
+     * chose the integration's agents. A group member's turn is checked as the email
+     * identity itself.</li>
+     * <li>Without a group policy the turn may reach only the agents the inbound
+     * processor put into {@code mail.consultRequested} ({@code EmailConsults}); a
+     * standalone agent's delegation guardrails have no admin surface to narrow
+     * them. A group member's turn keeps its group's
+     * {@code allowedDelegationTargets}.</li>
+     * <li>No continuation by id: the delegate conversation belongs to another
+     * identity.</li>
+     * </ul>
+     * A consulted agent's own turn ({@code email-consult:}) and an anonymous
+     * sender's get an empty target set: they consult nobody.
+     */
+    ConverseWithAgentTool.CallerScope emailScope(IConversationMemory memory, String userId) {
+        if (!EmailUserIdentity.originatesFromEmail(userId)) {
+            return null;
+        }
+        String integrationId = EmailUserIdentity.integrationIdOf(userId).orElse(null);
+        Set<String> only;
+        if (EmailUserIdentity.isConsultIdentity(userId) || !userId.startsWith(EmailUserIdentity.PREFIX)) {
+            only = Set.of();
+        } else if (hasGroupPolicy(memory)) {
+            only = null;
+        } else {
+            only = EmailConsults.requestedAgentIds(memory);
+        }
+        // The owner's USE right stands in for the sender's only where the set of agents
+        // is the processor's (the integration owner chose those targets). A group
+        // member's set is its group's allowedDelegationTargets, which may be empty
+        // (= any agent): lending the owner's rights there would let a mail reach every
+        // agent the owner may use, so that turn is checked as the email identity, which
+        // holds USE nowhere under workspace enforcement.
+        String accessPrincipal = userId;
+        if (only != null) {
+            String owner = null;
+            if (integrationId != null && resourceOwner != null) {
+                try {
+                    owner = resourceOwner.apply(integrationId);
+                } catch (RuntimeException e) {
+                    LOGGER.debugf("[DYNAMIC] Owner of email integration '%s' could not be read: %s", sanitize(integrationId), e.getMessage());
+                }
+            }
+            // Unknown owner: the email identity itself — fail closed.
+            if (owner != null && !owner.isBlank()) {
+                accessPrincipal = owner;
+            }
+        }
+        // Keyed to the sender's address, so an erasure request for the address reaches
+        // the consulted conversations (EmailIdentityGdprParticipant); the id carries a
+        // hash, never the address.
+        String delegate = EmailUserIdentity.addressOf(userId)
+                .map(address -> EmailUserIdentity.consult(integrationId, address))
+                .orElseGet(() -> EmailUserIdentity.consult(integrationId));
+        return new ConverseWithAgentTool.CallerScope(delegate, accessPrincipal, only, true);
     }
 
     /**

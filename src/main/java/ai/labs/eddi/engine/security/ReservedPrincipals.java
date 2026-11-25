@@ -56,6 +56,12 @@ public final class ReservedPrincipals {
             EmailUserIdentity.PREFIX,
             // Unauthenticated email senders, one-off and memory-less: email-anon:<random>
             EmailUserIdentity.ANONYMOUS_PREFIX,
+            // Agents an email turn consults, one-off and memory-less:
+            // email-consult:<integrationId>:<random>
+            EmailUserIdentity.CONSULT_PREFIX,
+            // Email thread identities (email v2 plan Phase 5):
+            // email-thread:<integrationId>:<hash>
+            EmailUserIdentity.THREAD_PREFIX,
             // Agent test-harness conversations (PR #1065), which switch tool mocking on
             "agent-test:",
             // A group's shared (team) memory owner: group:<groupId>
@@ -108,10 +114,11 @@ public final class ReservedPrincipals {
      * user memory: the one-off identity of an unauthenticated email sender. Its
      * {@code From} is a claim anyone can make, so whatever such a turn remembered
      * would be readable by the next forger — and nothing it could recall belongs to
-     * it.
+     * it. Also an agent an email turn consults ({@code email-consult:…}): it must
+     * not read the sender's memory, nor write anything about the sender.
      */
     public static boolean hasNoPersistentMemory(String userId) {
-        return userId != null && userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX);
+        return userId != null && (userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX) || userId.startsWith(EmailUserIdentity.CONSULT_PREFIX));
     }
 
     /** Whether {@code principal} is in a namespace EDDI reserves for itself. */

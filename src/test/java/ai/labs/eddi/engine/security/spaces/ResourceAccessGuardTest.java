@@ -81,6 +81,24 @@ class ResourceAccessGuardTest {
         return new ResourceAccessGuard(identity, ownershipValidator, spaceContext, settings, store);
     }
 
+    @Test
+    @DisplayName("ownerOf: a person's id; an erased, synthetic or missing owner, or an unreadable descriptor, is null")
+    void ownerOfFailsClosed() throws Exception {
+        var settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+        var store = mock(IDocumentDescriptorStore.class);
+        var g = guard(identity("bob"), settings, store);
+
+        when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
+        assertEquals("alice", g.ownerOf(RESOURCE_ID));
+        when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("gdpr-erased:0123abcd"));
+        assertNull(g.ownerOf(RESOURCE_ID), "an erased owner lends no rights");
+        when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("email:int1:x@y.com"));
+        assertNull(g.ownerOf(RESOURCE_ID));
+        when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        assertNull(g.ownerOf(RESOURCE_ID), "a deleted resource has no owner");
+        assertNull(g.ownerOf(" "));
+    }
+
     @Nested
     @DisplayName("when workspaces are not enforced")
     class Disabled {

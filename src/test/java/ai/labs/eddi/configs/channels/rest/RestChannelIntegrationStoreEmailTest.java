@@ -48,6 +48,7 @@ class RestChannelIntegrationStoreEmailTest {
     private IChannelIntegrationStore channelStore;
     private EmailChannelSupport support;
     private RestChannelIntegrationStore sut;
+    private ResourceAccessGuard guard;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -59,7 +60,8 @@ class RestChannelIntegrationStoreEmailTest {
         Instance<EmailChannelSupport> instance = mock(Instance.class);
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(support);
-        sut = new RestChannelIntegrationStore(channelStore, descriptors, mock(ResourceAccessGuard.class), instance);
+        guard = mock(ResourceAccessGuard.class);
+        sut = new RestChannelIntegrationStore(channelStore, descriptors, guard, instance);
         when(channelStore.create(any())).thenReturn(resourceId(ID, 1));
         when(channelStore.getCurrentResourceId(ID)).thenReturn(resourceId(ID, 1));
     }
@@ -303,6 +305,91 @@ class RestChannelIntegrationStoreEmailTest {
         empty.setPlatformConfig(new HashMap<>(Map.of("channelId", "C1")));
         empty.getTargets().get(0).setMentions(List.of());
         assertEquals(201, sut.createChannel(empty).getStatus(), "an empty list says nothing");
+    }
+
+    @Test
+    @DisplayName("consultable is email-only: refused on a Slack integration, where no mail could request a consultation")
+    void consultableOnlyForEmail() throws Exception {
+        var slack = email(Map.of());
+        slack.setChannelType("slack");
+        slack.setPlatformConfig(new HashMap<>(Map.of("channelId", "C1")));
+        slack.getTargets().get(0).setConsultable(List.of("legal"));
+        slack.setTargets(List.of(slack.getTargets().get(0), second("legal")));
+
+        assertTrue(refusal(slack, sut).contains("only supported for email integrations"));
+        verify(channelStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("consultable: a later target may be named, and the name is stored as that target spells it")
+    void consultableStored() {
+        var config = email(Map.of());
+        var intake = config.getTargets().get(0);
+        intake.setConsultable(List.of(" LEGAL "));
+        config.setTargets(List.of(intake, second("Legal")));
+
+        assertEquals(201, sut.createChannel(config).getStatus());
+
+        assertEquals(List.of("Legal"), intake.getConsultable());
+    }
+
+    @Test
+    @DisplayName("consultable: a save warns when the integration's owner may not use a consulted agent, and not when it may")
+    void consultOwnerWarning() {
+        when(support.warnings(any())).thenReturn(List.of());
+        var config = email(Map.of());
+        var intake = config.getTargets().get(0);
+        intake.setConsultable(List.of("legal"));
+        config.setTargets(List.of(intake, second("legal")));
+        when(guard.ownerOf(ID)).thenReturn("alice");
+        when(guard.principalMayUse("agent-2", "alice")).thenReturn(false);
+
+        assertEquals("email.consult-owner-cannot-use", sut.createChannel(config).getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
+
+        when(guard.principalMayUse("agent-2", "alice")).thenReturn(true);
+        assertNull(sut.createChannel(config).getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
+
+        when(guard.ownerOf(ID)).thenReturn(null);
+        assertEquals("email.consult-owner-cannot-use", sut.createChannel(config).getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER),
+                "an owner that cannot be named lends nothing");
+    }
+
+    @Test
+    @DisplayName("consultable: unknown names, the target's own agent, a GROUP, duplicates and more than 10 are refused")
+    void consultableRefused() throws Exception {
+        var unknown = email(Map.of());
+        unknown.getTargets().get(0).setConsultable(List.of("hr"));
+        assertTrue(refusal(unknown, sut).contains("'hr' is not the name of a target"));
+
+        var self = email(Map.of());
+        var sameAgent = second("twin");
+        sameAgent.setTargetId("agent-1");
+        self.getTargets().get(0).setConsultable(List.of("twin"));
+        self.setTargets(List.of(self.getTargets().get(0), sameAgent));
+        assertTrue(refusal(self, sut).contains("this target's own agent"));
+
+        var group = email(Map.of());
+        var panel = second("panel");
+        panel.setType(ChannelTarget.TargetType.GROUP);
+        group.getTargets().get(0).setConsultable(List.of("panel"));
+        group.setTargets(List.of(group.getTargets().get(0), panel));
+        assertTrue(refusal(group, sut).contains("must be an AGENT target"));
+
+        var fromGroup = email(Map.of());
+        fromGroup.getTargets().get(0).setType(ChannelTarget.TargetType.GROUP);
+        fromGroup.getTargets().get(0).setConsultable(List.of("legal"));
+        fromGroup.setTargets(List.of(fromGroup.getTargets().get(0), second("legal")));
+        assertTrue(refusal(fromGroup, sut).contains("only supported for AGENT targets"));
+
+        var twice = email(Map.of());
+        twice.getTargets().get(0).setConsultable(List.of("legal", "Legal"));
+        twice.setTargets(List.of(twice.getTargets().get(0), second("legal")));
+        assertTrue(refusal(twice, sut).contains("listed twice"));
+
+        var tooMany = email(Map.of());
+        tooMany.getTargets().get(0).setConsultable(List.of("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"));
+        assertTrue(refusal(tooMany, sut).contains("at most 10 consultable"));
+        verify(channelStore, never()).create(any());
     }
 
     @Test

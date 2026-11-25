@@ -165,6 +165,13 @@ public class EmailChannelSupport {
                     + "consider hitlConfig.toolApprovals for tools that change things.", sanitize(configuration.getName()),
                     sanitize(String.join(", ", ungated)));
         }
+        List<String> noConsult = toolsInspector.targetsWithoutConsultTool(configuration.getTargets());
+        if (!noConsult.isEmpty()) {
+            warnings.add(EmailChannelSettings.WARNING_CONSULT_NOT_ENABLED);
+            LOGGER.warnf("Email integration '%s': target(s) %s name consultable targets, but their agent has no LLM task with "
+                    + "enableBuiltInTools and converse_with_agent in builtInToolsWhitelist, so it can never consult them.",
+                    sanitize(configuration.getName()), sanitize(String.join(", ", noConsult)));
+        }
         return warnings;
     }
 

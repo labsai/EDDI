@@ -198,8 +198,27 @@ describe("email addressing rules", () => {
     expect(emailTargetProblems([{ allowedSenders: ["supplier.com"] }], pc)).toEqual(["targetAllowedSendersInvalid"]);
   });
 
+  it("checks the targets' consultable lists as the backend does", () => {
+    const finance = { name: "finance", type: "AGENT", targetId: "a1", consultable: ["Legal"] };
+    const legal = { name: "legal", type: "AGENT", targetId: "a2" };
+    const panel = { name: "panel", type: "GROUP", targetId: "g1" };
+    expect(emailTargetProblems([finance, legal], VALID)).toEqual([]);
+    expect(emailTargetProblems([{ ...finance, consultable: ["hr"] }, legal], VALID)).toEqual(["consultableUnknown"]);
+    expect(emailTargetProblems([{ ...finance, consultable: ["twin"] }, { name: "twin", type: "AGENT", targetId: "a1" }], VALID)).toEqual([
+      "consultableSelf",
+    ]);
+    expect(emailTargetProblems([{ ...finance, consultable: ["panel"] }, panel], VALID)).toEqual(["consultableNotAgent"]);
+    expect(emailTargetProblems([{ ...panel, consultable: ["legal"] }, legal], VALID)).toEqual(["consultableNotAgent"]);
+    expect(emailTargetProblems([{ ...finance, consultable: Array.from({ length: 11 }, () => "legal") }, legal], VALID)).toEqual([
+      "consultableTooMany",
+      "consultableDuplicate",
+    ]);
+    expect(emailTargetProblems([{ ...finance, consultable: ["legal", "LEGAL"] }, legal], VALID)).toEqual(["consultableDuplicate"]);
+    expect(emailTargetProblems([finance, { ...legal, observeMode: true }], VALID)).toEqual(["consultableObserver"]);
+  });
+
   it("strips the email-only target fields for any other channel type", () => {
-    const target = { name: "a", mentions: ["x"], addresses: ["y@example.com"], allowedSenders: ["*@example.com"] };
+    const target = { name: "a", mentions: ["x"], addresses: ["y@example.com"], allowedSenders: ["*@example.com"], consultable: ["b"] };
     expect(withoutEmailTargetRules(target)).toEqual({ name: "a" });
     expect(target.mentions).toEqual(["x"]);
   });

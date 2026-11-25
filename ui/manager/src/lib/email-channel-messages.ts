@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import {
   EMAIL_MAX_ALIASES,
+  EMAIL_MAX_CONSULTABLE_PER_TARGET,
   EMAIL_MAX_MENTIONS_PER_TARGET,
   EMAIL_MAX_AI_DISCLOSURE_CHARS,
   EMAIL_MAX_FROM_NAME_CHARS,
@@ -117,6 +118,21 @@ export function emailProblemMessage(problem: EmailProblem, t: TFunction): string
       return t("emailChannel.problem.targetAddressDuplicate", "Each target address can address one target only.");
     case "targetAllowedSendersInvalid":
       return t("emailChannel.problem.targetAllowedSendersInvalid", "Each allowed sender of a target must be user@domain, *@domain or *@*.domain.");
+    case "consultableUnknown":
+      return t("emailChannel.problem.consultableUnknown", "Each target a target can consult must be the name of another target of this integration.");
+    case "consultableSelf":
+      return t("emailChannel.problem.consultableSelf", "A target cannot consult its own agent.");
+    case "consultableNotAgent":
+      return t("emailChannel.problem.consultableNotAgent", "Only agent targets can consult or be consulted; a group discussion consults its own members.");
+    case "consultableTooMany":
+      return t("emailChannel.problem.consultableTooMany", {
+        max: EMAIL_MAX_CONSULTABLE_PER_TARGET,
+        defaultValue: "A target can consult at most {{max}} other targets.",
+      });
+    case "consultableDuplicate":
+      return t("emailChannel.problem.consultableDuplicate", "Each target a target can consult can be listed once only.");
+    case "consultableObserver":
+      return t("emailChannel.problem.consultableObserver", "An observer cannot be consulted; only an addressable target can.");
   }
 }
 
@@ -142,6 +158,16 @@ export function channelWarningMessage(code: string, t: TFunction): string {
       return t(
         "emailChannel.warning.honorReplyTo",
         "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      );
+    case "email.consult-not-enabled":
+      return t(
+        "emailChannel.warning.consultNotEnabled",
+        "Saved, but a target lists targets it can consult while its agent cannot delegate: turn on built-in tools and add converse_with_agent to the agent's built-in tools whitelist.",
+      );
+    case "email.consult-owner-cannot-use":
+      return t(
+        "emailChannel.warning.consultOwnerCannotUse",
+        "Saved, but the integration's owner may not use the agent of a target it can consult, so that consultation is refused. An admin role or a team share does not count for mail; share the agent with the owner directly.",
       );
     default:
       return code;
