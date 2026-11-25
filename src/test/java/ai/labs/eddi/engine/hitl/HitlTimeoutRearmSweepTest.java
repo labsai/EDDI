@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -113,6 +114,11 @@ class HitlTimeoutRearmSweepTest {
                 throw new ResourceStoreException("too many undecodable rows");
             }
             return result;
+        });
+        when(scheduleStore.readSchedule(anyString())).thenAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            return rows.stream().filter(row -> id.equals(row.getId())).findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException("no schedule " + id));
         });
         doAnswer(invocation -> {
             String id = invocation.getArgument(0);
@@ -854,6 +860,121 @@ class HitlTimeoutRearmSweepTest {
             assertEquals(deadline, armed.getNextFire());
             verify(scheduleStore, never()).createSchedule(any());
             assertEquals(1, pollAt(deadline));
+        }
+    }
+
+    // --- review follow-ups: tri-state pause identity, backoff, fence, budget ----
+
+    /** The rows of {@code REGULAR_NAME} as the poller would see them. */
+    private ScheduleConfiguration spentRow(String name, String surface, String id, String policy, Instant pausedAt,
+                                           Instant firedAt) {
+        ScheduleConfiguration row = armedRow(name, surface, id, policy, pausedAt, firedAt);
+        row.setEnabled(false);
+        row.setNextFire(null);
+        row.setLastFired(firedAt);
+        return row;
+    }
+
+    @Nested
+    @DisplayName("review follow-ups")
+    class ReviewFollowUps {
+
+        @Test
+        @DisplayName("a spent row keeps its backoff when the replacement cannot be created")
+        void spentRowSurvivesAFailedCreate() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
+            Instant firedAt = Instant.now().minus(Duration.ofMinutes(1));
+            regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            ScheduleConfiguration spent = spentRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    firedAt);
+            doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());
+
+            sweeps(1);
+
+            assertEquals(List.of(spent), rowsNamed(REGULAR_NAME), "the completion record is the backoff: it must outlive the failed create");
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+        }
+
+        @Test
+        @DisplayName("an unreadable pause identity defers the deletion of stale rows, the replacement is kept")
+        void unknownIdentityDefersDeletion() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
+            regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            ScheduleConfiguration stale = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT",
+                    pausedAt.minus(Duration.ofDays(1)), Instant.now().minus(Duration.ofHours(20)));
+            stale.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(pausedAt);
+            // the pre-write check reads the pause, every later read of it fails
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot).thenThrow(new RuntimeException("read failed"));
+
+            sweeps(1);
+
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+            assertEquals(2, rowsNamed(REGULAR_NAME).size(), "the replacement is armed, the stale row is left for a later sweep");
+        }
+
+        @Test
+        @DisplayName("a row requeued after it was judged is not deleted")
+        void requeuedRowIsFenced() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
+            regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            ScheduleConfiguration dead = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    Instant.now().minus(Duration.ofHours(1)));
+            dead.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
+            // an operator requeues it between the judgement and the delete
+            when(scheduleStore.readSchedule(dead.getId())).thenAnswer(invocation -> {
+                var requeued = new ScheduleConfiguration();
+                requeued.setId(dead.getId());
+                requeued.setName(dead.getName());
+                requeued.setMetadata(dead.getMetadata());
+                requeued.setEnabled(true);
+                requeued.setNextFire(dead.getNextFire());
+                requeued.setFireStatus(ScheduleConfiguration.FireStatus.PENDING);
+                return requeued;
+            });
+
+            sweeps(1);
+
+            verify(scheduleStore, never()).deleteSchedule(dead.getId());
+            assertTrue(rowsNamed(REGULAR_NAME).contains(dead), "the requeued row, with its fire history, is still there");
+        }
+
+        @Test
+        @DisplayName("a full page of stale rows is cleared and the pause armed in the same pass")
+        void fullPageIsClearedAndRead() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
+            regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            for (int i = 0; i < 100; i++) {
+                ScheduleConfiguration stale = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT",
+                        pausedAt.minus(Duration.ofDays(1 + i)), Instant.now().minus(Duration.ofHours(20)));
+                stale.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
+            }
+
+            sweeps(1);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size(), "the stale page is gone, one armed row remains");
+            assertTrue(named.get(0).isEnabled());
+            assertEquals(HitlDecision.pauseIdOf(pausedAt), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
+        }
+
+        @Test
+        @DisplayName("the retries of one pass share a budget: later pauses are not retried once it is spent")
+        void retryBudgetIsPerPass() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
+            regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            observer.readRetryDelays = List.of(Duration.ofMillis(5), Duration.ofMillis(5));
+            observer.retryBudgetPerPass = Duration.ofMillis(5); // room for one wait only
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenThrow(new ResourceStoreException("store down"));
+
+            sweeps(1);
+
+            // three attempts would be the unbudgeted count; the budget allows the first
+            // retry only
+            verify(scheduleStore, times(2)).readSchedulesByName(anyString(), anyInt());
+            verify(scheduleStore, never()).createSchedule(any());
         }
     }
 }

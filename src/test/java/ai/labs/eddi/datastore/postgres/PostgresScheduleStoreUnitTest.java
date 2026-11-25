@@ -1428,6 +1428,17 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void findDueSchedules_skipsAnUndecodableRowAndReturnsItsReadableSiblings() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        stubRows(List.of("broken-row", "readable-row"), Set.of("broken-row"));
+
+        List<ScheduleConfiguration> rows = sut.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3);
+
+        assertEquals(1, rows.size(), "the poll is not failed by one undecodable row");
+        assertEquals("readable-row", rows.get(0).getId());
+    }
+
+    @Test
     void findDueSchedules_ordersMostOverdueFirst() throws Exception {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);

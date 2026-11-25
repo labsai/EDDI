@@ -653,7 +653,15 @@ public class MongoScheduleStore implements IScheduleStore {
             // (enabled, nextFire, fireStatus) index serves this sort.
             List<ScheduleConfiguration> result = new ArrayList<>();
             for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
-                result.add(fromDocument(doc));
+                try {
+                    result.add(fromDocument(doc));
+                } catch (Exception e) {
+                    // One undecodable row must not fail the poll and starve its readable
+                    // siblings (a HITL timeout among them): it cannot be fired either way,
+                    // so it is left in place and named so it can be removed.
+                    LOGGER.warnf("Due schedule %s cannot be decoded — skipped: %s", sanitize(String.valueOf(doc.get(ID))),
+                            sanitize(e.getMessage()));
+                }
             }
             return result;
         } catch (Exception e) {

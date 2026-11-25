@@ -199,8 +199,11 @@ class HitlCrashRecoveryObserverCoverageTest {
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
             // regularStillPaused loads the snapshot; make that read throw → the
             // supplier's own catch returns true → outer re-check keeps the schedule.
-            when(memStore.loadConversationMemorySnapshot(CONV_ID))
+            // The first read (before the write) sees the pause; the re-check after the
+            // create fails — the answer is "unknown", so the created row is kept.
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(awaitingSnapshot(pausedAt))
                     .thenThrow(new RuntimeException("read failed"));
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
 
             observer(true, true).runRecovery();
 
@@ -417,7 +420,8 @@ class HitlCrashRecoveryObserverCoverageTest {
         void groupRecheckThrowsKeepsSchedule() throws Exception {
             var gc = pausedGc("AUTO_APPROVE", "PT10M", Instant.now().minus(1, ChronoUnit.HOURS));
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
-            when(gcStore.read(GC_ID)).thenThrow(new RuntimeException("read failed"));
+            when(gcStore.read(GC_ID)).thenReturn(gc).thenThrow(new RuntimeException("read failed"));
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
 
             observer(true, true).runRecovery();
 

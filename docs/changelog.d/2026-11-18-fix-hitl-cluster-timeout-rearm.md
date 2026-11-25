@@ -157,17 +157,32 @@
 - `ConversationServiceHitlCoverageTest`, `GroupHitlCoordinatorTest`: the arm-failure counter (the group one also
   without a registry).
 
+### Review follow-ups (same PR)
+
+- Stale rows are deleted after the replacement is created, not before: a spent row is the only record of when its
+  timeout fired, and with it the one-hour re-arm backoff, so it must survive a create that fails. A full page of
+  stale rows is cleared and read again in the same pass instead of waiting for the next one (a standalone node has
+  none).
+- Read retries share one budget per recovery pass (30 s): with the store down, a thousand pauses no longer wait
+  their own 1 s and 4 s each. Once it is spent a failed read is not retried and the pause stays unarmed this pass.
+- `findDueSchedules` (MongoDB and PostgreSQL) skips and names a row it cannot decode instead of failing the whole
+  poll, so a replacement timeout is not starved by an undecodable sibling.
+
 ### Left open
 
 - On a single node a timeout that could not be scheduled stays missing until the next restart (no periodic repair
   without a cluster).
 - `readSchedulesByName` has no ordering and the sweep reads at most 100 rows per name; with more it removes the
-  stale rows it read and waits for a later pass. An undecodable row stays (logged on every pass that reads the name)
+  stale rows it read (keeping this pause's spent row, which carries the backoff) and reads again, up to five
+  rounds, before it gives up until a later pass. An undecodable row stays (logged on every pass that reads the name)
   until someone deletes it.
 - A single node whose schedule store stays unreadable through the in-pass retries of its startup pass leaves the
   affected pauses without a re-armed timeout until the next start (ERROR log plus the arm-failure counter); there is
   no periodic repair without a cluster.
-- The pre-write re-check counts a pause whose state cannot be read as still current (as the post-create one always
-  did), so the sweep then proceeds as before this change.
+- A pause whose state cannot be read counts as still current when the sweep creates the replacement (as the
+  post-create check always did), but never when it deletes: stale rows are removed only on a confirmed pause
+  identity and only after the replacement exists, so an unreadable pause leaves them for a later sweep.
+- The delete of a stale row re-reads the row and skips it if its lifecycle moved (an operator requeued it); the
+  window between that read and the delete needs a compare-and-delete in the store, which does not exist.
 - The resume and cancel paths (`ConversationHitlService.deleteHitlTimeoutSchedule`, the group equivalents) still
   delete by name.

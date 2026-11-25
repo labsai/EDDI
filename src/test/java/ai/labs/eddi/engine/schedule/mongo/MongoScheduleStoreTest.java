@@ -1099,6 +1099,24 @@ class MongoScheduleStoreTest {
     // ==================== findDueSchedules ====================
 
     @Test
+    @DisplayName("findDueSchedules — a row that cannot be decoded is skipped, the readable due rows still reach the poller")
+    void findDueSchedules_skipsAnUndecodableRow() throws Exception {
+        FindIterable<Document> both = findingDocs(new Document("_id", "broken-row"), new Document("_id", "readable-row"));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(both);
+        when(both.sort(any(Document.class))).thenReturn(both);
+        var decoded = new ScheduleConfiguration();
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenAnswer(invocation -> {
+            Document doc = invocation.getArgument(0);
+            if ("broken-row".equals(doc.get("_id"))) {
+                throw new IOException("unexpected field type");
+            }
+            return decoded;
+        });
+
+        assertEquals(List.of(decoded), store.findDueSchedules(Instant.now(), Duration.ofMinutes(1), 3));
+    }
+
+    @Test
     @DisplayName("findDueSchedules — returns due schedules, most overdue first")
     void findDueSchedules() throws Exception {
         setupSchedulePageIteration();

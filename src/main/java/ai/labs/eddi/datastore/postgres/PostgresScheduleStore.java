@@ -963,7 +963,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setLong(3, nowMs);
             ps.setInt(4, maxRetries);
             ps.setInt(5, pollBatchSize);
-            return readScheduleList(ps);
+            return readDueScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
@@ -1295,6 +1295,27 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     // ========================= Helpers =========================
+
+    /**
+     * Like {@link #readScheduleList}, but one undecodable row is skipped (and
+     * named) instead of failing the read: the poll must not be starved of its
+     * readable rows — a HITL timeout among them — by a row it could not fire
+     * anyway. A failing query still fails the read.
+     */
+    private List<ScheduleConfiguration> readDueScheduleList(PreparedStatement ps) throws SQLException {
+        List<ScheduleConfiguration> result = new ArrayList<>();
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                try {
+                    result.add(fromResultSet(rs));
+                } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                    LOGGER.warnf("Due schedule %s cannot be decoded — skipped: %s", sanitize(rs.getString("id")),
+                            sanitize(e.getMessage()));
+                }
+            }
+        }
+        return result;
+    }
 
     private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException, IResourceStore.ResourceStoreException {
         List<ScheduleConfiguration> result = new ArrayList<>();
