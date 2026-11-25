@@ -141,4 +141,18 @@ class RestAgentStoreDeleteGuardTest {
         order.verify(restConversations).endActiveConversations(any(), eq(IConversationService.END_REASON_AGENT_DELETED));
         order.verify(agentStore).delete(AGENT_ID, 1);
     }
+
+    @Test
+    @DisplayName("deployment records that cannot be read refuse the delete with 503: an unseen deployed version is not deleted around")
+    void unreadableDeploymentRecordsRefuse() throws Exception {
+        when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(version(1));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                .thenThrow(new IResourceStore.ResourceStoreException("store timeout"));
+
+        var refused = assertThrows(WebApplicationException.class, () -> store.deleteAgent(AGENT_ID, 1, false, false, true));
+
+        assertEquals(503, refused.getResponse().getStatus());
+        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(agentStore, never()).delete(anyString(), anyInt());
+    }
 }

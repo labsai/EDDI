@@ -27,6 +27,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -176,6 +178,13 @@ class ResourceInUseGuardTest {
                 List.of(WORKFLOW_URI + "wf1?version=1", WORKFLOW_URI + "wf1?version=2", WORKFLOW_URI + "wf1?version=3"));
         guard.requireUnused(WORKFLOW_URI, "wf1", 3, false, false);
         verify(agentStore).findAgentVersionsListing(List.of(WORKFLOW_URI + "wf1?version=3"));
+    }
+
+    @Test
+    @DisplayName("a soft delete of version Integer.MAX_VALUE asks for that one version and returns (no wrapping counter)")
+    void softDeleteOfTheLargestVersionTerminates() throws Exception {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> guard.requireUnused(LLM_URI, "abc", Integer.MAX_VALUE, false, false));
+        verify(workflowStore).findWorkflowVersionsReferencing(List.of(LLM_URI + "abc?version=" + Integer.MAX_VALUE));
     }
 
     @Test

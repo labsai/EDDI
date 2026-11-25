@@ -196,6 +196,12 @@ public class ResourceInUseGuard {
         return WORKFLOW_AUTHORITY.equals(authority) || STEP_RESOURCE_AUTHORITIES.contains(authority);
     }
 
+    /**
+     * The URI's host, e.g. {@code ai.labs.llm}. Not named after the URI's
+     * "authority": CodeQL's {@code java/user-controlled-bypass} treats every method
+     * whose name contains {@code auth} as an authentication action, and flagged the
+     * {@code force} override that skips this lookup as a bypass of one.
+     */
     private static String hostOf(String resourceUri) {
         int scheme = resourceUri.indexOf("://");
         if (scheme < 0) {
@@ -212,7 +218,10 @@ public class ResourceInUseGuard {
      *            the store's resource URI prefix, e.g.
      *            {@code eddi://ai.labs.llm/llmstore/llms/}
      * @param version
-     *            the version addressed (for {@code permanent}, the newest)
+     *            for a soft delete, the version addressed; for {@code permanent},
+     *            the newest version stored, a soft-deleted one included: every
+     *            version up to it is checked, because {@code deleteAllPermanently}
+     *            removes them all
      */
     public void requireUnused(String resourceUri, String id, Integer version, boolean permanent, boolean force) {
         if (force || isUnguarded() || version == null || version < 1) {
@@ -220,8 +229,13 @@ public class ResourceInUseGuard {
         }
         String authority = hostOf(resourceUri);
         List<String> addressed = new ArrayList<>();
-        for (int v = permanent ? 1 : version; v <= version; v++) {
-            addressed.add(resourceUri + id + IRestVersionInfo.versionQueryParam + v);
+        if (permanent) {
+            // long, so a version of Integer.MAX_VALUE cannot wrap the counter.
+            for (long v = 1; v <= version; v++) {
+                addressed.add(resourceUri + id + IRestVersionInfo.versionQueryParam + v);
+            }
+        } else {
+            addressed.add(resourceUri + id + IRestVersionInfo.versionQueryParam + version);
         }
         List<User> users;
         try {
@@ -424,6 +438,21 @@ public class ResourceInUseGuard {
         body.put("openConversationsCount", result.total());
         body.put("override", END_CONVERSATIONS_PARAM + "=true");
         throw status(Response.Status.CONFLICT, message, body);
+    }
+
+    /**
+     * Refuses (503) the delete of an agent whose deployed versions could not all be
+     * listed: a version the caller did not see is neither counted by
+     * {@link #requireNoOpenConversations} nor undeployed, so its conversations
+     * would keep running on a deleted agent. The same fail-closed rule as a failed
+     * count.
+     */
+    public void requireCompleteDeploymentDiscovery(String agentId, boolean complete) {
+        if (complete || isUnguarded()) {
+            return;
+        }
+        LOGGER.errorf("Could not list every deployed version of agent %s; refusing the delete (503)", LogSanitizer.sanitize(agentId));
+        throw checkFailed("Could not list every deployed version of this agent, so it was not deleted. Retry the request.");
     }
 
     /**

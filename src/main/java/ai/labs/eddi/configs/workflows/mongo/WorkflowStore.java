@@ -147,11 +147,13 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         List<IResourceStore.IResourceId> live = new ArrayList<>();
         List<IResourceStore.IResourceId> historical = new ArrayList<>();
         List<String> uris = new ArrayList<>(new LinkedHashSet<>(resourceUris));
+        // From the primary, for the reason AgentStore.findAgentVersionsListing gives.
+        var storage = resourceStorage.primaryReads();
         for (int from = 0; from < uris.size(); from += IAgentStore.REFERENCE_QUERY_CHUNK) {
             List<String> chunk = uris.subList(from, Math.min(uris.size(), from + IAgentStore.REFERENCE_QUERY_CHUNK));
             for (String field : List.of(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD)) {
-                live.addAll(resourceStorage.findResourceIdsContainingAny(field, chunk));
-                historical.addAll(resourceStorage.findHistoryResourceIdsContainingAny(field, chunk));
+                live.addAll(storage.findResourceIdsContainingAny(field, chunk));
+                historical.addAll(storage.findHistoryResourceIdsContainingAny(field, chunk));
             }
         }
         return new ReferringVersions(live, historical);

@@ -368,4 +368,25 @@ class WorkflowStoreTest {
         store.deleteAllPermanently("wf-1");
         verify(resourceStorage).removeAllPermanently("wf-1");
     }
+
+    /**
+     * The delete guard acts on this lookup, so it reads from the primary (see
+     * AgentStore.findAgentVersionsListing).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("findWorkflowVersionsReferencing reads from the primary, not the nearest member")
+    void findWorkflowVersionsReferencing_readsFromThePrimary() {
+        IResourceStorage<WorkflowConfiguration> primary = mock(IResourceStorage.class);
+        when(resourceStorage.primaryReads()).thenReturn(primary);
+        IResourceStore.IResourceId live = mock(IResourceStore.IResourceId.class);
+        when(primary.findResourceIdsContainingAny(anyString(), anyCollection())).thenReturn(List.of(live));
+        when(primary.findHistoryResourceIdsContainingAny(anyString(), anyCollection())).thenReturn(List.of());
+
+        var found = store.findWorkflowVersionsReferencing(List.of("eddi://ai.labs.llm/llmstore/llms/abc?version=1"));
+
+        assertFalse(found.live().isEmpty());
+        verify(resourceStorage, never()).findResourceIdsContainingAny(anyString(), anyCollection());
+        verify(resourceStorage, never()).findHistoryResourceIdsContainingAny(anyString(), anyCollection());
+    }
 }

@@ -486,7 +486,13 @@ public class RestAgentStore implements IRestAgentStore {
 
         // Collected BEFORE the delete for the same reason: the deployment records are
         // removed below, and afterwards nothing names the versions still running.
-        List<DeploymentInfo> liveDeployments = liveDeploymentsOf(id);
+        LiveDeployments discovered = liveDeploymentsOf(id);
+        List<DeploymentInfo> liveDeployments = discovered.deployments();
+        // A version the discovery could not see would be neither checked for open
+        // conversations below nor undeployed after the delete: refuse (503) instead.
+        if (inUseGuard != null) {
+            inUseGuard.requireCompleteDeploymentDiscovery(id, discovered.complete());
+        }
 
         // 409 while a deployed version has active conversations, as undeploy does —
         // unless endAllActiveConversations=true. Only counted here: nothing is ended
@@ -632,8 +638,9 @@ public class RestAgentStore implements IRestAgentStore {
      * records because a version can be running without a record (a record write
      * that failed, or one a previous delete already removed).
      */
-    private List<DeploymentInfo> liveDeploymentsOf(String id) {
+    private LiveDeployments liveDeploymentsOf(String id) {
         List<DeploymentInfo> live = new ArrayList<>();
+        boolean complete = true;
         try {
             for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
                 if (id.equals(info.getAgentId())) {
@@ -641,6 +648,7 @@ public class RestAgentStore implements IRestAgentStore {
                 }
             }
         } catch (Exception e) {
+            complete = false;
             log.warnf("Could not read deployment records for Agent %s before deleting it: %s", sanitize(id), sanitize(e.getMessage()));
         }
         for (Deployment.Environment environment : Deployment.Environment.values()) {
@@ -657,10 +665,19 @@ public class RestAgentStore implements IRestAgentStore {
                     }
                 }
             } catch (Exception e) {
+                complete = false;
                 log.warnf("Could not list running Agents in %s before deleting Agent %s: %s", environment, sanitize(id), sanitize(e.getMessage()));
             }
         }
-        return live;
+        return new LiveDeployments(live, complete);
+    }
+
+    /**
+     * The live deployments of an agent, and whether every source answered: false
+     * when the deployment records or an environment's runtime could not be read, so
+     * versions may be missing.
+     */
+    private record LiveDeployments(List<DeploymentInfo> deployments, boolean complete) {
     }
 
     private void undeployLiveDeployments(String id, List<DeploymentInfo> liveDeployments) {

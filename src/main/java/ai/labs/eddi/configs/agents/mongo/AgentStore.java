@@ -245,10 +245,14 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         List<IResourceStore.IResourceId> live = new ArrayList<>();
         List<IResourceStore.IResourceId> historical = new ArrayList<>();
         List<String> uris = new ArrayList<>(new LinkedHashSet<>(workflowUris));
+        // From the primary: the delete guard acts on this answer, and a lagging
+        // secondary that has not seen the latest agent version would let a workflow
+        // that version lists be deleted.
+        var storage = resourceStorage.primaryReads();
         for (int from = 0; from < uris.size(); from += REFERENCE_QUERY_CHUNK) {
             List<String> chunk = uris.subList(from, Math.min(uris.size(), from + REFERENCE_QUERY_CHUNK));
-            live.addAll(resourceStorage.findResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
-            historical.addAll(resourceStorage.findHistoryResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
+            live.addAll(storage.findResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
+            historical.addAll(storage.findHistoryResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
         }
         return new ReferringVersions(live, historical);
     }

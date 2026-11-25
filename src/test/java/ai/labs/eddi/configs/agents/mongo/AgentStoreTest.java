@@ -696,4 +696,27 @@ class AgentStoreTest {
             }
         };
     }
+
+    /**
+     * The delete guard acts on this lookup, so it reads from the primary: on the
+     * client default (nearest) a lagging secondary could miss the agent version
+     * that lists the workflow being deleted.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("findAgentVersionsListing reads from the primary, not the nearest member")
+    void findAgentVersionsListing_readsFromThePrimary() {
+        IResourceStorage<AgentConfiguration> primary = mock(IResourceStorage.class);
+        doReturn(primary).when(resourceStorage).primaryReads();
+        List<String> uris = List.of("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        IResourceStore.IResourceId live = mock(IResourceStore.IResourceId.class);
+        when(primary.findResourceIdsContainingAny(AgentStore.WORKFLOWS_FIELD, uris)).thenReturn(List.of(live));
+        when(primary.findHistoryResourceIdsContainingAny(AgentStore.WORKFLOWS_FIELD, uris)).thenReturn(List.of());
+
+        var found = agentStore.findAgentVersionsListing(uris);
+
+        assertEquals(List.of(live), found.live());
+        verify(resourceStorage, never()).findResourceIdsContainingAny(anyString(), anyCollection());
+        verify(resourceStorage, never()).findHistoryResourceIdsContainingAny(anyString(), anyCollection());
+    }
 }
