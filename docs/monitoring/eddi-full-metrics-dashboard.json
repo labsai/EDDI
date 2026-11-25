@@ -12874,6 +12874,104 @@
             }
           },
           "description": "Addresses added to an integration's suppression list per hour (a reply bounced permanently). Nothing is sent to them until an administrator clears the entry (POST /channelstore/channels/{id}/email-suppressions/clear)."
+        },
+        {
+          "id": 462,
+          "type": "timeseries",
+          "title": "Channel config refusals",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Saves refused (`eddi_channel_config_rejected_total`), undeclared `platformConfig` keys the router dropped from stored documents (`eddi_channel_config_keys_dropped_total`, once per document version and key) and sends whose connection could not be resolved (`eddi_channel_credential_refused_total`), by channel `type`. A dropped key means a document reached the store without save validation; a credential refusal means a connection changed after the integration was saved.",
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 88
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, reason) (rate(eddi_channel_config_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rejected {{type}} {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (type) (rate(eddi_channel_config_keys_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped key {{type}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (type, reason) (rate(eddi_channel_credential_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "credential refused {{type}} {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -20083,7 +20181,7 @@
     {
       "id": 459,
       "type": "row",
-      "title": "GDPR Erasure Guarantee",
+      "title": "Organizations",
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -20095,6 +20193,172 @@
         {
           "id": 460,
           "type": "timeseries",
+          "title": "Org context fallbacks",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_org_context_fallback_total`: single-mode org lookups that found no org binding and used the `default` org, by `site` (the calling class and method). Expected to stay at 0. Anything above 0 is a code path that must be fixed before multi mode; it is harmless in single mode.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (site) (rate(eddi_org_context_fallback_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{site}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 461,
+          "type": "timeseries",
+          "title": "Platform-scope entries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_org_platform_scope_total`: entries into `OrgScope.platform`, the audited way to cross orgs (claim queries, migrations, platform admin views), by `reason`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_org_platform_scope_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 463,
+      "type": "row",
+      "title": "GDPR Erasure Guarantee",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "panels": [
+        {
+          "id": 464,
+          "type": "timeseries",
           "title": "Erasure guarantee: guarded writes",
           "datasource": {
             "type": "prometheus",
@@ -20105,7 +20369,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 42
+            "y": 43
           },
           "targets": [
             {
@@ -20202,7 +20466,7 @@
           }
         },
         {
-          "id": 461,
+          "id": 465,
           "type": "timeseries",
           "title": "Erasure guarantee: drain barrier",
           "datasource": {
@@ -20214,7 +20478,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 42
+            "y": 43
           },
           "targets": [
             {

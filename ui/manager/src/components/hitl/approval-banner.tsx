@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -890,7 +891,7 @@ export function ApprovalBanner({
       )}
 
       {/* Action buttons */}
-      <div className="flex items-center gap-2">
+      <RowActions className="justify-start">
         <button
           type="button"
           // `pauseDetailsError` belongs here as much as `pauseDetailsPending`:
@@ -943,7 +944,7 @@ export function ApprovalBanner({
             {t("hitl.cancel", "Cancel")}
           </button>
         )}
-      </div>
+      </RowActions>
 
       {/* Confirmation gate — no destructive HITL action fires on a single click. */}
       {confirmDialog && (
