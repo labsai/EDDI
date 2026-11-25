@@ -986,7 +986,7 @@ public class ChannelTargetRouter {
         }
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        ChannelIntegrationConfiguration integration = byChannel(normalizedType + ":" + platformChannelId);
         if (integration != null) {
             String token = integration.getPlatformConfig() == null ? null : integration.getPlatformConfig().get("botToken");
             if (token != null && !token.isBlank()) {
