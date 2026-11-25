@@ -8,12 +8,14 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.service.tool.ToolExecutionResult;
+import dev.langchain4j.service.tool.ToolProviderResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,17 +30,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -70,6 +75,8 @@ class McpClientCacheBoundsTest {
     private final Map<String, Thread> closed = new ConcurrentHashMap<>();
     private final AtomicInteger builds = new AtomicInteger();
     private final SecretResolver secretResolver = mock(SecretResolver.class);
+    /** Opened when a rebuild for a {@link #droppedServer} starts. */
+    private final CountDownLatch buildStarted = new CountDownLatch(1);
 
     @AfterEach
     void tearDown() {
@@ -504,6 +511,149 @@ class McpClientCacheBoundsTest {
         var refused = assertThrows(IllegalStateException.class, () -> call(tools, url));
         assertTrue(refused.getMessage().contains("circuit breaker"), refused.getMessage());
         assertEquals(buildsBefore + 3, builds.get(), "an open circuit fails the call without connecting");
+    }
+
+    /**
+     * A server whose tools were discovered and whose client has since been dropped;
+     * every rebuild after that throws {@code failure.get()} once {@code buildGate}
+     * opens.
+     */
+    private McpToolProviderManager.McpToolsResult droppedServer(McpToolProviderManager[] holder, String url,
+                                                                AtomicReference<RuntimeException> failure, CountDownLatch buildGate) {
+        var down = new AtomicBoolean();
+        var manager = manager(16, c -> {
+            if (down.get()) {
+                buildStarted.countDown();
+                await(buildGate);
+                throw failure.get();
+            }
+            return toolClient(c.getUrl(), () -> {
+            });
+        });
+        var tools = manager.discoverTools(List.of(config(url)));
+        manager.closeClient(url);
+        down.set(true);
+        holder[0] = manager;
+        return tools;
+    }
+
+    @Test
+    @DisplayName("one failed rebuild shared by concurrent callers counts as one breaker failure")
+    void concurrentWaitersOnOneFailedBuildCountOnce() throws Exception {
+        String url = "http://blip.example/mcp";
+        var holder = new McpToolProviderManager[1];
+        var gate = new CountDownLatch(1);
+        var tools = droppedServer(holder, url, new AtomicReference<>(new IllegalStateException("connection refused")), gate);
+        var manager = holder[0];
+        int buildsBefore = builds.get();
+
+        List<Future<String>> calls = new ArrayList<>();
+        calls.add(pool.submit(() -> call(tools, url)));
+        assertTrue(buildStarted.await(10, TimeUnit.SECONDS));
+        // The cache itself may hang a stage on the claim; count waiters from there.
+        int baseline = manager.buildWaiterCount(config(url));
+        for (int i = 0; i < 2; i++) {
+            calls.add(pool.submit(() -> call(tools, url)));
+        }
+        // The first caller builds; the other two wait on its claim.
+        awaitCondition(() -> manager.buildWaiterCount(config(url)) == baseline + 2, () -> {
+        });
+        assertEquals(baseline + 2, manager.buildWaiterCount(config(url)));
+        gate.countDown();
+        for (Future<String> call : calls) {
+            assertThrows(ExecutionException.class, () -> call.get(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(buildsBefore + 1, builds.get(), "the three callers shared one build");
+        assertEquals(1, manager.recentFailureCount(config(url)), "one failed build is one failure");
+        assertFalse(manager.isCircuitOpen(config(url)));
+    }
+
+    @Test
+    @DisplayName("a successful rebuild clears the server's breaker failures, as a successful discovery does")
+    void successfulRebuildClearsFailures() throws Exception {
+        String url = "http://recovering.example/mcp";
+        var serverDown = new AtomicBoolean();
+        var manager = manager(16, c -> {
+            if (serverDown.get()) {
+                throw new IllegalStateException("connection refused");
+            }
+            return toolClient(c.getUrl(), () -> {
+            });
+        });
+        var tools = manager.discoverTools(List.of(config(url)));
+        manager.closeClient(url);
+        serverDown.set(true);
+        for (int i = 0; i < 2; i++) {
+            assertThrows(IllegalStateException.class, () -> call(tools, url));
+        }
+        assertEquals(2, manager.recentFailureCount(config(url)));
+
+        serverDown.set(false);
+        assertEquals("answered by " + url, call(tools, url));
+        assertEquals(0, manager.recentFailureCount(config(url)), "the rebuild succeeded, so the failures are cleared");
+    }
+
+    @Test
+    @DisplayName("a rebuild refused for authentication or a missing credential does not feed the breaker")
+    void authAndCredentialFailuresDoNotFeedTheBreaker() throws Exception {
+        for (RuntimeException failure : List.of(new IllegalStateException("Unexpected status code: 401"),
+                new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "the user has not connected"))) {
+            closed.clear();
+            String url = "http://auth" + builds.get() + ".example/mcp";
+            var holder = new McpToolProviderManager[1];
+            var tools = droppedServer(holder, url, new AtomicReference<>(failure), new CountDownLatch(0));
+            for (int i = 0; i < 3; i++) {
+                assertThrows(RuntimeException.class, () -> call(tools, url));
+            }
+            assertEquals(0, holder[0].recentFailureCount(config(url)), "not counted: " + failure);
+            assertFalse(holder[0].isCircuitOpen(config(url)));
+        }
+    }
+
+    @Test
+    @DisplayName("a rebuild refused as a configuration error does not feed the breaker")
+    void configurationErrorsDoNotFeedTheBreaker() throws Exception {
+        String url = "http://misconfigured.example/mcp";
+        var holder = new McpToolProviderManager[1];
+        var tools = droppedServer(holder, url, new AtomicReference<>(new IllegalArgumentException("URL refused by the SSRF policy")),
+                new CountDownLatch(0));
+        for (int i = 0; i < 3; i++) {
+            assertThrows(IllegalArgumentException.class, () -> call(tools, url));
+        }
+        assertEquals(0, holder[0].recentFailureCount(config(url)));
+        assertFalse(holder[0].isCircuitOpen(config(url)));
+    }
+
+    @Test
+    @DisplayName("discovery counts a failed client build once, not again in its own catch")
+    void discoveryCountsAFailedBuildOnce() {
+        String url = "http://unreachable.example/mcp";
+        var manager = manager(16, c -> {
+            throw new IllegalStateException("connection refused");
+        });
+        var result = manager.discoverTools(List.of(config(url)));
+        assertEquals(McpToolProviderManager.McpFailureKind.CONNECTION_FAILURE, result.failures().get(0).kind());
+        assertEquals(1, manager.recentFailureCount(config(url)));
+    }
+
+    @Test
+    @DisplayName("discovery does not count a client retired under it as a breaker failure")
+    void discoveryDoesNotCountARetiredClient() {
+        String url = "http://churning.example/mcp";
+        var manager = new McpToolProviderManager(mock(GlobalVariableResolver.class), secretResolver,
+                new CallerIdentityResolver(NO_CALLER, true), NO_CALLER, false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS,
+                McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES, McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER,
+                McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS, 16,
+                McpToolProviderManager.DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS, null) {
+            @Override
+            ToolProviderResult fetchToolsFromServer(McpServerConfig serverConfig) {
+                throw new McpToolProviderManager.ClientRetiredException("evicted again as soon as it was built");
+            }
+        };
+        var result = manager.discoverTools(List.of(config(url)));
+        assertEquals(1, result.failures().size(), "the server is still reported as contributing nothing");
+        assertEquals(0, manager.recentFailureCount(config(url)), "the cache's churn says nothing about the server");
     }
 
     /**

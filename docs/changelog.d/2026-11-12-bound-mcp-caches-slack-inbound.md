@@ -30,9 +30,15 @@ unrelated servers hashed to the same bin.
   marked retired and is never leased again. The substitute executor keeps the
   tool's fixed name and the attribute policy that `McpToolProvider` uses.
   Cancelling an async call cancels the MCP call itself. A call that has to
-  rebuild its client goes through discovery's circuit breaker and failure
-  classification, so a server that is down fails fast instead of costing every
-  call a connect timeout.
+  rebuild its client goes through discovery's circuit breaker, so a server that
+  is down fails fast instead of costing every call a connect timeout.
+- A failed client build is counted towards the breaker once, on the building
+  thread, however many callers were waiting on it — one blip with three callers
+  waiting used to open the circuit and take the server out of discovery for a
+  minute. Both paths classify alike: credential failures, authentication
+  challenges, configuration errors (`IllegalArgumentException`) and a client
+  retired under the lease are not counted. A successful rebuild clears the
+  server's failures, as a successful discovery does.
 - A client is built **outside** any lock. The first caller claims the key with an
   empty future and builds on its own thread. Concurrent callers for the same key
   wait for that future and share the one client. Callers for other keys never wait

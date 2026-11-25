@@ -161,6 +161,15 @@ public class McpToolProviderManager {
     private final Set<McpClient> retiredClients = Collections.newSetFromMap(new WeakHashMap<>());
 
     /**
+     * Client build failures {@link #buildInto} has already classified for the
+     * circuit breaker, so discovery does not count the same failure again when it
+     * reaches its catch. Weak: an exception is forgotten once nothing holds it.
+     * {@code Throwable} does not override {@code equals}, so this is an identity
+     * set.
+     */
+    private final Set<Throwable> buildFailures = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+
+    /**
      * Cache of discovered tool specs/executors, keyed like {@link #clientCache}.
      * Finding F12: without this, every conversation turn issued a live
      * {@code tools/list} RPC to every configured MCP server (only the connection
@@ -413,6 +422,18 @@ public class McpToolProviderManager {
         if (close) {
             closeQuietly(key, client);
         }
+    }
+
+    /** Recent breaker failures recorded for a server (testing). */
+    int recentFailureCount(McpServerConfig config) {
+        List<Instant> failures = failureTimestamps.get(cacheKey(config));
+        return failures == null ? 0 : failures.size();
+    }
+
+    /** Callers waiting on a client build in progress for a server (testing). */
+    int buildWaiterCount(McpServerConfig config) {
+        CompletableFuture<McpClient> claim = clientCache.getIfPresent(cacheKey(config));
+        return claim == null ? 0 : claim.getNumberOfDependents();
     }
 
     /** Clients whose close waits for a lease to be released (testing). */
@@ -787,10 +808,21 @@ public class McpToolProviderManager {
                     failures.add(new McpServerFailure(serverName, url, McpFailureKind.AUTHENTICATION_REQUIRED,
                             "The server answered with an authentication challenge. Configure a credential for it."));
                     count("auth_required");
+                } else if (e instanceof ClientRetiredException) {
+                    // The client cache is too small for its load. Nothing is wrong with
+                    // the server, so the breaker stays out of it; there is no failure
+                    // kind for this cache's own capacity, and a configuration error
+                    // would tell the caller to fix a server config that is fine.
+                    LOGGER.warnf("MCP server '%s' contributed no tools this turn: %s", sanitize(serverName), e.getMessage());
+                    failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
+                    count("failure");
                 } else {
                     LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
                     failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
-                    recordFailure(circuitKey);
+                    // A failed client build was already classified, once, by buildInto.
+                    if (!buildFailures.remove(e)) {
+                        recordFailure(circuitKey);
+                    }
                     count("failure");
                 }
             }
@@ -919,27 +951,24 @@ public class McpToolProviderManager {
 
         /**
          * Leases the client for one call. Rebuilding it is a connect like the one
-         * discovery makes, so it gets discovery's circuit breaker and failure
-         * classification: while the circuit is open a call to a server with no cached
-         * client fails at once instead of waiting out a connect timeout, and a failed
-         * rebuild counts towards opening it — unless it is a credential problem, which
-         * waiting does not heal.
+         * discovery makes, so it gets discovery's circuit breaker: while the circuit is
+         * open a call to a server with no cached client fails at once instead of
+         * waiting out a connect timeout. A failed rebuild is counted by
+         * {@link #buildInto}, once per build and classified as discovery classifies it;
+         * a successful one clears the server's failures, as a successful discovery
+         * does.
          */
         private McpClient leaseForCall() {
-            if (clientCache.getIfPresent(key) == null && isCircuitOpen(key)) {
+            boolean cached = clientCache.getIfPresent(key) != null;
+            if (!cached && isCircuitOpen(key)) {
                 throw new IllegalStateException("MCP server '" + serverOf(key) + "' is unavailable: its circuit breaker is open after "
                         + CIRCUIT_FAILURE_THRESHOLD + " or more recent failures");
             }
-            try {
-                return leaseClient(serverConfig, key);
-            } catch (ClientRetiredException e) {
-                throw e;
-            } catch (RuntimeException e) {
-                if (credentialFailure(e) == null && !isAuthenticationChallenge(e)) {
-                    recordFailure(key);
-                }
-                throw e;
+            McpClient client = leaseClient(serverConfig, key);
+            if (!cached) {
+                recordSuccess(key);
             }
+            return client;
         }
 
         @Override
@@ -1368,13 +1397,38 @@ public class McpToolProviderManager {
         McpClient client;
         try {
             client = buildClient(config);
-        } catch (RuntimeException | Error e) {
+        } catch (RuntimeException e) {
+            // Counted here, once per build, on the building thread: every caller
+            // waiting on this claim rethrows the same exception, and counting it per
+            // caller let one blip with three callers waiting open the circuit — which
+            // also takes the server out of discovery for every agent for a window.
+            buildFailures.add(e);
+            if (countsTowardsCircuit(e)) {
+                recordFailure(key);
+            }
+            clientCache.asMap().remove(key, claim);
+            claim.completeExceptionally(e);
+            throw e;
+        } catch (Error e) {
             clientCache.asMap().remove(key, claim);
             claim.completeExceptionally(e);
             throw e;
         }
         claim.complete(client);
         return client;
+    }
+
+    /**
+     * Whether a failure says the server is unhealthy — the only kind the circuit
+     * breaker counts. Not a credential that cannot be resolved, not an
+     * authentication challenge (neither is healed by waiting), not a configuration
+     * the URL, transport or secret checks refused
+     * ({@link IllegalArgumentException}), and not {@link ClientRetiredException},
+     * which is about this cache, not about the server.
+     */
+    private static boolean countsTowardsCircuit(Throwable failure) {
+        return credentialFailure(failure) == null && !isAuthenticationChallenge(failure) && !(failure instanceof IllegalArgumentException)
+                && !(failure instanceof ClientRetiredException);
     }
 
     /** Waits for another caller's build, rethrowing its failure unwrapped. */
