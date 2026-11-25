@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import io.quarkus.arc.Unremovable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
@@ -52,6 +53,13 @@ import java.util.function.Predicate;
  * and a caller that reports them collects them with
  * {@link #problems(WorkflowConfiguration)}.
  */
+// Unremovable: nothing injects this bean, it is only looked up with
+// CDI.current().select(...), which ArC's unused-bean removal does not see.
+// Removed,
+// the lookup failed, the catch took it for "no container", and unknown step
+// types
+// were saved.
+@Unremovable
 @ApplicationScoped
 public class WorkflowConfigSaveValidator {
 
