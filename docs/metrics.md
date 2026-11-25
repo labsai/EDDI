@@ -730,7 +730,11 @@ eddi_attachment_forwarded_total             # Attachments converted to LLM conte
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
 eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
+eddi_attachment_shared_total                # Files shared from one conversation to another; tag: path (delegation, nested_group, …)
+eddi_attachment_share_refused_total         # Share requests refused; tag: reason (not_found, depth, shares_per_turn, …)
 ```
+
+The share meters are recorded by `AttachmentShareService`; the full tag lists are in [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).
 
 ### Outbound HTTP Metrics
 
