@@ -2317,7 +2317,7 @@
           "description": "Quarkus' own view of its worker pools: blocking REST requests and work dispatched through Vert.x. Turns submitted by the coordinator are on 'Turn executor load'."
         },
         {
-          "id": 459,
+          "id": 462,
           "type": "timeseries",
           "title": "Failed deployments by reason",
           "datasource": {
