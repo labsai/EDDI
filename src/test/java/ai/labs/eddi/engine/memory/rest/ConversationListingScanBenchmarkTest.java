@@ -15,7 +15,6 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Updates;
 import jakarta.ws.rs.WebApplicationException;
-import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
