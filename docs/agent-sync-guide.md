@@ -364,8 +364,11 @@ refused with `422` before anything is written (the archive's workflows are scann
 ```
 
 `POST /backup/import?strategy=create&allowIncomplete=true` (and `…/sync?allowIncomplete=true` for a
-first promotion) imports it anyway. The `201` then carries `X-Import-Warnings: <count>` and a JSON
-body `{ "resourceUri", "warnings": [...], "dropped": [...] }`. Nothing deploys an imported agent
+first promotion) imports it anyway. From `/backup/import` the `201` then carries
+`X-Import-Warnings: <count>` and a JSON body `{ "resourceUri", "warnings": [...], "dropped": [...] }`.
+A first promotion through `/sync` answers with its usual sync result instead: `agentUri` names the new
+agent, and the import's findings are lines of its `warnings` list, a dropped step as
+`dropped (not in the archive): …`. It has no `dropped` field and no header. Nothing deploys an imported agent
 automatically; complete it before you deploy. A `201` with warnings but no dropped step (an unknown
 provider, a missing vault secret) means the same: the configuration was written, and the warning
 tells you what will fail at run time. Without `allowIncomplete` a create with such findings is a plain

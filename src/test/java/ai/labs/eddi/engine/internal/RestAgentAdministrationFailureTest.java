@@ -167,6 +167,8 @@ class RestAgentAdministrationFailureTest {
             assertEquals(DeploymentFailure.VAULT_GRANT_MISSING, failure.code());
             assertNull(failure.secrets());
             assertNull(failure.fix());
+            // The grant failure's own message names the secret: it must be replaced.
+            assertFalse(failure.message().contains("gemini-api-key"), failure.message());
         }
 
         @Test
@@ -182,6 +184,8 @@ class RestAgentAdministrationFailureTest {
             assertEquals("ERROR", body.get("status"));
             assertNull(failure.secrets());
             assertNull(failure.fix());
+            // The grant failure's own message names the secret: it must be replaced.
+            assertFalse(failure.message().contains("gemini-api-key"), failure.message());
         }
     }
 
