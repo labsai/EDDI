@@ -578,5 +578,7 @@ class PostgresConversationMemoryStoreUnitTest {
         var outcome = store.upgradeCompatibilityGeneration("00000000-0000-0000-0000-0000000000a1", "agent" + (char) 0 + "x", 3);
 
         assertEquals(GenerationUpgradeOutcome.ALREADY_CURRENT, outcome);
+        // the store owns the probe ResultSet (a mock here): it must release it
+        verify(resultSet).close();
     }
 }
