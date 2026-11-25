@@ -27,6 +27,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -284,7 +286,7 @@ class OpenAiStreamAbandonmentTest {
 
     @Test
     void failedCancel_doesNotBreakTheStream() throws Exception {
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             throw new IllegalStateException("store down");
         }).when(conversationService).cancelConversation(any(), any(), any());
         var out = new DisconnectingStream();
@@ -309,7 +311,7 @@ class OpenAiStreamAbandonmentTest {
         bridge = newBridge(requestTimeoutSeconds);
         var cancelEntered = new CountDownLatch(1);
         var releaseCancel = new CountDownLatch(1);
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             cancelEntered.countDown();
             releaseCancel.await(10, TimeUnit.SECONDS);
             return IConversationService.CancelOutcome.CANCELLED;
@@ -342,7 +344,7 @@ class OpenAiStreamAbandonmentTest {
         // Ending raises the same cancel flag: run first, it would take the turn's
         // transition and audit actor from the cancel.
         var releaseCancel = new CountDownLatch(1);
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             releaseCancel.await(5, TimeUnit.SECONDS);
             return IConversationService.CancelOutcome.CANCELLED;
         }).when(conversationService).cancelConversation(any(), any(), any());
@@ -411,8 +413,12 @@ class OpenAiStreamAbandonmentTest {
     void cancelOnClientDisconnectOff_abandonedTurnThatNeverReportsAnEnd_isStillEndedAtTheBound() throws Exception {
         // Dropped by the watchdog while queued, a failed completion, a hung body: no
         // terminal callback ever comes, and the conversation must not stay open.
+        // The bound's task is held until the test runs it, so "not yet" and "then
+        // ended" are both checked without racing a timer.
         bridge.cancelOnClientDisconnect = false;
-        givenCleanupBoundOf(300);
+        givenCleanupBoundOf(0);
+        var boundTasks = new LinkedBlockingQueue<Runnable>();
+        bridge.deferredCleanupExecutor = boundTasks::add;
         var out = new DisconnectingStream();
         out.disconnect();
         givenStreamingEmits(handler -> {
@@ -422,7 +428,32 @@ class OpenAiStreamAbandonmentTest {
 
         bridge.stream(statelessTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
+        Runnable boundTask = boundTasks.poll(5, TimeUnit.SECONDS);
+        assertNotNull(boundTask, "no bound was armed for the waiting cleanup");
         verify(conversationService, never()).endConversation(any());
+        boundTask.run();
+        verify(conversationService, times(1)).endConversation(CONVERSATION_ID);
+        verifyNeverCancelled();
+    }
+
+    @Test
+    void boundRejectedByItsExecutor_stillEndsTheConversation() throws Exception {
+        // A managed executor that is shutting down refuses the task; nothing else
+        // would end the conversation then.
+        bridge.cancelOnClientDisconnect = false;
+        givenCleanupBoundOf(0);
+        bridge.deferredCleanupExecutor = task -> {
+            throw new RejectedExecutionException("shutting down");
+        };
+        var out = new DisconnectingStream();
+        out.disconnect();
+        givenStreamingEmits(handler -> {
+            handler.onTaskStart(null, "ai.labs.llm", 0);
+            handler.onToken("x");
+        });
+
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
+
         verify(conversationService, timeout(5_000).times(1)).endConversation(CONVERSATION_ID);
         verifyNeverCancelled();
     }
@@ -447,7 +478,7 @@ class OpenAiStreamAbandonmentTest {
         // end's store read would then abort and leave the conversation open.
         bridge.cancelOnClientDisconnect = false;
         var interruptedDuringEnd = new AtomicReference<Boolean>();
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             interruptedDuringEnd.set(Thread.currentThread().isInterrupted());
             return null;
         }).when(conversationService).endConversation(any());
@@ -479,7 +510,7 @@ class OpenAiStreamAbandonmentTest {
         // store: the turn's end must not release the cleanup ahead of it.
         var cancelEntered = new CountDownLatch(1);
         var releaseCancel = new CountDownLatch(1);
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             cancelEntered.countDown();
             releaseCancel.await(10, TimeUnit.SECONDS);
             return IConversationService.CancelOutcome.CANCELLED;
@@ -513,7 +544,7 @@ class OpenAiStreamAbandonmentTest {
     void cancelThatNeverReturns_stillLetsTheConversationEndAtTheBound() throws Exception {
         givenCleanupBoundOf(300);
         var releaseCancel = new CountDownLatch(1);
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             releaseCancel.await(10, TimeUnit.SECONDS);
             return IConversationService.CancelOutcome.CANCELLED;
         }).when(conversationService).cancelConversation(any(), any(), any());

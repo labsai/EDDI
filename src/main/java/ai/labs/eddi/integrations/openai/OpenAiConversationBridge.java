@@ -1034,12 +1034,27 @@ public class OpenAiConversationBridge {
                 if (cleanupMustWait()) {
                     deferredCleanup = cleanup;
                     long boundMs = TimeUnit.SECONDS.toMillis(Math.max(agentTimeoutSeconds, 0)) + deferredCleanupMarginMs;
-                    CompletableFuture.delayedExecutor(boundMs, TimeUnit.MILLISECONDS, deferredCleanupExecutor)
+                    CompletableFuture.delayedExecutor(boundMs, TimeUnit.MILLISECONDS, this::submitOrRunInline)
                             .execute(this::boundReached);
                     return;
                 }
             }
             runCleanup(cleanup);
+        }
+
+        /**
+         * Hands the bound's task to {@link #deferredCleanupExecutor}; if that refuses
+         * it (shutting down, a full queue), runs it here instead — otherwise nothing
+         * else would ever end the conversation.
+         */
+        private void submitOrRunInline(Runnable task) {
+            try {
+                deferredCleanupExecutor.execute(task);
+            } catch (RejectedExecutionException e) {
+                LOGGER.warnf("Deferred stateless cleanup of conversation %s rejected by its executor (%s); running it inline",
+                        sanitize(conversationId), e.getMessage());
+                task.run();
+            }
         }
 
         /**
