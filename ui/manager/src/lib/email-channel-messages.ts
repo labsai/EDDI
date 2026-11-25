@@ -6,6 +6,7 @@ import {
   EMAIL_MAX_AI_DISCLOSURE_CHARS,
   EMAIL_MAX_FROM_NAME_CHARS,
   EMAIL_MAX_OWNER_ADDRESSES,
+  EMAIL_MAX_REPLY_RECIPIENT_PATTERNS,
   EMAIL_MAX_REPLY_TEMPLATE_CHARS,
   EMAIL_MAX_TEMPLATE_CHARS,
   type EmailProblem,
@@ -88,6 +89,30 @@ export function emailProblemMessage(problem: EmailProblem, t: TFunction): string
       });
     case "maxRepliesPerThreadPerHour":
       return t("emailChannel.problem.maxRepliesPerThreadPerHour", "The reply limit must be a whole number from 1 to 1000.");
+    case "replyAudienceNeedsAddressed":
+      return t(
+        "emailChannel.problem.replyAudienceNeedsAddressed",
+        "Replying to the thread needs Act on: only mail that addresses {{productName}} — it must not answer a whole thread it was only copied on.",
+      );
+    case "replyAllowedRecipientsRequired":
+      return t("emailChannel.problem.replyAllowedRecipientsRequired", "Name who may be copied on a reply, e.g. *@example.com: only those recipients are.");
+    case "replyAllowedRecipientsInvalid":
+      return t("emailChannel.problem.replyAllowedRecipientsInvalid", {
+        max: EMAIL_MAX_REPLY_RECIPIENT_PATTERNS,
+        defaultValue: "At most {{max}} entries, each user@domain, *@domain or *@*.domain (not *@*).",
+      });
+    case "listAddressesInvalid":
+      return t("emailChannel.problem.listAddressesInvalid", {
+        max: EMAIL_MAX_REPLY_RECIPIENT_PATTERNS,
+        defaultValue: "At most {{max}} entries, each user@domain, *@domain or *@*.domain.",
+      });
+    case "maxReplyRecipients":
+      return t("emailChannel.problem.maxReplyRecipients", "The copy limit must be a whole number from 1 to 50.");
+    case "replyAudienceIdentityMode":
+      return t(
+        "emailChannel.problem.replyAudienceIdentityMode",
+        "With replies to the thread, every conversation runs as the thread's own identity: set Identity back to one per sender.",
+      );
     case "aliasesTooMany":
       return t("emailChannel.problem.aliasesTooMany", {
         max: EMAIL_MAX_ALIASES,
@@ -142,6 +167,11 @@ export function channelWarningMessage(code: string, t: TFunction): string {
       return t(
         "emailChannel.warning.honorReplyTo",
         "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      );
+    case "email.reply-audience-thread":
+      return t(
+        "emailChannel.warning.replyAudienceThread",
+        "Saved. Replies are copied to the thread's allowed recipients: whatever the agent looks up reaches them too, and this integration keeps no long-term memory per person.",
       );
     default:
       return code;

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -554,6 +555,15 @@ class ConversationServiceDeepBranchTest {
             var handler = conversationService.createPropertiesHandler("email-anon:0123abcd",
                     new AgentConfiguration.UserMemoryConfig(), true);
             assertNull(handler.getUserMemoryStore(), "no long-term memory read or written");
+            assertFalse(handler.isMemoryToolsEnabled(), "no UserMemoryTool");
+        }
+
+        @Test
+        @DisplayName("a conversation whose replies copy the thread (email-thread:) gets no memory store and no memory tools")
+        void threadEmailConversationHasNoMemory() {
+            var handler = conversationService.createPropertiesHandler(EmailUserIdentity.thread("int1", "<root@example.com>"),
+                    new AgentConfiguration.UserMemoryConfig(), true);
+            assertNull(handler.getUserMemoryStore(), "colleagues read the answer: no long-term memory read or written");
             assertFalse(handler.isMemoryToolsEnabled(), "no UserMemoryTool");
         }
 

@@ -122,6 +122,11 @@ public class ImapMailTransport implements MailTransport {
 
     @Override
     public String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        return send(integrationId, settings, mime, recipient == null ? List.of() : List.of(recipient));
+    }
+
+    @Override
+    public String send(String integrationId, EmailChannelSettings settings, byte[] mime, List<String> envelopeRecipients) throws MailSendException {
         if (settings == null || !settings.replies()) {
             // Trigger mode sends nothing, whoever asks.
             throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true,
@@ -141,7 +146,11 @@ public class ImapMailTransport implements MailTransport {
                     null);
         }
         SmtpSubmitter.Login login = smtpLogin(settings, endpoint);
-        return SmtpSubmitter.submit(connector, endpoint, settings.address(), login, mime, List.of(new MailAddress(recipient, null)));
+        if (envelopeRecipients == null || envelopeRecipients.isEmpty()) {
+            throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "A reply needs a recipient.", null);
+        }
+        return SmtpSubmitter.submit(connector, endpoint, settings.address(), login, mime,
+                envelopeRecipients.stream().map(address -> new MailAddress(address, null)).toList());
     }
 
     /** The SMTP login from the integration's connection, for the SMTP origin. */

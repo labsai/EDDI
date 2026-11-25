@@ -30,6 +30,8 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.RecipientRole;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.ReplyRecipient;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import ai.labs.eddi.integrations.email.ledger.LedgerRetry;
@@ -51,8 +53,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -95,13 +99,27 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * written and before every attempt), and at most
  * {@code maxRepliesPerThreadPerHour} rows per mail thread per hour (counted
  * from the ledger, cluster-wide). A reply over either limit is recorded
- * {@code SUPPRESSED}, never sent.
+ * {@code SUPPRESSED}, never sent. A suppressed {@code To} suppresses the whole
+ * reply; a suppressed {@code Cc} is only left out.
+ * <p>
+ * <b>Copies</b> ({@code replyAudience: thread}, email v2 plan §9.5): the
+ * {@code Cc} recipients {@link EmailReplyAudience} allowed are recorded with
+ * the row ({@link ReplyRecipient}) when it is written. A later attempt sends to
+ * that set intersected with what the current settings allow — settings may
+ * narrow an audience, never widen it — and a {@code Cc} it leaves out is
+ * removed from the record, so only someone who was really sent the reply counts
+ * as a participant of its thread.
  * <p>
  * <b>Bounces.</b> {@link #applyDeliveryReport} reads a DSN that names a reply
- * this integration sent: a permanent failure for the reply's recipient ends the
- * row {@code FAILED} and suppresses the address. A DSN is untrusted mail, so it
- * counts only for a Message-ID EDDI minted (random, sent only to that
- * recipient) and only for that recipient's block.
+ * this integration sent: a permanent failure for the reply's {@code To} ends
+ * the row {@code FAILED} and suppresses the address; for one of its {@code Cc}
+ * recipients it suppresses that address only and the row stays {@code SENT}. A
+ * DSN is untrusted mail, so it counts only for a Message-ID EDDI minted and
+ * only for a block naming one of that reply's own recipients. With copies the
+ * Message-ID is no longer known to one person: any recipient of the reply could
+ * forge a report that suppresses another of its recipients — at worst that
+ * colleague stops getting replies, which an admin lifts from the suppression
+ * list; it never adds a recipient.
  */
 @ApplicationScoped
 public class EmailReplySender {
@@ -160,9 +178,24 @@ public class EmailReplySender {
         }
     }
 
-    /** A reply ready to attempt. */
-    record Prepared(EmailChannelSettings settings, RenderedMail mail) {
+    /**
+     * A reply ready to attempt: the rendered mail, its {@code Cc} recipients, and
+     * what it was rendered from (so an attempt that has to leave a {@code Cc} out
+     * renders the mail again without it).
+     */
+    record Prepared(EmailChannelSettings settings, RenderedMail mail, List<String> cc, EmailReplyComposer.Thread thread, String body,
+            boolean capped) {
+        Prepared {
+            cc = cc == null ? List.of() : List.copyOf(cc);
+        }
+
+        Prepared(EmailChannelSettings settings, RenderedMail mail) {
+            this(settings, mail, List.of(), null, null, false);
+        }
     }
+
+    /** The row note of a reply whose copies {@code maxReplyRecipients} dropped. */
+    static final String CC_CAPPED = "CC_CAPPED: more than maxReplyRecipients; sent to the sender only";
 
     private final IEmailMessageLedger ledger;
     private final IEmailSuppressionStore suppressions;
@@ -453,7 +486,7 @@ public class EmailReplySender {
      */
     Optional<LedgerEntry> enqueue(Request request, Instant now) {
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
-                request.stepMail(), request.userId());
+                request.stepMail(), request.userId(), EmailReplyAudience.readEveryReply(ledger, request.conversationId()));
         if (!decision.allowed()) {
             metrics.reply("refused");
             LOGGER.infof("Email integration %s: no %s for conversation %s (%s)", sanitize(request.integrationId()), request.kind().id(),
@@ -492,11 +525,13 @@ public class EmailReplySender {
             }
             return Optional.empty();
         }
+        List<String> cc = unsuppressed(request.integrationId(), decision.cc());
+        boolean capped = decision.audience() != null && decision.audience().capped();
         Prepared prepared;
         try {
             String body = composer.body(settings, request.text(), request.stepMail());
             EmailReplyComposer.Thread thread = EmailReplyComposer.threadOf(request.stepMail(), request.inbound().messageId());
-            prepared = new Prepared(settings, composer.render(settings, recipient, thread, body, messageId));
+            prepared = new Prepared(settings, composer.render(settings, recipient, cc, thread, body, messageId), cc, thread, body, capped);
         } catch (IllegalArgumentException | IllegalStateException e) {
             LedgerEntry failed = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT, messageId,
                     request.conversationId(), sourceRef, key, recipient, State.FAILED, 0, null, null, null, "RENDER: " + truncate(e.getMessage()),
@@ -509,11 +544,17 @@ public class EmailReplySender {
             return Optional.empty();
         }
         LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT, messageId,
-                request.conversationId(), sourceRef, key, recipient, State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null,
-                now, now, now.plus(retention), threadKey);
+                request.conversationId(), sourceRef, key, recipient, State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null,
+                capped ? CC_CAPPED : null, now, now, now.plus(retention), threadKey);
         if (!ledger.insertIfAbsent(row)) {
             return Optional.empty();
         }
+        if (capped) {
+            metrics.ccCapped();
+        }
+        // After the row: a crash in between leaves a reply whose copies are not
+        // recorded, which only ever makes the participant check stricter.
+        ledger.addReplyRecipients(recipientsOf(row, cc));
         if (request.kind() == ReplyKind.GROUP) {
             groupReplies.put(row.id(), request);
         }
@@ -537,11 +578,32 @@ public class EmailReplySender {
                 }
                 return;
             }
-            String provider = transport.send(row.integrationId(), prepared.settings(), prepared.mail().mime(), row.recipient());
-            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, now)) {
+            Prepared sending = withoutSuppressedCopies(row, prepared);
+            List<String> envelope = envelopeOf(row, sending);
+            String provider;
+            try {
+                provider = transport.send(row.integrationId(), sending.settings(), sending.mail().mime(), envelope);
+            } catch (MailSendException refused) {
+                // The relay refused some copies' RCPT TO and, without sendpartial, sent
+                // nothing to anyone. A dead colleague's address on the mail must not cost
+                // the sender the answer: the refused copies are dropped — narrowing only —
+                // and the rest is submitted once more. A refused To is not narrowed away.
+                List<String> refusedCopies = refusedCopies(refused, row, sending);
+                if (refusedCopies.isEmpty()) {
+                    throw refused;
+                }
+                metrics.reply("cc_rejected");
+                LOGGER.infof("Email integration %s: the relay refused %d Cc recipient(s) of reply %s; sending without them",
+                        sanitize(row.integrationId()), refusedCopies.size(), row.id());
+                sending = withoutCopies(row, sending, refusedCopies);
+                envelope = envelopeOf(row, sending);
+                provider = transport.send(row.integrationId(), sending.settings(), sending.mail().mime(), envelope);
+            }
+            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, sending.capped() ? CC_CAPPED : null, now)) {
                 metrics.reply("sent");
                 metrics.replyLatency(Duration.between(row.createdAt(), now));
-                audit(row, "sent", provider, null);
+                metrics.replyRecipients(envelope.size());
+                audit(row, "sent", provider, null, sending.cc());
                 groupReplies.invalidate(row.id());
                 LOGGER.infof("Email integration %s: reply %s for conversation %s sent", sanitize(row.integrationId()), row.id(),
                         sanitize(row.conversationId()));
@@ -558,6 +620,109 @@ public class EmailReplySender {
             String error = "OTHER: " + e.getClass().getSimpleName();
             retry.deferOrFail(row, error, false, now, () -> fail(row, prepared.settings(), error, now), () -> metrics.reply("retry"));
         }
+    }
+
+    /**
+     * {@code prepared} without the copies whose address has been suppressed since
+     * it was built: they are left out of the envelope, the header and the record.
+     */
+    private Prepared withoutSuppressedCopies(LedgerEntry row, Prepared prepared) {
+        if (prepared.cc().isEmpty()) {
+            return prepared;
+        }
+        List<String> kept = unsuppressed(row.integrationId(), prepared.cc());
+        if (kept.size() == prepared.cc().size()) {
+            return prepared;
+        }
+        return withoutCopies(row, prepared, prepared.cc().stream().filter(address -> !kept.contains(address)).toList());
+    }
+
+    /** The To first, then the copies. */
+    private static List<String> envelopeOf(LedgerEntry row, Prepared prepared) {
+        List<String> envelope = new ArrayList<>();
+        envelope.add(row.recipient());
+        envelope.addAll(prepared.cc());
+        return envelope;
+    }
+
+    /**
+     * The copies of {@code prepared} a permanent refusal named, when it named only
+     * copies; empty when it named the To, nobody, or anyone the reply was not going
+     * to (then the reply fails as before).
+     */
+    static List<String> refusedCopies(MailSendException refused, LedgerEntry row, Prepared prepared) {
+        if (!refused.isPermanent() || refused.getRejectedRecipients().isEmpty() || prepared.cc().isEmpty()) {
+            return List.of();
+        }
+        List<String> copies = new ArrayList<>();
+        for (String rejected : refused.getRejectedRecipients()) {
+            String address = AddressNormalizer.tryNormalize(rejected).orElse(rejected);
+            if (address.equals(row.recipient()) || !prepared.cc().contains(address)) {
+                return List.of();
+            }
+            copies.add(address);
+        }
+        return copies;
+    }
+
+    /**
+     * {@code prepared} without {@code dropped}: left out of the envelope, the
+     * header and the record (so they never count as participants).
+     */
+    private Prepared withoutCopies(LedgerEntry row, Prepared prepared, List<String> dropped) {
+        List<String> kept = prepared.cc().stream().filter(address -> !dropped.contains(address)).toList();
+        ledger.removeReplyRecipients(row.id(), dropped);
+        if (prepared.thread() == null || prepared.body() == null) {
+            // Only a Prepared without copies lacks what it was rendered from.
+            throw new IllegalStateException("A reply with copies cannot be rendered again");
+        }
+        return new Prepared(prepared.settings(),
+                composer.render(prepared.settings(), row.recipient(), kept, prepared.thread(), prepared.body(), row.messageId()), kept,
+                prepared.thread(), prepared.body(), prepared.capped());
+    }
+
+    /** {@code addresses} without the suppressed ones, in order. */
+    private List<String> unsuppressed(String integrationId, List<String> addresses) {
+        List<String> kept = new ArrayList<>();
+        for (String address : addresses) {
+            if (!suppressions.isSuppressed(integrationId, address)) {
+                kept.add(address);
+            }
+        }
+        return kept;
+    }
+
+    /**
+     * The {@code To} and {@code cc} of {@code row}, as the child store holds them.
+     */
+    private static List<ReplyRecipient> recipientsOf(LedgerEntry row, List<String> cc) {
+        List<ReplyRecipient> recipients = new ArrayList<>();
+        recipients.add(new ReplyRecipient(row.id(), row.integrationId(), row.conversationId(), row.recipient(), RecipientRole.TO, row.createdAt(),
+                row.expiresAt()));
+        for (String address : cc) {
+            recipients.add(new ReplyRecipient(row.id(), row.integrationId(), row.conversationId(), address, RecipientRole.CC, row.createdAt(),
+                    row.expiresAt()));
+        }
+        return recipients;
+    }
+
+    /** The {@code Cc} recipients the child store still holds for {@code row}. */
+    private List<String> storedCopies(LedgerEntry row) {
+        return ledger.findReplyRecipients(row.id()).stream().filter(r -> r.role() == RecipientRole.CC).map(ReplyRecipient::address).toList();
+    }
+
+    /**
+     * What a retry sends to: the copies the row was queued with, narrowed to what
+     * {@code decision} (made under the current settings) allows. Copies it leaves
+     * out are removed from the record.
+     */
+    private List<String> retryCopies(LedgerEntry row, EmailReplyRecipients.Decision decision) {
+        List<String> stored = storedCopies(row);
+        List<String> cc = EmailReplyAudience.narrow(stored, decision.cc());
+        if (cc.size() != stored.size()) {
+            ledger.removeReplyRecipients(row.id(), stored.stream().filter(address -> !cc.contains(address)).toList());
+        }
+        return cc;
     }
 
     private void fail(LedgerEntry row, EmailChannelSettings settings, String error, Instant now) {
@@ -622,21 +787,23 @@ public class EmailReplySender {
             // again - with the current address as its From, which the transport also
             // uses for the envelope and the login - under the row's own Message-ID.
             EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, request.inbound(),
-                    request.stepMail(), request.userId());
+                    request.stepMail(), request.userId(), EmailReplyAudience.readEveryReply(ledger, row.conversationId()));
             if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
                 terminal(row, State.SUPPRESSED, RECIPIENT_REFUSED + (decision.allowed() ? "recipient_changed" : decision.refusal()), "refused", now);
                 return;
             }
-            RenderedMail rendered;
+            List<String> cc = retryCopies(row, decision);
+            Prepared prepared;
             try {
                 String body = composer.body(settings, request.text(), request.stepMail());
-                rendered = composer.render(settings, row.recipient(), EmailReplyComposer.threadOf(request.stepMail(), request.inbound().messageId()),
-                        body, row.messageId());
+                EmailReplyComposer.Thread thread = EmailReplyComposer.threadOf(request.stepMail(), request.inbound().messageId());
+                prepared = new Prepared(settings, composer.render(settings, row.recipient(), cc, thread, body, row.messageId()), cc, thread, body,
+                        decision.audience() != null && decision.audience().capped());
             } catch (IllegalArgumentException | IllegalStateException e) {
                 failTerminal(row, settings, "RENDER: " + truncate(e.getMessage()), now);
                 return;
             }
-            attempt(row, new Prepared(settings, rendered));
+            attempt(row, prepared);
             return;
         }
         Optional<LedgerEntry> inbound = ledger.findById(ref[0]);
@@ -659,23 +826,25 @@ public class EmailReplySender {
             return;
         }
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, inbound.get(), request.get().stepMail(),
-                request.get().userId());
+                request.get().userId(), EmailReplyAudience.readEveryReply(ledger, row.conversationId()));
         if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
             // The rules are applied again on every attempt: what was allowed when the row
             // was written may not be now (the settings changed).
             terminal(row, State.SUPPRESSED, RECIPIENT_REFUSED + (decision.allowed() ? "recipient_changed" : decision.refusal()), "refused", now);
             return;
         }
-        RenderedMail mail;
+        List<String> cc = retryCopies(row, decision);
+        Prepared prepared;
         try {
             String body = composer.body(settings, request.get().text(), request.get().stepMail());
-            mail = composer.render(settings, row.recipient(), EmailReplyComposer.threadOf(request.get().stepMail(), inbound.get().messageId()), body,
-                    row.messageId());
+            EmailReplyComposer.Thread thread = EmailReplyComposer.threadOf(request.get().stepMail(), inbound.get().messageId());
+            prepared = new Prepared(settings, composer.render(settings, row.recipient(), cc, thread, body, row.messageId()), cc, thread, body,
+                    decision.audience() != null && decision.audience().capped());
         } catch (IllegalArgumentException | IllegalStateException e) {
             failTerminal(row, settings, "RENDER: " + truncate(e.getMessage()), now);
             return;
         }
-        attempt(row, new Prepared(settings, mail));
+        attempt(row, prepared);
     }
 
     private Optional<Request> replyRequest(Located located, SimpleConversationMemorySnapshot snapshot, String stepText) {
@@ -715,8 +884,10 @@ public class EmailReplySender {
     /**
      * A delivery status notification arrived at {@code integrationId}'s mailbox.
      * When it names a reply this integration sent and reports a permanent failure
-     * for that reply's recipient, the row ends {@code FAILED} and the address is
-     * suppressed; a delay is noted on the row. Anything else in the report is
+     * for that reply's {@code To}, the row ends {@code FAILED} and the address is
+     * suppressed; for one of its {@code Cc} recipients, only that address is
+     * suppressed (and no longer counts as a participant) and the row stays
+     * {@code SENT}. A delay is noted on the row. Anything else in the report is
      * ignored: it is untrusted mail.
      *
      * @return whether the report applied to a reply
@@ -732,9 +903,19 @@ public class EmailReplySender {
         }
         LedgerEntry row = sent.get();
         boolean applied = false;
+        List<String> copies = null;
         for (DeliveryReport.Recipient block : report.recipients()) {
             String address = block.finalRecipient() == null ? null : AddressNormalizer.tryNormalize(block.finalRecipient()).orElse(null);
-            if (address == null || !address.equals(row.recipient())) {
+            if (address == null) {
+                continue;
+            }
+            if (!address.equals(row.recipient())) {
+                if (copies == null) {
+                    copies = storedCopies(row);
+                }
+                if (copies.contains(address) && block.isPermanentFailure()) {
+                    applied |= copyBounced(integrationId, row, address, block, now);
+                }
                 continue;
             }
             String status = block.status() == null ? "?" : block.status().strip();
@@ -755,6 +936,24 @@ public class EmailReplySender {
             }
         }
         return applied;
+    }
+
+    /**
+     * A permanent failure for one {@code Cc} of {@code row}: that address is
+     * suppressed and leaves the record, the reply itself stays {@code SENT}.
+     */
+    private boolean copyBounced(String integrationId, LedgerEntry row, String address, DeliveryReport.Recipient block, Instant now) {
+        String status = block.status() == null ? "?" : block.status().strip();
+        // Suppress first: were the suppression to fail after the record was removed, a
+        // later report could not find the address again and it would be copied anew.
+        if (suppressions.suppress(integrationId, address, "bounce:" + status, now)) {
+            metrics.suppressed("bounce");
+            metrics.reply("cc_bounced");
+            LOGGER.infof("Email integration %s: Cc address %s of reply %s suppressed after a permanent bounce (%s)", sanitize(integrationId),
+                    recipientPseudonym(address), row.id(), sanitize(status));
+        }
+        ledger.removeReplyRecipients(row.id(), List.of(address));
+        return true;
     }
 
     // --- Reading the conversation --------------------------------------------
@@ -843,6 +1042,18 @@ public class EmailReplySender {
      * ledger is write-once) and never the body.
      */
     private void audit(LedgerEntry row, String outcome, String providerResponse, String error) {
+        audit(row, outcome, providerResponse, error, null);
+    }
+
+    /** Most {@code Cc} domains one audit entry names. */
+    static final int MAX_AUDITED_CC_DOMAINS = 10;
+
+    /**
+     * {@link #audit(LedgerEntry, String, String, String)}, plus for a reply with
+     * copies their count and (at most {@value #MAX_AUDITED_CC_DOMAINS}) domains —
+     * never their addresses or pseudonyms.
+     */
+    private void audit(LedgerEntry row, String outcome, String providerResponse, String error, List<String> cc) {
         if (auditLedger == null || !auditLedger.isResolvable()) {
             return;
         }
@@ -869,6 +1080,16 @@ public class EmailReplySender {
             }
             if (error != null) {
                 detail.put("error", error);
+            }
+            if (cc != null && !cc.isEmpty()) {
+                detail.put("ccCount", cc.size());
+                LinkedHashSet<String> domains = new LinkedHashSet<>();
+                for (String address : cc) {
+                    if (domains.size() < MAX_AUDITED_CC_DOMAINS) {
+                        domains.add(IEmailSuppressionStore.domainOf(address));
+                    }
+                }
+                detail.put("ccDomains", List.copyOf(domains));
             }
             service.submit(new AuditEntry(UUID.randomUUID().toString(), row.conversationId(), null, null, null, null, -1, "email.reply", "email", -1,
                     0L, Map.of(), detail, null, null, List.of(), 0.0, Instant.now(), null, null));

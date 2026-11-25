@@ -802,7 +802,7 @@ eddi_autonomy_suspension_gated_total        # Calls the suspension overlay gated
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text
-eddi_email_outbound_total                   # Mail EDDI sends, by outcome; tags: kind (notify|notice|reply), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited; for reply also throttled|refused|bounced|no_output)
+eddi_email_outbound_total                   # Mail EDDI sends, by outcome; tags: kind (notify|notice|reply), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited; for reply also throttled|refused|bounced|cc_bounced|no_output)
 eddi_email_ledger_pending                   # Email ledger rows not yet sent, failed or suppressed (gauge)
 ```
 
@@ -845,6 +845,8 @@ eddi_email_poll_cursor_resets_total         # UIDVALIDITY changes that restarted
 eddi_email_poll_marked_total                # Processed mail marked in the mailbox; tags: integration, transport, mode, result (flagged|moved|flagged_not_moved|nothing)
 eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost|resubmitted|reply_rebuilt)
 eddi_email_outbound_latency_seconds         # Conversation mode: from a reply being queued to the relay accepting it, retries included (timer); tag: kind (reply)
+eddi_email_outbound_recipients              # Conversation mode: envelope recipients of a sent reply — 1, or 1 plus its copies under replyAudience: thread (distribution summary)
+eddi_email_outbound_cc_capped_total         # Thread replies answered to the sender alone because they had more than maxReplyRecipients copies
 eddi_email_suppressions_total               # Addresses added to an integration's suppression list; tag: reason (bounce)
 ```
 

@@ -2271,8 +2271,26 @@ your tool schemas do not cover it, not as a routine first step:
   correlateThreads is not accepted: the thread always stays one conversation.
   Who gets a reply: the DKIM/DMARC-authenticated From of the mail it answers —
   or, ONLY with honorReplyTo true, that mail's single Reply-To instead (which
-  DMARC does not cover) — never Cc, never an unauthenticated or email-anon
-  sender, never an address the model chooses. A mail answering the platform's reply (In-Reply-To or
+  DMARC does not cover) — never an unauthenticated or email-anon sender, never
+  an address the model chooses. Cc only with replyAudience "thread" (default
+  "sender"): the answered mail's DKIM-signed To/Cc recipients that match
+  replyAllowedRecipients (required, sender patterns, max 50), minus
+  listAddresses (lists/groups, never copied), the mailbox, its aliases and the
+  To; more than maxReplyRecipients (10, 1-50) copies and the reply goes to the
+  sender alone (row note CC_CAPPED). It needs actWhen "addressed" and the
+  default identityMode, warns email.reply-audience-thread, and every
+  conversation then runs as email-thread:<integrationId>:<digest>, which has NO
+  long-term memory (properties, user memory tools) — the trade-off to explain
+  when an admin asks why the agent forgot someone. Who continues such a thread:
+  with threadParticipants originalSenderOnly (default) only its first sender;
+  with anyAuthenticatedParticipant only someone who was sent EVERY reply it sent
+  so far (To or Cc) — a colleague who missed one gets their own conversation.
+  A Cc the relay refuses at RCPT TO is dropped and the reply resent once to the
+  rest (not suppressed). GDPR erasure deletes such shared conversations per
+  conversation id, export gives only the person's own mails and replies. The turn's mail.audience {to, cc} tells the
+  agent who will read the answer. A retry never adds a Cc, only drops ones the
+  settings no longer allow; a permanent bounce for a Cc suppresses that address
+  only and the reply stays SENT. A mail answering the platform's reply (In-Reply-To or
   References naming the Message-ID the platform sent, recorded in the email ledger)
   continues that conversation only for its original sender (or, with
   anyAuthenticatedParticipant, an address a platform reply in it went to); anyone

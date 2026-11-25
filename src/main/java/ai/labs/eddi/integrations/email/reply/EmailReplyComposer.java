@@ -138,9 +138,22 @@ public class EmailReplyComposer {
      */
     public PlainTextMailRenderer.RenderedMail render(EmailChannelSettings settings, String recipient, Thread thread, String body,
                                                      String messageId) {
+        return render(settings, recipient, List.of(), thread, body, messageId);
+    }
+
+    /**
+     * The reply as MIME, to {@code recipient} with {@code cc} in its {@code Cc}
+     * header — the audience {@link EmailReplyAudience} derived, never anything the
+     * model wrote.
+     */
+    public PlainTextMailRenderer.RenderedMail render(EmailChannelSettings settings, String recipient, List<String> cc, Thread thread, String body,
+                                                     String messageId) {
         MailAddress from = new MailAddress(settings.address(), settings.fromName());
-        OutboundMail mail = OutboundMail.replyInThread(from, new MailAddress(recipient, null), thread.subject(), thread.messageId(),
+        OutboundMail reply = OutboundMail.replyInThread(from, new MailAddress(recipient, null), thread.subject(), thread.messageId(),
                 thread.references(), body, messageId);
-        return PlainTextMailRenderer.render(mail);
+        if (cc != null && !cc.isEmpty()) {
+            reply = reply.withCc(cc.stream().map(address -> new MailAddress(address, null)).toList());
+        }
+        return PlainTextMailRenderer.render(reply);
     }
 }

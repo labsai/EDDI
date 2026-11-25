@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mail;
 
+import java.util.List;
+
 /**
  * A message the {@link SystemMailer} could not hand to the relay.
  * <p>
@@ -35,11 +37,30 @@ public class MailSendException extends Exception {
 
     private final Category category;
     private final boolean permanent;
+    private final List<String> rejectedRecipients;
 
     public MailSendException(Category category, boolean permanent, String message, Throwable cause) {
+        this(category, permanent, message, cause, List.of());
+    }
+
+    /**
+     * @param rejectedRecipients
+     *            the envelope recipients the relay refused (lower-cased), when it
+     *            named them; empty otherwise
+     */
+    public MailSendException(Category category, boolean permanent, String message, Throwable cause, List<String> rejectedRecipients) {
         super(message, cause);
         this.category = category;
         this.permanent = permanent;
+        this.rejectedRecipients = rejectedRecipients == null ? List.of() : List.copyOf(rejectedRecipients);
+    }
+
+    /**
+     * The envelope recipients the relay refused ({@code RCPT TO} answered 5xx),
+     * lower-cased; empty when it refused the message as a whole or named nobody.
+     */
+    public List<String> getRejectedRecipients() {
+        return rejectedRecipients;
     }
 
     public Category getCategory() {

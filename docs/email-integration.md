@@ -321,6 +321,7 @@ The context key **`mail`** holds what the mail says about itself — every field
 | `attachments` | One entry per attachment: `filename`, `contentType`, `size`, `inline`, and `attachmentId` when stored or `skipped` (`executable`, `type_not_allowed`, `too_large`, `too_many`, …) when not |
 | `addressing` | EDDI's verdict, not the mail's claim: `addressed` and `why` ([Addressing EDDI](#addressing-eddi)) |
 | `route` | `target`, `source`, `alsoAddressed` ([Routing order](#routing-order)), and `redirectRefused` — the target a mail named while it continued another agent's conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
+| `audience` | Conversation mode: who will read the answer — `to`, `cc` (empty unless `replyAudience: thread`), `ccCapped` ([Replying to the thread](#replying-to-the-thread)) |
 
 `mail.text` is available to the template but not repeated in the context. Stored attachments also reach the turn as
 `attachment_<n>` context entries (`storageRef`), so the [multimodal pipeline](attachments-guide.md) hands them to a
@@ -336,11 +337,12 @@ pass (no `display:none`, white-on-white, zero-size or off-screen text reaches th
 | Authenticated (`aligned-pass`), `identityMode: perSender` | `email:<integrationId>:<address>` | Yes — scoped to this integration, so a weakly configured integration cannot read what a strict one learned |
 | Authenticated, `identityMode: integration` | `email:<integrationId>` | Yes — **shared by every sender** of the integration |
 | Not authenticated, `requireAuthentication: false` | `email-anon:<random>` (new per mail) | **None**: no long-term properties are loaded or saved, no memory tool is attached |
+| Authenticated, conversation mode with `replyAudience: thread` | `email-thread:<integrationId>:<digest>` (one per thread; a non-participant gets one of their own) | **None**, like `email-anon:`: colleagues read the answer ([Replying to the thread](#replying-to-the-thread)) |
 | Not authenticated, `requireAuthentication: true` | — | Refused, recorded, not answered |
 
 Every email identity is `SELF_ASSERTED`: an inbound mail never makes a principal `VERIFIED`, so connections bound
 `PER_USER` are refused for these turns by the [existing rule](connections.md). Do **not** set
-`allowUnverifiedPrincipal` for anything an email agent uses. The `email:` and `email-anon:` prefixes are reserved:
+`allowUnverifiedPrincipal` for anything an email agent uses. The `email:`, `email-anon:` and `email-thread:` prefixes are reserved:
 no signed-in user can carry them.
 
 What an aligned pass proves is the **domain**: anyone who can send from `supplier.com` can write as any of its
@@ -459,7 +461,17 @@ cost); an unpriced model counts as zero.
   subject — for `eddi.email.ledger-retention` (30 days).
 - **Erasure and export** by address (`DELETE /admin/gdpr/{address}` or the MCP tool) reach every
   `email:<integrationId>:<address>` identity — current integrations and those the address's ledger rows name — and the
-  ledger rows. See [gdpr-compliance.md](gdpr-compliance.md).
+  ledger rows, including the replies the address was copied on. See [gdpr-compliance.md](gdpr-compliance.md).
+- **Thread conversations** (`replyAudience: thread`) run as an identity shared by the whole thread, so they are
+  reached **per conversation id** — the ids the address's own ledger rows name (its mails, the replies sent to it, the
+  replies it was copied on) — and only where the conversation runs as that integration's `email-thread:` identity;
+  never through the shared identity itself. **Export** lists, per such conversation, only the address's own mails and
+  the replies it was sent — nothing others wrote or were told. **Erasure** deletes each such conversation **whole**
+  (one audit entry `email.gdpr` per deleted conversation id): one person's turns cannot be cut out of a shared
+  conversation, and its other readers still have the mails themselves. Other conversations of the thread, and the
+  identity's audit entries, are left alone. If a conversation cannot be read or deleted, the erasure step fails and
+  the ledger rows that point at it are kept, so a retry still finds it. This is provisional — redacting only that
+  person's turns instead is an open product decision.
 - Every **refused** mail leaves an audit-ledger entry (`taskId: email.inbound`): integration, reason category, ledger
   row, Message-ID, and the sender only as `senderDomain` plus `senderPseudonym` — the audit ledger is write-once. The
   pseudonym is the GDPR token [HITL notifications](hitl.md#email-notifications) use — keyed with the audit ledger's key,
@@ -511,7 +523,8 @@ for a delivery report that applied to a reply), `eddi_email_poll_duration_second
 `eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}` (`requeued`, `lost`, `done`,
 `failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`, `eddi_email_poll_marked_total{result}`, `eddi_email_dns_lookups_total` and the `eddi_email_ledger_pending` gauge (see [metrics.md](metrics.md) for the full list).
 Conversation mode adds `eddi_email_outbound_total{kind="reply",outcome}` (`sent`, `retry`, `failed`, `suppressed`,
-`throttled`, `refused`, `bounced`, `no_output`), `eddi_email_outbound_latency_seconds{kind="reply"}` and
+`throttled`, `refused`, `bounced`, `cc_bounced`, `no_output`), `eddi_email_outbound_latency_seconds{kind="reply"}`,
+`eddi_email_outbound_recipients` (envelope recipients per sent reply), `eddi_email_outbound_cc_capped_total` and
 `eddi_email_suppressions_total{reason}`. Described in [metrics.md](metrics.md), charted in the Full Metrics dashboard's
 Integrations row.
 
@@ -576,16 +589,23 @@ Integrations row.
 | `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
 | `maxRepliesPerThreadPerHour` | `5` | At most this many replies per mail thread per hour, across all of its conversations (several senders in one thread share it), counted cluster-wide from the ledger (1 – 1000) |
 | `honorReplyTo` | `false` | `true`: reply to the mail's `Reply-To` when it names exactly one valid address. **Only for a web-form relay** that sends on behalf of its visitors; the save warns (`email.honor-reply-to`) |
+| `replyAudience` | `sender` | `thread`: also copy (`Cc`) the answered mail's internal recipients ([Replying to the thread](#replying-to-the-thread)). Needs `actWhen: addressed`, a non-empty `replyAllowedRecipients` and the default `identityMode`; the save warns (`email.reply-audience-thread`) |
+| `replyAllowedRecipients` | *(none)* | With `replyAudience: thread`, required: sender patterns (`user@domain`, `*@domain`, `*@*.domain`; never `*@*`), at most 50. Only recipients matching one are copied |
+| `listAddresses` | *(none)* | With `replyAudience: thread`: patterns that are never copied — distribution lists and groups — even when they match `replyAllowedRecipients`. At most 50 |
+| `maxReplyRecipients` | `10` | With `replyAudience: thread`: at most this many copies (1 – 50). A mail with more allowed recipients is answered to the sender alone (row note `CC_CAPPED`) |
 
 ### Who gets a reply
 
-One decision, made again on every attempt: the reply goes to the **authenticated `From`** of the mail it answers —
-never to `Cc`, never to another recipient, never to an address the model writes. A reply is only sent when:
+One decision, made again on every attempt: the reply goes **to** the **authenticated `From`** of the mail it answers —
+never to an address the model writes. With the default `replyAudience: sender` nobody else gets it; with
+`replyAudience: thread` the thread's allowed internal recipients are copied ([Replying to the
+thread](#replying-to-the-thread)). A reply is only sent when:
 
 - the integration is in conversation mode at the moment of sending;
 - the answered mail reached a turn (a refused mail never gets one);
-- the conversation runs as an authenticated email identity of the integration (`email:<id>:<address>` or `email:<id>`,
-  minted only for a DKIM-aligned pass) — never `email-anon:`;
+- the conversation runs as an authenticated email identity of the integration (`email:<id>:<address>`, `email:<id>` or
+  `email-thread:<id>:<digest>`, minted only for a DKIM-aligned pass) — never `email-anon:`, never another
+  integration's;
 - the mail's step in conversation memory names the same mail, the verdict `aligned-pass` and the same `From` as the
   ledger row;
 - the recipient is not the integration's own address and not on its [suppression list](#bounces-and-the-suppression-list).
@@ -593,6 +613,68 @@ never to `Cc`, never to another recipient, never to an address the model writes.
 Unauthenticated mail cannot reach a turn in this mode at all (`requireAuthentication` is forced on), so the checks
 above are the second and third line, not the first. With `honorReplyTo: true` the recipient is the single `Reply-To` —
 which DMARC does not cover: whoever can send authenticated mail from an allowed domain decides where the reply goes.
+
+### Replying to the thread
+
+With `replyAudience: thread`, colleagues on a mail read EDDI's answer too. The rules that keep it safe:
+
+- **The `To` is still the authenticated sender** (or the single `Reply-To` under `honorReplyTo`). Copies only ever go
+  in `Cc`.
+- **Who is copied is derived from headers by one function**, never chosen by the model: the answered mail's `To` and
+  `Cc`, from the **DKIM-signed** instances only — a `Cc: ceo@company.com` someone prepended, unsigned, to a replayed
+  genuine mail is not seen — minus the mailbox, its aliases and their plus-addresses, minus the `To`, minus anything
+  matching `listAddresses`, keeping only addresses that match `replyAllowedRecipients`, in header order, each once. More
+  than `maxReplyRecipients` and the reply goes to the sender alone.
+- **Someone copied later is not copied.** A `Cc` is kept only if they were sent **every** reply the conversation has
+  sent so far (a new conversation has sent none, so everyone passes). A person added to the thread halfway would
+  otherwise get an answer that draws on mails sent before they joined; they get the sender's reply without the copy, and
+  the drop is counted as `late_joiner`. If the ledger cannot be read the copies are dropped, not kept.
+- **The agent knows who will read its answer**: the turn's context carries `mail.audience` (`to`, `cc`, and
+  `ccCapped: true` when the cap emptied the copies), computed by the same function before the turn runs.
+- **No long-term memory.** A person's long-term memory would otherwise reach whoever is copied, and later mails can
+  add readers. So on such an integration every conversation runs as **`email-thread:<integrationId>:<digest of the
+  thread root>`**, which reads and writes no long-term properties and gets no memory tools — the thread itself
+  (conversation memory) works as usual; who may continue it is limited to people who read all of it (below). Pause
+  notices and continuations are copied like any reply. Only a conversation that runs as this
+  integration's thread identity is ever copied: one started before the switch to `thread` (as `email:<id>:<address>`,
+  with that person's memory) still answers its sender alone.
+- **Settings only narrow between attempts.** A retry sends to the copies the reply was queued with, intersected with
+  what the current settings allow; it never adds an address.
+- **Suppression is per address.** A suppressed `Cc` is left out and the rest still get the reply; a suppressed `To`
+  suppresses the whole reply.
+
+`actWhen: addressed` is required, so EDDI never answers a whole thread it was only copied on. The trade-off — no
+per-person long-term memory on such an integration — is what the save warning `email.reply-audience-thread` says.
+
+**Who continues a thread.** Every conversation of the thread is found by a key of the thread alone, but a mail
+continues it only when its authenticated sender is a **participant** — and a participant reads the conversation's
+history through the agent, so the rule is strict:
+
+- `threadParticipants: originalSenderOnly` (the default): only the conversation's first sender.
+- `threadParticipants: anyAuthenticatedParticipant`: anyone who was sent **every** reply the conversation has sent so
+  far (as `To` or `Cc`). Being copied once is not enough: after a reply someone was not sent — the first sender
+  following up without them, say — they cannot continue and ask the agent about it. "Every reply" is measured against
+  every mail that ran a turn in the conversation, not only the replies sent: a private mail whose reply is still queued,
+  was refused or failed, or that EDDI never answered is already in the history the agent reads, so anyone who was not
+  sent a reply to it forks too (as does everyone, the first sender included, once a mail went unanswered — the
+  conversation fails closed).
+
+This applies on every path that finds a conversation — a reply to EDDI's Message-ID, the thread key from `References`
+(also when that conversation has ended, so nobody takes a thread's key over), and the race of two mails starting the
+same thread at once. Anyone else — a forwarded thread, `References` naming someone else's thread, a colleague who
+missed a reply — gets a conversation of their own, as `email-thread:<id>:<digest of thread root and their address>`,
+and their answer copies nobody they were not on the mail with.
+
+**A refused copy does not cost the sender the answer.** When the relay refuses one copy's `RCPT TO` permanently (a
+dead colleague's address on the mail), nothing has been sent to anyone; EDDI drops the refused copies from that reply
+— header, envelope and record — and submits it once more to the rest. The address is not suppressed (a refusal can be
+the relay's policy, not a dead mailbox). A refused `To` fails the reply as before.
+
+*Follow-ups:* the Manager's conversation view does not yet show each reply's audience, and the Cc case is covered by
+unit tests, not yet by `EmailConversationModeIT`.
+
+**Loops.** Replies keep `Auto-Submitted: auto-replied`. Two integrations copied on one thread, both with
+`replyAudience: thread`, answer once each: the other's reply is refused by the loop guard.
 
 ### What a reply contains
 
@@ -648,8 +730,13 @@ ends `FAILED` (`CONTENT_UNAVAILABLE`).
 A delivery status notification (`multipart/report`) that arrives in the mailbox is still refused as input, but first
 read: when it names a Message-ID this integration sent and reports a **permanent** failure (5.x.x) **for that reply's
 recipient**, the reply row ends `FAILED` (`BOUNCED: <status>`) and the address goes on the integration's suppression
-list; a delay (4.x.x) is noted on the row. Anything else in a report is ignored — a report is untrusted mail, and it
-counts only for an id EDDI minted and sent to that one recipient. **No mail is sent to a suppressed address** (checked
+list; a delay (4.x.x) is noted on the row. For one of a thread reply's **copies**, only that address is suppressed (and
+no longer counts as a participant of the thread); the reply stays `SENT`. Anything else in a report is ignored — a
+report is untrusted mail, and it counts only for an id EDDI minted and only for a block naming one of that reply's own
+recipients. With copies, the Message-ID is known to everyone the reply went to, so one of them could forge a report
+that suppresses another — the suppression stays within this integration and names only that one address, so at worst
+that colleague stops getting this integration's replies until an admin clears the address; a report never adds a
+recipient. **No mail is sent to a suppressed address** (checked
 when the reply is queued and again before every attempt).
 
 The list stores the SHA-256 of each address and its domain, not the address. An administrator (EDIT on the
@@ -681,9 +768,11 @@ takeover feature ([planning/human-takeover-design.md](../planning/human-takeover
 
 Every sent, failed or bounced reply leaves an audit-ledger entry (`taskId: email.reply`): integration, reply kind,
 outcome, Message-ID, ledger row, attempts and the recipient as `recipientDomain` plus `recipientPseudonym` (the keyed
-GDPR token HITL notifications and refused-mail entries use) — never the address or the body. The log line for an
-address suppressed after a bounce names it by that pseudonym too. A reply row holds the recipient's address (reached by
-erasure and export) and no content; the reply itself is rebuilt from the conversation, where the inbound mail already
+GDPR token HITL notifications and refused-mail entries use) — never the address or the body. A sent thread reply adds
+`ccCount` and up to ten `ccDomains`, never the copies' addresses or pseudonyms. The log line for an
+address suppressed after a bounce names it by that pseudonym too. A reply row holds the recipient's address, and a thread
+reply's copies are recorded beside it (`email_reply_recipients`: row, conversation, address, `TO`/`CC`) — all reached
+by erasure and export — and no content; the reply itself is rebuilt from the conversation, where the inbound mail already
 lives.
 
 ## Helpdesk recipe (webhook + httpcalls)

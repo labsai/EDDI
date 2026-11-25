@@ -172,6 +172,49 @@ describe("EmailPlatformFields — conversation mode", () => {
   });
 });
 
+describe("EmailPlatformFields — reply audience", () => {
+  const BASE = { mode: "conversation", connection: "mailbox", host: "imap.example.com", address: "support@example.com", smtpHost: "smtp.example.com" };
+
+  it("defaults to the sender only and shows no thread fields", () => {
+    renderWithProviders(<Harness initial={{ ...BASE }} onChange={vi.fn()} />);
+    expect(screen.getByTestId("email-reply-audience")).toHaveValue("sender");
+    expect(screen.queryByTestId("email-reply-allowed-recipients")).toBeNull();
+    expect(screen.queryByTestId("email-reply-audience-warning")).toBeNull();
+  });
+
+  it("choosing the thread preselects actWhen addressed, warns about memory and asks for the allowlist", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ ...BASE, actWhen: "always" }} onChange={onChange} />);
+
+    await user.selectOptions(screen.getByTestId("email-reply-audience"), "thread");
+
+    expect(onChange).toHaveBeenLastCalledWith({ ...BASE, transport: "imap", actWhen: "addressed", replyAudience: "thread" });
+    expect(screen.getByTestId("email-reply-audience-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("email-problem-replyAllowedRecipientsRequired")).toBeInTheDocument();
+    expect(screen.getByTestId("email-max-reply-recipients")).toHaveAttribute("placeholder", "10");
+
+    await user.type(screen.getByTestId("email-reply-allowed-recipients"), "*@example.com");
+    expect(screen.queryByTestId("email-problem-replyAllowedRecipientsRequired")).toBeNull();
+  });
+
+  it("going back to the sender drops the keys only the thread reads", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(
+      <Harness
+        initial={{ ...BASE, actWhen: "addressed", replyAudience: "thread", replyAllowedRecipients: "*@example.com", listAddresses: "all@example.com" }}
+        onChange={onChange}
+      />,
+    );
+
+    await user.selectOptions(screen.getByTestId("email-reply-audience"), "sender");
+
+    expect(onChange).toHaveBeenLastCalledWith({ ...BASE, transport: "imap", actWhen: "addressed", replyAudience: "sender" });
+    expect(screen.queryByTestId("email-reply-allowed-recipients")).toBeNull();
+  });
+});
+
 describe("EmailSecurityNotes", () => {
   it("explains the per-mailbox Exchange restriction", () => {
     renderWithProviders(<EmailSecurityNotes />);

@@ -1221,7 +1221,7 @@ class EmailInboundProcessorTest {
     }
 
     /** Thread mappings, as the Mongo/Postgres stores keep them. */
-    static final class FakeUserConversations implements IUserConversationStore {
+    static class FakeUserConversations implements IUserConversationStore {
         final Map<String, UserConversation> mappings = new HashMap<>();
 
         private static String key(String intent, String userId) {

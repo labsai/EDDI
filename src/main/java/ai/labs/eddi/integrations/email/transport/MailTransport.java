@@ -104,6 +104,24 @@ public interface MailTransport {
         throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
     }
 
+    /**
+     * Submits one rendered reply to every address of {@code envelopeRecipients} —
+     * its {@code To} first, then the {@code Cc} recipients a thread audience
+     * allowed (email v2 plan §9.5) — in one submission. A transport that only knows
+     * {@link #send(String, EmailChannelSettings, byte[], String)} takes a single
+     * recipient and refuses more, rather than silently dropping them.
+     */
+    default String send(String integrationId, EmailChannelSettings settings, byte[] mime, List<String> envelopeRecipients) throws MailSendException {
+        if (envelopeRecipients == null || envelopeRecipients.isEmpty()) {
+            throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "A reply needs a recipient.", null);
+        }
+        if (envelopeRecipients.size() > 1) {
+            throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " sends to one recipient only.",
+                    null);
+        }
+        return send(integrationId, settings, mime, envelopeRecipients.get(0));
+    }
+
     /** The keyword a processed message gets. */
     String PROCESSED_KEYWORD = "$EddiProcessed";
 

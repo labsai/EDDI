@@ -72,7 +72,11 @@ public record EmailChannelSettings(
         int maxRepliesPerThreadPerHour,
         boolean honorReplyTo,
         ActWhen actWhen,
-        List<String> aliases) {
+        List<String> aliases,
+        ReplyAudience replyAudience,
+        List<String> replyAllowedRecipients,
+        int maxReplyRecipients,
+        List<String> listAddresses) {
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "email";
@@ -109,6 +113,10 @@ public record EmailChannelSettings(
     public static final String KEY_HONOR_REPLY_TO = "honorReplyTo";
     public static final String KEY_ACT_WHEN = "actWhen";
     public static final String KEY_ALIASES = "aliases";
+    public static final String KEY_REPLY_AUDIENCE = "replyAudience";
+    public static final String KEY_REPLY_ALLOWED_RECIPIENTS = "replyAllowedRecipients";
+    public static final String KEY_MAX_REPLY_RECIPIENTS = "maxReplyRecipients";
+    public static final String KEY_LIST_ADDRESSES = "listAddresses";
 
     /** Every key both modes read. */
     public static final Set<String> COMMON_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
@@ -127,7 +135,8 @@ public record EmailChannelSettings(
      * in trigger mode with their own message so an author learns why.
      */
     public static final Set<String> CONVERSATION_KEYS = Set.of(KEY_SMTP_HOST, KEY_SMTP_PORT, KEY_FROM_NAME, KEY_REPLY_TEMPLATE, KEY_AI_DISCLOSURE,
-            KEY_THREAD_PARTICIPANTS, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, KEY_HONOR_REPLY_TO);
+            KEY_THREAD_PARTICIPANTS, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, KEY_HONOR_REPLY_TO, KEY_REPLY_AUDIENCE, KEY_REPLY_ALLOWED_RECIPIENTS,
+            KEY_MAX_REPLY_RECIPIENTS, KEY_LIST_ADDRESSES);
 
     /** Every key trigger mode reads. */
     public static final Set<String> TRIGGER_KEYS = union(COMMON_KEYS, TRIGGER_ONLY_KEYS);
@@ -150,6 +159,13 @@ public record EmailChannelSettings(
     public static final int MAX_REPLY_TEMPLATE_LENGTH = 4000;
     public static final int MAX_AI_DISCLOSURE_LENGTH = 500;
     public static final int MAX_FROM_NAME_LENGTH = 100;
+    /** Cc recipients of one thread reply, by default and at most. */
+    public static final int DEFAULT_MAX_REPLY_RECIPIENTS = 10;
+    public static final int MAX_MAX_REPLY_RECIPIENTS = 50;
+    /**
+     * Entries of {@code replyAllowedRecipients} or {@code listAddresses}, at most.
+     */
+    public static final int MAX_REPLY_RECIPIENT_PATTERNS = 50;
 
     /** The only transport of this phase. */
     public static final String TRANSPORT_IMAP = "imap";
@@ -282,6 +298,46 @@ public record EmailChannelSettings(
             for (ActWhen mode : values()) {
                 if (mode.id.equalsIgnoreCase(value.trim())) {
                     return mode;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Who reads a conversation-mode reply (email v2 plan §9). The {@code To} is
+     * always the authenticated sender; {@code thread} only adds {@code Cc}
+     * recipients, each bounded by {@code replyAllowedRecipients}.
+     */
+    public enum ReplyAudience {
+        /** The authenticated sender only (the default). */
+        SENDER("sender"),
+        /**
+         * Also the answered mail's other {@code To}/{@code Cc} recipients that match
+         * {@code replyAllowedRecipients} and no {@code listAddresses} entry. Every
+         * conversation of the integration then runs as an {@code email-thread:}
+         * identity, which has no long-term memory: the sender's memory must not reach
+         * the colleagues who read the answer.
+         */
+        THREAD("thread");
+
+        private final String id;
+
+        ReplyAudience(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public static ReplyAudience fromId(String value) {
+            if (value == null || value.isBlank()) {
+                return SENDER;
+            }
+            for (ReplyAudience audience : values()) {
+                if (audience.id.equalsIgnoreCase(value.trim())) {
+                    return audience;
                 }
             }
             return null;
@@ -432,7 +488,45 @@ public record EmailChannelSettings(
                 ThreadParticipants.fromId(pc.get(KEY_THREAD_PARTICIPANTS)),
                 (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
                 bool(pc.get(KEY_HONOR_REPLY_TO), false), actWhenOrDefault(pc.get(KEY_ACT_WHEN)),
-                normalizedAddresses(list(pc.get(KEY_ALIASES)), normalizedAddress));
+                normalizedAddresses(list(pc.get(KEY_ALIASES)), normalizedAddress),
+                conversation ? effectiveAudience(pc) : ReplyAudience.SENDER, list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)),
+                (int) Math.max(1, Math.min(MAX_MAX_REPLY_RECIPIENTS, longValue(pc.get(KEY_MAX_REPLY_RECIPIENTS), DEFAULT_MAX_REPLY_RECIPIENTS))),
+                list(pc.get(KEY_LIST_ADDRESSES)));
+    }
+
+    /**
+     * {@code thread} only when everything it requires holds at read time too —
+     * {@code actWhen: addressed}, a non-empty {@code replyAllowedRecipients}, the
+     * default {@code identityMode} — not only at save: a document written around
+     * the validation replies to the sender alone.
+     */
+    private static ReplyAudience effectiveAudience(Map<String, String> pc) {
+        if (replyAudienceOrDefault(pc.get(KEY_REPLY_AUDIENCE)) != ReplyAudience.THREAD) {
+            return ReplyAudience.SENDER;
+        }
+        boolean addressed = actWhenOrDefault(pc.get(KEY_ACT_WHEN)) == ActWhen.ADDRESSED;
+        boolean allowlisted = !list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)).isEmpty();
+        boolean perSender = IdentityMode.fromId(pc.get(KEY_IDENTITY_MODE)) == IdentityMode.PER_SENDER;
+        return addressed && allowlisted && perSender ? ReplyAudience.THREAD : ReplyAudience.SENDER;
+    }
+
+    /**
+     * An unknown value reads as {@code sender}, the narrower audience: validate()
+     * refuses it at save time, and a document written around the validation must
+     * not mail more people than its author meant.
+     */
+    private static ReplyAudience replyAudienceOrDefault(String value) {
+        ReplyAudience parsed = ReplyAudience.fromId(value);
+        return parsed == null ? ReplyAudience.SENDER : parsed;
+    }
+
+    /**
+     * Whether replies may copy the thread (email v2 plan §9): {@code replyAudience:
+     * thread} in conversation mode. Every conversation of such an integration runs
+     * as an {@code email-thread:} identity.
+     */
+    public boolean repliesToThread() {
+        return replies() && replyAudience == ReplyAudience.THREAD;
     }
 
     /**
@@ -686,6 +780,56 @@ public record EmailChannelSettings(
         }
         rangeCheck(errors, pc, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, 1, MAX_MAX_REPLIES_PER_THREAD_PER_HOUR);
         booleanCheck(errors, pc, KEY_HONOR_REPLY_TO);
+        validateAudience(errors, pc);
+    }
+
+    /**
+     * {@code replyAudience} and its keys (email v2 plan §9.1). A thread audience
+     * needs {@code actWhen: addressed} (EDDI must not answer a whole thread it was
+     * only copied on), a non-empty {@code replyAllowedRecipients} (who may be
+     * copied is an explicit, internal list) and the default {@code identityMode}
+     * (every conversation runs as an {@code email-thread:} identity, so the key
+     * would read as if it did something).
+     */
+    private static void validateAudience(List<String> errors, Map<String, String> pc) {
+        String value = pc.get(KEY_REPLY_AUDIENCE);
+        ReplyAudience audience = ReplyAudience.fromId(value);
+        if (audience == null) {
+            errors.add("Unknown platformConfig.replyAudience '" + value + "'. Supported: sender, thread.");
+        }
+        for (String key : List.of(KEY_REPLY_ALLOWED_RECIPIENTS, KEY_LIST_ADDRESSES)) {
+            List<String> entries = list(pc.get(key));
+            if (entries.size() > MAX_REPLY_RECIPIENT_PATTERNS) {
+                errors.add("platformConfig." + key + " has more than " + MAX_REPLY_RECIPIENT_PATTERNS + " entries.");
+            }
+            for (int i = 0; i < entries.size(); i++) {
+                if (!SenderPatternSyntax.isValid(entries.get(i))) {
+                    errors.add("platformConfig." + key + " entry " + (i + 1) + " must be 'user@domain', '*@domain' or '*@*.domain'.");
+                }
+            }
+        }
+        rangeCheck(errors, pc, KEY_MAX_REPLY_RECIPIENTS, 1, MAX_MAX_REPLY_RECIPIENTS);
+        if (audience != ReplyAudience.THREAD) {
+            for (String key : List.of(KEY_REPLY_ALLOWED_RECIPIENTS, KEY_MAX_REPLY_RECIPIENTS, KEY_LIST_ADDRESSES)) {
+                if (blankToNull(pc.get(key)) != null) {
+                    errors.add("platformConfig." + key + " only applies with platformConfig.replyAudience 'thread'; remove it, or set the "
+                            + "audience to 'thread'.");
+                }
+            }
+            return;
+        }
+        if (ActWhen.fromId(pc.get(KEY_ACT_WHEN)) != ActWhen.ADDRESSED) {
+            errors.add("platformConfig.replyAudience 'thread' requires platformConfig.actWhen 'addressed': EDDI must not answer a whole "
+                    + "thread it was only copied on.");
+        }
+        if (list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)).isEmpty()) {
+            errors.add("platformConfig.replyAudience 'thread' requires platformConfig.replyAllowedRecipients (e.g. *@company.com): only "
+                    + "recipients matching one of them are copied on a reply.");
+        }
+        if (IdentityMode.fromId(pc.get(KEY_IDENTITY_MODE)) != IdentityMode.PER_SENDER) {
+            errors.add("platformConfig.identityMode must stay perSender with platformConfig.replyAudience 'thread': every conversation then runs "
+                    + "as the thread's own identity, without long-term memory.");
+        }
     }
 
     private static boolean hasControl(String value) {
@@ -717,6 +861,9 @@ public record EmailChannelSettings(
             if (settings.honorReplyTo()) {
                 warnings.add(WARNING_HONOR_REPLY_TO);
             }
+            if (settings.replyAudience() == ReplyAudience.THREAD) {
+                warnings.add(WARNING_REPLY_AUDIENCE_THREAD);
+            }
         }
         return warnings;
     }
@@ -731,6 +878,12 @@ public record EmailChannelSettings(
      * a mail authenticated by an allowed domain decides where the reply goes.
      */
     public static final String WARNING_HONOR_REPLY_TO = "email.honor-reply-to";
+    /**
+     * Replies are copied to the thread's internal recipients: whatever a turn
+     * fetches reaches them too, and the integration keeps no per-person long-term
+     * memory.
+     */
+    public static final String WARNING_REPLY_AUDIENCE_THREAD = "email.reply-audience-thread";
 
     /**
      * Anyone on the internet can make the agent run: no allowlist, no

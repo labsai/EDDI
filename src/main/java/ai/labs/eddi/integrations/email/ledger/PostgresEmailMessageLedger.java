@@ -19,8 +19,11 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -31,6 +34,9 @@ import java.util.UUID;
  * {@code FOR UPDATE SKIP LOCKED} selection of due rows, re-checking the state
  * and due time in its own {@code WHERE}: a second sweeper skips the rows the
  * first has locked, and finds them no longer due once it commits.
+ * <p>
+ * Reply recipients live in {@value #RECIPIENTS_TABLE}, keyed by
+ * {@code (row_id, address)}.
  */
 @ApplicationScoped
 @DefaultBean
@@ -39,6 +45,21 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     private static final Logger LOGGER = Logger.getLogger(PostgresEmailMessageLedger.class);
 
     static final String TABLE = "email_message_ledger";
+    static final String RECIPIENTS_TABLE = "email_reply_recipients";
+
+    private static final String CREATE_RECIPIENTS_TABLE = """
+            CREATE TABLE IF NOT EXISTS email_reply_recipients (
+                row_id VARCHAR(64) NOT NULL,
+                integration_id VARCHAR(255) NOT NULL,
+                conversation_id VARCHAR(255),
+                address VARCHAR(320) NOT NULL,
+                role VARCHAR(8) NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                PRIMARY KEY (row_id, address)
+            )
+            """;
 
     private static final String COLUMNS = "id, integration_id, kind, direction, message_id, conversation_id, source_ref, idempotency_key, "
             + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at, thread_key";
@@ -83,7 +104,10 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_thread ON email_message_ledger (integration_id, thread_key, kind, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_thread ON email_message_ledger (integration_id, thread_key, kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_reply_recipients_conversation ON email_reply_recipients (conversation_id, address)",
+            "CREATE INDEX IF NOT EXISTS idx_email_reply_recipients_address ON email_reply_recipients (address)",
+            "CREATE INDEX IF NOT EXISTS idx_email_reply_recipients_expires ON email_reply_recipients (expires_at)"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -109,6 +133,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            statement.execute(CREATE_RECIPIENTS_TABLE);
             for (String migration : COLUMN_MIGRATIONS) {
                 statement.execute(migration);
             }
@@ -259,7 +284,10 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public long deleteExpired(Instant now) {
         try (Connection connection = connection();
+                PreparedStatement children = connection.prepareStatement("DELETE FROM " + RECIPIENTS_TABLE + " WHERE expires_at <= ?");
                 PreparedStatement statement = connection.prepareStatement("DELETE FROM " + TABLE + " WHERE expires_at <= ?")) {
+            children.setTimestamp(1, timestamp(now));
+            children.executeUpdate();
             statement.setTimestamp(1, timestamp(now));
             return statement.executeUpdate();
         } catch (SQLException e) {
@@ -382,16 +410,148 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean hasSentReply(String conversationId, String recipient) {
-        String sql = "SELECT 1 FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'REPLY' AND direction = 'OUT' AND state = 'SENT' "
-                + "AND recipient = ? LIMIT 1";
+        String sql = "SELECT 1 FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
+                + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
+                + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC')) LIMIT 1";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, conversationId);
             statement.setString(2, recipient);
+            statement.setString(3, recipient);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next();
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to read the email ledger replies of a conversation", e);
+        }
+    }
+
+    @Override
+    public long countSentReplies(String conversationId) {
+        return count("SELECT COUNT(*) FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'REPLY' AND direction = 'OUT' AND state = 'SENT'",
+                conversationId);
+    }
+
+    @Override
+    public long countSentRepliesTo(String conversationId, String recipient) {
+        return count("SELECT COUNT(*) FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
+                + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
+                + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC'))", conversationId, recipient, recipient);
+    }
+
+    @Override
+    public Set<String> turnMailIds(String conversationId) {
+        return strings("SELECT id FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'TRIGGER' AND direction = 'IN'", false, conversationId);
+    }
+
+    @Override
+    public Set<String> answeredMailIdsSentTo(String conversationId, String recipient) {
+        return strings("SELECT l.source_ref FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
+                + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
+                + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC'))", true, conversationId, recipient, recipient);
+    }
+
+    private Set<String> strings(String sql, boolean sourceRefs, String... parameters) {
+        Set<String> found = new LinkedHashSet<>();
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < parameters.length; i++) {
+                statement.setString(i + 1, parameters[i]);
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    String value = rows.getString(1);
+                    found.add(sourceRefs ? IEmailMessageLedger.inboundIdOf(value) : value);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger turns of a conversation", e);
+        }
+        return found;
+    }
+
+    private long count(String sql, String... parameters) {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < parameters.length; i++) {
+                statement.setString(i + 1, parameters[i]);
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count the email ledger replies of a conversation", e);
+        }
+    }
+
+    @Override
+    public void addReplyRecipients(List<ReplyRecipient> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
+        String sql = "INSERT INTO " + RECIPIENTS_TABLE + " (row_id, integration_id, conversation_id, address, role, position, created_at, "
+                + "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < entries.size(); i++) {
+                ReplyRecipient entry = entries.get(i);
+                statement.setString(1, entry.rowId());
+                statement.setString(2, entry.integrationId());
+                statement.setString(3, entry.conversationId());
+                statement.setString(4, entry.address());
+                statement.setString(5, entry.role().name());
+                statement.setInt(6, i);
+                statement.setTimestamp(7, timestamp(entry.createdAt()));
+                statement.setTimestamp(8, timestamp(entry.expiresAt()));
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to write the recipients of an email reply", e);
+        }
+    }
+
+    @Override
+    public List<ReplyRecipient> findReplyRecipients(String rowId) {
+        return queryRecipients("SELECT row_id, integration_id, conversation_id, address, role, created_at, expires_at FROM " + RECIPIENTS_TABLE
+                + " WHERE row_id = ? ORDER BY CASE role WHEN 'TO' THEN 0 ELSE 1 END, position", rowId);
+    }
+
+    @Override
+    public long removeReplyRecipients(String rowId, Collection<String> addresses) {
+        if (addresses == null || addresses.isEmpty()) {
+            return 0;
+        }
+        String sql = "DELETE FROM " + RECIPIENTS_TABLE + " WHERE row_id = ? AND address = ?";
+        long removed = 0;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (String address : addresses) {
+                statement.setString(1, rowId);
+                statement.setString(2, address);
+                removed += statement.executeUpdate();
+            }
+            return removed;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to remove recipients of an email reply", e);
+        }
+    }
+
+    @Override
+    public List<ReplyRecipient> findReplyRecipientsByAddress(String address) {
+        return queryRecipients("SELECT row_id, integration_id, conversation_id, address, role, created_at, expires_at FROM " + RECIPIENTS_TABLE
+                + " WHERE address = ? ORDER BY created_at, row_id", address);
+    }
+
+    private List<ReplyRecipient> queryRecipients(String sql, String parameter) {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, parameter);
+            List<ReplyRecipient> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(new ReplyRecipient(rows.getString("row_id"), rows.getString("integration_id"), rows.getString("conversation_id"),
+                            rows.getString("address"), RecipientRole.valueOf(rows.getString("role")), instant(rows.getTimestamp("created_at")),
+                            instant(rows.getTimestamp("expires_at"))));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the recipients of email replies", e);
         }
     }
 
@@ -438,7 +598,12 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public long deleteByRecipient(String recipient) {
         try (Connection connection = connection();
+                PreparedStatement children = connection.prepareStatement("DELETE FROM " + RECIPIENTS_TABLE + " WHERE address = ? OR row_id IN "
+                        + "(SELECT id FROM " + TABLE + " WHERE recipient = ?)");
                 PreparedStatement statement = connection.prepareStatement("DELETE FROM " + TABLE + " WHERE recipient = ?")) {
+            children.setString(1, recipient);
+            children.setString(2, recipient);
+            children.executeUpdate();
             statement.setString(1, recipient);
             return statement.executeUpdate();
         } catch (SQLException e) {

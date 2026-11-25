@@ -27,7 +27,26 @@ export const EMAIL_CONVERSATION_KEYS = [
   "threadParticipants",
   "maxRepliesPerThreadPerHour",
   "honorReplyTo",
+  "replyAudience",
+  "replyAllowedRecipients",
+  "maxReplyRecipients",
+  "listAddresses",
 ] as const;
+
+/**
+ * Who reads a reply: `sender` (the authenticated sender only) or `thread` (also
+ * the answered mail's internal To/Cc recipients that match
+ * `replyAllowedRecipients`). Email v2 plan §9.
+ */
+export const EMAIL_REPLY_AUDIENCES = ["sender", "thread"] as const;
+/** Keys only `replyAudience: thread` reads; the backend refuses them otherwise. */
+export const EMAIL_THREAD_AUDIENCE_KEYS = ["replyAllowedRecipients", "maxReplyRecipients", "listAddresses"] as const;
+export const EMAIL_MAX_REPLY_RECIPIENT_PATTERNS = 50;
+
+/** Whether replies copy the thread: conversation mode with `replyAudience: thread`. */
+export function repliesToThread(pc: Record<string, string>): boolean {
+  return emailMode(pc) === "conversation" && (pc.replyAudience ?? "").trim().toLowerCase() === "thread";
+}
 
 /** Keys only trigger mode reads; a conversation always keeps its thread. */
 export const EMAIL_TRIGGER_ONLY_KEYS = ["correlateThreads"] as const;
@@ -84,6 +103,8 @@ export const EMAIL_DEFAULTS = {
   maxRepliesPerThreadPerHour: "5",
   honorReplyTo: "false",
   actWhen: "always",
+  replyAudience: "sender",
+  maxReplyRecipients: "10",
 } as const;
 
 export const EMAIL_DEFAULT_INPUT_TEMPLATE =
@@ -106,6 +127,7 @@ export const EMAIL_TEMPLATE_VARIABLES = [
   "mail.attachments",
   "mail.addressing",
   "mail.route",
+  "mail.audience",
   "mail.text",
 ] as const;
 
@@ -133,6 +155,9 @@ export function withEmailFixedKeys(pc: Record<string, string>): Record<string, s
   const foreign: readonly string[] = mode === "conversation" ? EMAIL_TRIGGER_ONLY_KEYS : EMAIL_CONVERSATION_KEYS;
   for (const key of foreign) delete next[key];
   if (mode === "conversation") delete next.requireAuthentication;
+  if (!repliesToThread(next)) {
+    for (const key of EMAIL_THREAD_AUDIENCE_KEYS) delete next[key];
+  }
   return next;
 }
 
@@ -203,6 +228,12 @@ export type EmailProblem =
   | "replyTemplateTooLong"
   | "aiDisclosureTooLong"
   | "maxRepliesPerThreadPerHour"
+  | "replyAudienceNeedsAddressed"
+  | "replyAllowedRecipientsRequired"
+  | "replyAllowedRecipientsInvalid"
+  | "listAddressesInvalid"
+  | "maxReplyRecipients"
+  | "replyAudienceIdentityMode"
   | "aliasesTooMany"
   | "aliasesInvalid"
   | "aliasIsAddress"
@@ -346,5 +377,28 @@ function conversationProblems(pc: Record<string, string>): EmailProblem[] {
   if ((pc.replyTemplate ?? "").length > EMAIL_MAX_REPLY_TEMPLATE_CHARS) problems.push("replyTemplateTooLong");
   if ((pc.aiDisclosure ?? "").length > EMAIL_MAX_AI_DISCLOSURE_CHARS) problems.push("aiDisclosureTooLong");
   if (!intInRange(pc.maxRepliesPerThreadPerHour, 1, 1000)) problems.push("maxRepliesPerThreadPerHour");
+  if (repliesToThread(pc)) problems.push(...threadAudienceProblems(pc));
+  return problems;
+}
+
+/**
+ * The backend's rules for `replyAudience: thread` (email v2 plan §9.1): it
+ * needs `actWhen: addressed`, an allowlist of who may be copied, and the default
+ * identity mode — every conversation then runs as the thread's memory-less
+ * identity.
+ */
+function threadAudienceProblems(pc: Record<string, string>): EmailProblem[] {
+  const problems: EmailProblem[] = [];
+  if ((pc.actWhen ?? "").trim().toLowerCase() !== "addressed") problems.push("replyAudienceNeedsAddressed");
+  const allowed = splitList(pc.replyAllowedRecipients);
+  if (allowed.length === 0) problems.push("replyAllowedRecipientsRequired");
+  else if (allowed.length > EMAIL_MAX_REPLY_RECIPIENT_PATTERNS || !allowed.every(isSenderPattern) || allowed.includes("*@*")) {
+    problems.push("replyAllowedRecipientsInvalid");
+  }
+  const lists = splitList(pc.listAddresses);
+  if (lists.length > EMAIL_MAX_REPLY_RECIPIENT_PATTERNS || !lists.every(isSenderPattern)) problems.push("listAddressesInvalid");
+  if (!intInRange(pc.maxReplyRecipients, 1, 50)) problems.push("maxReplyRecipients");
+  const identityMode = (pc.identityMode ?? "").trim();
+  if (identityMode !== "" && identityMode.toLowerCase() !== "persender") problems.push("replyAudienceIdentityMode");
   return problems;
 }

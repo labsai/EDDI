@@ -48,6 +48,8 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.transport.MailTransport.MailboxMessage;
+import ai.labs.eddi.integrations.email.reply.EmailReplyAudience;
+import ai.labs.eddi.integrations.email.reply.EmailReplyRecipients;
 import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
@@ -78,6 +80,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -133,6 +136,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * to {@link EmailReplySender} before the row is closed. And a delivery report
  * for a reply this integration sent updates that reply and the suppression
  * list. Trigger mode never reaches any of them: it sends nothing.
+ * <p>
+ * <b>Replies to the thread</b> (email v2 plan §9, {@code replyAudience:
+ * thread}): every conversation runs as the thread's {@code email-thread:}
+ * identity, which has no long-term memory, and is found by a key of the thread
+ * alone — but only a participant (the conversation's first sender, or an
+ * address one of its replies was sent to, {@code Cc} included) continues it, on
+ * every path that finds one. Anyone else gets a conversation of their own under
+ * a key and identity that name their address. The turn's context carries
+ * {@code mail.audience}: who will read the answer.
  */
 @ApplicationScoped
 public class EmailInboundProcessor {
@@ -382,18 +394,27 @@ public class EmailInboundProcessor {
             return refuse(ctx, row, "unroutable", EmailMetrics.UNROUTABLE, now);
         }
 
-        // 10. Identity.
+        // 10. Identity. A reply that copies the thread is read by more people than
+        // the sender, so its conversation must not carry the sender's long-term
+        // memory: it runs as the thread's memory-less identity (email v2 plan §9.2).
+        String threadRoot = threadRoot(parsed);
+        boolean threadAudience = settings.repliesToThread() && authenticated;
         String userId = !authenticated
                 ? EmailUserIdentity.anonymous()
-                : settings.identityMode() == EmailChannelSettings.IdentityMode.INTEGRATION
-                        ? EmailUserIdentity.integration(id)
-                        : EmailUserIdentity.perSender(id, sender);
+                : threadAudience
+                        ? EmailUserIdentity.thread(id, threadRoot)
+                        : settings.identityMode() == EmailChannelSettings.IdentityMode.INTEGRATION
+                                ? EmailUserIdentity.integration(id)
+                                : EmailUserIdentity.perSender(id, sender);
 
         // 11. Correlation (opt-in, authenticated senders only; sender is part of the
-        // key). Keyed by the routed agent, so a mail routed elsewhere starts that
-        // agent's own conversation rather than continuing this one.
+        // key, except under a thread audience, where the participant guard below
+        // stands in for it). Keyed by the routed agent, so a mail routed elsewhere
+        // starts that agent's own conversation rather than continuing this one.
         String intent = settings.correlateThreads() && authenticated && target.getType() != ChannelTarget.TargetType.GROUP
-                ? correlationIntent(id, target.getTargetId(), threadRoot(parsed), sender)
+                ? threadAudience
+                        ? threadCorrelationIntent(id, target.getTargetId(), threadRoot)
+                        : correlationIntent(id, target.getTargetId(), threadRoot, sender)
                 : null;
         String existingConversation = null;
         // A row that already names a conversation was handed back after the
@@ -426,6 +447,18 @@ public class EmailInboundProcessor {
         if (intent != null && existingConversation == null) {
             try {
                 UserConversation mapped = userConversationStore.readUserConversation(intent, userId);
+                // Ended or not: a non-participant must not take a thread's shared key over
+                // after its conversation ended either.
+                if (threadAudience && mapped != null && mapped.getConversationId() != null
+                        && !participantOf(mapped.getConversationId(), settings, sender)) {
+                    // The thread hijack guard on the shared key (email v2 plan §9.4): a
+                    // Message-ID is no secret, so naming the thread proves nothing. A sender
+                    // who neither started its conversation nor was sent a reply in it gets
+                    // their own, under a key and an identity that name their address.
+                    intent = correlationIntent(id, target.getTargetId(), threadRoot, sender);
+                    userId = EmailUserIdentity.threadForSender(id, threadRoot, sender);
+                    mapped = userConversationStore.readUserConversation(intent, userId);
+                }
                 if (mapped != null && mapped.getConversationId() != null) {
                     ConversationState state = stateOf(mapped.getConversationId());
                     if (state == ConversationState.IN_PROGRESS || state == ConversationState.AWAITING_HUMAN) {
@@ -483,7 +516,18 @@ public class EmailInboundProcessor {
                         row.id(), sanitize(target.getName()), sanitize(existingConversation));
             }
         }
-        Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData);
+        Map<String, Object> addressed = new LinkedHashMap<>();
+        addressed.put(ADDRESSING_KEY, addressing.toMap());
+        addressed.put(ROUTE_KEY, routeData);
+        if (settings.replies() && authenticated) {
+            // Who will read the answer, decided before the turn by the function every
+            // send attempt applies again (email v2 plan §9.3), so the agent can write
+            // for its real audience. An existing conversation keeps its own identity.
+            String conversationUserId = owner != null && owner.userId() != null ? owner.userId() : userId;
+            addressed.put(AUDIENCE_KEY,
+                    audienceOf(id, settings, parsed, sender, conversationUserId, EmailReplyAudience.readEveryReply(ledger, existingConversation))
+                            .toMap());
+        }
 
         // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
         // no sender hears anything.
@@ -528,7 +572,7 @@ public class EmailInboundProcessor {
             String conversationId = existingConversation;
             double costBefore = owner != null ? owner.cost() : 0.0;
             if (conversationId == null) {
-                conversationId = startConversation(target.getTargetId(), userId, id, intent);
+                conversationId = startConversation(target.getTargetId(), userId, id, intent, threadAudience ? settings : null, sender);
             }
             ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, conversationId, deadline, null, false, now);
             List<Map<String, Object>> attachmentData = new ArrayList<>();
@@ -561,7 +605,7 @@ public class EmailInboundProcessor {
             release(row, now.plus(RETRY_SHORT), "agent_not_ready", now);
             count(ctx, EmailMetrics.DEFERRED);
             return Disposition.DEFERRED;
-        } catch (ConversationAwaitingApprovalException e) {
+        } catch (ConversationAwaitingApprovalException | ThreadRaceLost e) {
             release(row, now.plus(RETRY_SHORT), "conversation_busy", now);
             count(ctx, EmailMetrics.DEFERRED);
             return Disposition.DEFERRED;
@@ -671,7 +715,27 @@ public class EmailInboundProcessor {
         return known;
     }
 
-    private String startConversation(String agentId, String userId, String integrationId, String intent) throws Exception {
+    /**
+     * A mail under a thread audience lost the race to start a thread's shared
+     * conversation to a mail whose sender it cannot be shown to share it with: it
+     * waits, and the next attempt finds the conversation and applies the
+     * participant guard.
+     */
+    static final class ThreadRaceLost extends RuntimeException {
+        ThreadRaceLost() {
+            super("lost the race for a thread's conversation", null, false, false);
+        }
+    }
+
+    /**
+     * Starts the conversation and maps it under {@code intent}. A mail that loses
+     * the race to map it joins the winner's conversation — under a thread audience
+     * ({@code threadSettings} not null) only when {@code sender} is a participant
+     * of it, since the key there does not name the sender.
+     */
+    private String startConversation(String agentId, String userId, String integrationId, String intent, EmailChannelSettings threadSettings,
+                                     String sender)
+            throws Exception {
         Map<String, Context> startContext = Map.of(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId));
         String conversationId = conversationService.startConversation(Deployment.Environment.production, agentId, userId, startContext)
                 .conversationId();
@@ -685,6 +749,9 @@ public class EmailInboundProcessor {
             UserConversation winner = userConversationStore.readUserConversation(intent, userId);
             if (winner != null && winner.getConversationId() != null && !winner.getConversationId().equals(conversationId)) {
                 endQuietly(conversationId);
+                if (threadSettings != null && !participantOf(winner.getConversationId(), threadSettings, sender)) {
+                    throw new ThreadRaceLost();
+                }
                 return winner.getConversationId();
             }
         }
@@ -909,6 +976,20 @@ public class EmailInboundProcessor {
     static final String ADDRESSING_KEY = "addressing";
     /** Key of {@link RouteDecision#toMap()} in the mail map. */
     static final String ROUTE_KEY = "route";
+    /** Key of {@link EmailReplyAudience.Audience#toMap()} in the mail map. */
+    static final String AUDIENCE_KEY = "audience";
+
+    /**
+     * Who will read the answer to {@code mail} in a conversation of
+     * {@code conversationUserId}: the same function, on the same signed headers,
+     * that every send attempt applies.
+     */
+    static EmailReplyAudience.Audience audienceOf(String integrationId, EmailChannelSettings settings, InboundMail mail, String sender,
+                                                  String conversationUserId, Predicate<String> readEveryReply) {
+        Map<String, Object> mailMap = mailData(mail, List.of(), false);
+        String to = EmailReplyRecipients.recipientFor(settings, mailMap, sender);
+        return EmailReplyAudience.compute(integrationId, settings, mailMap, to, conversationUserId, readEveryReply);
+    }
 
     /** Every address mail from which is this integration's own. */
     private static Set<String> ownSenders(EmailChannelSettings settings) {
@@ -946,7 +1027,10 @@ public class EmailInboundProcessor {
      * {@code unreadable} when its memory could not be read for a reason other than
      * its absence.
      */
-    record Owner(String agentId, double cost, boolean unreadable) {
+    record Owner(String agentId, double cost, boolean unreadable, String userId) {
+        Owner(String agentId, double cost, boolean unreadable) {
+            this(agentId, cost, unreadable, null);
+        }
     }
 
     private Owner ownerOf(String conversationId) {
@@ -955,7 +1039,8 @@ public class EmailInboundProcessor {
             if (snapshot == null) {
                 return new Owner(null, 0.0, false);
             }
-            return new Owner(snapshot.getAgentId(), snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0, false);
+            return new Owner(snapshot.getAgentId(), snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0, false,
+                    snapshot.getUserId());
         } catch (IResourceStore.ResourceNotFoundException e) {
             return new Owner(null, 0.0, false);
         } catch (Exception e) {
@@ -1017,9 +1102,11 @@ public class EmailInboundProcessor {
      * <b>The hijack guard</b> for this path: a Message-ID travels in every forward,
      * so naming it proves nothing. The sender must be the authenticated address
      * that started the conversation (its first inbound mail) or, with
-     * {@code threadParticipants: anyAuthenticatedParticipant}, an address one of
-     * its replies was sent to. Anyone else falls through to the thread key, which
-     * holds their own address, and so starts their own conversation.
+     * {@code threadParticipants: anyAuthenticatedParticipant} or
+     * {@code replyAudience: thread}, an address one of its sent replies went to, as
+     * {@code To} or {@code Cc}. Anyone else falls through to the thread key, which
+     * holds their own address (or, under a thread audience, is guarded the same
+     * way), and so starts their own conversation.
      */
     String continuedConversation(String integrationId, EmailChannelSettings settings, InboundMail mail, String sender) {
         List<String> referenced = new ArrayList<>();
@@ -1044,15 +1131,54 @@ public class EmailInboundProcessor {
         return null;
     }
 
+    /**
+     * Whether the conversation runs as its integration's {@code email-thread:}
+     * identity. A conversation that cannot be read counts as one: the strict rule
+     * is the one that fails closed.
+     */
+    private boolean runsAsThreadIdentity(String conversationId, Optional<LedgerEntry> first) {
+        Owner owner = ownerOf(conversationId);
+        if (owner.unreadable()) {
+            return true;
+        }
+        return first.isPresent() && EmailUserIdentity.isThreadIdentityOf(owner.userId(), first.get().integrationId());
+    }
+
     /** Whether {@code sender} may continue {@code conversationId} (see above). */
     boolean participantOf(String conversationId, EmailChannelSettings settings, String sender) {
         // The first mail that ran in the conversation names its original sender.
         Optional<LedgerEntry> first = ledger.findInboundTurn(conversationId, false);
-        if (first.isPresent() && sender.equals(first.get().recipient())) {
-            return true;
+        boolean firstSender = first.isPresent() && sender.equals(first.get().recipient());
+        boolean anyParticipant = settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT;
+        // A conversation that runs as a shared thread identity keeps the strict rule
+        // whatever the setting is now: switching replyAudience back to sender must not
+        // let someone who missed a reply continue it and read it through the agent.
+        if (!settings.repliesToThread() && !(anyParticipant && runsAsThreadIdentity(conversationId, first))) {
+            return firstSender || anyParticipant && ledger.hasSentReply(conversationId, sender);
         }
-        return settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT
-                && ledger.hasSentReply(conversationId, sender);
+        // Under a thread audience a continuing sender reads the conversation's history
+        // through the agent, so being copied once is not enough (email v2 plan §9.4):
+        // with anyAuthenticatedParticipant they must have been sent EVERY reply the
+        // conversation sent so far — anything said to the agent without them stays out
+        // of their reach, and they get a conversation of their own instead. With
+        // originalSenderOnly (the default) only the first sender continues it.
+        if (!anyParticipant) {
+            return firstSender;
+        }
+        long sent = ledger.countSentReplies(conversationId);
+        if (sent == 0) {
+            return firstSender;
+        }
+        // Coverage is per turn, not per reply row: every mail that ran a turn here is
+        // in
+        // the history the agent would read, so the sender must have been sent a reply
+        // to
+        // each of them. A reply still queued, refused or failed, or a mail EDDI never
+        // answered, leaves a turn uncovered; a pause notice and its resume reply are
+        // two
+        // rows for one turn and cover it once. One read of each side, no row totals to
+        // disagree between two calls.
+        return ledger.answeredMailIdsSentTo(conversationId, sender).containsAll(ledger.turnMailIds(conversationId));
     }
 
     /**
@@ -1103,6 +1229,19 @@ public class EmailInboundProcessor {
     static String correlationIntent(String integrationId, String agentId, String threadRoot, String sender) {
         return EmailUserIdentity.PREFIX + integrationId + ":" + agentId + ":"
                 + sha256Hex((threadRoot + "\n" + sender).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * The mapping key of a thread's shared conversation under
+     * {@code replyAudience: thread} (email v2 plan §9.4):
+     * {@code email:<integrationId>:<agentId>:<sha256(threadRoot, "thread")>}. It
+     * does not name the sender, so whoever finds a conversation through it must
+     * still pass {@link #participantOf}; the {@code "thread"} suffix keeps it apart
+     * from every per-sender key, whose suffix is an address.
+     */
+    static String threadCorrelationIntent(String integrationId, String agentId, String threadRoot) {
+        return EmailUserIdentity.PREFIX + integrationId + ":" + agentId + ":"
+                + sha256Hex((threadRoot + "\nthread").getBytes(StandardCharsets.UTF_8));
     }
 
     private boolean dailyBudgetExhausted(String integrationId, EmailChannelSettings settings, Instant now) {
