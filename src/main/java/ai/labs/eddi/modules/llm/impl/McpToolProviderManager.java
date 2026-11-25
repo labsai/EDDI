@@ -820,7 +820,10 @@ public class McpToolProviderManager {
                     LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
                     failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
                     // A failed client build was already classified, once, by buildInto.
-                    if (!buildFailures.remove(e)) {
+                    // contains, not remove: every discovery waiting on the same build
+                    // rethrows the same exception, and each of them must skip it. The
+                    // weak set forgets it once nothing holds it.
+                    if (!buildFailures.contains(e)) {
                         recordFailure(circuitKey);
                     }
                     count("failure");

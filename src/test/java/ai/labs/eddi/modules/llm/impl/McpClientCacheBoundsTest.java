@@ -638,6 +638,39 @@ class McpClientCacheBoundsTest {
     }
 
     @Test
+    @DisplayName("one failed build shared by concurrent discoveries counts as one breaker failure")
+    void concurrentDiscoveriesOnOneFailedBuildCountOnce() throws Exception {
+        String url = "http://blip-discovery.example/mcp";
+        var gate = new CountDownLatch(1);
+        var manager = manager(16, c -> {
+            buildStarted.countDown();
+            await(gate);
+            throw new IllegalStateException("connection refused");
+        });
+
+        List<Future<McpToolProviderManager.McpToolsResult>> discoveries = new ArrayList<>();
+        discoveries.add(pool.submit(() -> manager.discoverTools(List.of(config(url)))));
+        assertTrue(buildStarted.await(10, TimeUnit.SECONDS));
+        // The cache itself may hang a stage on the claim; count waiters from there.
+        int baseline = manager.buildWaiterCount(config(url));
+        for (int i = 0; i < 2; i++) {
+            discoveries.add(pool.submit(() -> manager.discoverTools(List.of(config(url)))));
+        }
+        awaitCondition(() -> manager.buildWaiterCount(config(url)) == baseline + 2, () -> {
+        });
+        assertEquals(baseline + 2, manager.buildWaiterCount(config(url)));
+        gate.countDown();
+        for (var discovery : discoveries) {
+            var result = discovery.get(10, TimeUnit.SECONDS);
+            assertEquals(McpToolProviderManager.McpFailureKind.CONNECTION_FAILURE, result.failures().get(0).kind());
+        }
+
+        assertEquals(1, builds.get(), "the three discoveries shared one build");
+        assertEquals(1, manager.recentFailureCount(config(url)), "one failed build is one failure");
+        assertFalse(manager.isCircuitOpen(config(url)));
+    }
+
+    @Test
     @DisplayName("discovery does not count a client retired under it as a breaker failure")
     void discoveryDoesNotCountARetiredClient() {
         String url = "http://churning.example/mcp";
