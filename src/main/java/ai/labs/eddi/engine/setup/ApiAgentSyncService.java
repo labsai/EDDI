@@ -10,21 +10,26 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupInternalException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.utils.RestUtilities;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
@@ -34,6 +39,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -681,16 +687,66 @@ public class ApiAgentSyncService {
      * parameter or header may switch a save to lenient (anyone could send it). The
      * bean runs the same access checks as the HTTP endpoint, against the same
      * caller. Without a container (unit tests) the loopback client is used.
+     * <p>
+     * An in-process write does not pass through {@code DocumentDescriptorFilter},
+     * which over HTTP moves the resource's descriptor to the new version on every
+     * {@code PUT}, so it is moved here. Without that the descriptor kept naming the
+     * old version: the synced agent then pointed at an LLM config and a workflow
+     * version whose descriptor a deployment cannot find, and the Manager listed the
+     * pre-sync version.
      */
     private <S> Response rewriteStored(Class<S> type, S loopback, Function<S, Response> write) {
         S store;
+        boolean inProcess;
         try {
-            store = CDI.current().select(type).get();
+            store = inProcessBean(type);
+            inProcess = true;
         } catch (RuntimeException noContainer) {
             store = loopback;
+            inProcess = false;
         }
         S target = store;
-        return LenientConfigWrite.call(() -> write.apply(target));
+        Response response = LenientConfigWrite.call(() -> write.apply(target));
+        if (inProcess) {
+            advanceDescriptor(inProcessBean(IDocumentDescriptorStore.class), response);
+        }
+        return response;
+    }
+
+    /** The CDI bean of {@code type}; throws where no container runs. */
+    <S> S inProcessBean(Class<S> type) {
+        return CDI.current().select(type).get();
+    }
+
+    /**
+     * Moves the descriptor of the version a {@code PUT} replaced to the version it
+     * wrote ({@code Location}), as {@code DocumentDescriptorFilter} does for a
+     * {@code PUT} over HTTP.
+     *
+     * @throws IllegalStateException
+     *             when the descriptor cannot be moved: the new version is written
+     *             but unreachable, and the agent must not be pointed at it
+     */
+    static void advanceDescriptor(IDocumentDescriptorStore descriptors, Response response) {
+        String location = response == null ? null : response.getHeaderString("Location");
+        if (location == null || location.isBlank() || response.getStatus() >= 300) {
+            return; // locationOf reports a write without a location
+        }
+        IResourceStore.IResourceId written = RestUtilities.extractResourceId(URI.create(location));
+        if (written == null || written.getId() == null || written.getVersion() == null || written.getVersion() < 2) {
+            return;
+        }
+        int previous = written.getVersion() - 1;
+        try {
+            DocumentDescriptor descriptor = descriptors.readDescriptor(written.getId(), previous);
+            descriptor.setLastModifiedOn(new Date());
+            descriptor.setResource(URI.create(location));
+            DescriptorAccess.rebuildIndex(descriptor);
+            descriptors.updateDescriptor(written.getId(), previous, descriptor);
+        } catch (Exception e) {
+            throw new IllegalStateException("Wrote " + LogSanitizer.sanitize(location) + ", but its descriptor could not be moved from version "
+                    + previous, e);
+        }
     }
 
     private <T> T rest(Class<T> type) {
