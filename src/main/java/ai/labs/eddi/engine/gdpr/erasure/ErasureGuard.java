@@ -270,8 +270,13 @@ public class ErasureGuard {
     /** Records the tombstone of an explicitly deleted conversation. */
     public void tombstoneConversation(String conversationId) {
         Objects.requireNonNull(conversationId, "conversationId");
+        tombstoneConversations(List.of(conversationId));
+    }
+
+    /** Records the tombstones of these conversations, in one write. */
+    public void tombstoneConversations(Collection<String> conversationIds) {
         Instant now = clock.instant();
-        store.putTombstones(Kind.CONVERSATION, List.of(conversationId), now, now.plus(retention));
+        store.putTombstones(Kind.CONVERSATION, new LinkedHashSet<>(conversationIds), now, now.plus(retention));
     }
 
     /**

@@ -17,6 +17,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * An async writer shaped like Agent Health's turn recorder, built only from the
@@ -56,6 +57,8 @@ public class HealthShapedWriter implements AsyncErasureWriter, AutoCloseable {
     public volatile CountDownLatch holdBeforeInsert;
     /** Counted down when the worker reached the hold. */
     public volatile CountDownLatch reachedHold;
+    /** How many rows the worker inserted (a refused write inserts none). */
+    public final AtomicInteger inserted = new AtomicInteger();
 
     public HealthShapedWriter(Map<String, Row> rows, ErasureGuard guard, int queueCapacity) {
         this.rows = rows;
@@ -99,6 +102,7 @@ public class HealthShapedWriter implements AsyncErasureWriter, AutoCloseable {
             return;
         }
         rows.put(row.id(), row);
+        inserted.incrementAndGet();
         guard.afterWrite(NAME, row.id(), row.userId(), row.conversationId(), capturedAt, () -> delete(row.id()));
     }
 

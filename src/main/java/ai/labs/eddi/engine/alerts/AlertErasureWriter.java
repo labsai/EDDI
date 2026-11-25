@@ -67,7 +67,8 @@ public class AlertErasureWriter implements AsyncErasureWriter {
 
     @Override
     public long eraseConversation(String conversationId) {
-        // Waits for deliveries holding a send claim, as user erasure does.
+        // Output values and rating comment excerpts, with their subjects. Waits for
+        // deliveries holding a send claim, as user erasure does.
         return redactor.redactConversationContent(conversationId);
     }
 

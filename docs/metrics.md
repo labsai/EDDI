@@ -951,6 +951,7 @@ eddi_gdpr_guard_pending_removals_total      # Pending removals of erased rows; t
 eddi_gdpr_guard_drain_seconds               # Timer: how long an erasure or permanent conversation delete waited for this node's async writers (_count, _sum, _max)
 eddi_gdpr_guard_drain_timeouts_total        # Drain barriers an async writer did not pass within eddi.gdpr.drain-timeout; tag: writer
 eddi_gdpr_guard_key_mismatch_total          # The tombstone key did not match the stored check value; every guarded operation fails closed until it is restored
+eddi_gdpr_guard_pending_backlog             # Gauge: pending removals stored, for every node, as counted by this node's last maintenance pass (every 5 minutes); NaN before the first
 ```
 
 `eddi_gdpr_guard_key_mismatch_total` must stay at zero: any increase means the
@@ -959,10 +960,15 @@ tombstone key changed and erasures are failing — see
 `check_failed` and `record_failed` should stay at zero: the first means the
 tombstone store could not be read and a write was skipped to be safe, the second
 that a row of an erased user could neither be removed nor recorded for a retry (the
-erasure's own delete still reaches it). `recorded` minus `cleared` is the backlog of
-pending removals, each of which keeps erasures of its user or conversation failing
-until the five-minute retry clears it. A drain timeout fails the erasure or delete
-that waited. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).
+erasure's own delete still reaches it). The `pending_removals_total` counters are
+removal *activity* of one process: they start at zero after a restart while the
+stored removals stay, so `recorded` minus `cleared` is not the backlog — it can read
+zero with removals outstanding, or go negative when a pass clears removals recorded
+before the restart. The backlog is `eddi_gdpr_guard_pending_backlog`, a count of what
+is actually stored; every node reports the same deployment-wide number, so chart its
+`max`. Each pending removal keeps erasures of its user or conversation failing until
+the five-minute retry clears it, and one that fails again moves to the back of the
+retry queue. A drain timeout fails the erasure or delete that waited. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).
 
 ### Agent Identity & Signing Metrics
 

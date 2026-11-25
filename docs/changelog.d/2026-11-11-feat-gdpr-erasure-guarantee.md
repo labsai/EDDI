@@ -78,17 +78,64 @@ docs: [GDPR](../gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-writ
   this one had to change because its link target was deleted and
   `DocumentationLinksTest` fails on a dead link.
 
+### Merge-ready round (2026-11-25)
+
+Merged `main` (the only conflict: the generated Full Metrics dashboard, where `main`'s
+Organizations row took panel id 459 — the GDPR row is now 463, with 464 and 465), then
+closed what the PR and its review still listed:
+
+- **Nothing of any writer is overlooked.** A conversation delete counts the
+  conversation's pending removals of *every* writer, and a user erasure ends with
+  `asyncWritePending` over every writer's removals of the user — a removal recorded by
+  a writer no longer deployed keeps both failed. User erasure also deletes and
+  verifies every writer's rows of the user's conversations (`asyncWriteConversations`,
+  `ErasureGuard.eraseConversationRows`), so a row that names a conversation but not the
+  user is covered; a failure keeps the snapshots for the re-run. A conversation the
+  user started after step 00 listed them is tombstoned before its rows go.
+- **Fair retries.** A pending removal that fails again is deferred (`nextAttemptAt` /
+  `next_attempt_at`), and the maintenance pass takes the due ones, longest-due first:
+  a full batch of removals that keep failing no longer starves the rest. A
+  store-backed gauge, `eddi_gdpr_guard_pending_backlog`, is the backlog; the counters
+  are documented as activity.
+- **A changed key reaches running nodes.** The cached tombstone key is re-checked
+  against the stored check value on every use (a plain read) and dropped when it no
+  longer matches. The key-reset recovery now quiesces the writers and clears the
+  excerpts stored under old-key subjects first; `adopt-master-key` says when it reset
+  the key the tombstone key is derived from.
+- **An unguarded erasure is reported.** A `gdpr-stop` without the tombstone marker
+  (an older coordinator) is answered with an error, which every release's coordinator
+  records as an incomplete cluster stop.
+- **Every permanent delete is guarded.** `ConversationPurgeService` refuses a
+  permanent delete without a guard (m7), and the retention sweep runs one batched
+  pass, `ErasureGuard.eraseConversations` (one tombstone write, one drain), before it
+  deletes, keeping what it could not erase.
+- **Conversation deletes blank rating excerpts** and their rater subject too, in both
+  stores (`redactConversationContent` / `countConversationContent`).
+- **Stale presence (m4)** is documented: a crashed node fails erasures and permanent
+  deletes for up to 3 × `eddi.cluster.presence.interval`.
+- Docs: re-run the erasure after a database recovery (residual limit 2), the
+  adopter's contract (plain user id allowed, scheduled jobs through a direct
+  executor), dashboard axes (rates, a count axis for timeouts and the backlog, an
+  empty drain panel says why).
+- Tests: `AgentHealthAdoptionTest` drives an Agent-Health-shaped writer
+  (`HealthShapedWriter`, public API only, its own package) through the real cascade
+  and the delete path — queued and in-flight writes, an unreachable node, a failing
+  store, a full queue. The tombstone store contract also runs on the in-memory double.
+  Every new check was mutation-tested.
+
 ### Still open
 
-- The MongoDB primary/majority-read behaviour is covered by an integration test (MongoErasureTombstoneStoreIT) that needs Docker and was not run locally; CI is the check.
-- Nodes of an older release do not write tombstones: an erasure they coordinate is not guarded (a peer logs a warning); upgrade every node, then re-run it.
-- The residual limits (clock assumption, rows written by nodes that were offline during an erasure) are documented in the GDPR guide, not closed.
+- The residual limits (clock assumption, rows written by a node cut off from NATS)
+  are documented in the GDPR guide, not closed: closing the cut-off case would need a
+  write-intent or an atomic conditional insert in every writer's store.
 
 ### What's next
 
-Agent Health (stacked PR) registers an `AsyncErasureWriter` for its turn/outcome rows
-and calls `beforeWrite`/`afterWrite`/`verifyUserErased` exactly as the GDPR guide's
-"For a new async writer" paragraph lists.
+Agent Health (#1386) replaces `HealthErasureFence` with an `AsyncErasureWriter` per
+row kind, as the GDPR guide's "For a new async writer" list says and
+`HealthShapedWriter` shows: `DrainBarrier.execute`/`awaitDrained`, `beforeWrite`/
+`afterWrite` around every write, `verifyUserErased` in its participants, and
+`removeRow`, `eraseConversation`, `countForConversation`.
 
 ```decision-log
 | 2026-11-11 | Async per-user writes are guarded by durable tombstones + a drain barrier + verification; an erasure that cannot ensure "none can be written later" fails a step | Alert events queued before an erasure could land after it; the node-local fence was best effort | Keeping the fence with a longer TTL; deleting by a later sweep only; blocking erasure until queues empty without tombstones |
@@ -97,7 +144,10 @@ and calls `beforeWrite`/`afterWrite`/`verifyUserErased` exactly as the GDPR guid
 | 2026-11-11 | No cache on tombstone reads | A cached "not erased" could miss a tombstone written before a barrier completed | A TTL cache invalidated by broadcast |
 | 2026-11-17 | The drain barrier covers only the guarded write; first alert deliveries run on a separate stage that re-checks the guard before sending | A slow webhook or an alert storm would otherwise fail every erasure and conversation delete | Waiting for deliveries with a longer timeout |
 | 2026-11-17 | Tombstone, pending-removal and verification reads on MongoDB go to the primary with majority concern | The client reads `nearest()`; a lagging secondary could answer "not erased" or "0 rows left" | Relying on the client default |
-| 2026-11-17 | Rating comment excerpts carry a keyed rater subject and are erased with the rater, but survive a conversation delete | Ratings outlive their conversation and the excerpt follows the rating | Blanking excerpts on conversation delete |
+| 2026-11-17 | Rating comment excerpts carry a keyed rater subject and are erased with the rater | The rater's erasure must find them after the ratings are gone, without storing the user id | Storing the plain rater id |
+| 2026-11-25 | A conversation delete blanks rating comment excerpts of the conversation too (superseding "they survive it") | The write side already refuses an excerpt for a tombstoned conversation, so the delete reporting success while one remains contradicted it; blanking an alert's copy costs nothing the rating does not keep | Keeping excerpts with their rating and exempting them from the conversation count |
 | 2026-11-17 | Agent-test purges skip the tombstone and the cluster drain | Their user is synthetic; a drain per test conversation would tie every test run to the slowest node | Batching the drains |
-| 2026-11-11 | Retention-driven conversation deletion runs no barrier | It only deletes conversations ended and untouched for at least the retention period; nothing of theirs can be queued, and their alert events age out on their own retention | Running the cluster barrier per retained conversation |
+| 2026-11-25 | The retention sweep gives the guarantee in one batched pass (one tombstone write, one drain) and keeps what it could not erase (superseding "runs no barrier") | Orphaned snapshots have no age, so "nothing can be queued" did not cover them; a batch costs one drain per sweep | One guarded erasure per conversation (a cluster scatter each); keeping the exemption |
+| 2026-11-25 | A running node re-checks its cached tombstone key against the stored check value on every use, with a plain read | A node that kept an old key would hash users the others no longer match; an insert-if-absent there would undo an operator's reset | Caching for a TTL; requiring a restart only |
+| 2026-11-25 | Pending removals are checked across every writer, and a failed one is deferred rather than retried first | A removal of a writer no longer deployed must not be overlooked; a stuck batch must not starve the rest | Per-writer counts only; a larger batch |
 ```

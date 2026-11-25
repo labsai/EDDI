@@ -735,6 +735,9 @@ public class GdprComplianceService {
         // again, so a failure keeps them.
         if (erasureGuard != null && !conversationIds.isEmpty()) {
             try {
+                // The ids were listed again after step 00: a conversation created in
+                // between has no tombstone yet, and one is written before its rows go.
+                erasureGuard.tombstoneConversations(conversationIds);
                 Map<String, String> notErased = erasureGuard.eraseConversationRows(conversationIds);
                 if (!notErased.isEmpty()) {
                     dependentCleanupIncomplete = true;

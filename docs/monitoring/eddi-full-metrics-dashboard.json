@@ -20364,7 +20364,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — `recorded` minus `cleared` is the backlog that keeps erasures failing until it is retried; `record_failed` should stay at zero. `eddi_gdpr_guard_key_mismatch_total` must stay at zero: a rise means the tombstone key changed and every guarded write and erasure fails closed until it is restored.",
+          "description": "Rates, per second: `eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — removal activity of this process (recorded, cleared, or `record_failed`, which should stay at zero); these counters restart at zero with the process, so their difference is not the backlog. `eddi_gdpr_guard_key_mismatch_total` must stay at zero: a rise means the tombstone key changed and every guarded write and erasure fails closed until it is resolved. Right axis: `eddi_gdpr_guard_pending_backlog` — the pending removals actually stored, for every node, as counted by the last five-minute maintenance pass; each one keeps erasures of its user or conversation failing until it is cleared. Empty until a node has run a pass.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -20407,7 +20407,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(increase(eddi_gdpr_guard_key_mismatch_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "expr": "sum(rate(eddi_gdpr_guard_key_mismatch_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -20415,6 +20415,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "key mismatch"
+            },
+            {
+              "refId": "E",
+              "expr": "max(eddi_gdpr_guard_pending_backlog{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "pending removals stored"
             }
           ],
           "fieldConfig": {
@@ -20450,7 +20461,28 @@
                 ]
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "E"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "stored"
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {
@@ -20473,7 +20505,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_gdpr_guard_drain_seconds` — how long erasures and permanent conversation deletes waited for this node's async writers to finish the work queued before the tombstones (max and mean). `eddi_gdpr_guard_drain_timeouts_total` by `writer` — barriers not passed within `eddi.gdpr.drain-timeout`; each one failed an erasure or a delete.",
+          "description": "Left axis, seconds: `eddi_gdpr_guard_drain_seconds` — how long erasures and permanent conversation deletes waited for this node's async writers to finish the work queued before the tombstones (max and mean). Empty, not zero, until a barrier has been measured: a latency has no honest value without one. Right axis, a count per interval: `eddi_gdpr_guard_drain_timeouts_total` by `writer` — barriers not passed within `eddi.gdpr.drain-timeout`; each one failed an erasure or a delete.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -20483,7 +20515,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "max(eddi_gdpr_guard_drain_seconds_max{job=~\"$job\"}) or on() vector(0)",
+              "expr": "max(eddi_gdpr_guard_drain_seconds_max{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -20546,9 +20578,31 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no drain measured yet"
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "C"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "timeouts"
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {

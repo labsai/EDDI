@@ -385,12 +385,16 @@ rater's erasure finds, blanks and verifies those excerpts directly, even when th
 ratings themselves are already gone. When the key is unavailable the alert is stored
 without the excerpt.
 
-A **permanent conversation delete** blanks every `OUTPUT_MATCH` value stored from
-that conversation, with the same guarantee: tombstone, drain on every node, blank,
-verify — and the delete fails (and deletes nothing else) when any of it fails.
-Rating comment excerpts are deliberately **kept** by a conversation delete: a rating
-outlives its conversation, and its excerpt follows the rating — it is blanked when
-the rating or the rater is erased.
+A **permanent conversation delete** — one conversation, or the retention sweep's
+batch — blanks every `OUTPUT_MATCH` value stored from that conversation **and every
+rating comment excerpt** of an alert about it, with the rater subject either
+carries, with the same guarantee: tombstone, drain on every node, blank, verify —
+and the delete fails (and deletes nothing else) when any of it fails. The alert
+itself stays, with its rule, agent, score, tags and time. The excerpt is
+conversation content: the write side already refuses it for a deleted
+conversation, so the delete removes it too, although the rating it was copied from
+may outlive the conversation. A user erasure does the same for every conversation
+of the user.
 
 **No send starts with erased content once an erasure has completed.** Every send —
 the first delivery and each retry, on any node — first takes a short claim on the

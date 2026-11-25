@@ -260,6 +260,18 @@ class GdprErasureGuaranteeTest {
     }
 
     @Test
+    @DisplayName("a conversation the user started after the tombstones were written is tombstoned before its rows are erased")
+    void conversationStartedMeanwhileIsTombstoned() throws Exception {
+        registerParticipant();
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"), List.of("conv-1", "conv-new"));
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.complete(), result.failedSteps().toString());
+        assertTrue(tombstones.hasTombstone(Kind.CONVERSATION, "conv-new"), "a late write to it is refused too");
+    }
+
+    @Test
     @DisplayName("a conversation whose async rows cannot be erased is kept for the re-run, and the erasure fails")
     void conversationRowsThatStayKeepTheConversation() throws Exception {
         registerParticipant();

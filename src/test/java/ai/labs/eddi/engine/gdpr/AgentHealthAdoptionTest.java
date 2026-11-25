@@ -154,6 +154,7 @@ class AgentHealthAdoptionTest {
         assertTrue(writer.record("late", USER, CONVERSATION, captured));
         drained(writer);
         assertEquals(0, rowsOf(USER), "the tombstone refused the late write");
+        assertEquals(0, writer.inserted.get(), "refused before the insert, not removed after it");
     }
 
     @Test
@@ -246,6 +247,7 @@ class AgentHealthAdoptionTest {
         assertTrue(writer.record("late", USER, CONVERSATION, Instant.now().plusSeconds(3600)));
         drained(writer);
         assertEquals(0, writer.countForConversation(CONVERSATION), "the conversation tombstone has no time component");
+        assertEquals(0, writer.inserted.get(), "refused before the insert");
     }
 
     @Test
