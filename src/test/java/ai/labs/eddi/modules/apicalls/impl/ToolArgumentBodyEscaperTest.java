@@ -293,7 +293,8 @@ class ToolArgumentBodyEscaperTest {
     void manyReferenceOpenersAreRefusedWithoutBuildingOverlappingSpans() {
         // 100 000 openers and one closing brace at the end: the old scan kept a suffix
         // per opener
-        // (about 350 million characters) before the caller could refuse the first
+        // (tens of billions of characters at this size) before the caller could refuse
+        // the first
         // reference.
         String hostile = "${vars:".repeat(100_000);
         String inert = "{\"q\":\"\"}";
