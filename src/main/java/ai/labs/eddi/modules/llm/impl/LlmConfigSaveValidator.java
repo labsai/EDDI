@@ -15,8 +15,10 @@ import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Save-time structural check of an {@link LlmConfiguration}: a value that can
@@ -157,7 +159,18 @@ public final class LlmConfigSaveValidator {
             String effectiveType = step.getType() != null ? step.getType() : task.getType();
             String field = step.getType() != null ? stepPath + ".type" : stepPath + ".type (inherited from " + path + ".type)";
             checkProvider(field, effectiveType, problems);
-            checkParameters(stepPath + ".parameters", effectiveType, step.getParameters(), problems);
+            // The step runs with the task's parameters and its own on top
+            // (CascadingModelExecutor.mergeParams). Under the task's provider the task's
+            // values are checked at task level already; under another provider they are
+            // checked here, against the provider that receives them.
+            Map<String, String> effective = step.getParameters();
+            if (!Objects.equals(effectiveType, task.getType()) && task.getParameters() != null) {
+                effective = new LinkedHashMap<>(task.getParameters());
+                if (step.getParameters() != null) {
+                    effective.putAll(step.getParameters());
+                }
+            }
+            checkParameters(stepPath + ".parameters", effectiveType, effective, problems);
             if (step.getTimeoutMs() != null && step.getTimeoutMs() <= 0) {
                 problems.add(stepPath + ".timeoutMs must be positive, got " + step.getTimeoutMs());
             }

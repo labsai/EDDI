@@ -143,6 +143,16 @@ class LlmConfigSaveValidatorTest {
     }
 
     @Test
+    @DisplayName("a cascade step on another provider is checked with the task parameters it inherits")
+    void inheritedParametersAreCheckedUnderTheStepsProvider() throws Exception {
+        // 1.5 is a valid OpenAI temperature (0-2) but out of Anthropic's range (0-1).
+        String json = "{\"tasks\":[{\"id\":\"t\",\"type\":\"openai\",\"parameters\":{\"modelName\":\"gpt-4o\",\"temperature\":\"1.5\"},"
+                + "\"modelCascade\":{\"enabled\":true,\"steps\":[{\"type\":\"anthropic\",\"parameters\":{}}]}}]}";
+        List<String> problems = problems(json);
+        assertTrue(problems.stream().anyMatch(p -> p.startsWith("tasks[0].modelCascade.steps[0].parameters.temperature")), problems.toString());
+    }
+
+    @Test
     @DisplayName("a disabled cascade never runs, so its steps are not checked: the same steps pass with enabled=false")
     void disabledCascadeIsNotChecked() throws Exception {
         String json = "{\"tasks\":[{\"id\":\"t\",\"type\":\"openai\",\"parameters\":{\"modelName\":\"gpt-4o\"},"
