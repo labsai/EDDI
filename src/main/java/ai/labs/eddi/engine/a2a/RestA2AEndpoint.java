@@ -365,7 +365,8 @@ public class RestA2AEndpoint {
         try {
             Response response = switch (method.operation()) {
                 case SEND -> jsonRpcSuccess(request.id(), A2AWireFormat.sendResult(
-                        taskHandler.send(agentId, A2AWireFormat.parseSend(request.params(), method.dialect())), method.dialect()));
+                        taskHandler.send(agentId, A2AWireFormat.parseSend(request.params(), method.dialect(), taskHandler.acceptsFiles())),
+                        method.dialect()));
                 case STREAM -> stream(agentId, request, method.dialect());
                 case GET -> handleTasksGet(request, method.dialect());
                 case CANCEL -> handleTasksCancel(request, method.dialect());
@@ -475,7 +476,7 @@ public class RestA2AEndpoint {
      * disconnects first — the turn still settles and releases its slot on its own.
      */
     private Response stream(String agentId, JsonRpcRequest request, Dialect dialect) throws Exception {
-        var send = A2AWireFormat.parseSend(request.params(), dialect);
+        var send = A2AWireFormat.parseSend(request.params(), dialect, taskHandler.acceptsFiles());
         BlockingQueue<StreamEvent> events = new LinkedBlockingQueue<>();
         taskHandler.stream(agentId, send, events::add);
         long waitMillis = TimeUnit.SECONDS.toMillis((long) taskHandler.taskTimeoutSeconds() + A2ATaskHandler.SLOT_LEASE_GRACE_SECONDS);

@@ -108,6 +108,14 @@ public class McpConversationTools {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /**
+     * The per-file ceiling of an inline file in the {@code attachments} argument —
+     * the limit an upload is held to. The initialiser is the shipped default, for
+     * unit tests that construct this bean directly.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520")
+    long maxAttachmentBytes = 20_971_520L;
+
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
@@ -239,7 +247,9 @@ public class McpConversationTools {
                               @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
                               @ToolArg(description = "The user message to send to the Agent (required)") String message,
                               @ToolArg(description = "Deprecated — ignored; the conversation keeps the environment it was started in (optional)",
-                                       required = false) String environment) {
+                                       required = false) String environment,
+                              @ToolArg(description = McpAttachmentArguments.ONE_TO_ONE_DESCRIPTION,
+                                       required = false) String attachments) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -247,6 +257,9 @@ public class McpConversationTools {
             return errorJson("conversationId is required");
         if (message == null || message.isBlank())
             return errorJson("message is required");
+        var files = McpAttachmentArguments.parse(attachments, true, maxAttachmentBytes);
+        if (files.isRefused())
+            return errorJson(files.error(), "BAD_REQUEST", null);
         try {
             // Driving someone else's conversation is a write — gate it exactly like
             // the REST say() does, or a viewer could inject turns into another
@@ -254,7 +267,7 @@ public class McpConversationTools {
             // re-checks USE on the conversation's agent (L4).
             conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
-            var snapshot = sendMessageAndWait(conversationId, message);
+            var snapshot = sendMessageAndWait(conversationId, message, files);
 
             // Finding 25: this turn itself paused for human approval — return a
             // structured PAUSED signal (not BUSY/error) so the MCP client can inform
@@ -295,12 +308,18 @@ public class McpConversationTools {
                                 @ToolArg(description = "Conversation ID to continue (optional — a new conversation is created when omitted)",
                                          required = false) String conversationId,
                                 @ToolArg(description = "Environment: 'production' (default) or 'test'; applies only when a new conversation is created",
-                                         required = false, defaultValue = "production") String environment) {
+                                         required = false, defaultValue = "production") String environment,
+                                @ToolArg(description = McpAttachmentArguments.ONE_TO_ONE_DESCRIPTION,
+                                         required = false) String attachments) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (message == null || message.isBlank())
             return errorJson("message is required");
+        // Before a conversation is created, so a malformed argument leaves none behind.
+        var files = McpAttachmentArguments.parse(attachments, true, maxAttachmentBytes);
+        if (files.isRefused())
+            return errorJson(files.error(), "BAD_REQUEST", null);
         // O4: hoist convId out of the try so a freshly-created conversation id is
         // still in scope for the catch — otherwise a skip/pause after auto-creation
         // would report the (nullable) method arg and lose the real id.
@@ -321,7 +340,7 @@ public class McpConversationTools {
             }
 
             // Step 2: Send the message
-            var snapshot = sendMessageAndWait(convId, message);
+            var snapshot = sendMessageAndWait(convId, message, files);
 
             // Finding 25: this turn itself paused for human approval — return a
             // structured PAUSED signal (not BUSY/error) so the MCP client can inform
@@ -1069,10 +1088,26 @@ public class McpConversationTools {
      * reply.
      */
     private SimpleConversationMemorySnapshot sendMessageAndWait(String conversationId, String message) throws Exception {
+        return sendMessageAndWait(conversationId, message, null);
+    }
+
+    /**
+     * As {@link #sendMessageAndWait(String, String)}, sending {@code files} as the
+     * turn's {@code attachment_N} context entries — which the engine resolves as it
+     * does for a REST {@code say} (which also keeps their inline payloads out of
+     * the step's output, so the result does not echo them).
+     */
+    private SimpleConversationMemorySnapshot sendMessageAndWait(String conversationId, String message, McpAttachmentArguments.Parsed files)
+            throws Exception {
 
         var inputData = new InputData();
         inputData.setInput(message);
-        inputData.setContext(Map.of("mcp", new Context(Context.ContextType.string, "true")));
+        var context = new LinkedHashMap<String, Context>();
+        context.put("mcp", new Context(Context.ContextType.string, "true"));
+        if (files != null && !files.isEmpty()) {
+            context.putAll(McpAttachmentArguments.toContexts(files.entries()));
+        }
+        inputData.setContext(context);
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 

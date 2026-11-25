@@ -276,10 +276,23 @@ memory, callerHasCeiling, site)` returns a refusal or null; `require(…)` throw
 prices, records in the group's cost ledger by key (a re-run is idempotent), charges the
 tenant the increase and notifies the sinks.
 
+**Document spend** — a call made for a document owner outside any turn (a summary job,
+the modality bridge) asks `DocumentSpendGate.admit(owner, estimateUsd)` first — the
+tenant budget, then the user's and the team's [daily document ceilings](langchain.md#daily-document-spend-ceilings)
+— and hands the usage to `SystemSpendMeter.charge(spendOwner, key, override, usage, detail)`
+after. `SpendOwner(ownerKey, userId, teamSpaceId, tenantId)` names whom it is charged to
+(a null `tenantId` is the default tenant). One call prices, adds to the owner's user and
+team day buckets, charges the owner's tenant and notifies the sinks with kind `DOCUMENT`.
+There is no ledger to charge by replacement: every call adds its full cost, so a caller
+charges each model call once (a cached result is not a call). `key` labels the operation
+in logs. An unpriced call costs $0, counts in the buckets and is reported under the
+unpriced `site` `document`.
+
 **Receiving spend** — implement `ISpendSink` as an `@ApplicationScoped` bean. Its
 `onSpend(SpendEvent)` is called synchronously after every charge the tenant counter
 accepted: settled turns (`TURN`, from `TurnCostMeter`: one per accepted charge, so a step
-that pauses and resumes can produce two), Dream runs (`DREAM`) and group machinery (`GROUP_SYSTEM`).
+that pauses and resumes can produce two), Dream runs (`DREAM`), group machinery (`GROUP_SYSTEM`),
+model-written conversation titles (`CONVERSATION_TITLE`) and document work charged to an owner (`DOCUMENT`).
 A `SpendEvent` carries `tenantId, conversationId, agentId, agentVersion, userId,
 groupId, groupConversationId, kind, detail, usd` (the delta just charged),
 `unpricedCalls, inputTokens, outputTokens` (a turn's are the increase since that

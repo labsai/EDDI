@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.documents.spend.DocumentSpendLimits;
 import ai.labs.eddi.modules.ingestion.extract.PdfWindowReader;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.Config;
@@ -13,6 +14,7 @@ import org.eclipse.microprofile.config.ConfigProvider;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.function.Function;
 
 /**
@@ -142,5 +144,69 @@ public class DocumentSettings {
                 .getOptionalValue("eddi.documents.structure.window-deadline-seconds", Long.class)
                 .orElse(PdfWindowReader.DEFAULT_WINDOW_DEADLINE.toSeconds());
         return seconds > 0 ? Duration.ofSeconds(seconds) : PdfWindowReader.DEFAULT_WINDOW_DEADLINE;
+    }
+
+    // --- WP-6.1: the deployment's default document index ---
+
+    /**
+     * The deployment's default document index: a RAG configuration id or URI,
+     * validated at startup ({@code DocumentIndexDefaultCheck}) and before every
+     * write. Unset by default: without it, and without a task's
+     * {@code documents.index.rag}, document search stays lexical.
+     */
+    public static final String INDEX_DEFAULT_RAG = "eddi.documents.index.default-rag";
+
+    /** {@link #INDEX_DEFAULT_RAG}, when set to something other than blank. */
+    public Optional<String> indexDefaultRag() {
+        return ConfigProvider.getConfig().getOptionalValue(INDEX_DEFAULT_RAG, String.class).map(String::strip).filter(value -> !value.isEmpty());
+    }
+
+    // --- WP-2b.2a: the pixel cap on embedded images ---
+
+    /** The most pixels one embedded image may declare before it is decoded. */
+    public static final String IMAGES_MAX_PIXELS = "eddi.documents.images.max-pixels";
+
+    /** {@link #IMAGES_MAX_PIXELS} unless set: 40 megapixels. */
+    public static final long DEFAULT_IMAGES_MAX_PIXELS = 40_000_000L;
+
+    /**
+     * {@link #IMAGES_MAX_PIXELS}: an image that declares more pixels, or a mask
+     * that does, is refused before anything is allocated for it. A CDI instance
+     * reads the deployment's configuration on every call, and a value that is not a
+     * positive number falls back to the default; explicit settings ({@link #of},
+     * {@link #none}) return the default.
+     */
+    public long imagesMaxPixels() {
+        if (bounds != null) {
+            return DEFAULT_IMAGES_MAX_PIXELS;
+        }
+        try {
+            return ConfigProvider.getConfig().getOptionalValue("eddi.documents.images.max-pixels", Long.class)
+                    .filter(pixels -> pixels > 0).orElse(DEFAULT_IMAGES_MAX_PIXELS);
+        } catch (IllegalArgumentException notANumber) {
+            return DEFAULT_IMAGES_MAX_PIXELS;
+        }
+    }
+
+    // --- WP-4b.1: daily document spend ceilings ---
+
+    /**
+     * The cumulative daily ceilings and the bucket retention
+     * ({@code eddi.documents.spend.*}). A CDI instance reads the deployment's
+     * configuration on every call; explicit settings ({@link #of}, {@link #none})
+     * return the built-in defaults (no ceiling, 35 days).
+     */
+    public DocumentSpendLimits spendLimits() {
+        if (bounds != null) {
+            return DocumentSpendLimits.defaults();
+        }
+        Config config = ConfigProvider.getConfig();
+        return new DocumentSpendLimits(usd(config.getOptionalValue(DocumentSpendLimits.MAX_PER_USER_PER_DAY, Double.class)),
+                usd(config.getOptionalValue(DocumentSpendLimits.MAX_PER_TEAM_PER_DAY, Double.class)),
+                config.getOptionalValue(DocumentSpendLimits.RETENTION_DAYS, Integer.class).orElse(DocumentSpendLimits.DEFAULT_RETENTION_DAYS));
+    }
+
+    private static OptionalDouble usd(Optional<Double> value) {
+        return value.map(OptionalDouble::of).orElse(OptionalDouble.empty());
     }
 }

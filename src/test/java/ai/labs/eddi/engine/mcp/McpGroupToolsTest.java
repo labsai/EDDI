@@ -448,7 +448,7 @@ class McpGroupToolsTest {
         when(groupConversationService.discuss("g1", "What?", "user1", 0)).thenReturn(gc);
         when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
 
-        String result = tools.discuss_with_group("g1", "What?", "user1");
+        String result = tools.discuss_with_group("g1", "What?", "user1", null);
 
         assertEquals("{\"id\":\"gc1\"}", result);
         verify(groupConversationService).discuss("g1", "What?", "user1", 0);
@@ -459,7 +459,7 @@ class McpGroupToolsTest {
         GroupConversation gc = new GroupConversation();
         when(groupConversationService.discuss(any(), any(), any(), anyInt())).thenReturn(gc);
 
-        tools.discuss_with_group("g1", "Q?", null);
+        tools.discuss_with_group("g1", "Q?", null, null);
 
         verify(groupConversationService).discuss("g1", "Q?", "mcp-client", 0);
     }
@@ -468,7 +468,7 @@ class McpGroupToolsTest {
     void discussWithGroup_handlesException() throws Exception {
         when(groupConversationService.discuss(any(), any(), any(), anyInt())).thenThrow(new RuntimeException("Failed"));
 
-        String result = tools.discuss_with_group("g1", "Q?", null);
+        String result = tools.discuss_with_group("g1", "Q?", null, null);
 
         assertTrue(result.contains("error"));
     }
@@ -668,7 +668,7 @@ class McpGroupToolsTest {
      */
     @Test
     void discussWithGroup_staysOffTheEventLoop() throws Exception {
-        var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class);
+        var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class, String.class);
         assertEquals(String.class, method.getReturnType(),
                 "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
                         + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
@@ -974,7 +974,7 @@ class McpGroupToolsTest {
         gc.setId("gc1");
         when(groupConversationService.discuss("g1", "Q?", "alice", 0)).thenReturn(gc);
 
-        toolsAsUser("alice", "eddi-viewer").discuss_with_group("g1", "Q?", null);
+        toolsAsUser("alice", "eddi-viewer").discuss_with_group("g1", "Q?", null, null);
 
         verify(groupConversationService).discuss("g1", "Q?", "alice", 0);
     }
@@ -1131,7 +1131,7 @@ class McpGroupToolsTest {
     void discussWithGroup_withoutUse_isRefusedBeforeAnyMemberRuns() throws Exception {
         doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("g1", "group");
 
-        String result = tools.discuss_with_group("g1", "question?", null);
+        String result = tools.discuss_with_group("g1", "question?", null, null);
 
         assertTrue(result.contains("Access denied"), result);
         verify(groupConversationService, never()).discuss(any(), any(), any(), anyInt());
@@ -1249,10 +1249,10 @@ class McpGroupToolsTest {
 
         @Test
         void discussWithGroup_overLongOrBlankQuestion_isRefusedBeforeTheService() throws Exception {
-            assertBadRequest(tools.discuss_with_group("g1", overLong, null), "at most 50000");
-            assertBadRequest(tools.discuss_with_group("g1", "   ", null), "'question' is required");
-            assertBadRequest(tools.discuss_with_group("g1", null, null), "'question' is required");
-            assertBadRequest(tools.discuss_with_group("g1", "Q?", "u".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1)),
+            assertBadRequest(tools.discuss_with_group("g1", overLong, null, null), "at most 50000");
+            assertBadRequest(tools.discuss_with_group("g1", "   ", null, null), "'question' is required");
+            assertBadRequest(tools.discuss_with_group("g1", null, null, null), "'question' is required");
+            assertBadRequest(tools.discuss_with_group("g1", "Q?", "u".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1), null),
                     "'userId' must be at most");
 
             verify(groupConversationService, never()).discuss(any(), any(), any(), anyInt());
@@ -1263,7 +1263,7 @@ class McpGroupToolsTest {
         void discussWithGroup_questionAtTheCeiling_runs() throws Exception {
             when(groupConversationService.discuss(any(), any(), any(), anyInt())).thenReturn(new GroupConversation());
 
-            tools.discuss_with_group("g1", atCeiling, null);
+            tools.discuss_with_group("g1", atCeiling, null, null);
 
             verify(groupConversationService).discuss("g1", atCeiling, "mcp-client", 0);
         }

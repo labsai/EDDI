@@ -52,7 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
-> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, `groupOutcomes`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, `documentSpend`, `groupOutcomes`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -228,6 +228,16 @@ principal, not a user: erasing or exporting it is refused with 400.
     carries the user's counters (tool or pool, window start, count) under `counters` in the
     `toolQuotas` section of `additionalData`, at most 1,000; past that the section says
     `"truncated": true` and the bundle reports `complete: false`
+18. **Document spend counters** (`documentSpend`) — **permanently deleted** by the `documentSpend`
+    participant: every daily bucket of document spend (UTC day, dollars, number of calls) kept under the
+    erased user id, the id exactly as the conversation carries it. A bucket holds no content and is
+    deleted on its own after `eddi.documents.spend.retention-days` (35). Team buckets hold a team space id
+    and amounts, no user id, and are kept. The participant has no in-flight work of its own to stop.
+    Nothing charges the buckets yet; once the background document jobs do, a job still running when the
+    user is erased could write a new bucket for the erased id, so those jobs ship with their own
+    participant that stops them first (and a stray bucket is deleted after the retention). The export carries the user's
+    buckets under `days` in the `documentSpend` section of `additionalData`, at most 1,000; past that the
+    section says `"truncated": true`
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 

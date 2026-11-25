@@ -8,14 +8,18 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
@@ -89,6 +93,7 @@ public class KnowledgeBaseStorageGuard {
                     + "for knowledge bases that already use it. A new knowledge base is addressed by its id; omit storeNamespace.");
         }
         config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
+        requireEligibleIfDocumentIndex(config);
         requireUsableExplicitLocation(null, config);
     }
 
@@ -133,11 +138,100 @@ public class KnowledgeBaseStorageGuard {
                     KnowledgeBaseStorage.NAMESPACE_ID, LogSanitizer.sanitize(updated.getName()));
             updated.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
         }
+        requireDocumentIndexTransitionAllowed(id, previous, updated);
+        boolean becomesDocumentIndex = DocumentIndexEligibility.isDocumentIndex(updated) && !DocumentIndexEligibility.isDocumentIndex(previous);
         String before = previous == null ? null : KnowledgeBaseStorage.explicitPhysicalName(previous);
         String after = KnowledgeBaseStorage.explicitPhysicalName(updated);
         boolean storeTypeChanged = previous != null && !Objects.equals(previous.getStoreType(), updated.getStoreType());
-        if (after != null && (!after.equals(before) || storeTypeChanged)) {
+        // Turning the flag on re-checks an unchanged location too: it may be shared
+        // with another knowledge base, which a document index may not do.
+        if (after != null && (!after.equals(before) || storeTypeChanged || becomesDocumentIndex)) {
             requireUsableExplicitLocation(id, updated);
+        }
+    }
+
+    /**
+     * Who uses a RAG configuration as a workflow step. Optional so the guard can be
+     * built with {@code new} (as {@link RestRagStore} does, which hands it on);
+     * without it, turning {@code documentIndex} on is refused, because the check it
+     * would run cannot be made.
+     */
+    private Provider<IWorkflowStore> workflowStore;
+
+    @Inject
+    void useWorkflowStore(Provider<IWorkflowStore> workflowStore) {
+        this.workflowStore = workflowStore;
+    }
+
+    /** A flagged configuration must be eligible. */
+    private static void requireEligibleIfDocumentIndex(RagConfiguration config) {
+        if (!DocumentIndexEligibility.isDocumentIndex(config)) {
+            return;
+        }
+        String reason = DocumentIndexEligibility.ineligibility(config);
+        if (reason != null) {
+            throw new BadRequestException("documentIndex: " + reason + ".");
+        }
+    }
+
+    /**
+     * The document-index rules of an update — enforced here, at the RAG side, so
+     * the separation from agents' knowledge bases holds whichever configuration is
+     * edited first:
+     * <ul>
+     * <li>a flagged configuration must be eligible;</li>
+     * <li>once a configuration is a document index it stays one, and its storage —
+     * store type, server, layout, location — cannot move: chunks may exist, and an
+     * LLM task may name it. Switched off, its users' chunks would sit in a store
+     * that agents' retrieval may read; moved, they would be stranded where nothing
+     * deletes them. Delete the configuration instead (its chunks go with the
+     * store);</li>
+     * <li>it cannot be turned on while a workflow uses the configuration as a RAG
+     * step — the workflow side refuses the reverse order.</li>
+     * </ul>
+     */
+    private void requireDocumentIndexTransitionAllowed(String id, RagConfiguration previous, RagConfiguration updated) {
+        boolean wasIndex = DocumentIndexEligibility.isDocumentIndex(previous);
+        boolean isIndex = DocumentIndexEligibility.isDocumentIndex(updated);
+        if (wasIndex && !isIndex) {
+            throw new BadRequestException("documentIndex cannot be switched off: this RAG configuration is a document index and may "
+                    + "hold users' document chunks. Delete it instead, after removing it from every LLM task's documents.index.rag.");
+        }
+        if (wasIndex && (!Objects.equals(KnowledgeBaseStorage.locationKey(id, previous), KnowledgeBaseStorage.locationKey(id, updated))
+                || KnowledgeBaseStorage.movesServer(previous, updated))) {
+            throw new BadRequestException("The storage of a document index cannot be moved (store type, server, layout or location): "
+                    + "the document chunks already written would be left where nothing deletes them.");
+        }
+        requireEligibleIfDocumentIndex(updated);
+        if (isIndex && !wasIndex) {
+            requireNoWorkflowUses(id);
+        }
+    }
+
+    private void requireNoWorkflowUses(String id) {
+        if (workflowStore == null) {
+            throw new BadRequestException("documentIndex cannot be turned on here: the workflows that may use this RAG configuration "
+                    + "cannot be checked.");
+        }
+        List<DocumentDescriptor> users;
+        try {
+            Integer current = ragStore.getCurrentResourceId(id).getVersion();
+            // Every version of this configuration, as referenced by the current
+            // version of any workflow.
+            users = workflowStore.get().getWorkflowDescriptorsContainingResource(IRestRagStore.resourceURI + id + "?version=" + current, true);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+            // Fail closed, like the location scan.
+            throw new IllegalStateException("Could not list the workflows that use knowledge base " + id
+                    + " to check that it may become a document index", e);
+        }
+        if (users != null && !users.isEmpty()) {
+            List<String> named = users.stream()
+                    .map(descriptor -> descriptor.getName() != null && !descriptor.getName().isBlank()
+                            ? descriptor.getName()
+                            : String.valueOf(descriptor.getResource()))
+                    .toList();
+            throw new BadRequestException("documentIndex cannot be turned on while a workflow uses this RAG configuration as a RAG step "
+                    + "(" + String.join(", ", named) + "): a document index is never an agent's knowledge base. Remove the step first.");
         }
     }
 
@@ -174,7 +268,16 @@ public class KnowledgeBaseStorageGuard {
                     + "another knowledge base's store. Choose another name, or omit it to get a location of this knowledge base's own.");
         }
         String ownKey = KnowledgeBaseStorage.collisionKey(config, explicit);
-        for (String otherId : idsUsing(ownKey, selfId)) {
+        for (Occupant other : occupantsOf(ownKey, selfId)) {
+            // A document index shares its store with nobody, in either direction: a
+            // knowledge base in the 6.5.0 layout reads its store unfiltered, and
+            // sharing with any other one is no use to an index.
+            if (other.documentIndex() || DocumentIndexEligibility.isDocumentIndex(config)) {
+                throw new BadRequestException("storeParameters." + parameter + " '" + explicit + "' is already the location of "
+                        + "another knowledge base, and a document index shares its location with no other knowledge base. "
+                        + "Choose a location of this knowledge base's own.");
+            }
+            String otherId = other.id();
             if (!resourceAccessGuard.hasAccess(otherId, AccessLevel.EDIT)) {
                 throw new BadRequestException("storeParameters." + parameter + " '" + explicit + "' is already the location of "
                         + "another knowledge base, which you cannot edit. Choose a location of this knowledge base's own.");
@@ -185,9 +288,13 @@ public class KnowledgeBaseStorageGuard {
         }
     }
 
-    /** Ids of the other knowledge bases whose explicit location matches. */
-    private List<String> idsUsing(String collisionKey, String selfId) {
-        List<String> matches = new ArrayList<>();
+    /** Another knowledge base whose explicit location matches. */
+    private record Occupant(String id, boolean documentIndex) {
+    }
+
+    /** The other knowledge bases whose explicit location matches. */
+    private List<Occupant> occupantsOf(String collisionKey, String selfId) {
+        List<Occupant> matches = new ArrayList<>();
         boolean complete = false;
         for (int page = 0; page < MAX_PAGES; page++) {
             List<DocumentDescriptor> descriptors;
@@ -203,9 +310,9 @@ public class KnowledgeBaseStorageGuard {
                 break;
             }
             for (DocumentDescriptor descriptor : descriptors) {
-                String otherKey = explicitKeyOf(descriptor, selfId);
-                if (otherKey != null && otherKey.equals(collisionKey)) {
-                    matches.add(RestUtilities.extractResourceId(descriptor.getResource()).getId());
+                Occupant other = occupantOf(descriptor, selfId, collisionKey);
+                if (other != null) {
+                    matches.add(other);
                 }
             }
             if (descriptors.size() < PAGE_SIZE) {
@@ -222,7 +329,7 @@ public class KnowledgeBaseStorageGuard {
         return matches;
     }
 
-    private String explicitKeyOf(DocumentDescriptor descriptor, String selfId) {
+    private Occupant occupantOf(DocumentDescriptor descriptor, String selfId, String collisionKey) {
         if (descriptor == null || descriptor.getResource() == null) {
             return null;
         }
@@ -238,7 +345,9 @@ public class KnowledgeBaseStorageGuard {
         try {
             RagConfiguration other = ragStore.read(resourceId.getId(), resourceId.getVersion());
             String explicit = KnowledgeBaseStorage.explicitPhysicalName(other);
-            return explicit == null ? null : KnowledgeBaseStorage.collisionKey(other, explicit);
+            return explicit != null && KnowledgeBaseStorage.collisionKey(other, explicit).equals(collisionKey)
+                    ? new Occupant(resourceId.getId(), DocumentIndexEligibility.isDocumentIndex(other))
+                    : null;
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Deleted since it was listed: it no longer owns a location.
             LOGGER.debugf("Skipping knowledge base %s in the storage collision check: %s", LogSanitizer.sanitize(resourceId.getId()),
