@@ -74,7 +74,7 @@ public class McpTeamBudgetTools {
     public String readTeamBudget(@ToolArg(description = "The group's id (required)") String groupId,
                                  @ToolArg(description = "Also return this many past months, 1..13 (default: none)",
                                           required = false) Integer historyMonths) {
-        requireAnyRole(identity, authEnabled, McpRoles.BUDGET_READ);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_team_budget"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -102,7 +102,7 @@ public class McpTeamBudgetTools {
     @Tool(name = "list_team_budgets", description = "List the budgets of several teams at once (comma-separated group ids, at most 50), "
             + "plus the tenant's remaining monthly budget. Groups you may not view are left out, not refused.")
     public String listTeamBudgets(@ToolArg(description = "Comma-separated group ids (required)") String groupIds) {
-        requireAnyRole(identity, authEnabled, McpRoles.BUDGET_READ);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_team_budgets"));
         if (groupIds == null || groupIds.isBlank()) {
             return errorJson("groupIds is required", "BAD_REQUEST", null);
         }
@@ -120,7 +120,7 @@ public class McpTeamBudgetTools {
     public String adjustTeamBudget(@ToolArg(description = "The group's id (required)") String groupId,
                                    @ToolArg(description = "This month's cap in USD (required)") Double capUsd,
                                    @ToolArg(description = "Why (required)") String reason) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("adjust_team_budget"));
         if (groupId == null || groupId.isBlank() || capUsd == null || reason == null || reason.isBlank()) {
             return errorJson("groupId, capUsd and reason are required", "BAD_REQUEST", null);
         }
@@ -140,7 +140,7 @@ public class McpTeamBudgetTools {
                                      @ToolArg(description = "Why (required)") String reason,
                                      @ToolArg(description = "Idempotency key; a retry with the same key changes nothing",
                                               required = false) String idempotencyKey) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("transfer_team_budget"));
         if (fromGroupId == null || fromGroupId.isBlank() || toGroupId == null || toGroupId.isBlank() || amountUsd == null || reason == null
                 || reason.isBlank()) {
             return errorJson("fromGroupId, toGroupId, amountUsd and reason are required", "BAD_REQUEST", null);
