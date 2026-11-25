@@ -380,14 +380,15 @@ public class HitlCrashRecoveryObserver {
             return 0;
         }
         int repaired;
+        int recovered;
         passRetryBudgetMillis.set(new long[]{retryBudgetPerPass.toMillis()});
         try {
             repaired = repairRegularPaused(CLUSTER_REARM_GRACE) + repairGroupPaused(CLUSTER_REARM_GRACE)
                     + repairGroupHumanPaused(CLUSTER_REARM_GRACE);
+            recovered = recoverRegularInProgress(eligible);
         } finally {
             passRetryBudgetMillis.remove();
         }
-        int recovered = recoverRegularInProgress(eligible);
         if (repaired > 0 || recovered > 0) {
             LOGGER.warnf("HITL cluster recovery: re-armed %d schedule(s), recovered %d stuck IN_PROGRESS conversation(s).", repaired,
                     recovered);
@@ -593,7 +594,7 @@ public class HitlCrashRecoveryObserver {
     }
 
     /** {@code groupStillPaused}'s I6 twin — same pause-identity re-check. */
-    private boolean groupStillHumanPaused(String groupConversationId, Instant scannedPausedAt) {
+    private Boolean groupStillHumanPaused(String groupConversationId, Instant scannedPausedAt) {
         try {
             var current = groupConversationStore.read(groupConversationId);
             if (current == null || current.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
@@ -605,7 +606,7 @@ public class HitlCrashRecoveryObserver {
             return scannedPausedAt.equals(current.getPausedAt());
         } catch (Exception e) {
             LOGGER.debugf("Human-pause re-check failed for %s: %s", groupConversationId, e.getMessage());
-            return true; // keep the schedule; the handler no-ops on a non-paused state
+            return null; // cannot verify — the row is kept, nothing is deleted on this answer
         }
     }
 
