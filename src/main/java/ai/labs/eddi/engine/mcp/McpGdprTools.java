@@ -95,7 +95,7 @@ public class McpGdprTools {
                                  @ToolArg(description = "Must be 'CONFIRM' to proceed") String confirmation) {
         int outcome = OUTCOME_REFUSED;
         try {
-            requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+            requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_user_data"));
             outcome = OUTCOME_INVALID;
             if (userId == null || userId.isBlank()) {
                 return errorJson("userId is required");
@@ -175,7 +175,7 @@ public class McpGdprTools {
                                  @ToolArg(description = "User ID to export (required)") String userId) {
         int outcome = OUTCOME_REFUSED;
         try {
-            requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+            requireAnyRole(identity, authEnabled, McpToolTiers.of("export_user_data"));
             outcome = OUTCOME_INVALID;
             if (userId == null || userId.isBlank()) {
                 return errorJson("userId is required");

@@ -570,7 +570,12 @@ keycloak:
   enabled: false
   image:
     repository: quay.io/keycloak/keycloak
-    tag: "26.8.0"
+    # A full patch version, pinned by digest as well: Keycloak rebuilt the 26.8.2
+    # tag on 2026-11-19 with the Java4Shell-fixed JDK, so the tag alone can still
+    # resolve to the earlier build on a node that pulled it before then. The digest
+    # wins over the tag: when you change `tag`, update or clear `digest` with it.
+    tag: "26.8.2"
+    digest: "sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3"
   adminUsername: admin
   # REQUIRED when keycloak.enabled=true and existingSecret is empty — no default
   # is shipped. Rendered into the <release>-keycloak Secret and read by the pod
