@@ -77,19 +77,22 @@ class PostgresSchemaConcurrencyIT extends PostgresTestBase {
         }
 
         ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<Object>> futures = new ArrayList<>();
-        for (Callable<Object> task : tasks) {
-            futures.add(pool.submit(() -> {
-                start.await();
-                return task.call();
-            }));
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Object>> futures = new ArrayList<>();
+            for (Callable<Object> task : tasks) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return task.call();
+                }));
+            }
+            start.countDown();
+            for (Future<Object> f : futures) {
+                f.get(120, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
         }
-        start.countDown();
-        for (Future<Object> f : futures) {
-            f.get(120, TimeUnit.SECONDS);
-        }
-        pool.shutdownNow();
 
         // every table exists, exactly once
         try (Connection c = ds.getConnection(); Statement s = c.createStatement()) {
@@ -105,22 +108,25 @@ class PostgresSchemaConcurrencyIT extends PostgresTestBase {
     void sameCreationManyTimes() throws Exception {
         PGSimpleDataSource ds = freshSchema();
         ExecutorService pool = Executors.newFixedThreadPool(16);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<?>> futures = new ArrayList<>();
-        for (int i = 0; i < 16; i++) {
-            futures.add(pool.submit(() -> {
-                start.await();
-                PostgresSchema.run(ds, "race", stmt -> {
-                    stmt.execute("CREATE TABLE IF NOT EXISTS race_table (id INT PRIMARY KEY, data JSONB)");
-                    stmt.execute("CREATE INDEX IF NOT EXISTS idx_race_table_data ON race_table USING GIN (data)");
-                });
-                return null;
-            }));
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<?>> futures = new ArrayList<>();
+            for (int i = 0; i < 16; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    PostgresSchema.run(ds, "race", stmt -> {
+                        stmt.execute("CREATE TABLE IF NOT EXISTS race_table (id INT PRIMARY KEY, data JSONB)");
+                        stmt.execute("CREATE INDEX IF NOT EXISTS idx_race_table_data ON race_table USING GIN (data)");
+                    });
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (Future<?> f : futures) {
+                f.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
         }
-        start.countDown();
-        for (Future<?> f : futures) {
-            f.get(60, TimeUnit.SECONDS);
-        }
-        pool.shutdownNow();
     }
 }

@@ -172,23 +172,26 @@ class PostgresSchemaTest {
         AtomicInteger executions = new AtomicInteger();
         int threads = 12;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<?>> futures = new ArrayList<>();
-        for (int i = 0; i < threads; i++) {
-            futures.add(pool.submit(() -> {
-                start.await();
-                PostgresSchema.runOnce(dataSource, "concurrent", stmt -> {
-                    executions.incrementAndGet();
-                    LockSupport.parkNanos(50_000_000L);
-                });
-                return null;
-            }));
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<?>> futures = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    PostgresSchema.runOnce(dataSource, "concurrent", stmt -> {
+                        executions.incrementAndGet();
+                        LockSupport.parkNanos(50_000_000L);
+                    });
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (Future<?> f : futures) {
+                f.get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
         }
-        start.countDown();
-        for (Future<?> f : futures) {
-            f.get(10, TimeUnit.SECONDS);
-        }
-        pool.shutdownNow();
 
         assertEquals(1, executions.get(), "the DDL of one step runs once per JVM and database");
         assertEquals(1, count("pg_advisory_lock("));

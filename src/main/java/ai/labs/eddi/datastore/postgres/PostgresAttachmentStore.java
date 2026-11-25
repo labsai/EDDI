@@ -230,10 +230,11 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             }
             // A row that records no owner stays deletable, though the read path refuses
             // it: deleting discloses nothing, and refusing would strand personal data.
-            if (owner != null && !owner.equals(requestingConversationId)) {
+            String requester = PostgresText.text(requestingConversationId);
+            if (owner != null && !owner.equals(requester)) {
                 throw new AttachmentAccessDeniedException(
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
-                                .formatted(owner, requestingConversationId));
+                                .formatted(owner, requester));
             }
             try (PreparedStatement ps = conn.prepareStatement(
                     "DELETE FROM attachments WHERE storage_ref = ?")) {
@@ -379,7 +380,10 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         }
     }
 
-    private void authorize(String owner, ResultSet rs, String requester) throws SQLException, AttachmentStoreException {
+    private void authorize(String owner, ResultSet rs, String rawRequester) throws SQLException, AttachmentStoreException {
+        // the row holds what the sanitizing data source stored, so compare the same
+        // text
+        String requester = PostgresText.text(rawRequester);
         if (owner != null && owner.equals(requester)) {
             return;
         }

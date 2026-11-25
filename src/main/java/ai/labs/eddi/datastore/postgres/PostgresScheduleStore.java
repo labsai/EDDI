@@ -206,20 +206,26 @@ public class PostgresScheduleStore implements IScheduleStore {
             """;
 
     /**
-     * Every statement is {@code IF NOT EXISTS}, so this doubles as the idempotent
-     * schema upgrade for indexes added later — {@code idx_fire_logs_started_at} is
-     * one such addition. It backs the retention sweep
-     * ({@code deleteFireLogsOlderThan}), which filters on {@code started_at} alone:
-     * neither compound fire-log index can serve that, because PostgreSQL cannot use
-     * a compound index without its leading column, so the hourly prune was a full
-     * scan of exactly the table it exists to keep bounded.
+     * Every statement is {@code IF NOT EXISTS} or {@code IF EXISTS}, so this
+     * doubles as the idempotent schema upgrade for indexes added later —
+     * {@code idx_fire_logs_started_at} is one such addition. It backs the retention
+     * sweep ({@code deleteFireLogsOlderThan}), which filters on {@code started_at}
+     * alone: neither compound fire-log index can serve that, because PostgreSQL
+     * cannot use a compound index without its leading column, so the hourly prune
+     * was a full scan of exactly the table it exists to keep bounded.
+     * <p>
+     * {@code name} is looked up by equality only, and a caller chooses it: a B-tree
+     * entry is capped near 2.7 KB after compression, so a long, poorly compressible
+     * name failed {@code createSchedule} on the old B-tree index, which is dropped
+     * here and replaced by a hash index that holds a hash of the value.
      */
     private static final String CREATE_INDEXES = """
             CREATE INDEX IF NOT EXISTS idx_schedules_due ON eddi_schedules (enabled, next_fire, fire_status);
             CREATE INDEX IF NOT EXISTS idx_schedules_agent ON eddi_schedules (agent_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON eddi_schedules (tenant_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_user ON eddi_schedules (user_id);
-            CREATE INDEX IF NOT EXISTS idx_schedules_name ON eddi_schedules (name);
+            DROP INDEX IF EXISTS idx_schedules_name;
+            CREATE INDEX IF NOT EXISTS idx_schedules_name_hash ON eddi_schedules USING HASH (name);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_schedule ON eddi_schedule_fire_logs (schedule_id, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_status ON eddi_schedule_fire_logs (status, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_started_at ON eddi_schedule_fire_logs (started_at);

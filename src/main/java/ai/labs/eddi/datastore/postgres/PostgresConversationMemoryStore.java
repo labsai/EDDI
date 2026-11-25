@@ -931,7 +931,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         return GenerationUpgradeOutcome.NOT_FOUND;
                     }
                     String generation = rs.getString("generation");
-                    return GenerationUpgradeOutcome.whyNotUpgraded(true, agentId != null && agentId.equals(rs.getString("AGENT_ID")),
+                    return GenerationUpgradeOutcome.whyNotUpgraded(true,
+                            agentId != null && PostgresText.text(agentId).equals(rs.getString("AGENT_ID")),
                             parseGeneration(conversationId, generation), targetGeneration,
                             stateOrNull(rs.getString("conversation_state")));
                 }

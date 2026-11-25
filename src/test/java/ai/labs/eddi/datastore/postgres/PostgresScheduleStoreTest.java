@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -770,6 +771,31 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
                 assertEquals(kept, store.readSchedule(kept).getId());
             }
             assertEquals(0, store.deleteUsedUpOneShotsByName(NAME), "nothing used up is left");
+        }
+    }
+
+    @Test
+    @DisplayName("a long, poorly compressible name is stored and found by name, and the name index is a hash index")
+    void longIncompressibleNameIsStoredAndFound() throws Exception {
+        // repeated characters compress away and would hide a B-tree entry-size failure
+        var random = new Random(42);
+        var sb = new StringBuilder();
+        for (int i = 0; i < 6000; i++) {
+            sb.append((char) ('a' + random.nextInt(26))).append((char) ('0' + random.nextInt(10)));
+        }
+        String name = sb.toString();
+
+        String id = store.createSchedule(createCronSchedule(name, "agent1", "tenant1"));
+
+        assertEquals(id, store.readScheduleByName(name).orElseThrow().getId());
+        try (var c = ds.getConnection();
+                var s = c.createStatement();
+                var rs = s.executeQuery(
+                        "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'eddi_schedules' AND indexname LIKE 'idx_schedules_name%'")) {
+            assertTrue(rs.next(), "the name index exists");
+            assertEquals("idx_schedules_name_hash", rs.getString(1));
+            assertTrue(rs.getString(2).toLowerCase().contains("using hash"), rs.getString(2));
+            assertFalse(rs.next(), "the old B-tree index is gone");
         }
     }
 

@@ -2139,7 +2139,8 @@ public class AuditLedgerService implements UserErasureParticipant {
         if (conversationId == null) {
             return Set.of();
         }
-        Set<Long> tracked = undelivered.get(conversationId);
+        UnaryOperator<String> storableText = auditStore.storableText();
+        Set<Long> tracked = undelivered.get(storableText == null ? conversationId : storableText.apply(conversationId));
         return tracked == null ? Set.of() : Set.copyOf(tracked);
     }
 

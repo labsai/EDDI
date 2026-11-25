@@ -169,6 +169,24 @@ class AuditLedgerPoisonEntryTest {
     }
 
     @Test
+    @DisplayName("undeliveredSequences finds the positions of a conversation id the store changes, asked with the id as the caller has it")
+    void undeliveredSequencesAnswersForTheCallersRawId() throws Exception {
+        doReturn(POSTGRES_TEXT).when(store).storableText();
+        storeRejectsPoisonEntries();
+        var service = ledger();
+        String raw = "conv\u0000x";
+        for (int i = 1; i <= 4; i++) {
+            service.submit(entry("poison-" + i, raw, Map.of("text", "x")));
+        }
+
+        service.flush();
+
+        assertEquals(4, service.undeliveredSequences(raw).size(), "the raw id must reach the positions tracked under the stored one");
+        assertEquals(4, service.undeliveredSequences("conv\uFFFDx").size());
+        assertTrue(service.undeliveredSequences("conv-other").isEmpty());
+    }
+
+    @Test
     @DisplayName("for a store that replaces NUL, the entry is made storable BEFORE it is signed")
     void nulIsReplacedBeforeSigning() {
         doReturn(POSTGRES_TEXT).when(store).storableText();
