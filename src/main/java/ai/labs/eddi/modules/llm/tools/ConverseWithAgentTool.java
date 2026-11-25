@@ -8,6 +8,10 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
+import ai.labs.eddi.engine.attachments.AttachmentShareService.Refusal;
+import ai.labs.eddi.engine.attachments.ShareResult;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -15,13 +19,16 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -76,6 +83,13 @@ public class ConverseWithAgentTool {
      */
     public static final String CONTEXT_DELEGATION_DEPTH_MAX = "delegationDepthMax";
 
+    /**
+     * Context key carrying how many hops the files shared on this turn have
+     * travelled ({@code documents.sharing.maxDepth}). Reserved
+     * ({@code ClientContextGuard}), so a client cannot set it.
+     */
+    public static final String CONTEXT_ATTACHMENT_SHARE_DEPTH = ClientContextGuard.KEY_ATTACHMENT_SHARE_DEPTH;
+
     private final IConversationService conversationService;
     private final String userId;
     private final DynamicAgentConfig config;
@@ -102,6 +116,9 @@ public class ConverseWithAgentTool {
      * {@code DynamicAgentToolsProvider} always supplies one under CDI).
      */
     private final BiPredicate<String, String> useCheck;
+
+    /** The files side of the turn, or {@code null} — see the widest constructor. */
+    private final AttachmentShareBinding shareBinding;
 
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
         this(conversationService, userId, permissiveDefault(), 0);
@@ -177,6 +194,22 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, delegationCount, null);
+    }
+
+    /**
+     * @param shareBinding
+     *            the files side of the turn, present only when the agent's
+     *            {@code documents.sharing.delegation} is on. With it, every
+     *            conversation this tool starts is recorded as started here — the
+     *            only kind of conversation that may later receive this
+     *            conversation's files — and {@link ConverseWithAgentAndFilesTool}
+     *            can hand files on. {@code null}: no recording, no files.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount,
+            AttachmentShareBinding shareBinding) {
+        this.shareBinding = shareBinding;
         this.delegationCount = delegationCount != null ? delegationCount : TurnCounter.local();
         this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
@@ -194,7 +227,27 @@ public class ConverseWithAgentTool {
                                     @P("The ID of the target agent to converse with") String agentId,
                                     @P("The message to send to the agent") String message,
                                     @P("Optional conversation ID for continuing a multi-turn conversation") String conversationId) {
+        return converse(agentId, message, conversationId, null);
+    }
 
+    /**
+     * The body both tool classes run. With {@code attachments} (only
+     * {@link ConverseWithAgentAndFilesTool} passes any) the named files are shared
+     * with the target conversation after every guardrail has passed and before the
+     * message is sent, and the result says what was shared and what was refused
+     * ahead of the delegate's answer.
+     */
+    String converse(String agentId, String message, String conversationId, List<String> attachments) {
+        StringBuilder filesNote = new StringBuilder();
+        String result = converseAndShare(agentId, message, conversationId, attachments, filesNote);
+        return filesNote.isEmpty() ? result : filesNote + result;
+    }
+
+    private String converseAndShare(String agentId, String message, String conversationId, List<String> attachments,
+                                    StringBuilder filesNote) {
+        // Whether the model named a conversation to continue, before the start branch
+        // below fills conversationId in.
+        boolean continuation = conversationId != null && !conversationId.isBlank();
         try {
             // --- Validate parameters ---
             if (agentId == null || agentId.isBlank()) {
@@ -282,6 +335,11 @@ public class ConverseWithAgentTool {
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
+                    // Recorded before anything else can fail: this conversation started
+                    // it, so it — and only it — may receive this conversation's files.
+                    if (shareBinding != null) {
+                        shareBinding.recordStarted(conversationId);
+                    }
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
                 } catch (Exception e) {
@@ -303,6 +361,9 @@ public class ConverseWithAgentTool {
             // startConversation call, and downstream turn processing may add context
             // entries of its own.
             inputData.setContext(new HashMap<>(delegationContext));
+
+            // --- Files: shared after every guardrail, before the message is sent ---
+            shareFiles(agentId, conversationId, continuation, attachments, inputData.getContext(), filesNote);
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final AtomicBoolean skipped = new AtomicBoolean();
@@ -382,6 +443,83 @@ public class ConverseWithAgentTool {
         } catch (Exception e) {
             LOGGER.errorf("[CONVERSE] Error conversing with agent '%s': %s", agentId, e.getMessage());
             return "❌ Error conversing with agent '%s': %s".formatted(agentId, e.getMessage());
+        }
+    }
+
+    /**
+     * Shares the named files with {@code targetConversationId} and puts each shared
+     * one on the message turn's context as {@code attachment_<n>} =
+     * {@code {storageRef, fileName}} — the shape a client's stored-reference
+     * attachment has, so the delegate's own pipeline resolves (against its grant)
+     * and forwards it exactly as if a user had attached it — plus the share depth
+     * the delegate's own shares are counted from. On the message turn, not the
+     * start context: the start context reaches step 0 only.
+     */
+    private void shareFiles(String agentId, String targetConversationId, boolean continuation, List<String> attachments,
+                            Map<String, Context> turnContext, StringBuilder filesNote) {
+        if (attachments == null || attachments.stream().allMatch(a -> a == null || a.isBlank())) {
+            return;
+        }
+        if (shareBinding == null) {
+            filesNote.append("⚠️ Files not shared: ").append(Refusal.UNAVAILABLE.text()).append(".\n");
+            return;
+        }
+        // A continued conversation must also still run the agent the model names: the
+        // engine refuses the message otherwise, and the grant would be made — and
+        // audited — for an agent that never receives the files.
+        ShareResult result = continuation && !runsAgent(targetConversationId, agentId)
+                ? shareBinding.refuseAll(attachments, Refusal.TARGET)
+                : shareBinding.shareTo(targetConversationId, agentId, attachments);
+        int index = 0;
+        for (ShareResult.Shared shared : result.shared()) {
+            Map<String, Object> value = new LinkedHashMap<>();
+            AttachmentSelector selector = shared.selector();
+            value.put(AttachmentContextExtractor.FIELD_STORAGE_REF, selector.storageRef());
+            // A part keeps the sender's pages: the delegate's intake checks them and never
+            // re-derives them from the unit under its own split.
+            putPart(value, AttachmentContextExtractor.FIELD_PAGES, selector.pages());
+            putPart(value, AttachmentContextExtractor.FIELD_UNIT, selector.unit());
+            putPart(value, AttachmentContextExtractor.FIELD_SPLIT, selector.split());
+            if (shared.fileName() != null) {
+                value.put("fileName", shared.fileName());
+            }
+            turnContext.put(AttachmentContextExtractor.ATTACHMENT_PREFIX + index++, new Context(Context.ContextType.object, value));
+        }
+        if (!result.shared().isEmpty()) {
+            turnContext.put(CONTEXT_ATTACHMENT_SHARE_DEPTH,
+                    new Context(Context.ContextType.string, String.valueOf(shareBinding.currentDepth() + 1)));
+            filesNote.append("📎 Shared with the agent: ")
+                    .append(String.join(", ", result.shared().stream().map(ShareResult.Shared::fileName).toList())).append(".\n");
+        }
+        if (!result.refused().isEmpty()) {
+            boolean capped = false;
+            List<String> reasons = new ArrayList<>();
+            for (ShareResult.Refused refused : result.refused()) {
+                reasons.add(refused.requestedName() + " (" + refused.reason() + ")");
+                capped |= Refusal.FILES_PER_SHARE.text().equals(refused.reason());
+            }
+            filesNote.append("⚠️ Not shared: ").append(String.join("; ", reasons)).append('.');
+            if (capped) {
+                filesNote.append(" At most ").append(shareBinding.maxFilesPerShare()).append(" files can be shared per call.");
+            }
+            filesNote.append('\n');
+        }
+        LOGGER.debugf("[CONVERSE] Shared %d file(s) with agent '%s' (%d refused)", (Object) result.shared().size(), sanitize(agentId),
+                result.refused().size());
+    }
+
+    /**
+     * Whether {@code conversationId} is a conversation of {@code agentId}. Any
+     * failure to tell counts as no.
+     */
+    private boolean runsAgent(String conversationId, String agentId) {
+        try {
+            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            return snapshot != null && agentId.equals(snapshot.getAgentId());
+        } catch (Exception e) {
+            LOGGER.debugf("[CONVERSE] Could not read the agent of conversation '%s': %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return false;
         }
     }
 
@@ -488,5 +626,11 @@ public class ConverseWithAgentTool {
      */
     private String extractResponse(SimpleConversationMemorySnapshot snapshot) {
         return ConversationOutputExtractor.extractResponse(snapshot);
+    }
+
+    private static void putPart(Map<String, Object> value, String field, String part) {
+        if (part != null && !part.isBlank()) {
+            value.put(field, part);
+        }
     }
 }

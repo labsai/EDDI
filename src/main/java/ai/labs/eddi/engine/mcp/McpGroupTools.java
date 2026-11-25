@@ -28,8 +28,11 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
+import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.internal.groups.GroupQuestionLimits;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -83,6 +86,20 @@ public class McpGroupTools {
     private final GroupTemplateService templateService;
     private final ResourceAccessGuard resourceAccessGuard;
     private final boolean authEnabled;
+
+    /*
+     * The limits RestGroupConversation re-checks a discussion's inline attachments
+     * against (GroupAttachmentLimits). Field-injected like there; the initialisers
+     * are the shipped defaults, for unit tests that construct this bean directly.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520")
+    long maxAttachmentBytes = 20_971_520L;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-conversation", defaultValue = "50")
+    int maxAttachmentsPerConversation = 50;
+
+    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600")
+    long maxAttachmentBytesPerConversation = 104_857_600L;
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
@@ -456,11 +473,25 @@ public class McpGroupTools {
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
                                      @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
                                      @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
-                                              required = false) String userId) {
+                                              required = false) String userId,
+                                     @ToolArg(description = McpAttachmentArguments.GROUP_DESCRIPTION,
+                                              required = false) String attachments) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         // The ceilings REST holds a question to: no validator sees an in-process MCP
         // call, and the question is fanned out to every member in every phase.
         String rejection = GroupQuestionLimits.rejectionReason(question, userId);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
+        // A storageRef is refused here, before anything else: the binder admits one
+        // only from a trusted source conversation, which an MCP call never has.
+        var files = McpAttachmentArguments.parse(attachments, false, maxAttachmentBytes);
+        if (files.isRefused()) {
+            return errorJson(files.error(), "BAD_REQUEST", null);
+        }
+        List<AttachmentRef> refs = McpAttachmentArguments.toRefs(files.entries());
+        rejection = GroupAttachmentLimits.rejectionReason(refs, maxAttachmentBytes, maxAttachmentsPerConversation,
+                maxAttachmentBytesPerConversation);
         if (rejection != null) {
             return errorJson(rejection, "BAD_REQUEST", null);
         }
@@ -473,10 +504,19 @@ public class McpGroupTools {
         }
         try {
             String user = resolveOwner(userId);
-            GroupConversation gc = groupConversationService.discuss(groupId, question, user, 0);
+            // The overload only when there are files, as REST does: the plain call stays
+            // exactly what it was.
+            List<Attachment> shared = GroupAttachmentLimits.toAttachments(refs);
+            GroupConversation gc = shared == null
+                    ? groupConversationService.discuss(groupId, question, user, 0)
+                    : groupConversationService.discuss(groupId, question, user, 0, null, shared);
             return jsonSerialization.serialize(gc);
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
+        } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
+            // The texts REST answers with: the scope, never the store's message.
+            LOGGER.infof("discuss_with_group rejected (attachment %s quota) for group %s", e.getScope(), LogSanitizer.sanitize(groupId));
+            return errorJson(GroupAttachmentLimits.quotaRejection(e.getScope()), "BAD_REQUEST", null);
         } catch (Exception e) {
             return failure("discuss_with_group", "Failed to run group discussion", e);
         }

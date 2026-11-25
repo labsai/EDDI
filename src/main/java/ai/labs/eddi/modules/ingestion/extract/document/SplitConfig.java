@@ -43,12 +43,13 @@ public record SplitConfig(SplitStrategy strategy, int pagesPerUnit, int maxUnitT
 
     /**
      * The version of the cutting rules, part of {@link #hash()}. Raised whenever
-     * the same configuration starts producing different units — when
-     * {@link SplitStrategy#HEADINGS} stops meaning {@link SplitStrategy#AUTO}, say
-     * — so a manifest cached under the old rules is not taken for one made under
-     * the new.
+     * the same configuration starts producing different units, so a manifest cached
+     * under the old rules is not taken for one made under the new, and a unit label
+     * from the old rules is recognized as belonging to another split. 2:
+     * {@link SplitStrategy#HEADINGS} cuts at headings instead of meaning
+     * {@link SplitStrategy#AUTO}, and AUTO tries headings before page windows.
      */
-    static final int RULES_VERSION = 1;
+    static final int RULES_VERSION = 2;
 
     public SplitConfig {
         strategy = strategy == null ? SplitStrategy.AUTO : strategy;

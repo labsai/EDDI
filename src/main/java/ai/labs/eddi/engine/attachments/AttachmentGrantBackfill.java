@@ -73,6 +73,11 @@ public class AttachmentGrantBackfill {
     static final String MIGRATION_KEY = "attachment-grants-backfill-complete";
     static final int BATCH_SIZE = 500;
     static final int MAX_BATCHES = 2_000;
+    /**
+     * Prefixed to the kept cursor when a lookup failed earlier in the pass; store
+     * cursors are hex ObjectIds or UUIDs, so it cannot collide.
+     */
+    static final String FAILED_EARLIER = "!";
 
     /** Whether a grantee still exists; throws when it cannot tell. */
     @FunctionalInterface
@@ -144,7 +149,12 @@ public class AttachmentGrantBackfill {
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not remove attachment grant rows whose blob is gone; the next start retries: %s", sanitize(e.getMessage()));
             }
-            String cursor = migration.readBackfillCursor();
+            // A pass can span several starts. A lookup that failed on an earlier start
+            // of the same pass is carried in the kept cursor, so the start that reaches
+            // the end does not record a pass that missed a grant as complete.
+            String kept = migration.readBackfillCursor();
+            boolean failedEarlier = kept != null && kept.startsWith(FAILED_EARLIER);
+            String cursor = failedEarlier ? kept.substring(FAILED_EARLIER.length()) : kept;
             for (int batch = 0; batch < maxBatches; batch++) {
                 IAttachmentGrantMigration.Page page = migration.readLegacyGrants(cursor, batchSize);
                 // Existence is cached for one page only, so a pass of many pages does
@@ -189,9 +199,9 @@ public class AttachmentGrantBackfill {
                     }
                 }
                 cursor = page.nextCursor();
-                migration.writeBackfillCursor(cursor);
+                migration.writeBackfillCursor(cursor == null ? null : (failed > 0 || failedEarlier ? FAILED_EARLIER : "") + cursor);
                 if (cursor == null) {
-                    complete = failed == 0;
+                    complete = failed == 0 && !failedEarlier;
                     break;
                 }
             }

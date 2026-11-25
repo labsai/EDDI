@@ -176,7 +176,8 @@ class AttachmentShareServiceTest {
             var r = service.resolveNames(listing, List.of("report.pdf#u3", "report.pdf#p1-2"));
             assertTrue(r.resolved().isEmpty());
             r.refused().forEach(x -> assertEquals(Refusal.PART.text(), x.reason()));
-            assertTrue(Refusal.PART.text().startsWith("parts of a file cannot be shared yet"));
+            // This service has no document structure, so it cannot resolve parts.
+            assertTrue(Refusal.PART.text().startsWith("parts of this file cannot be shared"));
         }
 
         @Test

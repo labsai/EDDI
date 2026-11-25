@@ -205,7 +205,7 @@ Quotas are enforced atomically: the usage is counted and the blob stored under o
 
 #### Derived files
 
-The store can also hold **derived files**: views EDDI makes of an uploaded file, such as a PDF's structure, the text of a page window, an extracted image or a page-range slice. Nothing creates one yet; the document features that will are off by default and arrive in later releases. What is already true:
+The store can also hold **derived files**: views EDDI makes of an uploaded file, such as a PDF's structure, the text of a page window, an extracted image or a page-range slice. The only one created so far is a PDF's **structure** (its chapters and their page ranges), stored the first time a part of the PDF is resolved (see [Sending part of a file](#sending-part-of-a-file)); the other kinds arrive with the document features, which are off by default. What is already true:
 
 - **A derived file belongs to the uploaded file's owner**, never to the conversation whose work produced it. When a group member reads a file shared with it and EDDI extracts a chapter, the extract belongs to the file's owner, any reader of the file can read it, and it is not deleted with the member.
 - **Access is decided on the uploaded file.** Whoever may read the file may read every view of it; a grant is always on the uploaded file. A conversation that may not read the file is told a view of it does not exist.
@@ -248,6 +248,41 @@ Attachment context keys must match the pattern `attachment_*`:
 | `fileName` | No | Original filename (for metadata/logging) |
 
 `storageRef` has the highest precedence; if both `url` and `data` are present, `url` takes precedence.
+
+### Sending part of a file
+
+A `storageRef` attachment of a PDF may name a part of the file instead of all of it, with three optional string fields:
+
+| Field | Example | Meaning |
+|---|---|---|
+| `pages` | `"12-19"` | First and last page, 1-based, inclusive. **Authoritative.** |
+| `unit` | `"u3"` | A chapter label, as an agent's document tools number the file |
+| `split` | 16 hex characters | The hash of the split configuration the `unit` label belongs to |
+
+```json
+{
+  "input": "Summarize this chapter",
+  "context": {
+    "attachment_0": {
+      "type": "object",
+      "value": { "storageRef": "6560a1b2c3d4e5f6a7b8c9d0", "pages": "12-19" }
+    }
+  }
+}
+```
+
+**Pages win.** A chapter label means something only for one way of cutting a file: two agents with different split settings number the same PDF differently. So:
+
+- With `pages`, those pages are used. They are checked against the document and never re-derived from `unit` or `split`, which travel along as labels.
+- With only `unit`, the label is turned into pages once, when the turn arrives, by the receiving agent's split, and the attachment then carries pages and split. Until designers can configure splits, every agent uses the deployment's built-in split. A client that needs a stable part should send `pages`.
+- A `unit` with a `split` hash from another split and no `pages` is an error ("this chapter id belongs to a different split of the file; send pages"). EDDI never guesses which chapter was meant.
+- An unknown unit, pages outside the document, a malformed range, or a part of a file that is not a PDF is an error too.
+
+An error is reported in the turn's `attachments:errors` note, the turn continues, and the attachment is dropped: a part that cannot be resolved is **never sent as the whole file**. A part counts as one attachment against `eddi.attachments.max-per-turn`, so five parts of one file use the five slots.
+
+Resolving a `unit` reads the PDF's structure once and keeps it as a derived file of the PDF (see [Derived files](#derived-files)), owned by the PDF's owner and deleted with it. A node-local cache of 30 minutes sits in front of it; the cache is never trusted for access, which is checked on every request.
+
+> **Rendering arrives in the next release.** This release resolves and carries parts end to end — through group conversations and agent-to-agent shares — but the model still receives the whole PDF, as before. Sending only the selected pages (a page-range PDF for document-capable models, the pages' text for others) is the next step.
 
 ---
 
@@ -385,6 +420,8 @@ To act on attachments, read the `attachments` memory key from a task, or match o
 
 Group discussions accept inline data and hosted URLs on `POST /groups/{groupId}/conversations`. Inline data is stored in the blob store owned by the group conversation and counted against the discussion's owner, so the same quotas apply as to a 1:1 upload: `eddi.attachments.max-size-bytes` per file, `max-per-conversation` and `max-total-bytes-per-conversation` for the discussion (checked from the request before anything is decoded or stored), and the per-user quotas (checked atomically when the files are stored). A refusal is a `400` (or a `group_error` event on the `/stream` variant), and nothing from the refused request is kept. Hosted `url` references pass through. A bare `storageRef` is not accepted from a client: only a nested group passes references down, and only those its parent discussion can read.
 
+The MCP tools take the same entries in an `attachments` argument: `talk_to_agent` and `chat_with_agent` send them as the turn's `attachment_*` context (a `storageRef` the conversation can read included), and `discuss_with_group` applies the group rules above and refuses a `storageRef` with an error. See [MCP server → Sending files](mcp-server.md#sending-files-attachments).
+
 Deleting a discussion (`DELETE /groups/{groupId}/conversations/{id}`) deletes its blobs, and a GDPR erasure of the owner reaches them — see [gdpr-compliance.md](gdpr-compliance.md).
 
 Each member's private conversation is granted access on its **first** turn and receives the files as `attachment_*` context; from there everything on this page applies unchanged. Later turns rely on the member's own history plus the auto-enabled `readAttachment` tool, so a member does not lose the file after phase one.
@@ -393,21 +430,27 @@ Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) ap
 
 ## Sharing between agents — the rule
 
-Every path that hands a stored file from one conversation to another follows one rule, implemented once in `AttachmentShareService` (`engine/attachments`). Today only its read check (rule 3) is in use, by the nested-group pass-through above — that path is neither metered nor audited as a share; the agent tools that pass files on (delegation first) call the full service.
+Every path that hands a stored file from one conversation to another follows one rule, implemented once in `AttachmentShareService` (`engine/attachments`). Delegation — `converse_with_agent` with its `attachments` argument, see [Handing files to a delegated agent](#handing-files-to-a-delegated-agent) — calls the full service; the nested-group pass-through above uses only its read check (rule 3) and is neither metered nor audited as a share.
 
 1. **A model names files; it never holds a reference.** What a conversation's model may name is its **listing**: the files it owns or was granted (`listAccessible`), minus the files of a turn an input guardrail refused (withheld). Each entry is shown by its file name — `(unnamed)` for a file stored without one, never the `storageRef` — and can also be named by its 1-based number. The listing is sorted by name (then by reference), so the same files always list the same way, but a file added or granted later can shift the numbers: a number is only meaningful against the listing shown in the same turn. A name that matches several files is refused with their numbers; a name that is not in the listing is `not found`, whether the file exists elsewhere or not at all.
 2. **Server code picks both ends.** The source is the conversation the tool is bound to; the target is a conversation server code created for the share. Neither comes from a model or from client context.
 3. **The listing is checked, not trusted.** It must have been built for the source conversation; a withheld file is never shared, even from a listing assembled by hand; and the source must still be able to read the file when it shares it (owner or grantee). Each of these refusals reads `not found` and names no file. A grantee may share a file onward, within the hop limit.
 4. **Limits**, set by the caller from the agent's configuration: files per share, shares per turn (one count for the whole turn, whatever the number of tool assemblies), allowed MIME types and the hop limit. A refused file uses up no slot.
 5. **What a share does:** it grants the target conversation read access to the file's root — so the receiver can read the whole file with `readAttachment` — records an audit entry in the **source** conversation's ledger (`taskId` `attachment.share`: target conversation and agent, reason, MIME type, size; no bytes, no file name), and counts the metrics below. The tool that shared stores a row per file under the step key `attachments:shared` (file name, target agent, reason — no references).
-6. **Not yet:** parts of a file. `report.pdf#u3` (a unit) and `report.pdf#p4-9` (pages) are understood and refused with *parts of a file cannot be shared yet*. A file whose name itself contains `#` is still found by its exact name.
+6. **Parts of a file.** `report.pdf#u3` (a unit) and `report.pdf#p4-9` (pages) name a part of a listed PDF. Before it is shared, a unit is turned into pages by the sharing agent's split, and given pages are checked against the document; the receiver gets those pages, whatever its own split ([Sending part of a file](#sending-part-of-a-file)). The grant is still on the whole file: **a receiver of a part can read the whole file with `readAttachment`**; the part limits what is sent, not what may be read. A part that cannot be resolved is refused with the reason and grants nothing. Parts and views an agent's tools record on the conversation's steps are listed too, as `report.pdf — u3, p.12–19` (or the view's file name), when their file is listed. A file whose name itself contains `#` is still found by its exact name.
 
 | Metric | Tag | Meaning |
 |---|---|---|
 | `eddi_attachment_shared_total` | `path` (`delegation`, `group_task`, `group_share`, `handoff`, `a2a_outbound`, `mcp`, `nested_group`) | Files shared |
-| `eddi_attachment_share_refused_total` | `reason` (`not_found`, `ambiguous`, `part`, `mime_type`, `depth`, `files_per_share`, `shares_per_turn`, `target`, `grant_failed`, `unavailable`) | Share requests refused |
+| `eddi_attachment_share_refused_total` | `reason` (`not_found`, `ambiguous`, `part`, `part_invalid`, `mime_type`, `depth`, `files_per_share`, `shares_per_turn`, `target`, `grant_failed`, `unavailable`) | Share requests refused |
 
 Granting is idempotent on both stores (MongoDB adds to a set, PostgreSQL appends only when absent), so sharing the same file twice leaves one grant.
+
+## Handing files to a delegated agent
+
+An agent whose LLM task sets `documents.sharing.delegation: true` can hand files of its conversation — whole, or a part such as `report.pdf#u3` — to another agent: `converse_with_agent(agentId, message, conversationId, attachments)`, where `attachments` lists file names (or numbers) of the conversation's files. The delegate's conversation is granted each file and receives it on the message turn as `attachment_<n>` = `{storageRef, fileName}` — the stored-reference form a client uses — so from there everything on this page applies to it unchanged: MIME and size come from the store, `eddi.attachments.max-per-turn` and the forward caps apply, and the delegate gets `readAttachment`.
+
+Files go only to the conversation the call starts, or to one this conversation started earlier; a file the delegate received can be handed on again until `documents.sharing.maxDepth` hops. The configuration, the limits and the rules are in [langchain.md → Handing files to a delegated agent](langchain.md#handing-files-to-a-delegated-agent).
 
 ## Architecture Notes
 

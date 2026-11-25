@@ -60,12 +60,12 @@ class RestLlmStoreDocumentsPatchTest {
         var rest = new RestLlmStore(store, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
                 mock(ResourceAccessGuard.class));
         rest.jsonPatcher = new ConfigJsonPatcher(mapper, new StrictConfigurationParser(mapper));
-        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/documents\",\"value\":{\"sharing\":{\"delegation\":true}}}]";
+        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/documents\",\"value\":{\"sharing\":{\"handoff\":true}}}]";
 
         // The store's refusal propagates as is (IllegalArgumentExceptionMapper turns it
         // into a 400 at the HTTP layer); any other refusal would fail this assertion.
         var e = assertThrows(IllegalArgumentException.class, () -> rest.patchLlm(ID, 2, patch));
-        assertEquals("langchain.task[0].documents.sharing.delegation is not available in this version", e.getMessage());
+        assertEquals("langchain.task[0].documents.sharing.handoff is not available in this version", e.getMessage());
         verifyNoInteractions(storage);
     }
 }

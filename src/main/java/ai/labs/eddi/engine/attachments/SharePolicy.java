@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import ai.labs.eddi.modules.llm.tools.TurnCounter;
 
 import java.util.Locale;
@@ -35,10 +36,14 @@ import java.util.stream.Collectors;
  *            ({@link TurnCounter#onStep}). {@code null} is replaced by a
  *            counter local to this policy, so {@code maxSharesPerTurn} then
  *            bounds the calls made with this policy instance
+ * @param split
+ *            the sharing task's split configuration: a part named by unit
+ *            ({@code report.pdf#u3}) is resolved to pages under it before it is
+ *            shared. {@code null} is replaced by {@link SplitConfig#defaults()}
  * @since 6.7.0
  */
 public record SharePolicy(int maxFilesPerShare, int maxSharesPerTurn, int maxDepth, int currentDepth,
-        Set<String> allowedMimeTypes, TurnCounter sharesThisTurn) {
+        Set<String> allowedMimeTypes, TurnCounter sharesThisTurn, SplitConfig split) {
 
     public SharePolicy {
         allowedMimeTypes = allowedMimeTypes == null
@@ -50,6 +55,15 @@ public record SharePolicy(int maxFilesPerShare, int maxSharesPerTurn, int maxDep
         if (sharesThisTurn == null) {
             sharesThisTurn = TurnCounter.local();
         }
+        if (split == null) {
+            split = SplitConfig.defaults();
+        }
+    }
+
+    /** A policy with the default split configuration. */
+    public SharePolicy(int maxFilesPerShare, int maxSharesPerTurn, int maxDepth, int currentDepth, Set<String> allowedMimeTypes,
+            TurnCounter sharesThisTurn) {
+        this(maxFilesPerShare, maxSharesPerTurn, maxDepth, currentDepth, allowedMimeTypes, sharesThisTurn, null);
     }
 
     /** Whether {@code mimeType} may be shared under this policy. */

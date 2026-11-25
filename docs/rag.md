@@ -383,6 +383,58 @@ Rules enforced when a knowledge base is saved:
 > fails with an index error (reported in the `rag:trace` entry). On the default `eddi_kbid_<id>`
 > collection nothing is filtered, because nothing else can be in it.
 
+### Document index
+
+A **document index** is a RAG configuration that holds the chunks of *users' and conversations'
+documents* — the PDFs the documents feature works with — and never an agent's knowledge base. An agent's
+knowledge base answers every user of the agent; a document belongs to one user, team or conversation.
+So the two are kept apart by a flag, and the flag is enforced in every direction, whichever configuration
+is edited first.
+
+```json
+{
+  "name": "Document index",
+  "embeddingProvider": "openai",
+  "embeddingParameters": { "model": "text-embedding-3-small", "apiKey": "${vault:openai-key}" },
+  "storeType": "pgvector",
+  "storeParameters": { "host": "db", "database": "eddi", "user": "eddi", "password": "${vault:pg-password}" },
+  "documentIndex": true
+}
+```
+
+`documentIndex` is `false` when absent (it is not written back for an ordinary knowledge base). In this
+version nothing writes document chunks yet and no LLM task can name an index (`documents.index.rag` is not
+available yet, see [langchain.md](langchain.md#documents-documents)); the flag, its refusals and the
+storage rules are in place first, so an index created now is already separated when indexing ships.
+
+**Eligible.** A configuration flagged `documentIndex` must also:
+
+- use `storeNamespace: "id"` (every knowledge base created from 6.6 on does),
+- use a vector store that filters and deletes by metadata: `pgvector`, `elasticsearch`, `qdrant`,
+  `chroma`, `in-memory` (lost on restart; for development), or `mongodb-atlas` **with an explicit
+  `collectionName`** whose vector index declares `metadata.kbId`, `metadata.sourceKey` and
+  `metadata.documentId` as filter fields — an Atlas default collection is refused,
+- have no ingestion `sources`: an index holds document chunks only.
+
+**Refused, in every direction:**
+
+| When | What is refused |
+| --- | --- |
+| A RAG configuration is created, duplicated or imported | `documentIndex: true` on a configuration that is not eligible (`400`, with the reason) |
+| A RAG configuration is updated | switching `documentIndex` off once it is on; moving a document index's storage (store type, server, layout or location); making it ineligible (adding `sources`, say); turning `documentIndex` on while the current version of any workflow uses the configuration as a RAG step (the workflow is named). Delete a document index you no longer want rather than switching it off |
+| A RAG configuration's explicit location is set | a document index may not share its `table`/`collectionName`/`indexName` with any other knowledge base, and no knowledge base may take the location of a document index — even when you may edit both |
+| A workflow is created or updated | a RAG step whose configuration is a document index (`400`, naming the step). This also covers an LLM task's `knowledgeBases` and `enableWorkflowRag`, which only ever reach the workflow's own RAG steps |
+| An LLM task is saved (once `documents.index.rag` is available) | a `documents.index.rag` that names a missing configuration, an ordinary knowledge base or an ineligible index |
+| EDDI starts | an `eddi.documents.index.default-rag` ([configuration-reference.md](configuration-reference.md#documents)) that names a missing or ineligible configuration: startup fails with the reason |
+| At runtime | retrieval skips a workflow RAG step whose configuration is a document index (one WARN per step, and a `rag:trace` entry with `"skipped": "documentIndex"`); every write of document chunks re-checks eligibility first |
+
+**How the chunks are kept apart.** A document chunk is written into the index's own store under three
+tags that server code sets and no caller can choose: `kbId = doclib:<ragConfigId>` (never the
+`kbId=<id>` an ordinary knowledge base filters on, so its retrieval, `/ingest` and source runs never see or
+delete one), `sourceKey = doclib|<ownerKey>` (whose document it is) and `documentId` = the stored
+attachment's reference. pgvector's `(documentId, sourceKey)` index serves the owner filter. A document's
+chunks are deleted by `documentId`, whatever their owner, so a change of owner leaves nothing behind.
+
 ## Ingestion Sources
 
 A knowledge base can pull its own documents instead of being fed one at a time. Sources live on the

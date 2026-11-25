@@ -86,7 +86,8 @@ class SkillToolReferencesTest {
             "failedSteps", "omittedCategories", // GDPR tool result fields
             "ratingConfig", // agent configuration field (SKILL.md, Feedback from users)
             "conversationControls", "rawHtml", "titleGeneration", // agent configuration fields (SKILL.md, Change an agent)
-            "canOpenTranscript" // list_conversation_ratings result field
+            "canOpenTranscript", // list_conversation_ratings result field
+            "mimeType" // field of an `attachments` entry (SKILL.md, Talk to an agent)
     );
 
     private static Path repoRoot() {

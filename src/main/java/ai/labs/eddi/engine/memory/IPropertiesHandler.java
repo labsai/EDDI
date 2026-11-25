@@ -67,4 +67,14 @@ public interface IPropertiesHandler {
     default int getMaxAttachmentsPerTurn() {
         return AttachmentContextExtractor.DEFAULT_MAX_ATTACHMENTS_PER_TURN;
     }
+
+    /**
+     * Resolves the part of a stored file an incoming {@code attachment_N} names
+     * ({@code pages}, {@code unit}, {@code split}) when a turn arrives.
+     * {@code null} (the default) refuses every part with an
+     * {@code attachments:errors} note; it never sends the whole file instead.
+     */
+    default AttachmentContextExtractor.PartResolver getAttachmentPartResolver() {
+        return null;
+    }
 }

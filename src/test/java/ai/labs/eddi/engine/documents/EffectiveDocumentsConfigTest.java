@@ -131,9 +131,9 @@ class EffectiveDocumentsConfigTest {
         @Test
         @DisplayName("a stored key that is not live resolves to off, with one warning naming it")
         void storedNonLiveKeyIsIgnored() throws Exception {
-            var e = EffectiveDocumentsConfig.resolve(parse("{\"sharing\":{\"delegation\":true}}"), DocumentSettings.none());
-            assertFalse(e.sharing().delegation());
-            assertEquals(List.of("documents.sharing.delegation is not available in this version and is ignored"), e.clampWarnings());
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"sharing\":{\"handoff\":true}}"), DocumentSettings.none());
+            assertFalse(e.sharing().handoff());
+            assertEquals(List.of("documents.sharing.handoff is not available in this version and is ignored"), e.clampWarnings());
         }
 
         @Test
@@ -150,10 +150,10 @@ class EffectiveDocumentsConfigTest {
         @Test
         @DisplayName("an operator default for a key that is not live is ignored too")
         void operatorDefaultForNonLiveKey() {
-            var settings = DocumentSettings.of(Map.of("sharing.delegation", "true"), DocumentBounds.none());
+            var settings = DocumentSettings.of(Map.of("sharing.handoff", "true"), DocumentBounds.none());
             var e = EffectiveDocumentsConfig.resolve(null, settings);
-            assertFalse(e.sharing().delegation());
-            assertEquals(List.of("eddi.documents.defaults.sharing.delegation configures a key that is not available in this version"
+            assertFalse(e.sharing().handoff());
+            assertEquals(List.of("eddi.documents.defaults.sharing.handoff configures a key that is not available in this version"
                     + " and is ignored"), e.clampWarnings());
         }
 
@@ -352,6 +352,18 @@ class EffectiveDocumentsConfigTest {
             double clamped = e.large().summary().maxCostPerDocument();
             assertTrue(new BigDecimal(clamped).compareTo(bound) <= 0, () -> "clamped to " + clamped);
             assertEquals(Math.nextDown(5.0), clamped);
+        }
+
+        @Test
+        @DisplayName("a value written at the bound is accepted silently, and its double never lies above the bound")
+        void valueAtBoundStaysAtOrBelowExactly() throws Exception {
+            BigDecimal bound = new BigDecimal("0.1"); // the double 0.1 is slightly above 0.1
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("large.summary.maxCostPerDocument", bound)));
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"large\":{\"summary\":{\"maxCostPerDocument\":0.1}}}"), settings,
+                    Set.of("large.summary.maxCostPerDocument"));
+            double clamped = e.large().summary().maxCostPerDocument();
+            assertTrue(new BigDecimal(clamped).compareTo(bound) <= 0, () -> "resolved to " + new BigDecimal(clamped));
+            assertTrue(e.clampWarnings().isEmpty(), e.clampWarnings().toString());
         }
 
         @Test

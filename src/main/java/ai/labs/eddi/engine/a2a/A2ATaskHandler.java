@@ -144,6 +144,7 @@ public class A2ATaskHandler {
     private final AgentCardService agentCardService;
     private final A2AInFlightLimiter limiter;
     private final MeterRegistry meterRegistry;
+    private final A2AInboundFiles inboundFiles;
 
     /**
      * The unsettled tasks of each conversation, oldest first, as submitted from
@@ -177,7 +178,9 @@ public class A2ATaskHandler {
     public A2ATaskHandler(IConversationService conversationService, IA2ATaskStore taskStore, SecurityIdentity identity,
             AgentCardService agentCardService, A2AInFlightLimiter limiter, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60") int agentTimeoutSeconds,
-            @ConfigProperty(name = "eddi.a2a.task-timeout-seconds") Optional<Integer> a2aTaskTimeoutSeconds) {
+            @ConfigProperty(name = "eddi.a2a.task-timeout-seconds") Optional<Integer> a2aTaskTimeoutSeconds,
+            A2AInboundFiles inboundFiles) {
+        this.inboundFiles = inboundFiles == null ? A2AInboundFiles.disabled() : inboundFiles;
         this.conversationService = conversationService;
         this.taskStore = taskStore;
         this.identity = identity;
@@ -191,8 +194,24 @@ public class A2ATaskHandler {
                 .orElseGet(() -> agentTimeoutSeconds > 0 ? agentTimeoutSeconds : DEFAULT_TASK_TIMEOUT_SECONDS);
     }
 
+    /** With file parts switched off — the constructor tests use. */
+    public A2ATaskHandler(IConversationService conversationService, IA2ATaskStore taskStore, SecurityIdentity identity,
+            AgentCardService agentCardService, A2AInFlightLimiter limiter, MeterRegistry meterRegistry, int agentTimeoutSeconds,
+            Optional<Integer> a2aTaskTimeoutSeconds) {
+        this(conversationService, taskStore, identity, agentCardService, limiter, meterRegistry, agentTimeoutSeconds,
+                a2aTaskTimeoutSeconds, A2AInboundFiles.disabled());
+    }
+
     int taskTimeoutSeconds() {
         return taskTimeoutSeconds;
+    }
+
+    /**
+     * Whether a send's file parts are read ({@code eddi.a2a.files.inbound} not
+     * {@code off}) — what the endpoint parses the request with.
+     */
+    public boolean acceptsFiles() {
+        return inboundFiles.acceptsFiles();
     }
 
     // ==================== send ====================
@@ -354,12 +373,17 @@ public class A2ATaskHandler {
      * A task about to run: its record, the peer, and how its conversation was
      * found.
      */
-    record Prepared(String principal, String agentId, A2ATaskRecord record, String messageText, boolean conversationFromContext) {
+    record Prepared(String principal, String agentId, A2ATaskRecord record, String messageText, boolean conversationFromContext,
+            Map<String, Context> attachments) {
 
-        Prepared withConversation(String conversationId) {
+        Prepared {
+            attachments = attachments == null ? Map.of() : Map.copyOf(attachments);
+        }
+
+        Prepared withConversation(String conversationId, Map<String, Context> movedAttachments) {
             A2ATaskRecord moved = new A2ATaskRecord(record.taskId(), record.contextId(), conversationId, record.agentId(), record.state(),
                     record.statusText(), record.responseText(), record.userText(), record.updatedAt(), record.generation());
-            return new Prepared(principal, agentId, moved, messageText, false);
+            return new Prepared(principal, agentId, moved, messageText, false, movedAttachments);
         }
     }
 
@@ -372,8 +396,10 @@ public class A2ATaskHandler {
     }
 
     private Prepared prepare(String agentId, SendRequest request) throws Exception {
-        String text = request.text();
-        if (text == null || text.isBlank()) {
+        String text = request.text() == null ? "" : request.text();
+        // A message may be files alone, but only when file parts were read at all
+        // (eddi.a2a.files.inbound not off); otherwise request.files() is empty.
+        if (text.isBlank() && request.files().isEmpty()) {
             throw new InvalidA2ARequestException("No text content found in message parts");
         }
 
@@ -407,11 +433,23 @@ public class A2ATaskHandler {
                         "The task is " + existing.state().wireName(Dialect.V0_3)
                                 + " and cannot take further messages; send a new message in the same context instead");
             }
+            // Stored before the task is saved: a refused file must not leave the task
+            // recorded as working.
+            Map<String, Context> attachments = inboundFiles.store(request.files(), existing.conversationId(), principal);
             A2ATaskRecord continued = new A2ATaskRecord(existing.taskId(), existing.contextId(), existing.conversationId(), agentId,
                     TaskState.working, null, null, text, Instant.now(), UUID.randomUUID().toString());
-            taskStore.saveTask(principal, continued);
-            return new Prepared(principal, agentId, continued, text, false);
+            try {
+                taskStore.saveTask(principal, continued);
+            } catch (RuntimeException e) {
+                inboundFiles.discard(attachments, existing.conversationId());
+                throw e;
+            }
+            return new Prepared(principal, agentId, continued, text, false, attachments);
         }
+
+        // Decoded, fetched and type-checked before a conversation is created: every
+        // file refusal but an exhausted quota leaves none behind.
+        List<A2AInboundFiles.Loaded> files = inboundFiles.load(request.files());
 
         final String requestedContextId = request.contextId();
         String contextId = requestedContextId;
@@ -423,28 +461,59 @@ public class A2ATaskHandler {
                     .orElse(null);
             fromContext = conversationId != null;
         }
+        boolean started = false;
         if (conversationId == null) {
             conversationId = startConversation(agentId, principal);
+            started = true;
         }
-        boolean legacy = request.dialect() == Dialect.LEGACY;
-        if (contextId == null && !legacy) {
-            // A context the server opens is the conversation: it then resolves after a
-            // restart without anything having been remembered.
-            contextId = conversationId;
+        // Owned by the task's conversation and counted against the peer's quota;
+        // stored before the context is bound or the task saved, so a refused file
+        // leaves neither behind.
+        Map<String, Context> attachments;
+        try {
+            attachments = inboundFiles.storeLoaded(files, conversationId, principal);
+        } catch (InvalidA2ARequestException e) {
+            if (started) {
+                endRefusedConversation(conversationId, principal);
+            }
+            throw e;
         }
-        if (contextId != null) {
-            taskStore.bindContext(principal, contextId, conversationId);
-        }
+        try {
+            boolean legacy = request.dialect() == Dialect.LEGACY;
+            if (contextId == null && !legacy) {
+                // A context the server opens is the conversation: it then resolves after a
+                // restart without anything having been remembered.
+                contextId = conversationId;
+            }
+            if (contextId != null) {
+                taskStore.bindContext(principal, contextId, conversationId);
+            }
 
-        String taskId = request.legacyTaskId() != null
-                ? request.legacyTaskId()
-                : legacy
-                        ? UUID.randomUUID().toString()
-                        : conversationId + TASK_ID_SEPARATOR + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        A2ATaskRecord record = new A2ATaskRecord(taskId, contextId, conversationId, agentId, TaskState.working, null, null, text,
-                Instant.now(), UUID.randomUUID().toString());
-        taskStore.saveTask(principal, record);
-        return new Prepared(principal, agentId, record, text, fromContext);
+            String taskId = request.legacyTaskId() != null
+                    ? request.legacyTaskId()
+                    : legacy
+                            ? UUID.randomUUID().toString()
+                            : conversationId + TASK_ID_SEPARATOR + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            A2ATaskRecord record = new A2ATaskRecord(taskId, contextId, conversationId, agentId, TaskState.working, null, null, text,
+                    Instant.now(), UUID.randomUUID().toString());
+            taskStore.saveTask(principal, record);
+            return new Prepared(principal, agentId, record, text, fromContext, attachments);
+        } catch (RuntimeException e) {
+            inboundFiles.discard(attachments, conversationId);
+            throw e;
+        }
+    }
+
+    /**
+     * Ends a conversation this send started for a message whose files the store
+     * then refused (an exhausted quota), so it is not left open and empty.
+     */
+    private void endRefusedConversation(String conversationId, String principal) {
+        try {
+            conversationService.endConversation(conversationId, "a2a:" + principal, "a2a file parts refused");
+        } catch (Exception e) {
+            LOGGER.debugf("A2A: the conversation of a refused message could not be ended: %s", sanitize(e.getMessage()));
+        }
     }
 
     private String startConversation(String agentId, String principal) throws Exception {
@@ -489,7 +558,10 @@ public class A2ATaskHandler {
             // context carries on in a fresh one rather than failing every later task.
             try {
                 String fresh = startConversation(prepared.agentId(), prepared.principal());
-                Prepared moved = prepared.withConversation(fresh);
+                // The message's files belong to the ended conversation: copy them into
+                // the fresh one, or its turn could not read them.
+                Prepared moved = prepared.withConversation(fresh,
+                        inboundFiles.rehome(prepared.attachments(), prepared.record().conversationId(), fresh, prepared.principal()));
                 taskStore.bindContext(moved.principal(), moved.record().contextId(), fresh);
                 taskStore.saveTask(moved.principal(), moved.record());
                 settler.retarget(moved);
@@ -519,6 +591,9 @@ public class A2ATaskHandler {
         if (prepared.record().contextId() != null) {
             context.put(CONTEXT_CONTEXT_ID, new Context(Context.ContextType.string, prepared.record().contextId()));
         }
+        // attachment_N entries naming the message's stored file parts, as a REST
+        // upload names its files.
+        context.putAll(prepared.attachments());
         inputData.setContext(context);
 
         String conversationId = prepared.record().conversationId();

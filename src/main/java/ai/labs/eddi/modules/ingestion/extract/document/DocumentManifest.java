@@ -21,8 +21,8 @@ import java.util.stream.Collectors;
  *            the document's page count
  * @param splitUsed
  *            the strategy that produced the units —
- *            {@link SplitStrategy#OUTLINE} or {@link SplitStrategy#PAGES},
- *            whatever was asked for
+ *            {@link SplitStrategy#OUTLINE}, {@link SplitStrategy#HEADINGS} or
+ *            {@link SplitStrategy#PAGES}, whatever was asked for
  * @param units
  *            parents before their children, in document order
  * @param embeddedFiles
