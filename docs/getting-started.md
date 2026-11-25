@@ -73,6 +73,82 @@ Unblock-File .\install.ps1
 
 The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). EDDI starts with no agents deployed — to create your first one, activate the **Platform Operator** at `/manage/operator` and describe the agent you want, or fill in the form-based wizard at `/manage/agents/wizard`.
 
+#### Installer options
+
+The one-line install pipes the script into `bash` and keeps no copy. To pass options, download it first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh -o install.sh
+```
+
+```bash
+bash install.sh --defaults                 # All defaults, no prompts
+bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
+bash install.sh --full                     # Everything enabled (PostgreSQL + auth + monitoring)
+bash install.sh --local                    # Build Docker image from local source
+bash install.sh --eddi-version=6.5.0       # Pin a release (image and compose files from its tag)
+bash install.sh --dry-run                  # Show the image tag and the git ref the files come from
+```
+
+PowerShell equivalents (`install.ps1`):
+
+```powershell
+.\install.ps1 -Defaults                    # All defaults, no prompts
+.\install.ps1 -Database postgres -WithAuth # PostgreSQL + Keycloak
+.\install.ps1 -Full                        # Everything enabled
+.\install.ps1 -Local                       # Build Docker image from local source (run from a repo checkout, after .\mvnw.cmd package -DskipTests)
+.\install.ps1 -DryRun                      # Show what would be done
+```
+
+With the default `latest` image, the compose files are downloaded from the newest
+release's tag (looked up through the GitHub API), not from `main`. The wizard
+generates a unique vault encryption key for secret management.
+
+The `--local` flag is for contributors testing pre-release builds:
+
+```bash
+./mvnw package -DskipTests    # Build the Java app
+bash install.sh --local        # Build Docker image + start containers
+```
+
+#### Updating
+
+The installer creates an `eddi` CLI wrapper (`start`, `stop`, `restart`, `status`,
+`logs`, `update`, `uninstall`). To update:
+
+```bash
+eddi update
+```
+
+This refreshes the compose files, pulls the image and restarts the containers. Which image it pulls is the `EDDI_VERSION` stored in `.env`: an install on `latest` moves to the newest release (it works even when the same tag was re-published, because Docker checks the remote digest), while an install pinned with `--eddi-version=6.5.0` stays on that version. To change the target:
+
+```bash
+eddi update --eddi-version=latest   # follow the newest release
+eddi update --eddi-version=6.7.0    # pin a specific release
+```
+
+> **Upgrading across releases?** Read the upgrade guide first: [Upgrading from 6.5](upgrading-from-6.5.md) covers a 6.5 deployment moving to 6.6 or 6.7, and [Upgrading from 6.4](upgrading-from-6.4.md) lists what an existing deployment must change, because several defaults now fail closed (a Keycloak realm imported from 6.1–6.4 needs a repair that re-running the installer applies and `eddi update` does not). A database that comes from EDDI 5 starts with [Upgrading from 5.x](upgrading-from-5x.md).
+
+> **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
+>
+> ```bash
+> # Linux / macOS
+> ~/.eddi/eddi update
+>
+> # Windows (PowerShell)
+> & "$HOME\.eddi\eddi.cmd" update
+> ```
+
+If the `eddi` CLI isn't available, you can pull and restart by hand from your install directory (`~/.eddi` by default). This is **not** equivalent to `eddi update`: it does not refresh the compose files or the monitoring assets, so across releases it can run a new image against an older configuration. Use it to re-pull the same version; to move to another release, restore the CLI by re-running the installer.
+
+```bash
+cd ~/.eddi
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml up -d
+```
+
+Adjust the `-f` flags to match your setup (e.g. add `-f docker-compose.auth.yml` if using Keycloak).
+
 ### Option 1 - EDDI with Docker (Manual)
 
 There are two ways to run **EDDI** under Docker: with **Docker Compose**, or by launching the containers manually.

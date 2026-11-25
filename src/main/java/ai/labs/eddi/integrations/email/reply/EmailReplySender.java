@@ -863,7 +863,9 @@ public class EmailReplySender {
      * address by hashing a list of candidates, as an unkeyed hash beside its domain
      * would allow — unless the deployment has neither a key nor a salt, where the
      * pseudonymizer falls back to an unsalted hash. The same token HITL
-     * notifications and GDPR erasure write for that address.
+     * notifications and refused-mail audits write for that address — but not the
+     * one GDPR erasure writes, which pseudonymises the user id (for a per-sender
+     * identity {@code email:<integrationId>:<address>}), not the bare address.
      */
     private String recipientPseudonym(String recipient) {
         return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));
@@ -888,5 +890,13 @@ public class EmailReplySender {
     /** Package-private for tests: whether a group reply is cached for retries. */
     boolean holdsGroupReply(String rowId) {
         return groupReplies.getIfPresent(rowId) != null;
+    }
+
+    /**
+     * Runs the group-reply cache's pending maintenance (eviction included) now, so
+     * a test can count what the bound left.
+     */
+    void cleanUpGroupReplies() {
+        groupReplies.cleanUp();
     }
 }
