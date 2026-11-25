@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -77,8 +76,6 @@ class GroupConversationServiceAbstentionTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -97,7 +94,7 @@ class GroupConversationServiceAbstentionTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
+                scheduleStore, null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     private AgentGroupConfiguration buildConfig(List<DiscussionPhase> phases, boolean recordDissents) {

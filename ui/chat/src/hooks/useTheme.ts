@@ -1,45 +1,30 @@
 /* ──────────────────────────────────────────────
    useTheme — Dark / Light / System theme hook
+   The storage, resolution and `data-theme` marking are @eddi/ui's, shared with
+   the Manager's ThemeProvider; what stays here is the widget's own rule that
+   `?theme=` beats a remembered choice.
    ────────────────────────────────────────────── */
 
 import { useEffect, useCallback, useRef } from "react";
+import {
+  applyTheme,
+  isThemeMode,
+  nextTheme,
+  readStoredTheme,
+  resolveTheme,
+  storeTheme,
+  subscribeSystemTheme,
+  type ThemeMode,
+} from "@eddi/ui";
 
-export type ThemeMode = "dark" | "light" | "system";
+export type { ThemeMode };
+export { nextTheme };
 
 const STORAGE_KEY = "eddi-chat-theme";
 
-/**
- * Storage access throws when site data is blocked — a sandboxed iframe, a
- * browser's third-party storage block, some private modes. Unguarded, that
- * exception escaped the effect and left the whole widget blank; the remembered
- * theme is a convenience, so it simply goes unremembered instead.
- */
-function readStoredTheme(): ThemeMode | null {
-  try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
-    return value === "dark" || value === "light" || value === "system" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeTheme(mode: ThemeMode): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, mode);
-  } catch {
-    // Not persisted — applied for this page only.
-  }
-}
-
-function getSystemTheme(): "dark" | "light" {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
-function applyTheme(mode: ThemeMode): void {
-  const resolved = mode === "system" ? getSystemTheme() : mode;
-  document.documentElement.setAttribute("data-theme", resolved);
+/** The widget's stylesheet reads `data-theme` (src/styles/variables.css). */
+function apply(mode: ThemeMode): void {
+  applyTheme(resolveTheme(mode), "data-theme");
 }
 
 /**
@@ -50,15 +35,10 @@ function applyTheme(mode: ThemeMode): void {
 function readUrlTheme(): ThemeMode | null {
   try {
     const value = new URLSearchParams(window.location.search).get("theme");
-    return value === "dark" || value === "light" || value === "system" ? value : null;
+    return isThemeMode(value) ? value : null;
   } catch {
     return null;
   }
-}
-
-/** dark -> light -> system -> dark. */
-export function nextTheme(mode: ThemeMode): ThemeMode {
-  return mode === "dark" ? "light" : mode === "light" ? "system" : "dark";
 }
 
 export function useTheme(initial: ThemeMode = "dark") {
@@ -68,27 +48,20 @@ export function useTheme(initial: ThemeMode = "dark") {
   // change.
   const currentMode = useRef<ThemeMode>(initial);
 
-  // Apply on mount
+  // Apply on mount, and follow the operating system while the mode is "system".
   useEffect(() => {
-    const mode = readUrlTheme() ?? readStoredTheme() ?? initial;
+    const mode = readUrlTheme() ?? readStoredTheme(STORAGE_KEY) ?? initial;
     currentMode.current = mode;
-    applyTheme(mode);
-
-    // Listen for system theme changes
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => {
-      if (currentMode.current === "system") {
-        applyTheme("system");
-      }
-    };
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    apply(mode);
+    return subscribeSystemTheme(() => {
+      if (currentMode.current === "system") apply("system");
+    });
   }, [initial]);
 
   const setTheme = useCallback((mode: ThemeMode) => {
     currentMode.current = mode;
-    storeTheme(mode);
-    applyTheme(mode);
+    storeTheme(STORAGE_KEY, mode);
+    apply(mode);
   }, []);
 
   /** The mode in force (may be "system", which `data-theme` never says). */

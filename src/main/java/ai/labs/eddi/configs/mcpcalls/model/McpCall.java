@@ -47,7 +47,7 @@ public class McpCall {
 
     /**
      * Tool arguments, templated from conversation memory. Values can use Qute
-     * template expressions (e.g., "[[${properties.userId}]]").
+     * template expressions (e.g., "{properties.userId}").
      */
     private Map<String, Object> toolArguments;
 

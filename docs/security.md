@@ -488,6 +488,55 @@ for existing installs. Webhook delivery de-duplication fails closed while NATS i
 (`eddi.cluster.degraded.nonces=reject`, the default). Details, the threat model and the
 rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
 
+## JVM Advisory: Java4Shell (CVE-2026-114938)
+
+**The pinned base images now carry a fixed JDK. The interim flag stays for now as a second line of defence; see [removing the flag](#removing-the-flag) below.**
+
+[CVE-2026-114938](https://access.redhat.com/security/vulnerabilities/RHSB-2026-018) is memory corruption in OpenJDK's accelerated Base64 decoder (`java.util.Base64.Decoder`). Malformed input can crash the JVM or run code in it, with no login, on hosts where all of these hold:
+
+- **JDK:** OpenJDK 17.0.6 or later without the fix. The fixed builds are 25.0.5.1 and 21.0.13.1.
+- **CPU:** x86-64 with AVX-512 VBMI: Intel Ice Lake or later, AMD Zen 4 or later. This covers AWS C6i/M6i/R6i and C7i/M7i/R7a, and GCP C3/C4/N4. ARM64 is not affected.
+
+EDDI decodes attacker-controlled Base64 before authentication:
+
+- MIME encoded words and DKIM signatures of inbound mail
+- webhook signature headers
+
+Keycloak decodes Base64 before any login too. Code running in the EDDI process can read everything EDDI can: the database, the vault master key and, through it, every stored secret.
+
+| Image | JDK in the pinned base | Mitigation shipped |
+| --- | --- | --- |
+| `labsai/eddi` | OpenJDK 25.0.5.1 (UBI 10 `openjdk-25-runtime:1.24-21`, confirmed with `java -version`), fixed | `-XX:-UseBASE64Intrinsics` on `JDK_JAVA_OPTIONS` |
+| Demo image | Temurin 25.0.5.1+2, fixed | The same flag on the `java` ENTRYPOINT |
+| Keycloak 26.8.2, pinned by digest (compose `auth` overlay, Helm, kustomize `auth` overlay) | OpenJDK 21.0.13.1 (confirmed with `java -version`), fixed | `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` |
+
+Images built before these pins (every EDDI image up to and including 6.7.0, Keycloak 26.8.0, and any `26.8.2` pulled before 2026-11-19, when that tag was rebuilt) carry a vulnerable JDK.
+
+The flag switches off only the vulnerable path: Base64 decoding falls back to plain Java. `-XX:UseAVX=2` is Red Hat's alternative, but a JVM on ARM64 refuses to start with it.
+
+**For a deployment running an older image,** add the flag yourself:
+
+- **EDDI:** if you do not set `JDK_JAVA_OPTIONS` yourself, set it to `--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics`. Setting the variable replaces the image's value, so keep the first two flags. If you already set it (for example for a custom truststore), append `-XX:-UseBASE64Intrinsics` to your existing value and keep your other options.
+- **Keycloak:** append `-XX:-UseBASE64Intrinsics` to `JAVA_OPTS_APPEND`.
+- **Demo image:** it carries the flag on its `java` ENTRYPOINT from this release on. An older demo image needs a rebuild or a new `--entrypoint`.
+
+A changed setting does not reach a running JVM. Recreate each affected container or pod so that it starts with the new flags: `docker compose up -d --force-recreate <service>` for Compose, `kubectl rollout restart` for a Deployment or StatefulSet (a `helm upgrade` that changes the pod template does this itself). Then check the running JVM, not the environment:
+
+```bash
+docker exec <container> jcmd <java pid> VM.flags -all | grep UseBASE64Intrinsics   # expect: = false
+grep -o avx512vbmi /proc/cpuinfo | head -1                                           # on the host: empty = not affected
+```
+
+`jcmd -l` inside the container lists the Java processes. In the Keycloak image, pid 1 is the start script, not the JVM. The demo image is a JRE without `jcmd`, but its `java` is pid 1, so the flag is on its command line:
+
+```bash
+docker exec <container> sh -c 'tr "\0" "\n" < /proc/1/cmdline | grep -x -e -XX:-UseBASE64Intrinsics'   # expect: the flag, printed back
+```
+
+### Removing the flag
+
+The pins above meet the condition below, and `java -version` inside each pinned image confirmed it on 2026-11-21 (25.0.5.1, 25.0.5.1+2 and 21.0.13.1). The flag still protects a deployment that overrides the Keycloak image or still runs an earlier pull of the same tag, so it is removed in a change of its own. Remove the flag from all five places, and delete `Java4ShellMitigationTest`, only when **all three** pinned bases carry a fixed JDK: the UBI `openjdk-25-runtime` digest (25.0.5.1 or later), the `eclipse-temurin:25-jre` digest of the demo image (25.0.5.1 or later) and the Keycloak image (JDK 21.0.13.1 or later). Moving one pin does not fix the others. The test fails the build whenever the flag is missing, so it goes in the same change.
+
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
 **Applies to:** apicall headers, and an MCP server's `apiKey`, that reference `${caller:token}` / `${caller:userId}`.
@@ -519,6 +568,20 @@ identity is captured while the request context is live and bound to the
 executing thread by `CallerIdentityContext`, always cleared in a `finally` —
 those threads are reused across conversations, so a leaked binding would be
 readable by the next caller's turn.
+
+**Team subjects travel as a snapshot.** The captured identity also carries the
+caller's team subjects (`team:<group path>`, the personal space excluded), read
+from the request's token with the same derivation the REST access checks use
+(`CallerSpaces.teamSubjectsOf`). That snapshot is what code running inside a turn
+— a tool on a virtual thread, where no token can be read — asks for the current
+caller's teams. It is taken once at the request boundary, never refreshed during
+the turn, never persisted, and never filled from the user directory's last-seen
+memberships. It fails closed: a turn without a request token behind it
+(a schedule, a team cadence, a HITL resume approved by somebody other than the
+conversation's owner) has no teams. An approver who is not the owner is bound
+without their teams, so the calls they approved run with their token but never
+admit the owner's turn through a team only the approver belongs to.
+`CallerIdentity.toString()` names neither the token nor any team.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
@@ -988,7 +1051,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 - **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `true`, deployment fallback `eddi.tools.budget.enforce-by-default`)
 - **Scope:** `maxBudgetPerConversation` bounds **tool** cost only. LLM token spend is governed separately and per run by the model cascade's `maxCostPerRun`; the two are not summed
-- **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001, `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
+- **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001 — $0.005 when `eddi.tools.websearch.provider` is `brave` or `google` — `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
 - **`enableCostTracking: false` does not switch an enforced ceiling off:** a task with an enforced `maxBudgetPerConversation` still records each call's charge, because the ceiling is checked against those charges; without them it would never be reached
 - **Eviction:** To prevent unbounded memory growth, the tracker caps per-conversation entries at 10 000 and evicts the oldest ~10% when the limit is reached
 - **Behaviour:** Enforcement is the **default** (6.6.0, security review finding M8). A configured `maxBudgetPerConversation` is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Opting out — `enforceBudget: false` per task, or `eddi.tools.budget.enforce-by-default=false` per deployment — keeps cost tracking and reporting and turns the refusal off; every task whose ceiling is opted out is named once in a WARN rather than lapsing silently, and the MCP `get_agent`/`deploy_agent` tools report the effective default as `toolBudgetEnforcedByDefault`. Until 6.6.0 this was an opt-in whose deployment key was not declared, so every stored ceiling was advisory

@@ -19,8 +19,10 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -691,6 +693,46 @@ class AgentCascadeServiceTest {
 
             assertEquals(CascadeException.Kind.CONFLICT, ex.kind());
             assertTrue(ex.getMessage().contains("version=2"), ex.getMessage());
+        }
+
+        /**
+         * The agent save refuses a signing agent whose key is unusable with a 400. As a
+         * FAILED cascade that became a 500 whose message the 4xx-only mapper never put
+         * in the body, so the caller learnt nothing.
+         */
+        @Test
+        @DisplayName("a 400 from the agent update stays a bad request, carrying the store's reason and what was written")
+        void agentUpdateRefusalIsBadRequest() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), anyBoolean()))
+                    .thenThrow(new BadRequestException("Signing key v1 has no private key in the secrets vault."));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.BAD_REQUEST, ex.kind());
+            assertTrue(ex.getMessage().contains("Signing key v1 has no private key"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("was NOT changed"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("workflows/" + WF1_ID + "?version=2"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("a 503 from the agent update is unavailable, with the reason from the response body")
+        void agentUpdateUnavailableIs503() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            // As the loopback REST client reports it: a bare status line, the reason in the
+            // body.
+            when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new WebApplicationException("HTTP 503",
+                    Response.status(503).entity("{\"error\":\"vault_unavailable\",\"message\":\"Could not check this agent's signing key\"}")
+                            .build()));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.UNAVAILABLE, ex.kind());
+            assertTrue(ex.getMessage().contains("Could not check this agent's signing key"), ex.getMessage());
         }
 
         @Test

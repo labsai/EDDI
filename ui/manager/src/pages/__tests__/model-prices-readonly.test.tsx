@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderPage } from "@/test/test-utils";
-import { resetModelPriceMock } from "@/test/mocks/model-prices-handlers";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { resetModelPriceMock } from "@eddi/app-kit/test/mocks/model-prices-handlers";
 
-vi.mock("@/hooks/use-auth", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/hooks/use-auth")>()),
+vi.mock("@eddi/app-kit/hooks/use-auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@eddi/app-kit/hooks/use-auth")>()),
   useIsAdminOrUnknown: () => false,
 }));
 

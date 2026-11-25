@@ -20,10 +20,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code regex-filter} — input and output. The agent designer's own patterns:
- * any match is a finding, reported as a rewrite with every match replaced. With
- * action {@code redact} the rewrite is applied; with {@code block},
- * {@code reprompt} or {@code warn} a match counts as a violation. Parameters:
+ * {@code regex-filter} — input, output and tool-call arguments. The agent
+ * designer's own patterns: any match is a finding, reported as a rewrite with
+ * every match replaced. With action {@code redact} the rewrite is applied; with
+ * {@code block}, {@code reprompt} or {@code warn} a match counts as a
+ * violation. Parameters:
  * <ul>
  * <li>{@code patterns} — regular expressions, one per line, case-insensitive
  * (required; without any the guardrail never fires);</li>

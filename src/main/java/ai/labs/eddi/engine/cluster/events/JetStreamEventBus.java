@@ -79,8 +79,14 @@ import java.util.function.Consumer;
  * disconnect). An outbox overflow publishes {@code cache.resync-all} on
  * reconnect, so the other nodes flush whatever this one could not tell them.
  * <p>
+ * <b>Transient events</b> ({@link #publishTransient}) bypass all of that: core
+ * NATS on {@code eddi.<prefix>.tevt.>}, outside the stream, never queued and
+ * dropped while disconnected, so a burst of them can neither evict
+ * invalidations from the stream nor overflow the outbox.
+ * <p>
  * Events from this node's own boot are ignored (the change was applied locally
- * before publishing), and handlers run in arrival order on one thread.
+ * before publishing), and handlers run in arrival order on two single-thread
+ * lanes: cache evictions and clears on one, every other event on the other.
  */
 @ApplicationScoped
 // ClusterStartable as well: ClusterBootstrap finds what to start through
@@ -123,6 +129,7 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
     private final ThreadPoolExecutor bulk = lane("eddi-cluster-events-cache");
     private volatile Connection subscribedOn;
     private volatile Dispatcher subscribedDispatcher;
+    private volatile Connection transientSubscribedOn;
     private volatile long lastStreamSequence;
     /**
      * When the event stream was created, as last read from the server. A different
@@ -214,19 +221,8 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
 
     @Override
     public void publish(String type, Map<String, Object> payload) {
-        Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("v", ClusterEvent.VERSION);
-        envelope.put("id", UUID.randomUUID().toString());
-        envelope.put("type", type);
-        envelope.put("originNode", node.nodeId());
-        envelope.put("originBoot", node.bootId());
-        envelope.put("ts", System.currentTimeMillis());
-        envelope.put("payload", payload == null ? Map.of() : payload);
-        byte[] data;
-        try {
-            data = JSON.writeValueAsBytes(envelope);
-        } catch (IOException e) {
-            LOGGER.warnf("Cluster event %s not serializable: %s", type, e.getMessage());
+        byte[] data = envelope(type, payload);
+        if (data == null) {
             return;
         }
         String subject = subjects.event(type);
@@ -248,6 +244,51 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
             });
         } catch (RuntimeException e) {
             enqueue(subject, data);
+        }
+    }
+
+    /**
+     * Core NATS, not JetStream: the event never enters the stream (whose message
+     * cap and retention the invalidations need) and never the outbox (whose
+     * overflow forces a cluster-wide resync). Disconnected, it is dropped and
+     * counted.
+     */
+    @Override
+    public void publishTransient(String type, Map<String, Object> payload) {
+        if (!connections.isConnected()) {
+            transientDropped(type);
+            return;
+        }
+        byte[] data = envelope(type, payload);
+        if (data == null) {
+            return;
+        }
+        try {
+            connections.requireConnected().publish(subjects.transientEvent(type), data);
+            meterRegistry.counter("eddi.cluster.events.transient.published", "type", type).increment();
+        } catch (RuntimeException e) {
+            transientDropped(type);
+        }
+    }
+
+    private void transientDropped(String type) {
+        meterRegistry.counter("eddi.cluster.events.transient.dropped", "type", type).increment();
+    }
+
+    private byte[] envelope(String type, Map<String, Object> payload) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("v", ClusterEvent.VERSION);
+        envelope.put("id", UUID.randomUUID().toString());
+        envelope.put("type", type);
+        envelope.put("originNode", node.nodeId());
+        envelope.put("originBoot", node.bootId());
+        envelope.put("ts", System.currentTimeMillis());
+        envelope.put("payload", payload == null ? Map.of() : payload);
+        try {
+            return JSON.writeValueAsBytes(envelope);
+        } catch (IOException e) {
+            LOGGER.warnf("Cluster event %s not serializable: %s", type, e.getMessage());
+            return null;
         }
     }
 
@@ -324,6 +365,16 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         }
         if (subscribedOn != connection) {
             subscribe(connection);
+        }
+        if (transientSubscribedOn != connection) {
+            try {
+                // Core NATS: no stream sequence, so a transient event never counts toward
+                // (or causes) a gap.
+                connection.createDispatcher(msg -> receive(msg.getData(), 0)).subscribe(subjects.transientEventWildcard());
+                transientSubscribedOn = connection;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not subscribe to transient cluster events: %s — retried on the next connect", e.getMessage());
+            }
         }
         if (recreated && subscribedOn != null) {
             resync("the event stream was recreated; every event published before it is gone");

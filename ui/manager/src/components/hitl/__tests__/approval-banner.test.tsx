@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, act, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import type { ToolCallPauseDetails } from "@/lib/api/hitl";
+import type { ToolCallPauseDetails } from "@eddi/app-kit/lib/api/hitl";
 
 /** A two-call TOOL_CALL pause fixture. */
 function toolPause(overrides: Partial<ToolCallPauseDetails> = {}): ToolCallPauseDetails {

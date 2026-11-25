@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -62,6 +63,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -358,6 +360,21 @@ class ApiCallExecutorForEachTest {
             assertTrue(e.getMessage().contains("2 of 4"), e.getMessage());
             assertEquals(4, built.size(), "every item was still sent");
             assertEquals(4, stored(templateData).size(), "the results were stored before the step failed");
+        }
+
+        @Test
+        @DisplayName("onItemFailure=fail keeps the configuration refusal behind an unbuildable item, so a start answers 422")
+        void failPolicyKeepsTheRefusal() {
+            when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.NOT_FOUND);
+            ApiCall call = call("/items/{item}", forEach(1));
+            call.getRequest().setHeaders(Map.of("X-Api-Key", "${vault:api-key}"));
+            call.getForEach().setOnItemFailure("fail");
+
+            LifecycleException e = assertThrows(LifecycleException.class,
+                    () -> executor.execute(call, memory, dataWithItems(List.of("a", "b")), SERVER));
+
+            assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, AgentConfigurationRefusal.find(e));
+            assertEquals(0, built.stream().filter(r -> r.sends.get() > 0).count(), "nothing was sent");
         }
 
         @Test

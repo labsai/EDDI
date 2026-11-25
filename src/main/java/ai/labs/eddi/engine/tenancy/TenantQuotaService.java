@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.OptionalDouble;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.List;
 
 /**
@@ -50,10 +51,10 @@ public class TenantQuotaService {
     @Inject
     ICacheFactory cacheFactory;
 
-    /** Name of the short-TTL cache behind {@link #quotaFor}. */
     /**
-     * Public for the reason {@code GdprComplianceService.RESTRICTION_CACHE_NAME}
-     * is: {@code CacheFactory.CACHE_SIZES} keys the sizing on this string and
+     * Name of the short-TTL cache behind {@link #quotaFor}. Public for the reason
+     * {@code GdprComplianceService.RESTRICTION_CACHE_NAME} is:
+     * {@code CacheFactory.CACHE_SIZES} keys the sizing on this string and
      * {@code CacheFactoryTest} binds the two, so a rename fails a test instead of
      * silently reverting the cache to the default size.
      */
@@ -81,6 +82,10 @@ public class TenantQuotaService {
      * {@code ConcurrentMap} cannot hold a null anyway.
      */
     private ICache<String, TenantQuota> quotaCache;
+
+    /** Bumped on every invalidation; a cache fill publishes only under its own. */
+    private final AtomicLong quotaGeneration = new AtomicLong();
+    private final Object quotaFillLock = new Object();
 
     @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default")
     String defaultTenantId;
@@ -169,9 +174,17 @@ public class TenantQuotaService {
         if (cached != null) {
             return cached;
         }
+        // A fill that read the store before a concurrent write must not publish its
+        // (now stale) value after that write's invalidation: it publishes only if no
+        // invalidation happened since it started. Reads stay lock-free.
+        long generation = quotaGeneration.get();
         TenantQuota resolved = quotaStore.getQuota(tenantId);
         if (resolved != null) {
-            quotaCache.put(tenantId, resolved);
+            synchronized (quotaFillLock) {
+                if (quotaGeneration.get() == generation) {
+                    quotaCache.put(tenantId, resolved);
+                }
+            }
         }
         return resolved;
     }
@@ -192,13 +205,39 @@ public class TenantQuotaService {
     }
 
     /**
+     * {@link #setQuota}, but only while the stored quota still equals
+     * {@code expected} ({@code null}: none stored). Drops the cached entry on
+     * success, as {@link #setQuota} does.
+     *
+     * @return whether the quota was written
+     */
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        boolean written = quotaStore.compareAndSetQuota(expected, next);
+        if (written) {
+            invalidateQuotaCache(next.tenantId());
+        }
+        return written;
+    }
+
+    /**
+     * Read a tenant's stored quota configuration straight from the store (no
+     * cache): {@code null} when none is stored.
+     */
+    public TenantQuota readStoredQuota(String tenantId) {
+        return quotaStore.getQuota(tenantId);
+    }
+
+    /**
      * Forget a tenant's cached quota configuration. Call after any write that did
      * not go through {@link #setQuota}, so the change takes effect on this node
      * immediately rather than after {@link #QUOTA_CACHE_TTL}.
      */
     public void invalidateQuotaCache(String tenantId) {
         if (quotaCache != null && tenantId != null) {
-            quotaCache.remove(tenantId);
+            synchronized (quotaFillLock) {
+                quotaGeneration.incrementAndGet();
+                quotaCache.remove(tenantId);
+            }
         }
     }
 
@@ -485,10 +524,10 @@ public class TenantQuotaService {
      * ({@link #checkCostBudget}) is what stops the next call. Callers must not fail
      * the work that already ran over a denied or unavailable result.
      * <p>
-     * Note: internally calls {@link ITenantQuotaStore#tryAddCost} which resets all
-     * expired time windows (minute, day, month) under the per-tenant lock. This is
-     * harmless (lazy reset is idempotent), but means this method has broader side
-     * effects than its name suggests.
+     * Note: internally calls {@link ITenantQuotaStore#tryAddCost}, which also rolls
+     * an expired monthly window (the in-memory store resets the minute and day
+     * windows too). This is harmless (lazy reset is idempotent), but means this
+     * method has broader side effects than its name suggests.
      */
     public QuotaCheckResult recordCost(String tenantId, double cost) {
         TenantQuota quota;

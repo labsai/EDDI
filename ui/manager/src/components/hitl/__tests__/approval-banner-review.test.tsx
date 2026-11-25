@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import { resumeConversation, type RulePauseDetails } from "@/lib/api/hitl";
+import { resumeConversation, type RulePauseDetails } from "@eddi/app-kit/lib/api/hitl";
 import {
   EDITABLE_CONVERSATION_ID,
   editableApprovalStatus,
   lastEditableResume,
-} from "@/test/mocks/hitl-review-handlers";
+} from "@eddi/app-kit/test/mocks/hitl-review-handlers";
 
 function rulePause(overrides: Partial<RulePauseDetails> = {}): RulePauseDetails {
   return { ...(editableApprovalStatus().pauseDetails as RulePauseDetails), ...overrides };

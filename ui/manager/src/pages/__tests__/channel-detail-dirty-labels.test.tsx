@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 function renderDetail() {

@@ -145,7 +145,7 @@ public interface IAlertEventStore {
     /**
      * GDPR erasure: blanks the stored {@code OUTPUT_MATCH} value of every event
      * that came from a conversation of {@code userId}, and forgets the subject.
-     *
+     * <p>
      * An event whose send claim is live at {@code now} is skipped.
      *
      * @return how many events changed

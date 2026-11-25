@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -95,8 +94,6 @@ class GroupConversationServiceHitlTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -115,7 +112,7 @@ class GroupConversationServiceHitlTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -1093,6 +1090,14 @@ class GroupConversationServiceHitlTest {
             // Both tasks should now be approved (not still AWAITING_APPROVAL)
             assertFalse(result.getTaskList().hasAwaitingApproval(),
                     "All tasks should be auto-approved when TASK pauseType + APPROVED + null taskApprovals");
+            // The timeout decider is recorded per task, so a cadence writeback can tell
+            // it from a person's approval (hitlConfig.approvalCompletesBacklogTask).
+            for (var task : tasks) {
+                var approval = result.getTaskList().approvalOf(task.id());
+                assertNotNull(approval, "approval recorded for " + task.subject());
+                assertEquals("system:timeout", approval.decidedBy());
+                assertFalse(approval.byPerson());
+            }
         }
     }
 
@@ -1238,7 +1243,7 @@ class GroupConversationServiceHitlTest {
                     groupStore, conversationStore, conversationService,
                     agentFactory, templatingEngine, jsonSerialization,
                     new SimpleMeterRegistry(), agentSigningService, agentStore,
-                    scheduleStore, nonceCacheService, auditLedger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                    scheduleStore, auditLedger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
         }
 
         private GroupConversation pausedGc(String id) {

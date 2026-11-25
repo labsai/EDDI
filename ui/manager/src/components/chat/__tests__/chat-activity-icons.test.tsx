@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatActivity } from "@/components/chat/chat-activity";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 
 // Regression: SSE task events carry a task's getType() — "langchain",
 // "behavior_rules", "httpCalls" — and the row looked that up as if it were an

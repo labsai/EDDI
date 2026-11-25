@@ -11,7 +11,9 @@ import java.util.Map;
 /**
  * Configuration for a scheduled Agent trigger.
  * <p>
- * Supports cron schedules, heartbeat intervals, and one-shot triggers:
+ * Supports cron schedules, heartbeat intervals, and one-shot triggers (a
+ * {@code CRON}-type schedule with {@code oneTimeAt} instead of a cron
+ * expression):
  * <ul>
  * <li>{@code CRON} — wall-clock aligned, e.g. "0 9 * * MON-FRI"</li>
  * <li>{@code HEARTBEAT} — interval-based, drift-proof, persistent

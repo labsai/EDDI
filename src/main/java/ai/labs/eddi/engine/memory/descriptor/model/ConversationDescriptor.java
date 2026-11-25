@@ -51,6 +51,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
     private String title;
     private TitleSource titleSource;
     private boolean pinned;
+    private String groupConversationId;
 
     public String getAgentName() {
         return agentName;
@@ -183,5 +184,23 @@ public class ConversationDescriptor extends ResourceDescriptor {
 
     public void setPinned(boolean pinned) {
         this.pinned = pinned;
+    }
+
+    /**
+     * The group conversation this conversation is a member's private thread of, or
+     * null for a conversation of its own. Recorded when a group discussion starts
+     * the member's conversation, so a listing of the owner's own chats can leave
+     * the member threads out ({@code excludeGroupMembers}). A listing hint, not an
+     * access attribute: who may read the conversation is still decided by its
+     * owner. Member conversations started before 6.7.0 do not record it.
+     *
+     * @since 6.7.0
+     */
+    public String getGroupConversationId() {
+        return groupConversationId;
+    }
+
+    public void setGroupConversationId(String groupConversationId) {
+        this.groupConversationId = groupConversationId;
     }
 }

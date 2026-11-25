@@ -362,6 +362,25 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 
 ## Changes after 6.7.0
 
+### Java4Shell (CVE-2026-114938): the images start the JVM with `-XX:-UseBASE64Intrinsics`
+
+The EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak service in the compose `auth` overlay, Helm (chart 2.14.3) and the kustomize `auth` overlay sets it on `JAVA_OPTS_APPEND`. This is an interim mitigation for a pre-authentication code-execution flaw in the JDK's Base64 decoder, until the base images ship a fixed JDK. They do now: EDDI images built from these pins and the demo image run OpenJDK 25.0.5.1, and the bundled Keycloak moves to 26.8.2, pinned by digest, with OpenJDK 21.0.13.1 (Helm chart 2.14.4). The flag stays as a second line of defence. If you set `JDK_JAVA_OPTIONS` yourself, add the flag to your value. If you run 6.7.0 or earlier and cannot upgrade yet, add it by hand. [Security → Java4Shell](security.md#jvm-advisory-java4shell-cve-2026-114938) has the details and how to check that the running JVM has it.
+
+### The default `websearch` price now follows the search provider
+
+Cost tracking used to charge every `websearch` call $0.001 whatever the provider. The default now
+depends on `eddi.tools.websearch.provider`: `brave` and `google` are priced at $0.005 per call (both
+list $5 per 1,000 requests), `duckduckgo` stays at $0.001. Deployments on `google` therefore see the
+price of a search rise from $0.001 to $0.005, five times. Agents, conversations and tenants that
+carry a dollar cost ceiling (`maxBudgetPerConversation`, group and team budgets, the tenant's monthly
+cost budget) and use web search reach it up to five times sooner for the same number of Google
+searches. Agents that set `toolPricing.websearch` themselves are unaffected.
+
+To keep the old price, set `eddi.tools.websearch.price-per-call=0.001` (or
+`EDDI_TOOLS_WEBSEARCH_PRICE_PER_CALL=0.001`); it replaces the provider default for whichever provider
+is configured, and also lets a plan that differs from list price be recorded as it is. See
+[Web Search Tool](langchain.md#web-search-tool).
+
 ### API-call steps named `ai.labs.apicalls` are now offered to the LLM as tools
 
 `eddi://ai.labs.apicalls` is an alias of `eddi://ai.labs.httpcalls`: both names run the same API-call
@@ -408,3 +427,26 @@ DNS lookups made by this check now give up after `eddi.security.ssrf-protection.
 count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
 refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
 See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).
+
+### Behavior rules with `tagMatches` or a reference-less `dependency`
+
+Two condition configs are now refused when you save a ruleset: a `deploymentContext` condition with a
+non-blank `tagMatches`, and a `dependency` condition without a `reference`. Neither could ever match.
+Rulesets that already carry one are **not** refused: they still deploy, import, sync and duplicate,
+and each such condition logs a WARN naming the ruleset and the rule. The condition evaluates as it
+did before, so it never matches, and a rule that negates it keeps firing on every turn.
+
+What you will see: the WARN at deploy, and a 400 naming the rule the next time you save that
+ruleset. Repair the two conditions differently:
+
+- **`deploymentContext` with `tagMatches`:** remove the `tagMatches` field. This changes what the
+  rule does when it was negated. A negated `tagMatches` was always true, so the rule fired in every
+  environment; after removing the field, a remaining `when` (for example `"production"`) is
+  evaluated for real, so the negation now fails in that environment: the rule stops firing in
+  production and keeps firing everywhere else. To keep it unconditional, remove the condition
+  together with its negation, or replace it with one that is always true.
+- **`dependency` without `reference`:** there is no field to remove. Add the `reference` naming the
+  rule it depends on, or replace or remove the condition after checking what the rule was meant to
+  do.
+
+See [behavior-rules.md](behavior-rules.md#deployment-context).

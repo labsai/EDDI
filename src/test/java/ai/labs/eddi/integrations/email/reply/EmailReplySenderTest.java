@@ -606,8 +606,10 @@ class EmailReplySenderTest {
                         mail(messageId, SENDER), "The panel recommends B.", NOW).orElseThrow().id());
             }
 
+            sender.cleanUpGroupReplies();
             long held = rows.stream().filter(sender::holdsGroupReply).count();
             assertTrue(held >= EmailReplySender.MAX_CACHED_GROUP_REPLIES, "still cached for their retries: " + held);
+            assertTrue(held <= EmailReplySender.MAX_CACHED_GROUP_REPLIES, "the bound evicted the overflow: " + held);
             assertTrue(transport.recipients.isEmpty(), "every attempt failed transiently");
         }
 

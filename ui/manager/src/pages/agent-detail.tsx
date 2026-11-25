@@ -1,16 +1,17 @@
+import { CatalogListingToggle } from "@eddi/app-kit/components/shared/catalog-listing-toggle";
 import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
 import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
-import { useState, useEffect, useCallback, useMemo, useId } from "react";
+import { useState, useEffect, useCallback, useMemo, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useBrand } from "@/hooks/use-brand";
-import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
-import type { Environment } from "@/lib/constants";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@eddi/app-kit/lib/deployment-environments";
+import type { Environment } from "@eddi/app-kit/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -43,13 +44,14 @@ import {
   Undo2,
   GitCompareArrows,
 } from "lucide-react";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
 import { toast } from "sonner";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Button } from "@eddi/ui";
 import {
   useAgent,
   useDeploymentStatus,
@@ -57,13 +59,15 @@ import {
   useUndeployAgent,
   useDeleteAgent,
   useDuplicateAgent,
+  useGenerateAgentSigningKey,
+  useRevokeAgentSigningKey,
   useAgentVersions,
   useUpdateAgent,
   useUpdateAgentDescriptor,
-} from "@/hooks/use-agents";
+} from "@eddi/app-kit/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -71,22 +75,22 @@ import {
   isAgentDraftDirty,
   type AgentEdit,
 } from "@/lib/agent-draft";
-import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { agentKeys, chatKeys } from "@/lib/query-keys";
+import { parseVersionFromLocation } from "@eddi/app-kit/lib/api/location-version";
+import { agentKeys, chatKeys } from "@eddi/app-kit/lib/query-keys";
 import { MAX_CONTINUATIONS } from "@/lib/continuation";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
 import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { useWorkflowDescriptors } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus, type Agent } from "@/lib/api/agents";
-import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
-import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@/lib/deploy-outcome";
+import { parseResourceUri, type EnvironmentStatus, type Agent } from "@eddi/app-kit/lib/api/agents";
+import { useDeployWithGrants, isGrantFailure } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
-import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { useChatStore, useStartConversation } from "@eddi/app-kit/hooks/use-chat";
 import {
   SecurityIdentitySection,
   CapabilitiesSection,
@@ -145,7 +149,10 @@ export function AgentDetailPage() {
 
   // Reset version when navigating to a different agent (React reuses
   // the component, so useState values persist across route param changes).
+  /** The agent on screen now, for async completions started on another one. */
+  const currentIdRef = useRef(id);
   useEffect(() => {
+    currentIdRef.current = id;
     setVersion(undefined);
     setDraft(null);
     setRebaseFrom(null);
@@ -231,6 +238,11 @@ export function AgentDetailPage() {
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
   const updateAgentMutation = useUpdateAgent();
+  const generateSigningKeyMutation = useGenerateAgentSigningKey();
+  const revokeSigningKeyMutation = useRevokeAgentSigningKey();
+  // Both endpoints are eddi-admin only: whoever can mint or retire a key decides
+  // what signs as the agent.
+  const mayGenerateSigningKey = useIsAdminOrUnknown();
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
@@ -292,11 +304,17 @@ export function AgentDetailPage() {
   const changedFields = useMemo(() => changedAgentFields(draft, agent), [draft, agent]);
   const isSaving = updateAgentMutation.isPending;
   /**
+   * A key generate or revoke in flight. It writes a new version the page then
+   * follows, so an edit made meanwhile would build a draft on the version
+   * before it and hide the key change until that draft is saved or discarded.
+   */
+  const keyChangePending = generateSigningKeyMutation.isPending || revokeSigningKeyMutation.isPending;
+  /**
    * Each section's own `disabled`. A viewer's sections are disabled one by one,
    * not through the fieldset: a disabled fieldset also disables the headers
    * that expand a section, and a viewer must still be able to open one to read it.
    */
-  const sectionsDisabled = isSaving || readOnly;
+  const sectionsDisabled = isSaving || keyChangePending || readOnly;
   /** Whether any of these top-level fields holds an unsaved edit. */
   const touched = (...fields: string[]) => fields.some((f) => changedFields.has(f));
 
@@ -304,12 +322,12 @@ export function AgentDetailPage() {
     (next) => {
       // No draft for a viewer: the backend refuses their save (EDIT), so there
       // is nothing to hold an edit for.
-      if (!agent || !editable || configPending || readOnly) return;
+      if (!agent || !editable || configPending || keyChangePending || readOnly) return;
       // Applied onto the latest draft, not taken wholesale: an edit built from
       // a slightly older render must not undo the one before it.
       setDraft((prev) => applyChangedFields(prev ?? agent, editable, next));
     },
-    [agent, editable, configPending, readOnly],
+    [agent, editable, configPending, keyChangePending, readOnly],
   );
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
@@ -500,6 +518,40 @@ export function AgentDetailPage() {
     );
   }
 
+  /** Generates a signing key; the backend saves it as a new version, which the page then follows. */
+  async function handleGenerateSigningKey() {
+    const agentId = id!;
+    try {
+      const result = await generateSigningKeyMutation.mutateAsync({ id: agentId, version: resolvedVersion });
+      const created = parseVersionFromLocation(result?.location);
+      // The version belongs to the agent the key was made for: if the page has
+      // moved to another agent meanwhile, following it would select a version
+      // that agent may not have.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
+      toast.success(
+        t("agentDetail.signingKeyGenerated", "Signing key v{{version}} generated and saved as a new agent version.", {
+          version: result?.version,
+        }),
+      );
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
+  }
+
+  /** Revokes a signing key; the backend saves that as a new version, which the page then follows. */
+  async function handleRevokeSigningKey(keyVersion: number) {
+    const agentId = id!;
+    try {
+      const result = await revokeSigningKeyMutation.mutateAsync({ id: agentId, keyVersion, version: resolvedVersion });
+      const created = parseVersionFromLocation(result?.location);
+      // As for generation: only follow the new version on the agent it belongs to.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
+      toast.success(t("agentDetail.signingKeyRevoked", "Signing key v{{version}} revoked.", { version: keyVersion }));
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
+  }
+
   async function handleDuplicate() {
     try {
       const result = await duplicateMutation.mutateAsync({
@@ -597,6 +649,7 @@ export function AgentDetailPage() {
   const doc = editable ?? agent;
   const modifiedSectionCount = [
     touched("workflows"),
+    touched("listed"),
     touched("a2aEnabled", "description", "a2aSkills"),
     touched("security", "identity"),
     touched("capabilities"),
@@ -1082,11 +1135,19 @@ export function AgentDetailPage() {
           is standing in for the one being loaded (see `configPending`); a
           viewer's are disabled section by section (see `sectionsDisabled`). */}
       <fieldset
-        disabled={configPending || isSaving}
-        aria-busy={configPending || isSaving}
+        disabled={configPending || isSaving || keyChangePending}
+        aria-busy={configPending || isSaving || keyChangePending}
         className="contents"
         data-testid="agent-config-sections"
       >
+      {/* End-user catalog listing (opt-in, IRestCatalog) */}
+      <CatalogListingToggle
+        kind="agent"
+        listed={doc.listed}
+        onChange={(listed) => editAgent({ ...doc, listed })}
+        disabled={sectionsDisabled}
+      />
+
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={doc}
@@ -1099,7 +1160,30 @@ export function AgentDetailPage() {
       />
 
       {/* Security & Identity */}
-      <SecurityIdentitySection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("security", "identity")} />
+      {/* Keyed by agent: a revoke dialog left open must not carry over to another agent. */}
+      <SecurityIdentitySection
+        key={`security-${id}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={sectionsDisabled}
+        modified={touched("security", "identity")}
+        signingKeyAction={
+          mayGenerateSigningKey
+            ? {
+                onGenerate: () => void handleGenerateSigningKey(),
+                onRevoke: (keyVersion) => void handleRevokeSigningKey(keyVersion),
+                pending: generateSigningKeyMutation.isPending || revokeSigningKeyMutation.isPending,
+                // The key lands as a new version of the CURRENT one: unsaved edits
+                // would then conflict with it, and an older version is refused.
+                disabledReason: isDirty
+                  ? t("agentDetail.generateSigningKeySaveFirst", "Save or discard your changes first: the key is saved as a new agent version.")
+                  : isNotLatest
+                    ? t("agentDetail.generateSigningKeyLatestOnly", "Open the latest version to generate a key.")
+                    : undefined,
+              }
+            : undefined
+        }
+      />
 
       {/* Capabilities */}
       <CapabilitiesSection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("capabilities")} />

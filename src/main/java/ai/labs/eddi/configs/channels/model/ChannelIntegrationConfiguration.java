@@ -77,9 +77,9 @@ public class ChannelIntegrationConfiguration {
      * {@code signatureScheme}, {@code signatureHeader}, {@code signatureEncoding},
      * {@code signaturePrefix}, {@code eventTypeHeader}, {@code eventTypePath},
      * {@code eventIdHeader}, {@code inputTemplate}, {@code conversationStrategy},
-     * {@code correlationKeyPath} — see {@link WebhookChannelSettings}. No
-     * {@code channelId}: a webhook integration is addressed by its resource
-     * id.</li>
+     * {@code correlationKeyPath}, {@code maxDeliveriesPerWindow} — see
+     * {@link WebhookChannelSettings}. No {@code channelId}: a webhook integration
+     * is addressed by its resource id.</li>
      * <li><b>email:</b> {@code mode}, {@code connection}, {@code host},
      * {@code address}, ... — see {@link EmailChannelSettings}. No secrets: the
      * credentials come from the named connection.</li>

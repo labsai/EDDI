@@ -14,9 +14,9 @@ import java.util.function.UnaryOperator;
  * Prepares a just-loaded {@link GroupConversation} for resume by checking its
  * {@code schemaVersion} against
  * {@link GroupConversation#CURRENT_SCHEMA_VERSION} (Wave 0, F6). A paused
- * discussion (`AWAITING_APPROVAL`) can sit in storage for days — long enough
- * for a deploy to land in between, changing the shape resume-time logic depends
- * on.
+ * discussion ({@code AWAITING_APPROVAL}) can sit in storage for days — long
+ * enough for a deploy to land in between, changing the shape resume-time logic
+ * depends on.
  *
  * @author ginccc
  */

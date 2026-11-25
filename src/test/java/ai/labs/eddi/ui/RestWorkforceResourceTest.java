@@ -24,7 +24,7 @@ class RestWorkforceResourceTest {
 
     @BeforeEach
     void setUp() {
-        resource = new RestWorkforceResource(ShellTestSupport.renderer());
+        resource = new RestWorkforceResource(ShellTestSupport.renderer(), ShellTestSupport.branding());
     }
 
     /**
@@ -51,6 +51,19 @@ class RestWorkforceResourceTest {
         assertEquals(200, response.getStatus());
         assertTrue(readEntity(response).contains("<html"),
                 "Entity must be the workforce.html document");
+    }
+
+    @Test
+    @DisplayName("manifest is the installable app's manifest in the brand, not the HTML shell")
+    void manifestIsServedAsJson() {
+        Response response = resource.manifest();
+        assertEquals(200, response.getStatus());
+        assertEquals("application/manifest+json", response.getMediaType().toString());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("\"name\":\"EDDI Workforce\""), body);
+        assertTrue(body.contains("\"start_url\":\"/workforce\""), body);
+        assertTrue(body.contains("\"scope\":\"/workforce\""), body);
+        assertFalse(body.contains("<html"), body);
     }
 
     @Test

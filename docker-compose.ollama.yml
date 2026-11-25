@@ -69,7 +69,9 @@ services:
         condition: service_healthy
     environment:
       - "OLLAMA_HOST=http://ollama:11434"
-      - "OLLAMA_PULL_MODEL=${OLLAMA_PULL_MODEL:-llama3.2:3b}"
+      # `-`, not `:-`: an OLLAMA_PULL_MODEL that is set but empty must stay empty,
+      # which is how the pull is skipped. `:-` would substitute the default for it.
+      - "OLLAMA_PULL_MODEL=${OLLAMA_PULL_MODEL-llama3.2:3b}"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-

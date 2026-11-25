@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { PausedCard } from "./PausedCard";
+import { PausedCard } from "@eddi/conversation";
 import { ChatProvider } from "@/store/chat-store";
-import type { ApprovalStatus } from "@/api/hitl-api";
+import type { ApprovalStatus } from "@eddi/core";
 
 /**
  * PausedCard renders purely from props today, but the repo convention is that

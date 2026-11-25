@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -84,7 +83,7 @@ class GroupHitlReviewTest {
         when(ledger.isEnabled()).thenReturn(true);
         service = new GroupConversationService(groupStore, conversationStore, mock(IConversationService.class), mock(IAgentFactory.class),
                 mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(), mock(AgentSigningService.class),
-                mock(IAgentStore.class), scheduleStore, mock(NonceCacheService.class), ledger, new CallerIdentityContext(null, null), "default", 3);
+                mock(IAgentStore.class), scheduleStore, ledger, new CallerIdentityContext(null, null), "default", 3);
     }
 
     private void groupConfig(boolean allowEdits, List<DiscussionPhase> phases) throws Exception {

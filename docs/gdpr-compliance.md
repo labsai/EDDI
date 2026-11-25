@@ -213,7 +213,9 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   non-secret message, written by a model from it (`titleGeneration`), or set by the user.
   Titles live on the conversation descriptor, so the erasure step "Conversation
   descriptors" removes them, archived copies of soft-deleted conversations included.
-  Conversation properties, step data and checkpoints are **not** exported
+  The conversation search (`GET /conversationstore/conversations/search`) matches titles
+  only and keeps no index of its own, so it finds nothing of an erased user's
+  conversations. Conversation properties, step data and checkpoints are **not** exported
 - All managed conversation mappings (intent→conversation bindings)
 - Audit processing records: conversation id, agent id, task type, duration, LLM detail and timestamp (capped at 10,000 entries; the prompt input, output and tool calls of the entry are not included)
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —

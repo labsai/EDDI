@@ -58,10 +58,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * they lived in the orchestrator only because that is where the loop is.
  * <p>
  * Almost every method is static, which is why the cluster was mechanical to
- * move: the two that are not ({@link #recordRuleMatches},
- * {@link #recordPauseCapGuard}) are instance methods purely so a test can
- * observe them, and both are best-effort emitters that swallow their own
- * exceptions — guard bookkeeping must never break the LLM loop.
+ * move: {@link #buildPendingBatch} is an instance method because it needs the
+ * transcript codec, and the best-effort emitters ({@link #recordRuleMatches},
+ * {@link #recordPauseCapGuard}, {@link #recordWriteApprovalDecision}) are
+ * instance methods purely so a test can observe them — they swallow their own
+ * exceptions, because guard bookkeeping must never break the LLM loop.
  * <p>
  * {@code AgentOrchestrator} keeps a thin declared delegator for each of these.
  * That is not tidiness: several characterization tests reach them through
