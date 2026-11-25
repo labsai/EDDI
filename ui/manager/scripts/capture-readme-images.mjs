@@ -8,7 +8,7 @@
 //
 //   cd ui && npm ci                       # once
 //   cd manager && npm run dev             # leave running (port 3000)
-//   node scripts/capture-readme-images.mjs [--base http://localhost:3000] [--only banner|shots]
+//   node scripts/capture-readme-images.mjs [--base http://localhost:3000] [--only banner|social|shots]
 //
 // Output goes to <repo>/screenshots/. Needs Playwright's Chromium
 // (`npx playwright install chromium`), the one the e2e tests use.
@@ -67,6 +67,20 @@ async function captureBanner(browser) {
   console.log("wrote screenshots/eddi-banner.jpg");
 }
 
+/** The repository's social preview: uploaded by hand in Settings > General, not shown in the README. */
+async function captureSocialPreview(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 640 },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(path.join(repoRoot, "branding", "readme-banner", "social-preview.html")).href);
+  await page.waitForLoadState("networkidle");
+  await page.screenshot({ path: path.join(outDir, "eddi-social-preview.png") });
+  await context.close();
+  console.log("wrote screenshots/eddi-social-preview.png");
+}
+
 async function captureShots(browser) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
@@ -115,6 +129,9 @@ const browser = await chromium.launch();
 try {
   if (only === "all" || only === "banner") {
     await captureBanner(browser);
+  }
+  if (only === "all" || only === "social") {
+    await captureSocialPreview(browser);
   }
   if (only === "all" || only === "shots") {
     await captureShots(browser);
