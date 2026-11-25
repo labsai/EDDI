@@ -121,6 +121,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -2180,15 +2181,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private void syncImportedRagSchedules(URI created, RagConfiguration config, ImportTransaction transaction) {
+        syncImportedRagSchedules(created, config, transaction::recordCompensation);
+    }
+
+    /**
+     * @param compensations
+     *            where the undo goes ({@code ImportTransaction.recordCompensation})
+     */
+    void syncImportedRagSchedules(URI created, RagConfiguration config, Consumer<Runnable> compensations) {
         if (config.getSources() == null || config.getSources().isEmpty()) {
             return;
         }
         try {
             IResourceId resourceId = RestUtilities.extractResourceId(created);
-            ragSourceIngestionService.syncSchedules(resourceId.getId(), resourceId.getVersion(), config, Set.of());
             // A later failure deletes the knowledge base; its schedules would otherwise
-            // stay behind, firing against a resource that no longer exists.
-            transaction.recordCompensation(() -> ragSourceIngestionService.removeSchedules(resourceId.getId(), config));
+            // stay behind, firing against a resource that no longer exists. Recorded
+            // BEFORE the sync: it creates the schedules one source at a time, so one
+            // that fails part-way has armed the earlier ones, and its exception skipped
+            // a compensation recorded after it. removeSchedules goes by the
+            // deterministic names and ignores those that have no schedule.
+            compensations.accept(() -> ragSourceIngestionService.removeSchedules(resourceId.getId(), config));
+            ragSourceIngestionService.syncSchedules(resourceId.getId(), resourceId.getVersion(), config, Set.of());
         } catch (RuntimeException e) {
             // Surfaced, never swallowed: a source with a cron that has no schedule
             // looks scheduled on every screen and never runs.
