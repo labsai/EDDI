@@ -96,6 +96,8 @@ class ReservedPrincipalsTest {
             Map.entry("sha256:", "content hash prefix: brand image hash and ETag (BrandAssetValidator.hash); "
                     + "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"),
             Map.entry("retro:", "RETRO memory entry key"),
+            Map.entry("derived:", "de-duplication key of a derived attachment in a conversation listing (ConversationListing)"),
+            Map.entry("manifest:", "unitId of a stored document manifest (DocumentStructureService.MANIFEST_UNIT_PREFIX)"),
             Map.entry("rag-ingestion:", "schedule name"),
             Map.entry("audit-key-id:", "audit key id record"),
             Map.entry("agent-signing-key:", "vault key name"),
