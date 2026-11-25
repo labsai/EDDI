@@ -41,6 +41,22 @@ No request header or parameter makes a save lenient. Warnings shown to the calle
 
 Persisting the deployment failure reason in the deployment record (both backends) — left out because open PRs #1398 and #1416 change `PostgresDeploymentStorage` and the undeploy ordering. A deployment made with `autoDeploy=false` is not recorded and so does not pin resources for the in-use guard. Manager "used by" confirmation and the `force` / `endAllActiveConversations` options (UI follow-up branch).
 
+## fix(configs): review round on PR #1492 — in-use check scope, proxy-safe step registry, sync descriptors (2026-11-25)
+
+**Repo:** EDDI (`fix/config-validation-import-and-delete-guards`)
+
+Merged `origin/main` (conflicts: `McpAdminTools` delete tools keep the new `force` / `endAllActiveConversations` arguments behind main's `McpToolTiers` gate; the Full Metrics panel this branch added took id 462, because main's Organizations row took 459). Then the CodeRabbit round and the two red checks:
+
+- **Integration Tests:** `WorkflowCrudIT` saved a rules step without a ruleset, which the save check refuses; the fixture names one, and a new case asserts `400` for an unknown step type and for a rules step without a uri.
+- **CodeQL `java/user-controlled-bypass`:** a name heuristic. `ResourceInUseGuard.authorityOf` contains `auth`, so CodeQL took it for an authentication action and the documented `force=true` override for a bypass of it. Renamed `hostOf`; nothing else changed.
+- **The step-type check never ran in a deployment.** `WorkflowConfigSaveValidator` read the registry as a field of the CDI client proxy (null there), and the NPE was taken for "no container". It goes through `isKnownStepType` now.
+- **In-use check scope.** A soft delete checks the one version; a permanent delete checks every stored version up to the newest, soft-deleted ones included, not up to the version requested. The counter cannot wrap at `Integer.MAX_VALUE`, which used to loop until out of memory. The reverse lookups read from the primary. An agent delete whose deployment discovery failed is a `503` instead of going ahead with a partial list. Workflows store reference URIs trimmed so the exact-match lookup finds them. An agent delete's bulk end skips a conversation that paused for a human after it was listed.
+- **API-agent sync** writes the LLM config and workflow in process, which skips `DocumentDescriptorFilter`; it now advances each descriptor itself.
+- **MCP** `delete_agent` / `delete_resource` return the guard's refusal body instead of `INTERNAL` or a false `deleted`.
+- **Export / import:** a configuration the selection leaves out no longer fails the export when it cannot be serialized; an unrelated unreadable snippet no longer fails it; pruning and detection of missing archive references count depth the same way; an imported knowledge base's schedule cleanup is recorded before the sync that can fail part-way. A disabled model cascade's steps no longer refuse an LLM config save.
+
+Left for a decision: the race between the version check and ending conversations on an agent delete (closing it needs a delete reservation or a lock); a dictionary a parser *document* lists is not looked up by the in-use guard; and whether to dismiss the CodeQL alert or keep the rename.
+
 ```decision-log
 | 2026-11-18 | Lenient config writes use one marker, `LenientConfigWrite` (a ScopedValue), entered in process; writers that go through loopback HTTP (agent setup) generate valid configs instead, proven by a test | Save-time checks for LLM configs and workflows must not break import, sync, duplicate and setup; the marker cannot cross a loopback HTTP request | A thread-local policy of its own (a second mechanism next to the shared marker); a request header or parameter that makes a save lenient (anyone could send it) |
 ```
