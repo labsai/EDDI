@@ -1456,6 +1456,11 @@ public class RestConversationStore implements IRestConversationStore {
                 }
                 if (state == ConversationState.ENDED) {
                     skipped.add(conversationId);
+                } else if (state == ConversationState.AWAITING_HUMAN && IConversationService.END_REASON_AGENT_DELETED.equals(reason)) {
+                    // Deleting an agent leaves conversations paused for a human alone
+                    // (ResourceInUseGuard.endOpenConversations). The caller filtered its page
+                    // by the state it listed; one that paused since is caught by this re-read.
+                    skipped.add(conversationId);
                 } else {
                     toEnd.add(conversationId);
                 }
