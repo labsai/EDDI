@@ -1189,7 +1189,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      *            none — see {@link #parseTypedSelection(String)}
      */
     private void exportSnippets(Path agentPath, Set<String> referencedNames, Set<String> selectedSnippetIds) {
-        if (referencedNames.isEmpty()) {
+        // An empty selection asks for no snippets: nothing to read, so nothing to fail.
+        if (referencedNames.isEmpty() || selectedSnippetIds != null && selectedSnippetIds.isEmpty()) {
             return;
         }
 

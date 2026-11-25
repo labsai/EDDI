@@ -3431,7 +3431,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 sink.add(describeMissing(uriString));
             }
             for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (!WorkflowExtensions.KEY_URI.equals(entry.getKey())) {
+                if (!(WorkflowExtensions.KEY_URI.equals(entry.getKey()) && entry.getValue() instanceof String)) {
                     collectMissing(entry.getValue(), workflowPath, depth + 1, sink);
                 }
             }
@@ -3615,7 +3615,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 return true;
             }
             for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (!WorkflowExtensions.KEY_URI.equals(entry.getKey())
+                // Only a string uri is this node's own reference (checked above); a
+                // container under the key is walked like any other value, as pruning does.
+                if (!(WorkflowExtensions.KEY_URI.equals(entry.getKey()) && entry.getValue() instanceof String)
                         && referencesMissingFile(entry.getValue(), workflowPath, depth + 1)) {
                     return true;
                 }

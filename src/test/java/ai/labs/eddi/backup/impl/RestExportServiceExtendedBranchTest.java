@@ -292,6 +292,19 @@ class RestExportServiceExtendedBranchTest {
         }
 
         @Test
+        @DisplayName("an empty snippet selection reads nothing, so an unreadable snippet cannot fail the export")
+        void emptySnippetSelectionReadsNothing() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+            when(snippetStore.read(anyString(), any())).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), new LinkedHashSet<>(Set.of("greeting")), Set.of());
+
+            verify(documentDescriptorStore, never()).readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), anyBoolean(), any());
+        }
+
+        @Test
         @DisplayName("ResourceNotFoundException on snippet read is handled gracefully")
         void snippetResourceNotFound() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(

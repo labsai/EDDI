@@ -546,6 +546,27 @@ class RestImportServiceUnresolvableReferenceTest {
     }
 
     /**
+     * Only a string under {@code uri} is a node's own reference; a container under
+     * that key used to be skipped by detection but walked by pruning, so a missing
+     * reference inside it was removed without a 422.
+     */
+    @Test
+    @DisplayName("a missing reference inside a container under a uri key is reported, not pruned silently")
+    void missingReferenceUnderAContainerUriIsReported() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.llm","extensions":{"wrapper":{"uri":[{"uri":"%s"}]}}}
+                """.formatted(MISSING_LLM_URI), false);
+
+        var refused = assertThrows(WebApplicationException.class, () -> {
+            try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                    IWorkflowStore.class, mock(IWorkflowStore.class))) {
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            }
+        });
+        assertEquals(422, refused.getResponse().getStatus());
+    }
+
+    /**
      * The preview walks the agent's workflow list before anything is written, and a
      * {@code null} entry there — which Jackson produces from
      * {@code "workflows":[null]} — has no resource id to look anything up by. It is

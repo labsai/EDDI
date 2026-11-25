@@ -535,8 +535,9 @@ The preview returns a resource tree with selectability flags. Agent and workflow
 Snippets and schedules have their own parameters (`selectedSnippets`, `selectedSchedules`).
 Deselecting an extension **keeps the workflow step that referenced it** — the archive states
 what the source deployment actually runs, and the importer decides what to do with a reference
-it cannot satisfy: `merge` answers it from the target's own copy, `create` drops the step and
-logs a warning. See [Import/Export an Agent → Selecting What to Export](import-export-an-agent.md#selecting-what-to-export)
+it cannot satisfy: `merge` answers it from the target's own copy; `create` refuses the archive
+with `422` listing the missing references, and with `allowIncomplete=true` drops the step and
+reports it in the response's `dropped` list (see the section above). See [Import/Export an Agent → Selecting What to Export](import-export-an-agent.md#selecting-what-to-export)
 for the three-state semantics of each parameter and for the archive retention window.
 
 ## See Also
