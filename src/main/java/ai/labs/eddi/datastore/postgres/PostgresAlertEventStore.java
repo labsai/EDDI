@@ -441,18 +441,20 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactConversationOutputValues(String conversationId, Instant now) {
+    public long redactConversationContent(String conversationId, Instant now) {
         ensureSchema();
-        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE conversation_id = ? "
-                + "AND (match->>'value') IS NOT NULL" + UNCLAIMED, Arrays.asList(conversationId, timestamp(now)), false);
+        return update("UPDATE alert_events SET match = match - 'value' - 'commentExcerpt', subject_user_id = NULL WHERE conversation_id = ? "
+                + "AND " + CONVERSATION_CONTENT + UNCLAIMED, Arrays.asList(conversationId, timestamp(now)), false);
     }
 
     @Override
-    public long countConversationOutputValues(String conversationId) {
+    public long countConversationContent(String conversationId) {
         ensureSchema();
-        return update("SELECT COUNT(*) FROM alert_events WHERE conversation_id = ? AND (match->>'value') IS NOT NULL", List.of(conversationId),
-                true);
+        return update("SELECT COUNT(*) FROM alert_events WHERE conversation_id = ? AND " + CONVERSATION_CONTENT, List.of(conversationId), true);
     }
+
+    /** An output value or a rating comment excerpt. */
+    private static final String CONVERSATION_CONTENT = "((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL)";
 
     @Override
     public boolean holdsPersonalContent(String eventId) {

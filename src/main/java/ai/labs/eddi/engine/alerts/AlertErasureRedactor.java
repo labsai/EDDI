@@ -70,12 +70,12 @@ public class AlertErasureRedactor {
     }
 
     /**
-     * Blanks every OUTPUT_MATCH value stored from {@code conversationId} — an
-     * explicit conversation delete.
+     * Blanks every OUTPUT_MATCH value and rating comment excerpt stored about
+     * {@code conversationId} — an explicit conversation delete.
      */
-    public long redactConversationOutputValues(String conversationId) {
-        return untilDone("conversation output values", now -> eventStore.redactConversationOutputValues(conversationId, now),
-                () -> eventStore.countConversationOutputValues(conversationId));
+    public long redactConversationContent(String conversationId) {
+        return untilDone("conversation content", now -> eventStore.redactConversationContent(conversationId, now),
+                () -> eventStore.countConversationContent(conversationId));
     }
 
     /** Blanks the comment excerpt of every event about these ratings. */

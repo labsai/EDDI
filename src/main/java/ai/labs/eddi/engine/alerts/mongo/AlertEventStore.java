@@ -338,14 +338,19 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactConversationOutputValues(String conversationId, Instant now) {
-        return events.updateMany(and(eq("conversationId", conversationId), exists("match.value", true), unclaimed(now)),
-                combine(unset("match.value"), unset("subjectUserId"))).getModifiedCount();
+    public long redactConversationContent(String conversationId, Instant now) {
+        return events.updateMany(and(eq("conversationId", conversationId), conversationContent(), unclaimed(now)),
+                combine(unset("match.value"), unset("match.commentExcerpt"), unset("subjectUserId"))).getModifiedCount();
+    }
+
+    /** An output value or a rating comment excerpt (stored as null when absent). */
+    private static Bson conversationContent() {
+        return or(exists("match.value", true), ne("match.commentExcerpt", null));
     }
 
     @Override
-    public long countConversationOutputValues(String conversationId) {
-        return verified.countDocuments(and(eq("conversationId", conversationId), exists("match.value", true)));
+    public long countConversationContent(String conversationId) {
+        return verified.countDocuments(and(eq("conversationId", conversationId), conversationContent()));
     }
 
     @Override

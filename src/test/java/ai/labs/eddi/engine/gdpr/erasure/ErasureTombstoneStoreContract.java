@@ -83,18 +83,55 @@ public interface ErasureTombstoneStoreContract {
         store.addPendingRemoval(new PendingRemoval("health", "r3", "u1", null, T0.plusSeconds(2)));
 
         assertEquals(3, store.countPendingRemovals(null, null, null), "a second record of the same row is a no-op");
-        assertEquals(List.of("r1", "r2", "r3"), store.pendingRemovals(null, null, null, 10).stream().map(PendingRemoval::rowId).toList());
+        assertEquals(List.of("r1", "r2", "r3"), store.pendingRemovals(null, null, null, null, 10).stream().map(PendingRemoval::rowId).toList());
         assertEquals(2, store.countPendingRemovals(null, "u1", null));
         assertEquals(1, store.countPendingRemovals("alerts", "u1", null));
         assertEquals(2, store.countPendingRemovals("alerts", "u1", "c2"), "user OR conversation");
         assertEquals(1, store.countPendingRemovals(null, null, "c2"));
-        assertEquals(1, store.pendingRemovals(null, null, null, 1).size());
+        assertEquals(1, store.pendingRemovals(null, null, null, null, 1).size());
 
-        PendingRemoval read = store.pendingRemovals("alerts", null, "c1", 10).getFirst();
+        PendingRemoval read = store.pendingRemovals("alerts", null, "c1", null, 10).getFirst();
         assertEquals(new PendingRemoval("alerts", "r1", "u1", "c1", T0), read, "the first record wins");
 
         assertTrue(store.removePendingRemoval("alerts", "r1"));
         assertFalse(store.removePendingRemoval("alerts", "r1"));
         assertEquals(1, store.countPendingRemovals(null, "u1", "c1"), "only health's r3 remains for u1");
+    }
+
+    @Test
+    default void aDeferredPendingRemovalMovesBehindTheOthersAndOutOfTheDueSet() {
+        IErasureTombstoneStore store = tombstoneStore();
+        store.addPendingRemoval(new PendingRemoval("alerts", "old", null, "c1", T0));
+        store.addPendingRemoval(new PendingRemoval("alerts", "mid", null, "c1", T0.plusSeconds(1)));
+        store.addPendingRemoval(new PendingRemoval("alerts", "new", null, "c1", T0.plusSeconds(2)));
+
+        assertEquals(List.of("old", "mid", "new"), rowIds(store.pendingRemovals(null, null, null, T0.plusSeconds(2), 10)),
+                "due by their creation time, the oldest first");
+        assertEquals(List.of("old", "mid"), rowIds(store.pendingRemovals(null, null, null, T0.plusSeconds(1), 10)), "not yet due: left out");
+
+        // The oldest keeps failing: deferred, it is no longer first in line.
+        store.deferPendingRemoval("alerts", "old", T0.plusSeconds(60));
+        assertEquals(List.of("mid"), rowIds(store.pendingRemovals(null, null, null, T0.plusSeconds(2), 1)),
+                "a batch of one now reaches the next removal instead of the failing one");
+        assertEquals(List.of("mid", "new", "old"), rowIds(store.pendingRemovals(null, null, null, T0.plusSeconds(60), 10)),
+                "due again, behind the ones that were due before it");
+        assertEquals(List.of("old", "mid", "new"), rowIds(store.pendingRemovals(null, null, "c1", null, 10)),
+                "an erasure's own retry ignores the schedule: every removal, oldest first");
+
+        store.deferPendingRemoval("alerts", "gone", T0.plusSeconds(60));
+        assertEquals(3, store.countPendingRemovals(null, null, null), "deferring an unknown removal creates nothing");
+    }
+
+    @Test
+    default void aMetaValueIsReadWithoutBeingWritten() {
+        IErasureTombstoneStore store = tombstoneStore();
+        assertEquals(Optional.empty(), store.meta("tombstone-key-check"));
+        assertEquals(Optional.empty(), store.meta("tombstone-key-check"), "a read never inserts");
+        store.putMetaIfAbsent("tombstone-key-check", "vault:abc");
+        assertEquals(Optional.of("vault:abc"), store.meta("tombstone-key-check"));
+    }
+
+    private static List<String> rowIds(List<PendingRemoval> removals) {
+        return removals.stream().map(PendingRemoval::rowId).toList();
     }
 }

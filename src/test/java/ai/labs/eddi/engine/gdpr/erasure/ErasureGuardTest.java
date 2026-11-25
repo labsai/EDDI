@@ -24,6 +24,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,6 +52,9 @@ class ErasureGuardTest {
         boolean failRemoval;
         final List<String> removed = new ArrayList<>();
         int erasedConversations;
+        int drainCalls;
+        /** A conversation whose rows this writer cannot erase (its store refuses). */
+        String stuckConversation;
 
         @Override
         public String name() {
@@ -59,6 +63,7 @@ class ErasureGuardTest {
 
         @Override
         public boolean awaitDrained(Duration timeout) {
+            drainCalls++;
             return drains;
         }
 
@@ -74,6 +79,9 @@ class ErasureGuardTest {
         @Override
         public long eraseConversation(String conversationId) {
             erasedConversations++;
+            if (conversationId.equals(stuckConversation)) {
+                return 0;
+            }
             int before = rows.size();
             rows.values().removeIf(conversationId::equals);
             return before - rows.size();
@@ -302,7 +310,9 @@ class ErasureGuardTest {
                     .thenReturn(Map.of("n2", Map.of("drained", true), "n3", Map.of("drained", true)));
             guard.clusterRpc = rpc;
             guard.eraseConversation(CONVERSATION);
-            verify(rpc).callAll(eq(IClusterRpc.ERASURE_DRAIN), eq(Map.of("conversationId", CONVERSATION)), eq(Duration.ofSeconds(40)), eq(2));
+            // The peers drain everything; the request names no conversation id, which
+            // would only end up in their logs.
+            verify(rpc).callAll(eq(IClusterRpc.ERASURE_DRAIN), eq(Map.of("conversations", 1)), eq(Duration.ofSeconds(40)), eq(2));
         }
 
         @Test
@@ -431,6 +441,129 @@ class ErasureGuardTest {
         assertFalse(store.hasTombstone(Kind.USER, hash));
         assertTrue(store.hasTombstone(Kind.USER, guard.userKey(hash)));
         assertNotEquals(hash, guard.userKey(hash));
+    }
+
+    @Nested
+    @DisplayName("nothing is overlooked: pending removals of any writer, fair retries, a key that changed under a running node")
+    class NothingOverlooked {
+
+        @Test
+        @DisplayName("a pending removal of the conversation by a writer no longer deployed fails the conversation delete")
+        void conversationPendingOfAnUnknownWriter() {
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("retired", "r9", null, CONVERSATION, NOW));
+            ErasureIncompleteException e = assertThrows(ErasureIncompleteException.class, () -> guard.eraseConversation(CONVERSATION));
+            assertTrue(e.getMessage().contains("1 pending removal(s) remain"), e.getMessage());
+            assertEquals(1, store.pendingCount(), "kept: no bean can remove it, so the row may still exist");
+        }
+
+        @Test
+        @DisplayName("a pending removal of the user by a writer no longer deployed fails the last check, not the writer's own")
+        void userPendingOfAnUnknownWriter() {
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("retired", "r8", guard.userKey(KvKeys.sha256(USER)), null, NOW));
+            guard.verifyUserErased("fake", USER, () -> 0);
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> guard.verifyNoPendingRemovals(USER));
+            assertTrue(e.getMessage().contains("1 pending removal(s)"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("the user's own pending removals of every writer are retried by the last check")
+        void lastCheckRetries() {
+            writer.rows.put("r1", CONVERSATION);
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("fake", "r1", guard.userKey(KvKeys.sha256(USER)), null, NOW));
+            guard.verifyNoPendingRemovals(USER);
+            assertEquals(0, store.pendingCount());
+            assertEquals(List.of("r1"), writer.removed);
+        }
+
+        @Test
+        @DisplayName("maintenance: a full batch of removals that keep failing does not starve a removable one behind it")
+        void retriesAreFair() {
+            for (int i = 0; i < ErasureGuard.RETRY_BATCH; i++) {
+                store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("retired", "stuck-" + i, null, "c" + i, NOW.minusSeconds(600)));
+            }
+            writer.rows.put("later", CONVERSATION);
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("fake", "later", null, CONVERSATION, NOW.minusSeconds(1)));
+
+            assertEquals(0, guard.retryDuePending(), "the first pass is full of removals that cannot succeed");
+            assertEquals(1, guard.retryDuePending(), "they were moved back, so the next pass reaches the removable one");
+            assertEquals(List.of("later"), writer.removed);
+            assertEquals(ErasureGuard.RETRY_BATCH, store.pendingCount(), "the stuck ones stay pending");
+        }
+
+        @Test
+        @DisplayName("the backlog counts what is stored, not what this process recorded")
+        void backlog() {
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("fake", "r1", null, CONVERSATION, NOW));
+            store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("retired", "r2", null, CONVERSATION, NOW));
+            assertEquals(2, guard.pendingRemovalBacklog());
+        }
+
+        private ErasureGuard nodeWith(byte[] vaultSubkey) {
+            ErasureGuard node = new ErasureGuard(store, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+            node.vaultKey = () -> vaultSubkey;
+            return node;
+        }
+
+        @Test
+        @DisplayName("a running node stops using its key as soon as the stored check value names another one")
+        void runningNodeDropsAReplacedKey() {
+            byte[] oldKey = new byte[32];
+            byte[] newKey = new byte[32];
+            newKey[0] = 1;
+            ErasureGuard running = nodeWith(oldKey);
+            String before = running.userKey("h");
+            assertTrue(running.beforeWrite(USER, "c", NOW));
+
+            // The operator adopts a new key: the check row is deleted, and a node with
+            // the new key writes its own.
+            store.removeMeta(ErasureGuard.KEY_CHECK_META);
+            ErasureGuard restarted = nodeWith(newKey);
+            assertNotEquals(before, restarted.userKey("h"));
+
+            assertThrows(IllegalStateException.class, () -> running.userKey("h"), "the cached old key is not used any more");
+            assertFalse(running.beforeWrite(USER, "c", NOW), "a guarded write on the stale node fails closed");
+            assertThrows(IllegalStateException.class, () -> running.tombstoneUser("someone", List.of()));
+        }
+
+        @Test
+        @DisplayName("re-checking the key is a plain read: it never writes a check value back")
+        void recheckDoesNotReinsert() {
+            ErasureGuard running = nodeWith(new byte[32]);
+            running.userKey("h");
+            store.replaceMeta(ErasureGuard.KEY_CHECK_META, "vault:someone-else");
+            assertThrows(IllegalStateException.class, () -> running.userKey("h"));
+            assertEquals(Optional.of("vault:someone-else"), store.meta(ErasureGuard.KEY_CHECK_META));
+        }
+
+        @Test
+        @DisplayName("many conversations: one tombstone write and one drain for all, and only the one that failed is reported")
+        void batch() {
+            writer.rows.put("r1", "c1");
+            writer.rows.put("r2", "c2");
+            writer.rows.put("r3", "c3");
+            writer.stuckConversation = "c2";
+
+            Map<String, String> failed = guard.eraseConversations(List.of("c1", "c2", "c3"));
+
+            assertEquals(List.of("c2"), List.copyOf(failed.keySet()));
+            assertTrue(failed.get("c2").contains("1 row(s) remain"), failed.get("c2"));
+            assertEquals(1, writer.drainCalls, "one barrier for the whole batch");
+            assertEquals(Map.of("r2", "c2"), writer.rows);
+            for (String id : List.of("c1", "c2", "c3")) {
+                assertTrue(store.hasTombstone(Kind.CONVERSATION, id), id);
+            }
+        }
+
+        @Test
+        @DisplayName("many conversations: a writer that does not drain keeps every one of them, and none is touched")
+        void batchUndrained() {
+            writer.drains = false;
+            writer.rows.put("r1", "c1");
+            Map<String, String> failed = guard.eraseConversations(List.of("c1", "c2"));
+            assertEquals(List.of("c1", "c2"), List.copyOf(failed.keySet()));
+            assertEquals(0, writer.erasedConversations);
+        }
     }
 
     @Test

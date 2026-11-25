@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -60,10 +62,11 @@ class ClusterControlHandlersErasureDrainTest {
     @DisplayName("gdpr-stop: stops the user's work first, then passes the drain barrier, and says so")
     void stopThenDrain() {
         when(guard.drainReply()).thenReturn(Map.of("drained", true));
-        Map<String, Object> reply = handler(IClusterRpc.GDPR_STOP).apply(Map.of("userIdHash", "hash"));
+        Map<String, Object> reply = handler(IClusterRpc.GDPR_STOP).apply(Map.of("userIdHash", "hash", GdprComplianceService.TOMBSTONED, true));
 
         assertEquals(1, reply.get("stopped"));
         assertEquals(true, reply.get("drained"));
+        assertFalse(reply.containsKey("error"), String.valueOf(reply));
         InOrder order = inOrder(participant, guard);
         order.verify(participant).stopInFlightWorkByHash("hash");
         order.verify(guard).drainReply();
@@ -73,10 +76,23 @@ class ClusterControlHandlersErasureDrainTest {
     @DisplayName("gdpr-stop: a barrier that timed out is an error in the reply, so the erasing node fails its cluster stop")
     void drainTimeout() {
         when(guard.drainReply()).thenReturn(Map.of("drained", false, "error", "async writer(s) not drained within PT30S: alerts"));
-        Map<String, Object> reply = handler(IClusterRpc.GDPR_STOP).apply(Map.of("userIdHash", "hash"));
+        Map<String, Object> reply = handler(IClusterRpc.GDPR_STOP).apply(Map.of("userIdHash", "hash", GdprComplianceService.TOMBSTONED, true));
 
         assertEquals(false, reply.get("drained"));
         assertTrue(String.valueOf(reply.get("error")).contains("alerts"), String.valueOf(reply));
+    }
+
+    @Test
+    @DisplayName("gdpr-stop from a coordinator that wrote no tombstones (an older release): stopped and drained, but answered with an error")
+    void unguardedErasureIsAnError() {
+        when(guard.drainReply()).thenReturn(Map.of("drained", true));
+        Map<String, Object> reply = handler(IClusterRpc.GDPR_STOP).apply(Map.of("userIdHash", "hash"));
+
+        assertEquals(1, reply.get("stopped"), "the stop still runs");
+        assertEquals(true, reply.get("drained"), "and so does the drain");
+        // Every release's coordinator records a reply error as an incomplete cluster
+        // stop, so the erasure is not reported complete over unguarded writes.
+        assertEquals(ClusterControlHandlers.UNGUARDED_ERASURE_ERROR, reply.get("error"));
     }
 
     @Test

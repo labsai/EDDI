@@ -183,14 +183,19 @@ public interface IAlertEventStore {
     long redactEventContent(String eventId, Instant now);
 
     /**
-     * Explicit conversation delete: blanks the stored {@code OUTPUT_MATCH} value
-     * (and its subject) of every event of {@code conversationId}, skipping an event
-     * whose send claim is live at {@code now}.
+     * Explicit conversation delete (and the user erasure's per-conversation step):
+     * blanks the personal content of every event of {@code conversationId} — a
+     * stored {@code OUTPUT_MATCH} value, a rating comment excerpt, and the subject
+     * either carries — skipping an event whose send claim is live at {@code now}.
+     * The same content {@link #holdsPersonalContent} looks for.
      */
-    long redactConversationOutputValues(String conversationId, Instant now);
+    long redactConversationContent(String conversationId, Instant now);
 
-    /** How many events of {@code conversationId} still hold an output value. */
-    long countConversationOutputValues(String conversationId);
+    /**
+     * How many events of {@code conversationId} still hold an output value or a
+     * rating comment excerpt.
+     */
+    long countConversationContent(String conversationId);
 
     /**
      * Whether the event still holds anything personal — an output value, a rating

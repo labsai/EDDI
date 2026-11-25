@@ -106,14 +106,24 @@ public class ClusterControlHandlers implements ClusterStartable {
         }
     }
 
+    /**
+     * The {@code error} of a {@code gdpr-stop} reply to an erasure that wrote no
+     * tombstones.
+     */
+    static final String UNGUARDED_ERASURE_ERROR = "the erasure wrote no erasure tombstones (its coordinating node runs a release without "
+            + "the erasure guarantee), so this node's asynchronously written rows are not guarded — re-run it once every node is upgraded";
+
     private Map<String, Object> gdprStop(Map<String, Object> request) {
-        if (!Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED))) {
+        boolean unguarded = !Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED));
+        if (unguarded) {
             // An erasure coordinated by a node of an older release: it wrote no tombstones,
             // so this node's async writers cannot see it and their late writes are not
-            // guarded. Nothing here can make up for that; say so where operators look.
+            // guarded. The stop and the drain still run below, but the reply carries an
+            // error, which every release's coordinator records as an incomplete cluster
+            // stop: the erasure is not reported complete over writes nothing guards.
             LOGGER.warn("GDPR: an erasure was coordinated by a node without the erasure guarantee (an older release). Its "
-                    + "asynchronously written rows (alerts) are not guarded — upgrade every node before relying on the guarantee, "
-                    + "then re-run that erasure.");
+                    + "asynchronously written rows (alerts) are not guarded; the stop is answered with an error so the erasure is "
+                    + "reported incomplete. Upgrade every node, then re-run that erasure.");
         }
         String userIdHash;
         if (request.get("userIdSealed") != null) {
@@ -152,6 +162,9 @@ public class ClusterControlHandlers implements ClusterStartable {
         }
         if (drain.get("error") != null) {
             errors.add(String.valueOf(drain.get("error")));
+        }
+        if (unguarded) {
+            errors.add(UNGUARDED_ERASURE_ERROR);
         }
         if (!errors.isEmpty()) {
             // Reported, so the erasing node records its cluster stop as incomplete.

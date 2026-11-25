@@ -66,7 +66,9 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
             "CREATE INDEX IF NOT EXISTS idx_erasure_pending_user ON erasure_pending_removals (user_key) WHERE user_key IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_erasure_pending_conversation ON erasure_pending_removals (conversation_id) "
                     + "WHERE conversation_id IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_erasure_pending_created ON erasure_pending_removals (created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_erasure_pending_created ON erasure_pending_removals (created_at)",
+            "ALTER TABLE erasure_pending_removals ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ",
+            "CREATE INDEX IF NOT EXISTS idx_erasure_pending_due ON erasure_pending_removals (next_attempt_at, created_at)"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -181,6 +183,20 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
+    public Optional<String> meta(String name) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT value FROM erasure_meta WHERE name = ?")) {
+            ps.setString(1, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.ofNullable(rs.getString(1)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read the erasure meta value " + name, e);
+        }
+    }
+
+    @Override
     public void addPendingRemoval(PendingRemoval removal) {
         ensureSchema();
         List<Object> params = new ArrayList<>();
@@ -189,16 +205,25 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
         params.add(removal.userKey());
         params.add(removal.conversationId());
         params.add(timestamp(removal.createdAt()));
-        update("INSERT INTO erasure_pending_removals (writer, row_id, user_key, conversation_id, created_at) VALUES (?, ?, ?, ?, ?) "
-                + "ON CONFLICT (writer, row_id) DO NOTHING", params);
+        params.add(timestamp(removal.createdAt()));
+        update("INSERT INTO erasure_pending_removals (writer, row_id, user_key, conversation_id, created_at, next_attempt_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (writer, row_id) DO NOTHING", params);
     }
 
     @Override
-    public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, int limit) {
+    public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit) {
         ensureSchema();
         List<Object> params = new ArrayList<>();
-        String sql = "SELECT writer, row_id, user_key, conversation_id, created_at FROM erasure_pending_removals"
-                + where(writer, userKey, conversationId, params) + " ORDER BY created_at, writer, row_id LIMIT ?";
+        String where = where(writer, userKey, conversationId, params);
+        String order = " ORDER BY created_at, writer, row_id";
+        if (dueBy != null) {
+            // A row without next_attempt_at (written before the column existed) is due.
+            where += (where.isEmpty() ? " WHERE " : " AND ") + "(next_attempt_at IS NULL OR next_attempt_at <= ?)";
+            params.add(timestamp(dueBy));
+            order = " ORDER BY next_attempt_at NULLS FIRST, created_at, writer, row_id";
+        }
+        String sql = "SELECT writer, row_id, user_key, conversation_id, created_at FROM erasure_pending_removals" + where + order
+                + " LIMIT ?";
         params.add(limit);
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             bind(ps, params);
@@ -228,6 +253,13 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to count pending erasure removals", e);
         }
+    }
+
+    @Override
+    public void deferPendingRemoval(String writer, String rowId, Instant notBefore) {
+        ensureSchema();
+        update("UPDATE erasure_pending_removals SET next_attempt_at = ? WHERE writer = ? AND row_id = ?",
+                List.of(timestamp(notBefore), writer, rowId));
     }
 
     @Override

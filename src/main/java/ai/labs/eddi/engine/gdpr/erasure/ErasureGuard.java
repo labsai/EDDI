@@ -27,11 +27,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -67,10 +69,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * user or conversation failed until it is gone.
  *
  * <h3>Fail closed</h3> A tombstone that cannot be read is treated as present:
- * the write is skipped (or removed again). Nothing is cached — a cache that
- * missed a tombstone written before a barrier completed would break the
- * guarantee — so a guarded write costs one or two indexed lookups, on the
- * writer's background thread.
+ * the write is skipped (or removed again). No tombstone is cached — a cache
+ * that missed a tombstone written before a barrier completed would break the
+ * guarantee — so a guarded write costs two or three indexed point reads (the
+ * key check value, then the tombstones), on the writer's background thread.
  */
 @ApplicationScoped
 public class ErasureGuard {
@@ -83,6 +85,12 @@ public class ErasureGuard {
 
     /** How many pending removals one retry pass handles. */
     static final int RETRY_BATCH = 500;
+
+    /**
+     * How far a pending removal that failed again is moved back, so the next
+     * maintenance pass reaches the ones behind it first.
+     */
+    static final Duration RETRY_DEFER = Duration.ofMinutes(5);
 
     /** Removes one row a writer has just written. */
     @FunctionalInterface
@@ -355,48 +363,128 @@ public class ErasureGuard {
      *             retry succeeds
      */
     public void eraseConversation(String conversationId) throws ErasureIncompleteException {
+        Objects.requireNonNull(conversationId, "conversationId");
+        Map<String, String> failed = eraseConversations(List.of(conversationId));
+        if (!failed.isEmpty()) {
+            throw new ErasureIncompleteException(failed.get(conversationId));
+        }
+    }
+
+    /**
+     * {@link #eraseConversation} for many conversations at once (the retention
+     * sweep's permanent deletes): one tombstone write and <b>one</b> drain barrier,
+     * local and cluster, for all of them, then the delete and verification of each.
+     *
+     * @return the conversations that could not be erased with the guarantee, each
+     *         with the reason — their snapshots must be kept for a retry; empty
+     *         when every one succeeded
+     */
+    public Map<String, String> eraseConversations(Collection<String> conversationIds) {
+        Set<String> ids = new LinkedHashSet<>(conversationIds);
+        Map<String, String> failed = new LinkedHashMap<>();
+        if (ids.isEmpty()) {
+            return failed;
+        }
         try {
-            tombstoneConversation(conversationId);
+            Instant now = clock.instant();
+            store.putTombstones(Kind.CONVERSATION, ids, now, now.plus(retention));
         } catch (RuntimeException e) {
-            throw new ErasureIncompleteException("could not record the erasure tombstone: " + e);
+            ids.forEach(id -> failed.put(id, "could not record the erasure tombstone: " + e));
+            return failed;
         }
         List<String> problems = new ArrayList<>();
         List<String> undrained = drainLocal();
         if (!undrained.isEmpty()) {
             problems.add("async writer(s) not drained on this node: " + undrained);
         }
-        problems.addAll(drainCluster(conversationId));
+        problems.addAll(drainCluster(ids.size()));
         // The barrier must hold before the delete: a row still queued could land after
         // it. Without it, nothing is deleted here and the whole delete is retried.
         if (!problems.isEmpty()) {
-            throw new ErasureIncompleteException(String.join("; ", problems));
+            String reason = String.join("; ", problems);
+            ids.forEach(id -> failed.put(id, reason));
+            return failed;
         }
-        for (AsyncErasureWriter writer : writers()) {
+        failed.putAll(eraseConversationRows(ids));
+        return failed;
+    }
+
+    /**
+     * Deletes and verifies every async writer's rows of each conversation, and
+     * requires no pending removal of it to be left — <em>whatever writer</em> the
+     * removal names, so a record of a writer that is no longer deployed keeps the
+     * conversation failed instead of being overlooked. Writes no tombstone and runs
+     * no barrier: the caller must have done both. A user erasure calls it for the
+     * user's conversations, so a row that carries a conversation id but no user
+     * reference is erased with them.
+     *
+     * @return the conversations whose rows are not all gone, each with the reason;
+     *         empty when all are
+     */
+    public Map<String, String> eraseConversationRows(Collection<String> conversationIds) {
+        Map<String, String> failed = new LinkedHashMap<>();
+        for (String conversationId : new LinkedHashSet<>(conversationIds)) {
+            List<String> problems = new ArrayList<>();
             try {
-                retryPending(writer.name(), null, conversationId);
-                writer.eraseConversation(conversationId);
-                long left = writer.countForConversation(conversationId);
-                long pending = store.countPendingRemovals(writer.name(), null, conversationId);
-                if (left > 0 || pending > 0) {
-                    problems.add(writer.name() + ": " + left + " row(s) and " + pending + " pending removal(s) remain");
+                retryPending(null, null, conversationId);
+            } catch (RuntimeException e) {
+                problems.add("pending removals could not be retried: " + e);
+            }
+            for (AsyncErasureWriter writer : writers()) {
+                try {
+                    writer.eraseConversation(conversationId);
+                    long left = writer.countForConversation(conversationId);
+                    if (left > 0) {
+                        problems.add(writer.name() + ": " + left + " row(s) remain");
+                    }
+                } catch (Exception e) {
+                    problems.add(writer.name() + ": " + e);
                 }
-            } catch (Exception e) {
-                problems.add(writer.name() + ": " + e);
+            }
+            try {
+                long pending = store.countPendingRemovals(null, null, conversationId);
+                if (pending > 0) {
+                    problems.add(pending + " pending removal(s) remain");
+                }
+            } catch (RuntimeException e) {
+                problems.add("pending removals could not be counted: " + e);
+            }
+            if (!problems.isEmpty()) {
+                failed.put(conversationId, String.join("; ", problems));
             }
         }
-        if (!problems.isEmpty()) {
-            throw new ErasureIncompleteException(String.join("; ", problems));
+        return failed;
+    }
+
+    /**
+     * The last check of a user erasure, after every participant ran: retries the
+     * user's pending removals of <em>every</em> writer and requires none to be
+     * left. {@link #verifyUserErased} checks one writer's; this also catches a
+     * removal recorded by a writer without a participant, or one no longer
+     * deployed.
+     *
+     * @throws IllegalStateException
+     *             when a pending removal remains, or the store cannot tell
+     */
+    public void verifyNoPendingRemovals(String userId) {
+        String key = userKey(KvKeys.sha256(userId));
+        retryPending(null, key, null);
+        long pending = store.countPendingRemovals(null, key, null);
+        if (pending > 0) {
+            throw new IllegalStateException(pending + " pending removal(s) of the user remain");
         }
     }
 
     /** The conversation-delete barrier on every other node. */
-    List<String> drainCluster(String conversationId) {
+    List<String> drainCluster(int conversations) {
         if (clusterRpc == null || !clusterRpc.isClustered()) {
             return List.of();
         }
         try {
             int expected = clusterRpc.expectedPeers();
-            var replies = clusterRpc.callAll(IClusterRpc.ERASURE_DRAIN, Map.of("conversationId", conversationId),
+            // Every peer drains everything; the request names no conversation, which
+            // would only end up in their logs.
+            var replies = clusterRpc.callAll(IClusterRpc.ERASURE_DRAIN, Map.of("conversations", conversations),
                     clusterTimeout.plus(drainTimeout), expected);
             return clusterVerdict(replies, expected);
         } catch (RuntimeException e) {
@@ -424,20 +512,46 @@ public class ErasureGuard {
     }
 
     /**
-     * Retries pending removals — of one writer and user or conversation (an
-     * erasure's verification), or all of them (the maintenance pass, with every
-     * argument null).
+     * Retries the pending removals in an erasure's scope — of one writer (null:
+     * every writer) and user or conversation — whether or not they are due yet.
      *
      * @return how many were cleared
      */
     public int retryPending(String writer, String userKey, String conversationId) {
+        return retry(store.pendingRemovals(writer, userKey, conversationId, null, RETRY_BATCH));
+    }
+
+    /**
+     * The maintenance pass: retries the pending removals that are due, the
+     * longest-due first. One that fails again, or names a writer no bean answers
+     * to, is moved back by {@link #RETRY_DEFER}, so removals that keep failing
+     * cannot fill every batch and starve the ones behind them.
+     *
+     * @return how many were cleared
+     */
+    public int retryDuePending() {
+        return retry(store.pendingRemovals(null, null, null, clock.instant(), RETRY_BATCH));
+    }
+
+    /**
+     * How many pending removals are stored, of every writer and node; also
+     * published as the {@code eddi_gdpr_guard_pending_backlog} gauge.
+     */
+    public long pendingRemovalBacklog() {
+        long backlog = store.countPendingRemovals(null, null, null);
+        metrics.pendingBacklog(backlog);
+        return backlog;
+    }
+
+    private int retry(List<PendingRemoval> removals) {
         int cleared = 0;
-        for (PendingRemoval removal : store.pendingRemovals(writer, userKey, conversationId, RETRY_BATCH)) {
+        for (PendingRemoval removal : removals) {
             AsyncErasureWriter owner = writer(removal.writer());
             if (owner == null) {
                 // Left pending on purpose: no bean can remove it, and dropping the record
                 // would let the erasure report success over a row that may still exist.
                 LOGGER.errorf("GDPR: a pending removal names the unknown async writer '%s'; it stays pending", sanitize(removal.writer()));
+                defer(removal);
                 continue;
             }
             try {
@@ -447,9 +561,19 @@ public class ErasureGuard {
                 cleared++;
             } catch (Exception e) {
                 LOGGER.warnf("GDPR: pending removal of a %s row still fails: %s", removal.writer(), e.toString());
+                defer(removal);
             }
         }
         return cleared;
+    }
+
+    private void defer(PendingRemoval removal) {
+        try {
+            store.deferPendingRemoval(removal.writer(), removal.rowId(), clock.instant().plus(RETRY_DEFER));
+        } catch (RuntimeException e) {
+            // It stays due, so the next pass tries it first again; nothing is lost.
+            LOGGER.debugf("GDPR: a pending removal could not be moved back: %s", e.toString());
+        }
     }
 
     /** Deletes tombstones past their retention; returns how many. */
@@ -498,14 +622,35 @@ public class ErasureGuard {
     private static final byte[] KEY_CHECK_PLAINTEXT = "eddi-gdpr-tombstone-key-check".getBytes(StandardCharsets.UTF_8);
     private static final long MISMATCH_LOG_INTERVAL_MILLIS = 60_000;
 
-    /** The resolved key, with one Mac per thread (Mac is not thread-safe). */
-    private record TombstoneKey(String mode, ThreadLocal<Mac> macs) {
+    /**
+     * The resolved key: its mode, the check value it was accepted under, and one
+     * Mac per thread (Mac is not thread-safe).
+     */
+    private record TombstoneKey(String mode, String check, ThreadLocal<Mac> macs) {
     }
 
+    /**
+     * The tombstone key, re-checked against the stored check value on every use.
+     * The derived key is kept (deriving it reads the vault), but whether it is
+     * still <em>the</em> key is not assumed: when the stored check value no longer
+     * matches it — an operator replaced or deleted the row to adopt a new key —
+     * this node drops it and resolves again, which fails closed unless its own key
+     * is the stored one. So a running node never keeps hashing users with a key the
+     * stored check value no longer names. The re-check is a plain read: inserting
+     * the old check value again would undo the operator's reset.
+     */
     private TombstoneKey key() {
         TombstoneKey current = tombstoneKey;
         if (current != null) {
-            return current;
+            Optional<String> stored = store.meta(KEY_CHECK_META);
+            if (stored.isPresent() && stored.get().equals(current.check())) {
+                return current;
+            }
+            synchronized (this) {
+                if (tombstoneKey == current) {
+                    tombstoneKey = null;
+                }
+            }
         }
         synchronized (this) {
             if (tombstoneKey == null) {
@@ -527,8 +672,10 @@ public class ErasureGuard {
      * later, a restored vault metadata store, a lost salt row) would make every
      * existing tombstone silently stop matching, so it fails closed instead — every
      * guarded write is skipped, every erasure step that needs the key fails — and
-     * says so (ERROR, {@code eddi_gdpr_guard_key_mismatch_total}). Not cached, so
-     * the guard recovers as soon as the operator restored the key.
+     * says so (ERROR, {@code eddi_gdpr_guard_key_mismatch_total}). A failed
+     * resolution is not cached, so the guard recovers as soon as the operator
+     * restored the key; a successful one is, and {@link #key} re-checks it against
+     * the stored check value on every use.
      */
     private TombstoneKey resolveKey() {
         byte[] raw = vaultSubkey();
@@ -555,7 +702,7 @@ public class ErasureGuard {
             throw new IllegalStateException("The erasure tombstone key changed (now " + mode + "); see the ERROR log for the operator action");
         }
         final byte[] keyBytes = raw;
-        return new TombstoneKey(mode, ThreadLocal.withInitial(() -> newMac(keyBytes)));
+        return new TombstoneKey(mode, check, ThreadLocal.withInitial(() -> newMac(keyBytes)));
     }
 
     /** The vault subkey, or null when no vault is configured. */

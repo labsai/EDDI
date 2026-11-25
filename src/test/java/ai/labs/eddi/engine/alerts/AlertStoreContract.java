@@ -191,6 +191,33 @@ public interface AlertStoreContract {
     }
 
     /**
+     * A conversation delete reaches a rating alert's comment excerpt too: it is
+     * conversation content, carries the conversation id, and the write side already
+     * refuses it for a tombstoned conversation. Its rater subject goes with it.
+     */
+    @Test
+    default void aConversationDeleteAlsoBlanksRatingExcerptsAndTheirRater() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore()
+                .insert(new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.RATING, t.kind(), t.agentId(), t.agentVersion(), "conv-r",
+                        t.firedAt(), "Unhappy users", t.match(), t.deliveries(), t.state(), t.nextAttemptAt(), "r1", 0, null, null, null, null, 0,
+                        "k1:rater", null))
+                .orElseThrow();
+        AlertEvent elsewhere = eventStore().insert(event(AGENT, "r2", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
+        assertEquals(1, eventStore().countConversationContent("conv-r"), "an excerpt counts as the conversation's content");
+
+        assertEquals(1, eventStore().redactConversationContent("conv-r", Instant.now()));
+
+        assertEquals(0, eventStore().countConversationContent("conv-r"));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertFalse(eventStore().holdsPersonalContent(rated.id()), "the rater subject goes with the excerpt");
+        assertEquals(List.of("Too slow"), eventStore().read(rated.id()).orElseThrow().match().tags(), "the alert itself stays");
+        assertEquals("It took forever", eventStore().read(elsewhere.id()).orElseThrow().match().commentExcerpt(), "another conversation's stays");
+        assertEquals(0, eventStore().countConversationContent("conv-without-alerts"));
+        assertEquals(0, eventStore().redactConversationContent("conv-without-alerts", Instant.now()));
+    }
+
+    /**
      * The erasure guarantee's removals: a conversation's values, and one event's
      * personal content.
      */
@@ -201,16 +228,16 @@ public interface AlertStoreContract {
         AlertEvent claimed = eventStore().insert(withOutputIn(t, "g2", "v2", "owner-1", "conv-a")).orElseThrow();
         AlertEvent other = eventStore().insert(withOutputIn(t, "g3", "v3", "owner-2", "conv-b")).orElseThrow();
         AlertEvent rated = eventStore().insert(event(AGENT, "g4", AlertEvent.State.PENDING, NOW, null)).orElseThrow();
-        assertEquals(2, eventStore().countConversationOutputValues("conv-a"));
+        assertEquals(2, eventStore().countConversationContent("conv-a"));
 
         Instant now = Instant.now();
         assertTrue(eventStore().claimSend(claimed.id(), "A", now, now.plusSeconds(30)));
-        assertEquals(1, eventStore().redactConversationOutputValues("conv-a", now), "a live send claim is skipped");
-        assertEquals(1, eventStore().countConversationOutputValues("conv-a"));
-        assertEquals(1, eventStore().redactConversationOutputValues("conv-a", now.plusSeconds(30)));
-        assertEquals(0, eventStore().countConversationOutputValues("conv-a"));
+        assertEquals(1, eventStore().redactConversationContent("conv-a", now), "a live send claim is skipped");
+        assertEquals(1, eventStore().countConversationContent("conv-a"));
+        assertEquals(1, eventStore().redactConversationContent("conv-a", now.plusSeconds(30)));
+        assertEquals(0, eventStore().countConversationContent("conv-a"));
         assertEquals(0, eventStore().countOutputValues("owner-1"), "the subject goes with the value");
-        assertEquals(1, eventStore().countConversationOutputValues("conv-b"), "another conversation is untouched");
+        assertEquals(1, eventStore().countConversationContent("conv-b"), "another conversation is untouched");
 
         assertTrue(eventStore().claimSend(rated.id(), "B", now, now.plusSeconds(30)));
         eventStore().redactEventContent(rated.id(), now);

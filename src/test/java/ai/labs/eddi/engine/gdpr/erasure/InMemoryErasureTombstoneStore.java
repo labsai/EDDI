@@ -25,6 +25,7 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
 
     private final Map<String, Tombstone> tombstones = new ConcurrentHashMap<>();
     private final Map<String, PendingRemoval> pending = new LinkedHashMap<>();
+    private final Map<String, Instant> nextAttempt = new LinkedHashMap<>();
     private final Map<String, String> meta = new LinkedHashMap<>();
     public volatile boolean failReads;
     public volatile boolean failPending;
@@ -77,9 +78,22 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
         return meta.computeIfAbsent(name, n -> value);
     }
 
+    @Override
+    public synchronized Optional<String> meta(String name) {
+        if (failReads) {
+            throw new IllegalStateException("meta store down");
+        }
+        return Optional.ofNullable(meta.get(name));
+    }
+
     /** Simulates a restore or an operator replacing a stored meta value. */
     public synchronized void replaceMeta(String name, String value) {
         meta.put(name, value);
+    }
+
+    /** Simulates an operator deleting a stored meta value. */
+    public synchronized void removeMeta(String name) {
+        meta.remove(name);
     }
 
     @Override
@@ -87,19 +101,35 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
         if (failPending) {
             throw new IllegalStateException("pending store down");
         }
-        pending.putIfAbsent(removal.writer() + ":" + removal.rowId(), removal);
+        if (pending.putIfAbsent(removal.writer() + ":" + removal.rowId(), removal) == null) {
+            nextAttempt.put(removal.writer() + ":" + removal.rowId(), removal.createdAt());
+        }
     }
 
     @Override
-    public synchronized List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, int limit) {
+    public synchronized List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy,
+                                                             int limit) {
         List<PendingRemoval> found = new ArrayList<>();
         for (PendingRemoval p : pending.values()) {
-            if (matches(p, writer, userKey, conversationId)) {
+            if (matches(p, writer, userKey, conversationId) && (dueBy == null || !next(p).isAfter(dueBy))) {
                 found.add(p);
             }
         }
-        found.sort(Comparator.comparing(PendingRemoval::createdAt));
+        found.sort(dueBy == null
+                ? Comparator.comparing(PendingRemoval::createdAt)
+                : Comparator.comparing(this::next).thenComparing(PendingRemoval::createdAt));
         return found.size() > limit ? found.subList(0, limit) : found;
+    }
+
+    private Instant next(PendingRemoval p) {
+        return nextAttempt.getOrDefault(p.writer() + ":" + p.rowId(), p.createdAt());
+    }
+
+    @Override
+    public synchronized void deferPendingRemoval(String writer, String rowId, Instant notBefore) {
+        if (pending.containsKey(writer + ":" + rowId)) {
+            nextAttempt.put(writer + ":" + rowId, notBefore);
+        }
     }
 
     private static boolean matches(PendingRemoval p, String writer, String userKey, String conversationId) {
@@ -119,6 +149,7 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Override
     public synchronized boolean removePendingRemoval(String writer, String rowId) {
+        nextAttempt.remove(writer + ":" + rowId);
         return pending.remove(writer + ":" + rowId) != null;
     }
 

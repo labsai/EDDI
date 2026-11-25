@@ -34,12 +34,19 @@ public class ErasureGuardMaintenance {
     @Scheduled(every = "5m", delayed = "2m", identity = "gdpr-erasure-guard-maintenance")
     void run() {
         try {
-            int cleared = guard.retryPending(null, null, null);
+            int cleared = guard.retryDuePending();
             if (cleared > 0) {
                 LOGGER.infof("GDPR: cleared %d pending removal(s) of erased rows", cleared);
             }
         } catch (RuntimeException e) {
             LOGGER.warnf("GDPR: pending removals could not be retried; the next pass will: %s", e.toString());
+        }
+        try {
+            // The durable backlog for the dashboard: the counters of recorded and cleared
+            // removals are per process and start at zero after a restart.
+            guard.pendingRemovalBacklog();
+        } catch (RuntimeException e) {
+            LOGGER.debugf("GDPR: pending removals could not be counted: %s", e.toString());
         }
         try {
             long expired = guard.deleteExpiredTombstones();

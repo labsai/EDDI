@@ -43,6 +43,13 @@ public final class DrainBarrier {
     private final Object monitor = new Object();
 
     /**
+     * Test seam: run by {@link #awaitDrained} right after it read its target, so a
+     * test can tell when work submitted from then on is "after the barrier". Null
+     * outside tests.
+     */
+    volatile Runnable afterSnapshot;
+
+    /**
      * Submits {@code task} to {@code executor}, tracked by this barrier.
      *
      * @throws RejectedExecutionException
@@ -73,6 +80,10 @@ public final class DrainBarrier {
     public boolean awaitDrained(Duration timeout) throws InterruptedException {
         long target = sequence.get();
         long deadline = System.nanoTime() + timeout.toNanos();
+        Runnable seam = afterSnapshot;
+        if (seam != null) {
+            seam.run();
+        }
         synchronized (monitor) {
             while (pendingUpTo(target)) {
                 long left = deadline - System.nanoTime();

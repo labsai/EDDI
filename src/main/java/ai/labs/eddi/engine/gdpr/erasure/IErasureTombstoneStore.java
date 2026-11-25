@@ -81,16 +81,37 @@ public interface IErasureTombstoneStore {
      */
     String putMetaIfAbsent(String name, String value);
 
+    /**
+     * The stored deployment-wide value {@code name}, or empty when none is stored.
+     * A plain read, never a write: a running node re-checks its tombstone key with
+     * it, and an insert there would put back a check value an operator has just
+     * removed.
+     */
+    Optional<String> meta(String name);
+
     /** Records a pending removal; a second record of the same row is a no-op. */
     void addPendingRemoval(PendingRemoval removal);
 
     /**
-     * Pending removals, oldest first, at most {@code limit}, of {@code writer}
-     * (null: every writer): all of them when {@code userKey} and
-     * {@code conversationId} are both null, otherwise those whose user key or
-     * conversation matches either non-null one.
+     * Pending removals, at most {@code limit}, of {@code writer} (null: every
+     * writer): all of them when {@code userKey} and {@code conversationId} are both
+     * null, otherwise those whose user key or conversation matches either non-null
+     * one.
+     * <p>
+     * With {@code dueBy} null (an erasure retrying its own removals), every match
+     * is returned, oldest first. With {@code dueBy} set (the maintenance pass),
+     * only those whose next attempt is due by then, the longest-due first: a
+     * removal that failed was {@link #deferPendingRemoval deferred}, so it moves
+     * behind the others and a batch of removals that keep failing cannot starve the
+     * rest.
      */
-    List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, int limit);
+    List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit);
+
+    /**
+     * Moves the next attempt of a pending removal to {@code notBefore} (see
+     * {@link #pendingRemovals}). A removal that no longer exists is ignored.
+     */
+    void deferPendingRemoval(String writer, String rowId, Instant notBefore);
 
     /** How many {@link #pendingRemovals} would return without a limit. */
     long countPendingRemovals(String writer, String userKey, String conversationId);

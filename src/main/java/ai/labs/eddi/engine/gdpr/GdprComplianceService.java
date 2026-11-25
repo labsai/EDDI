@@ -424,6 +424,8 @@ public class GdprComplianceService {
      * discussions, and purge the conversations' dead letters</li>
      * <li>Delete all HITL tool execution journal entries for user
      * conversations</li>
+     * <li>Delete and verify the async writers' rows of the user's conversations
+     * ({@link ErasureGuard#eraseConversationRows})</li>
      * <li>Delete all conversation descriptors</li>
      * <li>Delete all conversation memory checkpoints</li>
      * <li>Delete the vault slots holding the user's {@code scope: "secret"}
@@ -444,6 +446,8 @@ public class GdprComplianceService {
      * {@code eddi.audit.erasure-mode=pseudonymize}), then pseudonymize any rows
      * left under the raw id</li>
      * <li>Run every registered {@link IGdprParticipant}, in {@code order()}</li>
+     * <li>Require no pending removal of the user's async-written rows to be left,
+     * of any writer ({@link ErasureGuard#verifyNoPendingRemovals})</li>
      * </ol>
      * <p>
      * Conversation IDs are resolved once, after the user memories are deleted and
@@ -721,6 +725,27 @@ public class GdprComplianceService {
         if (journalEntriesDeleted > 0) {
             LOGGER.infof("[GDPR] Deleted %d HITL tool journal entries [%s]",
                     journalEntriesDeleted, pseudonym);
+        }
+
+        // 3b. The async writers' rows of the user's conversations (ErasureGuard), for
+        // a row that carries the conversation but no reference to the user — the
+        // writers' participants (step 8) find only the rows that name the user. Runs
+        // after the drain barrier of step 0 and, like the journal above, before the
+        // snapshots are deleted: they are how a re-run finds these conversations
+        // again, so a failure keeps them.
+        if (erasureGuard != null && !conversationIds.isEmpty()) {
+            try {
+                Map<String, String> notErased = erasureGuard.eraseConversationRows(conversationIds);
+                if (!notErased.isEmpty()) {
+                    dependentCleanupIncomplete = true;
+                    recordFailure(failedSteps, "asyncWriteConversations", new IllegalStateException(
+                            notErased.size() + " conversation(s) still hold asynchronously written rows: " + notErased.values().iterator().next()),
+                            pseudonym);
+                }
+            } catch (Exception e) {
+                dependentCleanupIncomplete = true;
+                recordFailure(failedSteps, "asyncWriteConversations", e, pseudonym);
+            }
         }
 
         // 4a. Delete conversation descriptors (must run BEFORE or alongside
@@ -1041,6 +1066,18 @@ public class GdprComplianceService {
             } catch (Exception e) {
                 participantsFailed.add(participant.name());
                 recordFailure(failedSteps, participant.name(), e, pseudonym);
+            }
+        }
+
+        // 9. The erasure guarantee's last check: no pending removal of the user is
+        // left, whatever writer recorded it — also one of a writer that has no
+        // participant, or is no longer deployed (each participant checks only its
+        // own writer's).
+        if (erasureGuard != null) {
+            try {
+                erasureGuard.verifyNoPendingRemovals(userId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "asyncWritePending", e, pseudonym);
             }
         }
 

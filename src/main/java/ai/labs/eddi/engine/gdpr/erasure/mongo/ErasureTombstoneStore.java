@@ -41,6 +41,7 @@ import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.currentDate;
 import static com.mongodb.client.model.Updates.max;
+import static com.mongodb.client.model.Updates.set;
 import static com.mongodb.client.model.Updates.setOnInsert;
 
 /**
@@ -79,6 +80,7 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
         pending.createIndex(Indexes.ascending("conversationId"),
                 new IndexOptions().name("idx_erasurepending_conversation").partialFilterExpression(exists("conversationId", true)));
         pending.createIndex(Indexes.ascending("createdAt"), new IndexOptions().name("idx_erasurepending_created"));
+        pending.createIndex(Indexes.ascending("nextAttemptAt", "createdAt"), new IndexOptions().name("idx_erasurepending_due"));
     }
 
     /**
@@ -150,9 +152,15 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
+    public Optional<String> meta(String name) {
+        Document found = meta.find(eq("_id", name)).first();
+        return found == null ? Optional.empty() : Optional.ofNullable(found.getString("value"));
+    }
+
+    @Override
     public void addPendingRemoval(PendingRemoval removal) {
-        Document doc = new Document("writer", removal.writer()).append("rowId", removal.rowId()).append("createdAt",
-                Date.from(removal.createdAt()));
+        Document doc = new Document("writer", removal.writer()).append("rowId", removal.rowId())
+                .append("createdAt", Date.from(removal.createdAt())).append("nextAttemptAt", Date.from(removal.createdAt()));
         if (removal.userKey() != null) {
             doc.append("userKey", removal.userKey());
         }
@@ -164,9 +172,16 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
-    public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, int limit) {
+    public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit) {
         List<PendingRemoval> found = new ArrayList<>();
-        pending.find(filter(writer, userKey, conversationId)).sort(Sorts.ascending("createdAt", "_id")).limit(limit)
+        Bson filter = filter(writer, userKey, conversationId);
+        Bson sort = Sorts.ascending("createdAt", "_id");
+        if (dueBy != null) {
+            // A record without nextAttemptAt (written before the field existed) is due.
+            filter = and(filter, or(lte("nextAttemptAt", Date.from(dueBy)), exists("nextAttemptAt", false)));
+            sort = Sorts.ascending("nextAttemptAt", "createdAt", "_id");
+        }
+        pending.find(filter).sort(sort).limit(limit)
                 .forEach(doc -> found.add(new PendingRemoval(doc.getString("writer"), doc.getString("rowId"), doc.getString("userKey"),
                         doc.getString("conversationId"), doc.getDate("createdAt").toInstant())));
         return found;
@@ -175,6 +190,11 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     @Override
     public long countPendingRemovals(String writer, String userKey, String conversationId) {
         return pending.countDocuments(filter(writer, userKey, conversationId));
+    }
+
+    @Override
+    public void deferPendingRemoval(String writer, String rowId, Instant notBefore) {
+        pending.updateOne(eq("_id", writer + ":" + rowId), set("nextAttemptAt", Date.from(notBefore)));
     }
 
     @Override

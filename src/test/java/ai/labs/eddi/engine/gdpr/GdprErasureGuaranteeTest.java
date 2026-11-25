@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.Kind;
+import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.PendingRemoval;
 import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
@@ -54,6 +55,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
@@ -72,6 +74,11 @@ class GdprErasureGuaranteeTest {
     /** An async writer whose user rows live in a map: row id → user id. */
     static class Writer implements AsyncErasureWriter {
         final Map<String, String> rows = new HashMap<>();
+        /**
+         * Rows that carry only a conversation id, no user reference: row id →
+         * conversation.
+         */
+        final Map<String, String> conversationRows = new HashMap<>();
         boolean drains = true;
         boolean failRemoval;
 
@@ -95,12 +102,14 @@ class GdprErasureGuaranteeTest {
 
         @Override
         public long eraseConversation(String conversationId) {
-            return 0;
+            int before = conversationRows.size();
+            conversationRows.values().removeIf(conversationId::equals);
+            return before - conversationRows.size();
         }
 
         @Override
         public long countForConversation(String conversationId) {
-            return 0;
+            return conversationRows.values().stream().filter(conversationId::equals).count();
         }
     }
 
@@ -238,6 +247,52 @@ class GdprErasureGuaranteeTest {
     }
 
     @Test
+    @DisplayName("a row that names only one of the user's conversations, not the user, is erased with the conversation")
+    void conversationOnlyRowsAreErased() {
+        registerParticipant();
+        writer.conversationRows.put("c-row", "conv-2");
+        writer.conversationRows.put("other-row", "conv-of-someone-else");
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.complete(), result.failedSteps().toString());
+        assertEquals(Map.of("other-row", "conv-of-someone-else"), writer.conversationRows);
+    }
+
+    @Test
+    @DisplayName("a conversation whose async rows cannot be erased is kept for the re-run, and the erasure fails")
+    void conversationRowsThatStayKeepTheConversation() throws Exception {
+        registerParticipant();
+        Writer stuck = new Writer() {
+            @Override
+            public long eraseConversation(String conversationId) {
+                return 0;
+            }
+        };
+        stuck.conversationRows.put("c-row", "conv-1");
+        guard = new ErasureGuard(tombstones, List.of(stuck), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+        service.erasureGuard = guard;
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.failedSteps().contains("asyncWriteConversations"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), "the snapshots are what a re-run finds the conversations by");
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
+    @DisplayName("a pending removal of the user by a writer without a participant (or no longer deployed) fails the erasure")
+    void pendingRemovalOfAnotherWriter() {
+        registerParticipant();
+        tombstones.addPendingRemoval(new PendingRemoval("retired", "r9", guard.userKey(KvKeys.sha256(USER_ID)), null, NOW));
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertEquals(List.of("asyncWritePending"), result.failedSteps());
+    }
+
+    @Test
     @DisplayName("a row whose self-removal failed keeps the erasure failed; the re-run, once the removal works, completes it")
     void idempotentRerunFinishesAFailedErasure() {
         registerParticipant();
@@ -253,7 +308,11 @@ class GdprErasureGuaranteeTest {
         writer.rows.put("r1", USER_ID);
 
         var first = service.deleteUserData(USER_ID);
-        assertEquals(List.of("fake"), first.failedSteps(), "a pending removal must not be reported as a clean erasure");
+        // The pending removal names conv-1 as well, so the conversation is kept for the
+        // re-run (asyncWriteConversations, conversations); the participant's own
+        // check (fake) and the last check over every writer (asyncWritePending) fail.
+        assertEquals(List.of("asyncWriteConversations", "conversations", "fake", "asyncWritePending"), first.failedSteps(),
+                "a pending removal must not be reported as a clean erasure");
 
         writer.failRemoval = false;
         var second = service.deleteUserData(USER_ID);

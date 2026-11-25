@@ -5,12 +5,14 @@
 package ai.labs.eddi.engine.gdpr.erasure;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The meters of the erasure guarantee ({@code eddi.gdpr.guard.*}). No tag
@@ -26,6 +28,7 @@ public class ErasureMetrics {
     static final String DRAIN = "eddi.gdpr.guard.drain";
     static final String DRAIN_TIMEOUTS = "eddi.gdpr.guard.drain.timeouts";
     static final String KEY_MISMATCH = "eddi.gdpr.guard.key.mismatch";
+    static final String PENDING_BACKLOG = "eddi.gdpr.guard.pending.backlog";
 
     static final String REASON_TOMBSTONE = "tombstone";
     static final String REASON_CHECK_FAILED = "check_failed";
@@ -34,6 +37,11 @@ public class ErasureMetrics {
     static final String PENDING_RECORD_FAILED = "record_failed";
 
     private final MeterRegistry registry;
+    /**
+     * The stored pending removals as of this node's last maintenance pass; NaN
+     * until the first one counted them.
+     */
+    private final AtomicReference<Double> backlog = new AtomicReference<>(Double.NaN);
 
     @Inject
     public ErasureMetrics(MeterRegistry registry) {
@@ -46,6 +54,14 @@ public class ErasureMetrics {
         }
         drainTimer();
         keyMismatch0();
+        Gauge.builder(PENDING_BACKLOG, backlog, AtomicReference::get)
+                .description("Pending removals of erased rows stored for every node, as counted by this node's last maintenance pass "
+                        + "(every 5 minutes); not a process-local counter, so it survives restarts")
+                .register(registry);
+    }
+
+    void pendingBacklog(long stored) {
+        backlog.set((double) stored);
     }
 
     void keyMismatch() {

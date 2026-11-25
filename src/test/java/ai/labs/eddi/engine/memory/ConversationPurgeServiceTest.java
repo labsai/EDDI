@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -22,6 +23,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -50,6 +53,7 @@ class ConversationPurgeServiceTest {
         Instance<IAttachmentStore> attachments = mock(Instance.class);
         when(attachments.isResolvable()).thenReturn(false);
         service = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, attachments);
+        service.useErasureGuard(TestErasureGuards.withoutWriters());
     }
 
     private void storedAs(String userId) throws Exception {
@@ -152,6 +156,7 @@ class ConversationPurgeServiceTest {
         when(journalInstance.get()).thenReturn(journal);
         var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, attachments,
                 checkpointInstance, journalInstance);
+        withCheckpoints.useErasureGuard(TestErasureGuards.withoutWriters());
 
         withCheckpoints.purge(CONVERSATION_ID);
 
@@ -190,6 +195,7 @@ class ConversationPurgeServiceTest {
         when(vault.get()).thenReturn(vaultStore);
         var withEverything = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, mock(Instance.class),
                 checkpointInstance, journalInstance);
+        withEverything.useErasureGuard(TestErasureGuards.withoutWriters());
 
         assertThrows(IResourceStore.ResourceStoreException.class, () -> withEverything.purge(CONVERSATION_ID));
 
@@ -215,6 +221,7 @@ class ConversationPurgeServiceTest {
         when(journalInstance.get()).thenReturn(journal);
         var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
                 mock(Instance.class), checkpointInstance, journalInstance);
+        withCheckpoints.useErasureGuard(TestErasureGuards.withoutWriters());
 
         assertThrows(IResourceStore.ResourceStoreException.class, () -> withCheckpoints.purge(CONVERSATION_ID));
 
@@ -239,6 +246,7 @@ class ConversationPurgeServiceTest {
         when(vault.isResolvable()).thenReturn(true);
         when(vault.get()).thenReturn(mock(AutoVaultedSecrets.class));
         var withVault = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, mock(Instance.class));
+        withVault.useErasureGuard(TestErasureGuards.withoutWriters());
         ISecretProvider provider = mock(ISecretProvider.class);
         when(provider.isAvailable()).thenReturn(false);
         Instance<ISecretProvider> providerInstance = mock(Instance.class);
@@ -299,5 +307,37 @@ class ConversationPurgeServiceTest {
         InOrder order = inOrder(guard, memoryStore);
         order.verify(guard).eraseConversation(CONVERSATION_ID);
         order.verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
+    @DisplayName("a service built without an erasure guard refuses a permanent delete before touching anything")
+    void withoutAGuardNothingIsDeleted() throws Exception {
+        service.useErasureGuard(null);
+
+        var refused = assertThrows(IResourceStore.ResourceStoreException.class, () -> service.purge(CONVERSATION_ID));
+
+        assertTrue(refused.getMessage().contains("without the erasure guard"), refused.getMessage());
+        verify(conversationService, never()).endConversation(anyString(), anyString());
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        verify(descriptorStore, never()).deleteAllDescriptor(anyString());
+    }
+
+    @Test
+    @DisplayName("a service built without an erasure guard keeps every conversation of a sweep")
+    void withoutAGuardASweepKeepsEverything() {
+        service.useErasureGuard(null);
+        var kept = service.eraseAsyncWrittenData(List.of("c1", "c2"));
+        assertEquals(Set.of("c1", "c2"), kept.keySet());
+    }
+
+    @Test
+    @DisplayName("an agent-test purge needs no guard: it erases nobody")
+    void agentTestPurgeWithoutAGuard() throws Exception {
+        service.useErasureGuard(null);
+        storedAs(AgentTestConversations.userIdFor(RUN_ID, 0, 1));
+
+        service.purgeAgentTestConversation(CONVERSATION_ID, RUN_ID);
+
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
 }

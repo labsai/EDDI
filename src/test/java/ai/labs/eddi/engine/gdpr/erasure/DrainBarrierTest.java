@@ -65,8 +65,11 @@ class DrainBarrierTest {
             CountDownLatch releaseBefore = new CountDownLatch(1);
             CountDownLatch releaseAfter = new CountDownLatch(1);
             barrier.execute(single, () -> await(releaseBefore));
+            CountDownLatch snapshotTaken = new CountDownLatch(1);
+            barrier.afterSnapshot = snapshotTaken::countDown;
             Future<Boolean> waiting = other.submit(() -> barrier.awaitDrained(Duration.ofSeconds(10)));
-            Thread.sleep(200); // the barrier has taken its snapshot
+            // Not a sleep: the barrier says when it has read its target.
+            assertTrue(snapshotTaken.await(5, TimeUnit.SECONDS), "the barrier never took its snapshot");
             // Queued after the barrier started, and blocked: it must not hold the barrier.
             barrier.execute(other, () -> await(releaseAfter));
             releaseBefore.countDown();
