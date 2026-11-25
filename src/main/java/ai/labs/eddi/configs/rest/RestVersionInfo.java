@@ -339,7 +339,11 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         // at this configuration, unless force. Refused before anything is touched. A
         // permanent delete removes every stored version, so all of them are checked,
         // not only those up to the version the request names.
-        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, permanent ? newestStoredVersion(id, version) : version, permanent, force);
+        // The newest version is read only when the check will run (a guarded type, no
+        // force): a store error there must not fail a delete that never needed it.
+        boolean checked = !force && resourceURI != null && ResourceInUseGuard.isGuarded(resourceURI);
+        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, permanent && checked ? newestStoredVersion(id, version) : version, permanent,
+                force);
 
         try {
             if (permanent) {
