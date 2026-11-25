@@ -18,7 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
-import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
@@ -59,7 +59,7 @@ class ResourceInUseGuardTest {
     private IDeploymentStore deploymentStore;
     private IDocumentDescriptorStore descriptorStore;
     private IConversationMemoryStore conversations;
-    private IRestConversationStore restConversations;
+    private RestConversationStore restConversations;
     private ResourceAccessGuard accessGuard;
     private ResourceInUseGuard guard;
 
@@ -70,7 +70,7 @@ class ResourceInUseGuardTest {
         deploymentStore = mock(IDeploymentStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         conversations = mock(IConversationMemoryStore.class);
-        restConversations = mock(IRestConversationStore.class);
+        restConversations = mock(RestConversationStore.class);
         accessGuard = mock(ResourceAccessGuard.class);
         when(accessGuard.seesEverything()).thenReturn(true);
         when(accessGuard.canAccess(any(DocumentDescriptor.class), eq(AccessLevel.VIEW))).thenReturn(true);
@@ -279,7 +279,7 @@ class ResourceInUseGuardTest {
         assertEquals("AGENT_HAS_OPEN_CONVERSATIONS", body.get("code"));
         assertEquals(2L, body.get("openConversationsCount"));
         assertEquals("endAllActiveConversations=true", body.get("override"));
-        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(restConversations, never()).endActiveConversationsLeavingPaused(any(), anyString());
     }
 
     @Test
@@ -290,7 +290,7 @@ class ResourceInUseGuardTest {
         var open = guard.requireNoOpenConversations("a1", List.of(1), true);
 
         assertEquals(1L, open.total());
-        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(restConversations, never()).endActiveConversationsLeavingPaused(any(), anyString());
     }
 
     @Test
@@ -302,13 +302,13 @@ class ResourceInUseGuardTest {
         when(conversations.loadOpenConversationActivity("a1", 1, "c2", 500)).thenReturn(List.of(
                 new ConversationActivitySummary("c3", ConversationState.IN_PROGRESS, "a1", 1, null)));
         when(conversations.loadOpenConversationActivity("a1", 1, "c3", 500)).thenReturn(List.of());
-        when(restConversations.endActiveConversations(any(), anyString())).thenReturn(Response.ok().build());
+        when(restConversations.endActiveConversationsLeavingPaused(any(), anyString())).thenReturn(Response.ok().build());
 
         guard.endOpenConversations("a1", new ResourceInUseGuard.OpenConversations(Map.of(1, 2L)));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ConversationStatus>> pages = ArgumentCaptor.forClass(List.class);
-        verify(restConversations, times(2)).endActiveConversations(pages.capture(), eq(IConversationService.END_REASON_AGENT_DELETED));
+        verify(restConversations, times(2)).endActiveConversationsLeavingPaused(pages.capture(), eq(IConversationService.END_REASON_AGENT_DELETED));
         assertEquals(List.of("c1"), pages.getAllValues().get(0).stream().map(ConversationStatus::getConversationId).toList());
         assertEquals(List.of("c3"), pages.getAllValues().get(1).stream().map(ConversationStatus::getConversationId).toList());
     }
@@ -318,7 +318,7 @@ class ResourceInUseGuardTest {
     void failedEndStops() throws Exception {
         when(conversations.loadOpenConversationActivity("a1", 1, null, 500))
                 .thenReturn(List.of(new ConversationActivitySummary("c1", ConversationState.READY, "a1", 1, null)));
-        when(restConversations.endActiveConversations(any(), anyString())).thenReturn(Response.serverError().build());
+        when(restConversations.endActiveConversationsLeavingPaused(any(), anyString())).thenReturn(Response.serverError().build());
 
         assertThrows(IllegalStateException.class,
                 () -> guard.endOpenConversations("a1", new ResourceInUseGuard.OpenConversations(Map.of(1, 1L))));

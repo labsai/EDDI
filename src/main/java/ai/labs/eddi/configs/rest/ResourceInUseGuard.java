@@ -18,7 +18,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
-import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -138,13 +138,13 @@ public class ResourceInUseGuard {
     private final IDeploymentStore deploymentStore;
     private final IDocumentDescriptorStore descriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
-    private final IRestConversationStore restConversationStore;
+    private final RestConversationStore restConversationStore;
     private final ResourceAccessGuard accessGuard;
 
     @Inject
     public ResourceInUseGuard(IAgentStore agentStore, IWorkflowStore workflowStore, IDeploymentStore deploymentStore,
             IDocumentDescriptorStore descriptorStore, IConversationMemoryStore conversationMemoryStore,
-            IRestConversationStore restConversationStore, ResourceAccessGuard accessGuard) {
+            RestConversationStore restConversationStore, ResourceAccessGuard accessGuard) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.deploymentStore = deploymentStore;
@@ -492,7 +492,7 @@ public class ResourceInUseGuard {
                     throw new IllegalStateException("Could not list the open conversations of agent " + agentId + " - not deleting it", e);
                 }
                 if (!page.isEmpty()) {
-                    Response ended = restConversationStore.endActiveConversations(page, IConversationService.END_REASON_AGENT_DELETED);
+                    Response ended = restConversationStore.endActiveConversationsLeavingPaused(page, IConversationService.END_REASON_AGENT_DELETED);
                     if (ended != null && ended.getStatus() >= 300) {
                         throw new IllegalStateException("Could not end every open conversation of agent " + agentId + " - not deleting it");
                     }

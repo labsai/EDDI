@@ -941,6 +941,25 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("endIfStateAndNotPaused ends only from the expected state and only without a pause bookmark")
+        void endIfStateAndNotPaused() throws Exception {
+            var plain = createSnapshot(null, "agent1", 1, "user1", ConversationState.READY);
+            String plainId = store.storeConversationMemorySnapshot(plain);
+            assertFalse(store.endIfStateAndNotPaused(plainId, ConversationState.IN_PROGRESS), "a wrong expected state must miss");
+            assertTrue(store.endIfStateAndNotPaused(plainId, ConversationState.READY));
+            assertEquals(ConversationState.ENDED, store.getConversationState(plainId));
+
+            // A resume in flight: IN_PROGRESS, the approval's bookmark still on the
+            // document.
+            var resuming = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            resuming.setHitlPausedAt(Instant.parse("2026-11-25T10:00:00Z"));
+            String resumingId = store.storeConversationMemorySnapshot(resuming);
+            assertFalse(store.endIfStateAndNotPaused(resumingId, ConversationState.IN_PROGRESS),
+                    "a conversation whose approval is still pending must not be ended");
+            assertEquals(ConversationState.IN_PROGRESS, store.getConversationState(resumingId));
+        }
+
+        @Test
         @DisplayName("storeConversationMemorySnapshotIfState persists only while the state matches (terminal writer wins)")
         void storeConversationMemorySnapshotIfState() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);

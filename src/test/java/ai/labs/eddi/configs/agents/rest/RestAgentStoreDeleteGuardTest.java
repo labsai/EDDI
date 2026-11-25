@@ -20,7 +20,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
-import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -60,7 +60,7 @@ class RestAgentStoreDeleteGuardTest {
     private IAgentStore agentStore;
     private IDeploymentStore deploymentStore;
     private IConversationMemoryStore conversations;
-    private IRestConversationStore restConversations;
+    private RestConversationStore restConversations;
     private RestAgentStore store;
 
     @BeforeEach
@@ -68,7 +68,7 @@ class RestAgentStoreDeleteGuardTest {
         agentStore = mock(IAgentStore.class);
         deploymentStore = mock(IDeploymentStore.class);
         conversations = mock(IConversationMemoryStore.class);
-        restConversations = mock(IRestConversationStore.class);
+        restConversations = mock(RestConversationStore.class);
         var accessGuard = mock(ResourceAccessGuard.class);
         var guard = new ResourceInUseGuard(agentStore, mock(IWorkflowStore.class), deploymentStore, mock(IDocumentDescriptorStore.class),
                 conversations, restConversations, accessGuard);
@@ -88,7 +88,7 @@ class RestAgentStoreDeleteGuardTest {
         when(conversations.loadOpenConversationActivity(AGENT_ID, 1, null, 500))
                 .thenReturn(List.of(new ConversationActivitySummary("c1", ConversationState.READY, AGENT_ID, 1, null)));
         when(conversations.loadOpenConversationActivity(AGENT_ID, 1, "c1", 500)).thenReturn(List.of());
-        when(restConversations.endActiveConversations(any(), anyString())).thenReturn(Response.ok().build());
+        when(restConversations.endActiveConversationsLeavingPaused(any(), anyString())).thenReturn(Response.ok().build());
     }
 
     private static IResourceStore.IResourceId version(int version) {
@@ -114,7 +114,7 @@ class RestAgentStoreDeleteGuardTest {
         var refused = assertThrows(WebApplicationException.class, () -> store.deleteAgent(AGENT_ID, 1, false, false, true));
 
         assertEquals(409, refused.getResponse().getStatus());
-        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(restConversations, never()).endActiveConversationsLeavingPaused(any(), anyString());
         verify(agentStore, never()).delete(anyString(), anyInt());
     }
 
@@ -126,7 +126,7 @@ class RestAgentStoreDeleteGuardTest {
         var refused = assertThrows(WebApplicationException.class, () -> store.deleteAgent(AGENT_ID, 1, false, false));
 
         assertEquals(409, refused.getResponse().getStatus());
-        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(restConversations, never()).endActiveConversationsLeavingPaused(any(), anyString());
         verify(agentStore, never()).delete(anyString(), anyInt());
     }
 
@@ -138,7 +138,7 @@ class RestAgentStoreDeleteGuardTest {
         assertEquals(200, store.deleteAgent(AGENT_ID, 1, false, false, true).getStatus());
 
         InOrder order = inOrder(restConversations, agentStore);
-        order.verify(restConversations).endActiveConversations(any(), eq(IConversationService.END_REASON_AGENT_DELETED));
+        order.verify(restConversations).endActiveConversationsLeavingPaused(any(), eq(IConversationService.END_REASON_AGENT_DELETED));
         order.verify(agentStore).delete(AGENT_ID, 1);
     }
 
@@ -152,7 +152,7 @@ class RestAgentStoreDeleteGuardTest {
         var refused = assertThrows(WebApplicationException.class, () -> store.deleteAgent(AGENT_ID, 1, false, false, true));
 
         assertEquals(503, refused.getResponse().getStatus());
-        verify(restConversations, never()).endActiveConversations(any(), anyString());
+        verify(restConversations, never()).endActiveConversationsLeavingPaused(any(), anyString());
         verify(agentStore, never()).delete(anyString(), anyInt());
     }
 }

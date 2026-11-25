@@ -433,6 +433,18 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * {@link #compareAndSetState} to {@code ENDED}, and only while the conversation
+     * carries no HITL pause bookmark ({@code hitlPausedAt}), as one atomic write.
+     * The bookmark outlives the {@code AWAITING_HUMAN} state while a resume runs
+     * ({@code IN_PROGRESS}, before it commits or puts the pause back) and after a
+     * resume crashed: the approval is still pending then, and an end must not
+     * resolve it as a side effect.
+     *
+     * @return true if the conversation was ended
+     */
+    boolean endIfStateAndNotPaused(String conversationId, ConversationState expected) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Cluster mode: record that the lease holder carrying {@code fence} has started
      * its turn, by raising the document's {@code _fence} to at least that value
      * (never lowering it, never touching the revision).

@@ -1274,6 +1274,28 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean endIfStateAndNotPaused(String conversationId, ConversationState expected) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
+        ensureSchema();
+        // As compareAndSetState, plus: no pause bookmark (absent, or a JSON null).
+        String sql = "UPDATE conversation_memories SET conversation_state = ?, "
+                + "data = jsonb_set(data, '{conversationState}', to_jsonb(?::text)) "
+                + "WHERE id = ?::uuid AND conversation_state = ? "
+                + "AND (data->'hitlPausedAt' IS NULL OR jsonb_typeof(data->'hitlPausedAt') = 'null')";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ConversationState.ENDED.name());
+            ps.setString(2, ConversationState.ENDED.name());
+            ps.setString(3, conversationId);
+            ps.setString(4, expected.name());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to end conversation", e);
+        }
+    }
+
+    @Override
     public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence)
             throws IResourceStore.ResourceStoreException {
         if (!PostgresIds.isStorableId(conversationId)) {

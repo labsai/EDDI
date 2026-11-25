@@ -1183,23 +1183,46 @@ class RestConversationStoreTest {
         }
 
         /**
-         * The agent delete lists open conversations and leaves those paused for a human
-         * alone; one that paused between that listing and this call used to be ended
-         * anyway, terminally resolving its pending approval.
+         * The agent delete leaves conversations paused for a human alone. Its bulk end
+         * goes through the conditional end, which decides by compare-and-set; one that
+         * pauses after the re-read here is reported by the service as not ended.
          */
         @Test
-        @DisplayName("an agent delete's bulk end leaves a conversation that has since paused for a human alone")
-        void agentDeleteSkipsAConversationThatPausedSinceItWasListed() throws Exception {
+        @DisplayName("the agent delete's bulk end uses the conditional end and reports a conversation it left alone as skipped")
+        void leavingPausedUsesTheConditionalEnd() throws Exception {
             storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
+            storedConversation("conv-raced", AGENT_A, ConversationState.IN_PROGRESS);
             storedConversation("conv-ready", AGENT_A, ConversationState.READY);
             when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
+            when(conversationService.endConversationUnlessAwaitingHuman("conv-raced", "editor-1", IConversationService.END_REASON_AGENT_DELETED))
+                    .thenReturn(false);
+            when(conversationService.endConversationUnlessAwaitingHuman("conv-ready", "editor-1", IConversationService.END_REASON_AGENT_DELETED))
+                    .thenReturn(true);
 
-            restConversationStore.endActiveConversations(
-                    List.of(statusOf("conv-paused", ConversationState.IN_PROGRESS), statusOf("conv-ready", ConversationState.READY)),
+            Response response = restConversationStore.endActiveConversationsLeavingPaused(
+                    List.of(statusOf("conv-paused", ConversationState.IN_PROGRESS), statusOf("conv-raced", ConversationState.IN_PROGRESS),
+                            statusOf("conv-ready", ConversationState.READY)),
                     IConversationService.END_REASON_AGENT_DELETED);
 
-            verify(conversationService, never()).endConversation(eq("conv-paused"), any(), any());
-            verify(conversationService).endConversation("conv-ready", "editor-1", IConversationService.END_REASON_AGENT_DELETED);
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, List<String>>) response.getEntity();
+            assertEquals(List.of("conv-ready"), body.get("ended"));
+            assertEquals(List.of("conv-paused", "conv-raced"), body.get("skipped"));
+            verify(conversationService, never()).endConversation(any(), any(), any());
+            verify(conversationService, never()).endConversation(any(), any());
+            verify(conversationService, never()).endConversationUnlessAwaitingHuman(eq("conv-paused"), any(), any());
+        }
+
+        @Test
+        @DisplayName("the public bulk end still ends a paused conversation, whatever the end reason")
+        void publicBulkEndStillEndsPausedConversations() throws Exception {
+            storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
+            when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
+
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", null)), IConversationService.END_REASON_AGENT_DELETED);
+
+            verify(conversationService).endConversation("conv-paused", "editor-1", IConversationService.END_REASON_AGENT_DELETED);
+            verify(conversationService, never()).endConversationUnlessAwaitingHuman(any(), any(), any());
         }
 
         @Test

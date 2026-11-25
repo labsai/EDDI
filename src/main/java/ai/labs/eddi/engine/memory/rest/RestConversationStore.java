@@ -1426,6 +1426,23 @@ public class RestConversationStore implements IRestConversationStore {
      */
     @Override
     public Response endActiveConversations(List<ConversationStatus> conversationStatuses, String endReason) {
+        return endActive(conversationStatuses, endReason, false);
+    }
+
+    /**
+     * {@link #endActiveConversations}, leaving every conversation that is paused
+     * for a human ({@code AWAITING_HUMAN}) as it is, including one that pauses
+     * while this runs: each end is
+     * {@link IConversationService#endConversationUnlessAwaitingHuman}, a
+     * compare-and-set on the state. Not an endpoint; the agent delete calls it
+     * ({@code ResourceInUseGuard.endOpenConversations}). A conversation left alone
+     * is reported under {@code skipped}.
+     */
+    public Response endActiveConversationsLeavingPaused(List<ConversationStatus> conversationStatuses, String endReason) {
+        return endActive(conversationStatuses, endReason, true);
+    }
+
+    private Response endActive(List<ConversationStatus> conversationStatuses, String endReason, boolean leavePaused) {
         if (conversationStatuses == null) {
             throw new BadRequestException("A list of conversations to end is required");
         }
@@ -1454,12 +1471,7 @@ public class RestConversationStore implements IRestConversationStore {
                 if (checkedAgents.add(String.valueOf(agentId))) {
                     resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
                 }
-                if (state == ConversationState.ENDED) {
-                    skipped.add(conversationId);
-                } else if (state == ConversationState.AWAITING_HUMAN && IConversationService.END_REASON_AGENT_DELETED.equals(reason)) {
-                    // Deleting an agent leaves conversations paused for a human alone
-                    // (ResourceInUseGuard.endOpenConversations). The caller filtered its page
-                    // by the state it listed; one that paused since is caught by this re-read.
+                if (state == ConversationState.ENDED || leavePaused && state == ConversationState.AWAITING_HUMAN) {
                     skipped.add(conversationId);
                 } else {
                     toEnd.add(conversationId);
@@ -1470,7 +1482,13 @@ public class RestConversationStore implements IRestConversationStore {
             List<String> failed = new LinkedList<>();
             for (String conversationId : toEnd) {
                 try {
-                    if (reason == null) {
+                    if (leavePaused) {
+                        // The state read above is advisory; the compare-and-set inside decides.
+                        if (!conversationService.endConversationUnlessAwaitingHuman(conversationId, actor, reason)) {
+                            skipped.add(conversationId);
+                            continue;
+                        }
+                    } else if (reason == null) {
                         conversationService.endConversation(conversationId, actor);
                     } else {
                         conversationService.endConversation(conversationId, actor, reason);

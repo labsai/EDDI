@@ -1225,6 +1225,20 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean endIfStateAndNotPaused(String conversationId, ConversationState expected) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
+        // eq(field, null) matches an absent field as well as an explicit null.
+        var filter = Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name()),
+                Filters.eq(KEY_HITL_PAUSED_AT, null));
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, ConversationState.ENDED.name()));
+        return conversationCollectionDocument.updateOne(filter, update).getMatchedCount() > 0;
+    }
+
+    @Override
     public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence) {
         if (!isStorableId(conversationId)) {
             return false;
