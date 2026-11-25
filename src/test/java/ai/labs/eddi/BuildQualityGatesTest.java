@@ -1599,6 +1599,16 @@ class BuildQualityGatesTest {
                 "queue and push scans must accept a finding only when an added fingerprint names its path and rule AND"
                         + " the line it names has the finding's exact text: commit-scoped fingerprints cannot match"
                         + " squashed commits, and line numbers shift");
+        assertTrue(gitleaks.contains("ignore_lines_added \"$APPROVAL_BASE\" \"$APPROVAL_HEAD\"")
+                && gitleaks.contains("ADDED=$(LC_ALL=C comm -13")
+                && gitleaks.contains("line_at() { git cat-file blob"),
+                "both .gitleaksignore validators and the finding-line comparison must read blobs (git cat-file),"
+                        + " which no .gitattributes setting can alter");
+        assertFalse(gitleaks.replaceAll("LC_ALL=C grep -a -v?E", "").matches("(?s).*grep -v?E [\"'](\\^\\$\\{FINGERPRINT|\\^\\[0-9a-f\\]).*"),
+                "the fingerprint validators must run grep as LC_ALL=C grep -a: in a UTF-8 locale grep drops a line"
+                        + " with an invalid byte, so such an entry would skip validation");
+        assertTrue(gitleaks.split("is a symbolic link; it must be a regular file", -1).length - 1 == 2,
+                "both validators must refuse a symlinked .gitleaksignore, which cat-file reads as the link target");
         assertFalse(gitleaks.contains("git diff --no-color -U0"),
                 "added .gitleaksignore lines must come from comparing the two blobs' lines (git cat-file): a diff honours"
                         + " .gitattributes, so `.gitleaksignore -diff` would hide every addition, and filtering +++ headers"

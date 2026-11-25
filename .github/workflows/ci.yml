@@ -2317,9 +2317,18 @@ jobs:
             # `binary` or a textconv driver turn the file's diff into "Binary files
             # differ", hiding every addition) and needs care with "+++" headers;
             # comparing the two blobs' line sets has neither problem.
+            # A symlinked .gitleaksignore would be validated as its link TARGET (the path
+            # string cat-file returns), not as the contents gitleaks then loads.
+            if [ "$(git ls-tree "$APPROVAL_HEAD" -- .gitleaksignore | cut -c1-6)" = "120000" ]; then
+              echo "::error::.gitleaksignore is a symbolic link; it must be a regular file"
+              exit 1
+            fi
             IGNORE_ADDED=$(ignore_lines_added "$APPROVAL_BASE" "$APPROVAL_HEAD")
-            NOT_FINGERPRINTS=$(printf '%s\n' "$IGNORE_ADDED" | grep -vE "^${FINGERPRINT}[[:space:]]*\$" \
-              | grep -vE '^[[:space:]]*(#.*)?$' || true)
+            # LC_ALL=C grep -a: in a UTF-8 locale GNU grep silently drops a line
+            # holding an invalid byte, so a commit-less entry for a Latin-1 file name
+            # would pass unvalidated while gitleaks still honours it.
+            NOT_FINGERPRINTS=$(printf '%s\n' "$IGNORE_ADDED" | LC_ALL=C grep -a -vE "^${FINGERPRINT}[[:space:]]*\$" \
+              | LC_ALL=C grep -a -vE '^[[:space:]]*(#.*)?$' || true)
             if [ -n "$NOT_FINGERPRINTS" ]; then
               echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
               printf '%s\n' "$NOT_FINGERPRINTS"
@@ -2327,7 +2336,7 @@ jobs:
             fi
             # Whole fingerprints, paths normalised the way gitleaks normalises
             # them (backslashes to slashes) so a Windows-style entry still matches.
-            APPROVED=$(printf '%s\n' "$IGNORE_ADDED" | grep -E "^${FINGERPRINT}" \
+            APPROVED=$(printf '%s\n' "$IGNORE_ADDED" | LC_ALL=C grep -a -E "^${FINGERPRINT}" \
               | sed -E 's/[[:space:]]*$//' | tr '\\' '/' | LC_ALL=C sort -u || true)
           fi
 
@@ -2412,11 +2421,19 @@ jobs:
           # added lines are the head blob's lines the fork point's blob lacks (read
           # with cat-file, so no .gitattributes setting can hide them, and no
           # "+++" header handling is needed).
+          # A symlinked .gitleaksignore would be validated as its link TARGET (the
+          # path string cat-file returns), not as the contents gitleaks then loads.
+          if [ "$(git ls-tree "$PR_HEAD" -- .gitleaksignore | cut -c1-6)" = "120000" ]; then
+            echo "::error::.gitleaksignore is a symbolic link; it must be a regular file"
+            exit 1
+          fi
           ADDED=$(LC_ALL=C comm -13 \
             <(git cat-file blob "$FORK_POINT:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u) \
             <(git cat-file blob "$PR_HEAD:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u))
-          OTHER=$(printf '%s\n' "$ADDED" | grep -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
-            | grep -vE '^[[:space:]]*(#.*)?$' || true)
+          # LC_ALL=C grep -a, as in the scan step: a line with an invalid UTF-8 byte
+          # must be validated, not silently dropped.
+          OTHER=$(printf '%s\n' "$ADDED" | LC_ALL=C grep -a -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
+            | LC_ALL=C grep -a -vE '^[[:space:]]*(#.*)?$' || true)
           if [ -n "$OTHER" ]; then
             # Fails, rather than only withholding the tolerance: such a line (a
             # path-wide or commit-less entry) would suppress future findings once

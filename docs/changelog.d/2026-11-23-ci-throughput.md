@@ -172,6 +172,16 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   now the head blob's lines that the base blob lacks (`git cat-file` plus `comm`), which no attribute
   or diff driver can change, and the finding-line comparison reads blobs the same way. Both the PR
   and the queue reject that entry now; the 11 earlier cases still behave as before.
+- **Local review of that fix** (it found two older holes on the same path, now closed):
+  GNU grep in a UTF-8 locale silently drops a line holding an invalid byte, so a commit-less entry
+  for a Latin-1 file name skipped validation while gitleaks still honoured it. The validators now run
+  `LC_ALL=C grep -a`; a mutation check with plain `grep` let the entry through on the PR and in the
+  queue. A symlinked `.gitleaksignore` was validated as its link target rather than the contents
+  gitleaks loads; both validators now refuse a symlink. The guard test pins the blob reads, the
+  `LC_ALL=C grep -a` form and the symlink refusal. Confirmed with the pinned binary that `* diff`
+  in `.git/info/attributes` also overrides `binary`, `diff=<driver>` textconv and tree-defined
+  attribute macros. Left as is: merge commits are not scanned on a PR (`git log -p` prints no merge
+  diff), as before this branch; the queue and `main` scans see the squashed result.
 - `UI Workforce` was red on that run: `session-list.test.tsx` puts a conversation modified "ten
   minutes ago" under Today, which is false between 00:00 and 00:10 UTC (the run hit it at 00:02).
   Unrelated to this branch, which does not touch `ui/workforce`; the job was re-run, and the flake
