@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [November 2026](changelog/2026-11.md) | 165 | 838 KB |
+| [November 2026](changelog/2026-11.md) | 177 | 857 KB |
 | [October 2026](changelog/2026-10.md) | 267 | 1236 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1217 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
@@ -67,6 +67,311 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 🔒 chore(docker): base images with the Java4Shell-fixed JDK; Keycloak 26.8.2 pinned by digest (2026-11-21)
+
+**Repo:** EDDI (`chore/base-images-fixed-jdk`)
+
+### What changed and why
+
+All three base images EDDI ships now have a build whose JDK fixes Java4Shell (CVE-2026-114938). Until now the
+repository pinned builds with a vulnerable JDK and relied on the interim `-XX:-UseBASE64Intrinsics` flag:
+
+| Image | Was | Now | JDK |
+| --- | --- | --- | --- |
+| `ubi10/openjdk-25-runtime:1.24` (production, both `FROM` lines) | `dab1be80…`, built 2026-11-11 | `6110c805…`, built 2026-11-19 (`1.24-21`) | OpenJDK 25.0.5.0.8 → 25.0.5.1 |
+| `eclipse-temurin:25-jre` (demo runtime) | `a640968a…`, built 2026-11-11 | `4ed132f6…`, built 2026-11-20 | `jdk-25.0.5+8` → `jdk-25.0.5.1+2` |
+| `quay.io/keycloak/keycloak` (compose `auth` overlay, Helm, kustomize `auth` overlay, the Manager's Keycloak compose files) | `26.8.0` (tag only, 2026-10-10) | `26.8.2@sha256:7e66a96e…`, rebuilt 2026-11-19 | OpenJDK 21.0.12.1 → 21.0.13.1 |
+
+- **Keycloak is pinned by digest as well as by tag.** Keycloak rebuilt the `26.8.2` tag on 2026-11-19 with the
+  fixed JDK, so a node that pulled `26.8.2` before then still holds the vulnerable build under the same tag. The digest
+  pins the rebuilt one. The move from 26.8.0 to 26.8.2 also brings Keycloak's own fixes from 26.8.1 and 26.8.2. CI's
+  `Auth E2E (Keycloak)` job runs the Manager's Keycloak compose file on it. No CI job starts `docker-compose.auth.yml`,
+  so its stack was run by hand on 26.8.2 (2026-11-21): `keycloak-guard` passed, the `eddi` realm imported,
+  Keycloak started healthy on OpenJDK 21.0.13.1 with the flag active, and `keycloak-admin-rotate` rotated a default
+  `admin/admin` account through `kcadm` `reset-password`, verified the configured login and wrote its marker, and
+  passed again on a rerun.
+- **Helm chart 2.14.3 → 2.14.4**, with `EXPECTED_CHART_VERSION`. `keycloak.image` gains a `digest` field, rendered as
+  `tag@digest` the way `nats.image` already is. The digest selects the image, so an operator who overrides
+  `keycloak.image.tag` must also set `keycloak.image.digest` to the matching digest, or clear it with
+  `--set keycloak.image.digest=""`; a tag-only override still runs the pinned 26.8.2 build. `ThirdPartyImagePinsTest`
+  now requires the same Keycloak
+  `MAJOR.MINOR.PATCH@sha256` reference on every delivery path (compose, `ui/*` compose, Kustomize, Helm).
+- **Confirmed inside the images:** `java -version` in each pinned image (amd64) prints `25.0.5.1`
+  (Red_Hat-25.0.5.1.2-1), `25.0.5.1+2` (Temurin) and `21.0.13.1` (Red_Hat-21.0.13.1.2-1).
+- **The flag stays.** [`security.md`](security.md#removing-the-flag) allows removing it, together with
+  `Java4ShellMitigationTest`, now that all three pins carry a fixed JDK. It is kept for now as a second line of
+  defence for deployments that override the Keycloak image or still run an earlier pull of a rebuilt tag. Its removal
+  is a change of its own.
+- Docs: `security.md` (status line, the image table, a note on images published before these pins) and
+  `mcp-server.md` (the Keycloak version the stacks pin). `Java4ShellMitigationTest`'s Javadoc records the new pins.
+
+### What's next
+
+- Backport to the 6.7 line for 6.7.1 (labsai/EDDI#1500). That branch is on chart 2.14.1, so it moves to 2.14.2.
+- Remove the flag from all five places and delete `Java4ShellMitigationTest` in one change, when the team decides
+  the safeguard is no longer wanted.
+
+---
+
+## Model catalog refresh: Fable 5.2, GPT-6.2, Gemini 4, Kimi K3.1 (2026-11-19)
+
+**Repo/branch:** EDDI, `claude/model-api-support-audit-6cd65c` (rename before pushing).
+
+Audited the model pickers and the parameter rules against each provider's own
+docs (Anthropic models overview, OpenAI models + changelog, Gemini models +
+changelog, Mistral models, Moonshot models page, xAI release notes).
+
+- **Pickers** (`ui/packages/app-kit/src/lib/model-suggestions.ts`,
+  `llm-provider-catalog.ts`, `openai-compatible-providers.json`): added
+  `claude-fable-5-2` and the limited-access `claude-mythos-5-2`/`5-1`/`5` (Anthropic list; Fable 5.2 also Vertex, Bedrock `global.` profile),
+  `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6.1-terra` (OpenAI, Azure),
+  `gemini-4-neon`, `gemini-4-hydrogen`, `gemini-4-carbon`, and
+  `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed`. Dropped what the providers now
+  deprecate or retire: `gemini-2.5-pro`/`gemini-2.5-flash` (route to 3.8 and
+  3.5 Flash-Lite from 2026-12-01, with breaking changes), `mistral-large-2512`
+  (retired 2026-10-31) and `mistral-medium-3-5` (deprecated 2026-10-31). Kimi
+  K2.6 and K2.7-code stay listed, last, because the parameter rules still cover
+  them and `ModelParameterCatalogTest.noDeadRegex` requires that.
+- **Parameter rules** (`model-parameters.json`, regenerated
+  `llm-parameter-catalog.data.ts`): Fable/Mythos 5.2 follow the 5.x rules
+  (fixed temperature/topP, no topK, adaptive thinking only); `gpt-6.2*` rejects
+  sampling parameters unconditionally and has no `none` effort; Azure
+  `gpt-6.2*` rejects the penalty parameters; Gemini `thinkingLevel` accepts
+  `xhigh`, which a rule restricts to Gemini 4 Neon/Hydrogen (other models reject it).
+- **Reference prices:** `claude-fable-5-2*` at $8/$40 (it would otherwise match
+  the $10/$50 `claude-fable-5*` fallback). GPT-6.2 and Gemini 4 prices are left
+  unset (`unpricedPolicy: ALLOW`) until published figures are confirmed.
+
+**Second pass (every picker id re-checked against provider docs):**
+`MiniMax-M3.1-Flash-Preview` is `MiniMax-M3.1-Flash` in MiniMax's docs (rules match both);
+`deepseek-ai/DeepSeek-V4-Pro` is not a Hugging Face repo, so the picker now lists
+`DeepSeek-V4.1-Flash` and `moonshotai/Kimi-K3.1-Pro`; added `qwen4-max` (Alibaba),
+`global.openai.gpt-6.2-astra`/`-sol` (Bedrock lists both), `gemini-4-hydrogen` (Vertex), and
+OpenRouter's Fable 5.2, GPT-6.2 Sol and Gemini 4 Neon. Confirmed unchanged: all Anthropic,
+xAI, Groq, DeepSeek, GLM, OCI chat ids, the Ollama tags and the Azure GPT list. Not
+confirmable from docs: the `*-latest` Mistral aliases (the model pages hide an alias),
+`qwen3.8-max`, `qwen3.7-flash`, the Vertex-specific ids for Gemma and Claude, and OCI's
+`xai.grok-4.20-reasoning`/gpt-oss ids; they were left as they were.
+
+**Not done / open:** `gpt-6.2-*` `reasoningEffort` and `verbosity` support was
+not confirmed from the docs; Gemini 4 sampling-parameter behaviour is not
+documented, so the existing "3.6 and newer ignore temperature" rule is
+unchanged. The DeepSeek, Qwen, GLM and MiniMax ids were re-checked against the vendors' model lists
+(see the second pass above); what remains unconfirmed is only the list under "Not confirmable from docs". Their
+*parameter rules* were not re-verified against the APIs.
+
+---
+
+## 🔒 fix(security): Java4Shell interim mitigation, -XX:-UseBASE64Intrinsics on every shipped JVM (2026-11-18)
+
+**Repo:** EDDI · **Branch:** `fix/java4shell-base64-intrinsics`
+
+### What changed and why
+
+CVE-2026-114938 ("Java4Shell", Red Hat [RHSB-2026-018](https://access.redhat.com/security/vulnerabilities/RHSB-2026-018)) is memory corruption in the AVX-512 VBMI accelerated path of `java.util.Base64.Decoder`. With malformed input, an unauthenticated attacker can crash the JVM or run code in it on x86-64 hosts from Intel Ice Lake and AMD Zen 4 on. EDDI decodes such input before authentication: MIME encoded words and DKIM signatures of inbound mail, and webhook signature headers. Keycloak does as well. Fixed JDKs are 25.0.5.1 and 21.0.13.1. On 18 Nov, Red Hat had published neither a fixed UBI image nor a fixed RPM: the newest `ubi10/openjdk-25-runtime:1.24` build is the 11 Nov digest pinned here, and both it and the UBI repository carry `25.0.5.0.8`.
+
+- `src/main/docker/Dockerfile`: `-XX:-UseBASE64Intrinsics` added to `JDK_JAVA_OPTIONS`, which survives an operator's `JAVA_OPTS` / `JAVA_OPTS_APPEND`.
+- `src/main/docker/Dockerfile.demo`: the same flag on the bare `java` ENTRYPOINT (Temurin 25.0.5).
+- Keycloak 26.8.0 (bundles OpenJDK 21.0.12.1): `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` in `docker-compose.auth.yml`, `helm/eddi/templates/keycloak.yaml` (chart 2.14.2 → 2.14.3, `EXPECTED_CHART_VERSION` with it) and `k8s/overlays/auth/keycloak-statefulset.yaml`.
+- New `Java4ShellMitigationTest` pins the flag in all five places.
+- `docs/security.md`: new "JVM Advisory: Java4Shell" section, covering who is affected, what ships, the manual mitigation for older images, and how to check the running JVM. `docs/upgrading-from-6.5.md`: a note under "Changes after 6.7.0".
+
+### Design decisions
+
+- **`-XX:-UseBASE64Intrinsics`, not `-XX:UseAVX=2`.** It removes only the vulnerable path; `UseAVX=2` also drops every other AVX-512 optimisation, and a JVM on ARM64 refuses to start with it.
+- **No `-XX:+UnlockDiagnosticVMOptions`.** In all three pinned images, `PrintFlagsFinal` reports `UseBASE64Intrinsics` as a product flag that takes effect from the command line.
+- **Not changed:** `mise.toml` (Temurin 25.0.4, for development only; no fixed Temurin build was available) and the integration-test Keycloak compose files under `ui/manager/` (CI only, never exposed).
+
+### What's next
+
+Three base images carry a vulnerable JDK, each with its own pin: the UBI `openjdk-25-runtime` digest (production image), the `eclipse-temurin:25-jre` digest (demo image) and `quay.io/keycloak/keycloak:26.8.0`. Remove the flag from all five places, and delete `Java4ShellMitigationTest` in the same change, only when **all three** are fixed (OpenJDK 25.0.5.1 or later, and 21.0.13.1 or later for Keycloak). Moving one pin leaves the others exposed. Bump `mise.toml` once Temurin 25.0.5.1 is out.
+
+---
+
+## 📝 docs(readme): the README is rewritten as a front page, not a manual (2026-11-18)
+
+**Repo:** EDDI (`docs/readme-redesign`)
+
+### What changed and why
+
+**`README.md` is restructured: a 200-line front page, then the full feature list.** It had grown
+by accretion: every feature added a bullet, every deployment fix a paragraph, and
+the result was a page whose first screen was nine badges and a table of contents,
+whose middle was 200 lines of feature bullets and a 43-row index that duplicated
+[`docs/README.md`](README.md), and which printed operator runbooks (the compose
+overlay matrix, the Kubernetes Secret procedure, the Maven command table) inline.
+It never showed one line of agent configuration, in a product whose pitch is that
+agents are configuration.
+
+The new page answers, in order, what a visitor asks: what is this and is it for
+me, how do I run it, what does it look like, how does it work, what is in it,
+where are the docs, how do I build it. Sections:
+
+1. Banner, name, the badges (the ten the page had, plus the licence), one
+   paragraph, link row.
+2. **Why EDDI**: run, limit, approve, record, then two design choices, and a plain statement that EDDI is a service you
+   deploy rather than a library you import, pointing readers who want a library
+   at LangChain4j (which EDDI builds on) rather than at frameworks in other
+   languages. This replaces the comparison table, whose concurrency row
+   ("virtual threads — true OS-level parallelism") was wrong and whose tone
+   invited argument rather than evaluation.
+3. **Quick start**: the two installer commands, the URL, what is served at which
+   path, and how to get a first agent. Options and alternatives are links.
+4. **What it looks like**: three screenshots instead of eleven, one each for
+   run, approve and record.
+5. **How it works**: an LLM agent's configuration (model, prompt, built-in
+   tools), copied from [`langchain.md`](langchain.md#agent-mode-enhanced-features)
+   with the key as a vault reference and Claude Sonnet 5.5 as the model, then who writes such documents and a short
+   paragraph on the pipeline. Behaviour rules get one sentence: most agents are
+   an LLM task with tools, and a first draft that led with a rule gave them far
+   more room than their use warrants.
+6. **What's included**: one table, eleven rows, each row linking to its guides.
+7. **Documentation** by intent, **Development** (short), **Community and
+   support**.
+8. **Full feature list**: every feature the old page listed, kept at the end for
+   readers who want it on one page and for in-page search, but rewritten to be
+   lighter: one short line per feature, plain headings, a link row to the guides
+   under each heading, and no em dashes. Two claims are corrected on the way:
+   virtual threads are not "OS-level" concurrency, and SSRF validation is the
+   built-in tools', not every outbound call's.
+9. **License**.
+
+Headings no longer carry emoji, so their anchors are plain (`#quick-start`,
+`#development`).
+
+### Positioning
+
+The page now calls EDDI "the open-source AI agent management system" and
+organises **Why EDDI** around four verbs: run, limit, approve, record.
+"Multi-agent orchestration middleware" described one capability; what the
+product does around an agent (grant its tools, cap its cost, gate its actions,
+keep the ledger) is management, and that is what a reader evaluating it for a
+regulated setting is looking for. `AGENTS.md`, `docs/README.md` and the
+repository description still use the older phrase; aligning them is a separate
+decision.
+
+### Nothing was deleted, it moved
+
+| Was in `README.md` | Now in |
+| --- | --- |
+| Installer options, `eddi update`, the CLI-not-found note, manual update, the upgrade pointer | [`getting-started.md`](getting-started.md#installer-options) (Option 0) |
+| The compose command matrix, the overlay list, the Ollama and NVIDIA notes | [`docker.md`](docker.md#compose-files-and-overlays) |
+| Prerequisites (Node, mise), dev-mode notes, the dev vault key, the Maven Command Reference, the system-property table, the JaCoCo path | [`CONTRIBUTING.md`](../CONTRIBUTING.md#maven-command-reference) |
+| The Kubernetes install block | already in [`kubernetes.md`](kubernetes.md); the README links to it |
+| The docs index, the compliance table, the security bullet list | already in [`docs/README.md`](README.md), the feature guides and [`security.md`](security.md) |
+
+`AGENTS.md` pointed at `README.md#️-development` and called the README's Maven
+table canonical; both now point at `CONTRIBUTING.md`.
+
+### Build inputs
+
+The README is graded by tests, which shaped three choices. It still prints one
+`quarkus:dev` command carrying `-Djvm.args=--add-modules=jdk.incubator.vector`
+(`JlamaRuntimeFlagsTest` requires every dev-mode document to show one). It prints
+no `kubectl apply -k` and no `labsai/eddi:latest` (`DeploymentManifestsTest`), and
+no multi-file compose command (`ComposeStackTest`); the commands that moved to
+`docker.md` are the same combinations the matrix already renders.
+
+### Images
+
+- **Banner:** `screenshots/eddi-banner.jpg`, rendered from
+  [`branding/readme-banner/banner.html`](../branding/readme-banner/banner.html).
+  The old one was a 1200×630 social card (tall for a README) whose tagline, "The
+  Enterprise AI Orchestrator", matched neither the README nor the repository
+  description. The new one is 1280×380, carries the README's own line, and shows
+  an agent's configuration instead of generic artwork.
+- **Screenshots:** retaken from the current Manager on its mock API; the old set
+  showed the pages as they looked at 6.0. The mock API always reports version
+  `6.0.0-demo`, so the capture hides the sidebar's version label rather than
+  print a release number that never changes.
+- **[`ui/manager/scripts/capture-readme-images.mjs`](../ui/manager/scripts/capture-readme-images.mjs)**
+  regenerates all of them, so the next refresh is one command rather than a
+  manual session.
+
+### "Works with the AI you already use"
+
+A new section after **Why EDDI** answers a question the page left open: is EDDI
+a replacement for ChatGPT or Claude? It is not. The Manager lets you do
+everything by hand, but the intended experience is to connect the assistant you
+already use over MCP or REST and have it build and operate agents, or consult
+EDDI agents that hold access (a database, an internal API) the assistant does
+not. The section also says EDDI works alone, through Workforce, the chat UI or
+Slack.
+
+`AGENTS.md`, `docs/README.md` and `docs/mcp-server.md` said 108 MCP tools; all
+now say 120.
+
+### Three independent reviews
+
+The page was reviewed by three models with the same brief. Where they agreed,
+it changed:
+
+- **The sample ran nothing.** It listened for a `help` action that no rule
+  emitted. It now uses `"actions": ["*"]`, and the text calls it the LLM step of
+  an agent rather than the agent.
+- **Governance claims carry their conditions.** The ledger is "HMAC-signed once
+  a signing key is configured"; agent signing is "optional"; the Red Hat line
+  says what CI does (checks every image against the certification requirements)
+  rather than asserting a status.
+- **The MCP tool count is 120**, which is what `McpToolContractTest` pins. The
+  README said 108, as `AGENTS.md`, `docs/README.md` and `docs/mcp-server.md` did.
+- **The quick start reaches a reply**: a health check, where the model key goes,
+  the wizard or the Operator, then chat. It says the default install has no
+  login and is loopback-only, and that a hand-run `docker compose up` needs
+  `EDDI_VAULT_MASTER_KEY`.
+- **The screenshots show the pitch**: a group discussion (run), the pending
+  approvals page (approve) and an agent's audit trail (record) replace the
+  dashboard and a rule-driven conversation.
+
+Not taken: moving the full feature list out to a docs page, and restoring the
+comparison against Python frameworks. Both were decided the other way on
+purpose.
+
+### Review findings on the moved text
+
+Moving the installer, compose and build material put old text in front of a
+reviewer for the first time, and some of it was wrong:
+
+- **`OLLAMA_PULL_MODEL=` did not skip the model pull.**
+  [`docker-compose.ollama.yml`](../docker-compose.ollama.yml) read it with
+  `${OLLAMA_PULL_MODEL:-llama3.2:3b}`, and `:-` substitutes the default for an
+  empty value as well as an unset one. It is now `-`.
+- **The PostgreSQL and cluster commands generated new secrets on every run.**
+  The database volume keeps its first password and the vault its first master
+  key, so the second run failed or could not decrypt. `docker.md` now writes
+  them into `.env` once, into a file only its owner can read, and as hex: the
+  base64 the old command produced contains `/` and `+`, which break the MongoDB
+  connection string the cluster stack builds from `MONGO_PASSWORD`.
+- **`eddi update` does not always pull the latest image.** A pinned install
+  stays pinned; the page says so and shows `--eddi-version`. The manual
+  `docker compose pull` is no longer called equivalent, because it does not
+  refresh the compose files.
+- **The installer options could not be used after `curl | bash`**, which keeps
+  no script. A download line comes first.
+- **`echo … > .env` replaced an existing `.env`**, vault key included.
+  `CONTRIBUTING.md` now says to add the line in an editor instead of through a
+  redirect.
+- **`-Dquarkus.profile` does not default to `dev`** outside dev mode.
+- **Single-quoted `-Djvm.args` does not work in `cmd.exe`.**
+- **A wizard-created agent is not in Workforce**: the wizard deploys to `test`,
+  and Workforce lists production agents marked as listed.
+
+### The test count
+
+The Tests badge said 20,000+. CI now runs more than 50,000: about 38,400 JUnit,
+11,300 Vitest and 500 Playwright. The badge says 50,000+, and `AGENTS.md` gives
+the breakdown and why a grep for `@Test` counts fewer (parameterized tests run
+once per case). Coverage is stated for the backend, which is where the gate is.
+
+### Not done here
+
+- The repository description and topics on GitHub are settings, not files. The
+  description says "19+ LLM providers" where the docs say 19.
+- The social preview image (uploaded in repository settings) is still the old
+  banner.
 
 ---
 
@@ -266,238 +571,6 @@ The owner batched the stack behind one CI run. Each PR head was merged with a re
 - **Turn notes:** escalation notes say "Another model was tried because …" — the note is recorded when the cascade moves on, before the next model answers. The operator prompt and the guide say the same.
 - i18n: 5 new keys and 1 renamed, in all eleven locales; the five escalation sentences reworded in all eleven.
 - Answered, not changed: the human-turn announcement with no signed-in principal ("It's your turn") — that only happens with auth off, where anyone may answer the turn.
-
----
-
-## 🔒 chore(security): allowlist #1372's dummy echo fixtures in .gitleaksignore (2026-11-15)
-
-**Repo:** EDDI (`feat/rag-document-delete`, carried by PR #1299)
-
-### What changed and why
-
-PR #1372 (redacting encoded echoes of a substituted secret from API-call responses) reports three Gitleaks `generic-api-key` findings in its first commit, all in `ApiCallExecutorEncodedEchoRedactionTest`: the base64 form of a hex-word placeholder secret, held in a constant named after a secret, and the base64 of the text "fake-token" under a `token` key, once in a body string and once in a map. Every value decodes to placeholder text and nothing authenticates against anything. A later commit of that PR renamed two of them, but Gitleaks scans the whole commit range and reads `.gitleaksignore` from the base branch, so the PR cannot allowlist itself and its history cannot be rewritten (no force-push). The three fingerprints are added in a `# PR #1372` block that does not quote the values.
-
-The findings were located by replaying Gitleaks' default `generic-api-key` rule (regex plus the 3.5 entropy threshold; the repo has no `.gitleaks.toml`) over the PR's non-merge commits, because the CI log redacts them. The replay finds exactly three, matching the CI count.
-
-### Design decisions
-
-- The repository owner decided to fold these entries, together with #1410's entries for #1304, into PR #1299, which is already approved and merges next, because #1410's reviewer is away. #1410 is closed as superseded once #1299 merges.
-
-**Files:** [`.gitleaksignore`](../.gitleaksignore)
-
----
-
-## Live links move from eddi.labs.ai to eddi.technology (2026-11-15)
-
-**Repo:** EDDI · **Branch:** `fix/redact-encoded-secret-echoes` (#1372, carried here by the owner's decision)
-
-**What changed:** the project site moved to `eddi.technology`, and `eddi.labs.ai` only redirects there now. The live links now point at the new domain directly:
-- Docs: `GOVERNANCE.md` and `docs/rag.md` (the `README` itself has no `eddi.labs.ai` link).
-- The installers' closing message (`install.sh`, `install.ps1`) and the startup `banner.txt`.
-- The OpenAPI contact URL in `application.properties`, with `BrandedOpenApiRouteTest` updated to match.
-- The image label in `src/main/docker/Dockerfile`.
-- The crawler's default User-Agent (`EDDI-Crawler/1.0 (+https://eddi.technology)`), documented in `docs/rag.md`.
-- The "Website" link in the Docker-pull Slack notice.
-- The Helm chart's `home`, and its `icon`, which was broken: `eddi.labs.ai/img/eddi-logo.png` redirected to a 404. It now points at `https://eddi.technology/eddi-icon.png`. The chart version moves from 2.14.1 to 2.14.2, with `EXPECTED_CHART_VERSION` in `DeploymentManifestsTest`.
-
-**Left alone on purpose:**
-- `AGENTS.md` and `planning/docs-site-migration-plan.md`, which describe the redirect itself.
-- The monthly changelog archives.
-- Tests that use the old URL only as arbitrary test data.
-- The Umami analytics `hostname` in `docker-pull-notify.yml`: changing it would split the project-metrics history across two hostnames.
-- `docs.labs.ai`, the `labsai` GitHub and Docker names, and `labs.ai` e-mail addresses. They are different things, and the docs-site cutover is planned separately.
-
----
-
-## 🐛 fix(operator): no literal braces in the system prompt, so Qute renders it again (2026-11-15)
-
-**Repo:** EDDI (`fix/operator-prompt-qute-braces`)
-
-### What broke
-
-#1318 added `(metric eddi_parser_semantic_fallback_total{outcome: match, no_match})` to the Platform Operator's system prompt. The backend renders that prompt as a Qute template on every turn, and `{outcome: match, no_match}` reads as an expression in an `outcome` namespace that has no resolver. The render failed, so the model received the prompt unrendered and the `Operator Activation E2E` job went red on `main`.
-
-The PR's own CI did not stop it: that job is not a required check, and no unit test looked for namespace-style braces in the whole prompt.
-
-### What changed
-
-- `ui/manager/src/lib/operator/system-prompt.ts`: the metric is written as `eddi_parser_semantic_fallback_total, tagged outcome=match or no_match`, with no braces.
-- `ui/manager/src/lib/operator/__tests__/system-prompt.test.ts`: a guard test builds the whole prompt body (read-only and read-plus-write grants) and fails on any `{name: ...}` whose namespace is not `vault`, `connection` or `caller`, so this fails a unit test instead of only the e2e job.
-- `operator-revision.json`: revision 64 to 65 (the prompt text changed), new fingerprint.
-
-### Design decisions
-
-- The guard checks the namespace pattern rather than banning all braces: the prompt legitimately carries `{#if context.screen}`, `{context.x}` and a few literal `{...}` examples that Qute leaves alone.
-
----
-
-## 🐛 fix(groups): approved-result actions — stale cancel fenced, unreadable config refuses the approval, FAIL_TASK at discussion end (2026-11-15)
-
-**Repo:** EDDI (`feat/group-approved-result-actions`)
-
-Review follow-ups on PR #1375.
-
-### What changed and why
-
-- **A stale cancel can no longer overwrite a claim.** A cancel on another pod reads the running discussion, the
-  leg then writes its `RUNNING` claim, and the cancel's compare-and-set (state `IN_PROGRESS`, no pause) still
-  matched — its stale `PENDING` record was settled `NOT_SENT` while the leg sent the request, whose outcome write
-  then failed against `CANCELLED`. `SharedTaskList` now carries `approvedActionsRevision`, which
-  `GroupApprovedResultActions` changes with every claim and outcome (and restores when that write fails). A
-  conditional write in `GroupConversationStore` (`updateIfState`, `updateIfStateAndPause`) that *settles* owed
-  records also requires `taskList.approvedActionsRevision` to be what the writer read, through the existing
-  `storeIfFieldsEqual` dotted-path CAS on MongoDB and PostgreSQL. The stale cancel loses (`409`); a cancel that read
-  the claim lands and reads it `OUTCOME_UNKNOWN`. Writes that settle nothing keep the plain state CAS.
-- **An approval is not consumed when the group configuration cannot be read.** `GroupHitlCoordinator` refused the
-  approval only through strict plan binding; a decision with the matching `planHash` completed the task and
-  persisted the decision without the action record it owed. A TASK-pause decision that would approve a task now
-  throws `ResourceStoreException` before anything is mutated — the pause and its awaiting tasks stay; a timeout's
-  `AUTO_APPROVE` retries through `RetryLaterException`. Rejections still apply (they owe no action).
-- **Nor when the paused phase drifted.** With the configuration read but the bookmarked phase renamed, moved or
-  removed, `recordApprovedResultActions` skipped the record while the task completion persisted with the resume
-  CAS; the resumed leg's drift guard then restored the pause but not the task, so a retry after the fix found
-  nothing awaiting and the action never ran. The same refusal now fires first, through one
-  `bookmarkedPhaseDrift` check that recording also uses.
-- **Dashboard panel id.** The *Approved-result actions by outcome* panel moved from id `447` (taken on `main` by
-  the *Input Parser* row) to `449`; the k8s split copy was regenerated with `scripts/sync-monitoring-assets.py`.
-- **`FAIL_TASK` at discussion end.** `SharedTaskList.settleOwedApprovedActions` turned an orphaned `RUNNING` claim
-  into `OUTCOME_UNKNOWN` but left its task `COMPLETED`. It now applies the same `onFailure` rule as the live leg,
-  through one shared `applyFailurePolicy`, stamping the discussion's end time so repeated reads agree.
-- **Docs** (`docs/group-approved-result-actions.md`): a store outage leaves an `IN_PROGRESS` discussion with a
-  `PENDING` record (not an ended one), and the update endpoint is `PUT /groupstore/groups/{id}?version=`.
-  Operator prompt: the refused approval, the cancel `409` and `OUTCOME_UNKNOWN` failing the task (fingerprint only).
-
-### Tests
-
-`GroupApprovedResultActionsStaleCancelTest` replays cancel read → claim write → cancel write → send against an
-in-memory CAS storage; `GroupConversationStoreApprovedActionsTest` covers the fence and terminal `FAIL_TASK` /
-`KEEP_COMPLETED`; the Mongo and PostgreSQL container tests run the stale and current cancel on real backends;
-`GroupHitlCoordinatorApprovedActionsTest` covers the refused approval (unreadable configuration, renamed and
-removed paused phase).
-
----
-
-## Review fixes: percent-encoded widget routes and CJK glyph precedence (2026-11-15)
-
-Branch `chore/ui-npm-workspaces` (PR #1274), UI only.
-
-- `ui/chat/src/location.ts`: the literal `chat` and `managed` segments are now percent-decoded before they are compared, as the router this parser replaced did, so `/%63hat/production/agent-1` and `/chat/%6danaged/support/user-7` resolve to their intended routes. Regression cases added to `location.test.tsx`.
-- `ui/manager/src/index.css`: `:root:lang(ja|ko|zh|zh-Hant|...)` rules put the active locale's CJK family first in `--font-sans`, so a Han glyph both families cover no longer keeps the glyph form of an earlier-loaded locale after a language change. `locale-fonts.test.ts` pins the ordering.
-
----
-
-## AGENTS.md: no merge without a completed CodeRabbit review (2026-11-14)
-
-**Repo:** EDDI · **Branch:** `docs/agents-coderabbit-required`
-
-**What changed:** `AGENTS.md` §2 rule 4 gains a merge gate. A PR may only be merged once CodeRabbit has reviewed its current head, every CodeRabbit finding (inline, nitpick and outside-diff) is fixed or answered, and every CodeRabbit thread is resolved. A "Review limit reached" / "Review rate limited" reply counts as not reviewed. A human approval, green CI and an agent's own review are required as well, but none of them replaces CodeRabbit. Only the user can waive the rule, for a named PR.
-
-**Why:** on 2026-11-12 seventeen PRs (#1272 #1296 #1298 #1320 #1321 #1322 #1326 #1329 #1330 #1337 #1338 #1339 #1347 #1350 #1353 #1362 #1373) were squash-merged by an assistant session that treated a human approval plus its own review as sufficient, while CodeRabbit was rate limited on all of them. Those merges are being reviewed after the fact. Writing the rule into `AGENTS.md` makes it binding on every session and assistant, not only the one that was told.
-
-**Design decisions:** the rule sits next to the push discipline and the `ship-pr` pointer, which is where every assistant reads before opening or merging a PR. It names the two CodeRabbit commands for re-requesting a review rather than restating the skill's full command table.
-
----
-
-## AGENTS.md: never merge into a red main, never merge in bulk (2026-11-14)
-
-**Repo:** EDDI · **Branch:** `docs/agents-coderabbit-required`
-
-**What changed:** a second merge gate in `AGENTS.md` §2 rule 4:
-- Check `main`'s latest `CI/CD` run before every merge, and merge nothing while it is red.
-- Merge through the merge queue once `main` has one.
-- Without a queue, merge one PR at a time and re-test a PR after `main` changed under it, or test-compile the whole set together before landing several.
-- Watch `main`'s run after each merge and revert or fix a red one first.
-
-**Why:** "Require branches to be up to date" is off on `main`, so a PR's green CI only covers the `main` it was tested on. On 2026-11-12, #1352 renamed `ResourceAccessGuard.callerIsAdmin()` to `isAdmin()` and #1345 added a test calling `callerIsAdmin()`. Both were green and were merged minutes apart, and `main` stopped compiling its tests (fixed by #1407). Seventeen more PRs were merged while `main` was red.
-
-**Design decisions:** the rule points at a merge queue as the real fix: a separate PR adds the `merge_group` trigger to `ci.yml`, and an admin enables the queue. It does not ask for "require branches to be up to date", which would make every open PR re-run CI after each merge, too slow for this repository's CI capacity.
-
----
-
-## Manager first-load budget raised to 650 KB (2026-11-14)
-
-**Repo:** EDDI · **Branch:** `fix/alert-rule-cap` (#1357)
-
-**What changed:** in `ui/bundle-budget.json`, the first-load budget of the Manager pages (`manage.html`, `workforce.html`, `welcome.html`) goes from 630 KB to 650 KB gzip. The chat widget's budget stays at 170 KB (it measures 160.6 KB).
-
-**Why:** #1272 set 630 KB, measured against a `main` that did not yet include the UI PRs merged alongside it. Once all of them were in, the Manager pages measured 641.1 KB and the `Bundle budget` step in UI Manager Checks failed. Main's own CI never showed it, because its run stopped earlier, at the broken test compile. The budget file says raising a budget is a decision, not a fix; the repository owner made it, choosing to raise the budget rather than shrink the bundle now.
-
-**Design decisions:** 650 KB leaves about 9 KB of headroom over the measured 641.1 KB, still roughly 94 KB below the 743.8 KB phase-0 baseline. Work to get back under 630 KB (lazy-loading whatever grew the first load) is left to the frontend-unification plan.
-
----
-
-## 🔒 chore(security): allowlist #1304's dummy PEM fixtures in .gitleaksignore (2026-11-12)
-
-**Repo:** EDDI (`chore/gitleaksignore-1304-fixtures`)
-
-### What changed and why
-
-PR #1304 (OAuth2 JWT-bearer and `private_key_jwt`) tripped the Gitleaks `Secret Scanning` check with `private-key` findings in one early commit. They are PEM armour lines written as literals in a Javadoc comment, a constant and some tests, with empty, placeholder or runtime-generated bodies. Gitleaks scans every commit of a PR range and reads `.gitleaksignore` from the base branch, so the PR cannot allowlist itself, and the branch history cannot be rewritten (no force-push). The commit's fingerprints are therefore added here, in the established per-PR block. Later commits on that branch already build the armour at runtime. No key material is involved and nothing authenticates against anything.
-
-**Files:** [`.gitleaksignore`](../.gitleaksignore)
-
----
-
-## fix(test): McpScheduleParityTest compiles again on main (2026-11-12)
-
-**Repo:** EDDI (`fix/mcp-schedule-parity-test-compile`)
-
-Two merges crossed: #1352 removed `ResourceAccessGuard.callerIsAdmin()`, a duplicate of `isAdmin()` (both return `ownershipValidator.isAdmin(identity)`), and #1345 added `McpScheduleParityTest`, which stubs `callerIsAdmin()`. Each was green on its own branch, but together the test sources on `main` no longer compiled, so `Build & Test` failed on `main` and on every pull request merged against it. The test now stubs `isAdmin()`. No production code changed.
-
----
-
-## 🐛 fix(engine): `setup-api/sync` and "latest version" MCP reads failed with "does not define how its version info is authorized" (2026-11-11)
-
-**Repo:** EDDI (`fix/setup-api-sync-current-version`)
-
-### What broke
-
-`POST /administration/agents/{agentId}/setup-api/sync` answered HTTP 500 on 6.7.0 before it wrote anything,
-dry run included: `API agent sync failed: Access denied: this store does not define how its version info is
-authorized`. The same refusal came back from every MCP admin tool that resolves "the latest version" when no
-version is given (`read_workflow` without `version`, reproduced on a live 6.7.0; also the other resource reads
-in `McpAdminTools`), and the same lookup in `AgentSetupService` and `AgentCascadeService`. Callers that inject a
-store bean directly (`McpConversationTools`, `McpGroupTools`) were never affected.
-
-### Cause
-
-Those callers reach the stores through `IRestInterfaceFactory`, a MicroProfile REST client over loopback.
-`getCurrentVersion` is a `default` method of the `IRestVersionInfo` mixin, and a REST client runs a default
-method as plain Java in the caller, never as a request. The store beans override
-`requireCurrentVersionAccess` with their VIEW check, but the client proxy does not, so the mixin's
-fail-closed default (#1161) refused everyone. Before #1161 the next default, `getCurrentResourceId`, threw
-`IllegalStateException` instead, so this path never worked through a client; sync (#1270) was the first caller
-that could not do without it.
-
-### Fix
-
-`RestInterfaceFactory` wraps every store client it builds (`CurrentVersionRouting`): `getCurrentVersion` is sent
-to the store's own `GET /{id}/currentversion` endpoint over HTTP, with the same loopback caller filter, and every
-other method goes to the client unchanged. The endpoint keeps its role check and the store's VIEW check, so
-nothing is authorized that was not before; one place fixes every caller, and a new caller cannot fall into it
-again.
-
-The `currentversion` client is shared: callers never close the clients the factory hands out, so building one per
-call would leave one more behind each time. The loopback factory method (`get(Class)`) builds it once per store
-address and trust level (with or without the caller credential) and reuses it; this is safe because the filter
-reads the caller per request, not when the client is built. The two-argument method (`get(Class, serverUrl)`)
-does not cache, since a cache keyed by arbitrary `serverUrl`s would be unbounded. `redirectToLatestVersion` is not
-routed (it answers a 303 that a client would follow, and no in-process caller uses it). The
-wrapper is a `java.lang.reflect.Proxy`, which a future native image build has to register.
-
-**Files:** [`CurrentVersionRouting.java`](../src/main/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRouting.java),
-[`RestInterfaceFactory.java`](../src/main/java/ai/labs/eddi/engine/runtime/client/factory/RestInterfaceFactory.java),
-[`CurrentVersionRoutingTest.java`](../src/test/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRoutingTest.java),
-[`LoopbackCurrentVersionIT.java`](../src/test/java/ai/labs/eddi/integration/LoopbackCurrentVersionIT.java)
-
-### Verification
-
-The unit test reproduces the refusal on a client-like store and checks the routing. `LoopbackCurrentVersionIT`
-(integration phase, CI only) makes the real call: the injected factory resolves the latest version of a stored
-resource against the running application, and a JDK `HttpServer` on an ephemeral loopback port shows the request
-is `GET /{id}/currentversion`, carries the caller's bearer token on the loopback client and none on a named remote
-instance. It was not run locally. After the release, check `setup-api/sync` with `dryRun: true` and `read_workflow`
-without a version on staging.
 
 ---
 

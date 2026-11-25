@@ -86,7 +86,7 @@ public class McpOversightTools {
                                      @ToolArg(description = "Only decisions on this agent version", required = false) Integer agentVersion,
                                      @ToolArg(description = "none, category, agent, group, day, week, channel or agentVersion (default none)",
                                               required = false) String groupBy) {
-        requireAnyRole(identity, authEnabled, McpRoles.OVERSIGHT);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("summarize_approvals"));
         try {
             IRestApprovalAnalytics.Query query = new IRestApprovalAnalytics.Query();
             query.agentId = agentId;
@@ -109,7 +109,7 @@ public class McpOversightTools {
             + "approval and sampled instead) or SUSPENDED (re-gated after a flagged sample or by hand) — and the recommendation or "
             + "suspension behind it. Applying, dismissing, suspending and lifting are done by a person on the Manager's Oversight page.")
     public String listAutonomyRecommendations(@ToolArg(description = AGENT_ID_ARG, required = false) String agentId) {
-        requireAnyRole(identity, authEnabled, McpRoles.OVERSIGHT);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_autonomy_recommendations"));
         try {
             return jsonSerialization.serialize(autonomy.listStates(agentId));
         } catch (Exception e) {
@@ -123,7 +123,7 @@ public class McpOversightTools {
             + "hitlConfig.oversight.autonomyPolicy are evaluated.")
     public String getAutonomyState(@ToolArg(description = "Agent id (required)") String agentId,
                                    @ToolArg(description = "Approval category, e.g. tool:mcp:add_issue_comment (required)") String category) {
-        requireAnyRole(identity, authEnabled, McpRoles.OVERSIGHT);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_autonomy_state"));
         if (agentId == null || agentId.isBlank() || category == null || category.isBlank()) {
             return errorJson("agentId and category are required", "BAD_REQUEST", null);
         }
@@ -138,7 +138,7 @@ public class McpOversightTools {
             + "gate allowed (exempt or promoted) that sampledAudit picked for a look afterwards. Unreviewed samples expire after "
             + "reviewWithin. The samples themselves are reviewed on the Manager's Oversight page.")
     public String countPendingAuditSamples(@ToolArg(description = AGENT_ID_ARG, required = false) String agentId) {
-        requireAnyRole(identity, authEnabled, McpRoles.OVERSIGHT);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("count_pending_audit_samples"));
         try {
             return jsonSerialization.serialize(samples.pendingCount(agentId));
         } catch (Exception e) {

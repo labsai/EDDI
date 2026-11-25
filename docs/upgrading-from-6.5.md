@@ -442,3 +442,26 @@ migrate: PostgreSQL adds the `thread_key` column and its index on start, MongoDB
 Everything else of the email addressing release is opt-in: `actWhen` defaults to `always` (every mail runs, as
 before), and the new per-target `mentions`, `addresses` and `allowedSenders` do nothing until set. The Manager
 preselects `actWhen: addressed` for **new** email integrations only.
+
+### Behavior rules with `tagMatches` or a reference-less `dependency`
+
+Two condition configs are now refused when you save a ruleset: a `deploymentContext` condition with a
+non-blank `tagMatches`, and a `dependency` condition without a `reference`. Neither could ever match.
+Rulesets that already carry one are **not** refused: they still deploy, import, sync and duplicate,
+and each such condition logs a WARN naming the ruleset and the rule. The condition evaluates as it
+did before, so it never matches, and a rule that negates it keeps firing on every turn.
+
+What you will see: the WARN at deploy, and a 400 naming the rule the next time you save that
+ruleset. Repair the two conditions differently:
+
+- **`deploymentContext` with `tagMatches`:** remove the `tagMatches` field. This changes what the
+  rule does when it was negated. A negated `tagMatches` was always true, so the rule fired in every
+  environment; after removing the field, a remaining `when` (for example `"production"`) is
+  evaluated for real, so the negation now fails in that environment: the rule stops firing in
+  production and keeps firing everywhere else. To keep it unconditional, remove the condition
+  together with its negation, or replace it with one that is always true.
+- **`dependency` without `reference`:** there is no field to remove. Add the `reference` naming the
+  rule it depends on, or replace or remove the condition after checking what the rule was meant to
+  do.
+
+See [behavior-rules.md](behavior-rules.md#deployment-context).

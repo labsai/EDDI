@@ -155,7 +155,7 @@ public class McpHitlTools {
     public String listPendingApprovals(
                                        @ToolArg(description = "Max entries to return (default: 200, capped at 1000)", required = false,
                                                 defaultValue = "200") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_pending_approvals"));
         try {
             int effectiveLimit = parseIntOrDefault(limit, 200);
             var result = hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
@@ -182,7 +182,7 @@ public class McpHitlTools {
                                     @ToolArg(description = "Conversation ID") String conversationId,
                                     @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                              defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_approval_status"));
         if (conversationId == null || conversationId.isBlank()) {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
@@ -304,7 +304,7 @@ public class McpHitlTools {
                                               required = false) String toolDecisionsJson,
                                      @ToolArg(description = "planHash from get_approval_status — the exact plan this decision is for",
                                               required = false) String planHash) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("resume_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -373,7 +373,7 @@ public class McpHitlTools {
           description = "Cancel a paused or running regular conversation. Attributed to the authenticated caller.")
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -424,7 +424,7 @@ public class McpHitlTools {
                                             @ToolArg(description = "Group ID") String groupId,
                                             @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                      defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_group_pending_approvals"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -444,7 +444,7 @@ public class McpHitlTools {
     public String listAllGroupPendingApprovals(
                                                @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                         defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_all_group_pending_approvals"));
         try {
             var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
             meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
@@ -464,7 +464,7 @@ public class McpHitlTools {
                                          @ToolArg(description = "Group conversation ID") String conversationId,
                                          @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                                   defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_group_approval_status"));
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
@@ -603,7 +603,7 @@ public class McpHitlTools {
                                              required = false) String taskDecisionsJson,
                                     @ToolArg(description = "planHash from get_group_approval_status — the exact plan this decision is for",
                                              required = false) String planHash) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("approve_group_phase"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -719,7 +719,7 @@ public class McpHitlTools {
                                                  required = false) String content,
                                         @ToolArg(description = "For a TIE_BREAK pause: exactly one of the pendingOptions",
                                                  required = false) String choice) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("submit_group_human_input"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -768,7 +768,7 @@ public class McpHitlTools {
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_group_discussion"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
