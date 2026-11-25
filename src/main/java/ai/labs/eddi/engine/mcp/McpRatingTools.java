@@ -92,7 +92,7 @@ public class McpRatingTools {
                                           @ToolArg(description = "newest or lowest (default: newest)", required = false) String sort,
                                           @ToolArg(description = "Page start, default 0", required = false) Integer index,
                                           @ToolArg(description = "Page size, default 20, max 100", required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_conversation_ratings"));
         try {
             RatingQueryParams query = query(agentId, agentVersion, environment, from, to, minScore, maxScore, kind, tag, hasComment,
                     reviewStatus, needsAttention, conversationId);
@@ -125,7 +125,7 @@ public class McpRatingTools {
                                                         required = false) Boolean needsAttention,
                                                @ToolArg(description = "none, day, week, agentVersion or channel (default: none)",
                                                         required = false) String groupBy) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("summarize_conversation_ratings"));
         try {
             RatingQueryParams query = query(agentId, agentVersion, environment, from, to, minScore, maxScore, kind, tag, hasComment,
                     reviewStatus, needsAttention, null);
@@ -138,7 +138,7 @@ public class McpRatingTools {
     @Tool(name = "count_ratings_needing_attention", description = "Count the ratings in the triage queue: NEW (not yet reviewed) "
             + "ratings that are low (normalized 0.5 or less) or carry a comment. A re-rating puts a reviewed rating back in the queue.")
     public String countRatingsNeedingAttention(@ToolArg(description = AGENT_ID_ARG, required = false) String agentId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("count_ratings_needing_attention"));
         try {
             return jsonSerialization.serialize(ratings.attentionCount(agentId));
         } catch (Exception e) {
@@ -154,7 +154,7 @@ public class McpRatingTools {
                                            @ToolArg(description = "REVIEWED or NEW; omit to change only the note",
                                                     required = false) String reviewStatus,
                                            @ToolArg(description = "Review note; omit to keep the current one", required = false) String reviewNote) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("review_conversation_rating"));
         if (ratingId == null || ratingId.isBlank()) {
             return errorJson("ratingId is required", "BAD_REQUEST", null);
         }
