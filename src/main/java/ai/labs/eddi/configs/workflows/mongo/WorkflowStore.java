@@ -31,6 +31,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -78,6 +80,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     public IResourceStore.IResourceId create(WorkflowConfiguration workflowConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
         WorkflowConfigSaveValidator.validate(workflowConfiguration);
+        trimReferenceUris(workflowConfiguration);
         return super.create(workflowConfiguration);
     }
 
@@ -87,6 +90,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
         WorkflowConfigSaveValidator.validate(workflowConfiguration);
+        trimReferenceUris(workflowConfiguration);
         return super.update(id, version, workflowConfiguration);
     }
 
@@ -140,6 +144,63 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             }
         }
         return ret;
+    }
+
+    /**
+     * Stores the two reference fields the reverse lookup queries
+     * ({@link #WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD},
+     * {@link #WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD}) without
+     * surrounding whitespace. The save check and the runtime
+     * ({@code ResourceUris.require}) both trim a padded {@code config.uri}, but the
+     * lookup is an exact match on the stored value: a padded reference was
+     * invisible to it, and the in-use guard let the resource it named be deleted.
+     */
+    static void trimReferenceUris(WorkflowConfiguration workflow) {
+        if (workflow == null || workflow.getWorkflowSteps() == null) {
+            return;
+        }
+        for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+            if (step == null) {
+                continue;
+            }
+            step.setConfig(withTrimmedUri(step.getConfig()));
+            if (step.getExtensions() != null && step.getExtensions().get("dictionaries") instanceof List<?> dictionaries) {
+                List<Object> trimmed = new ArrayList<>(dictionaries.size());
+                boolean changed = false;
+                for (Object entry : dictionaries) {
+                    Object next = entry;
+                    if (entry instanceof Map<?, ?> dictionary && dictionary.get("config") instanceof Map<?, ?> config) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> typed = (Map<String, Object>) config;
+                        Map<String, Object> newConfig = withTrimmedUri(typed);
+                        if (newConfig != config) {
+                            Map<Object, Object> copy = new LinkedHashMap<>(dictionary);
+                            copy.put("config", newConfig);
+                            next = copy;
+                            changed = true;
+                        }
+                    }
+                    trimmed.add(next);
+                }
+                if (changed) {
+                    Map<String, Object> extensions = new LinkedHashMap<>(step.getExtensions());
+                    extensions.put("dictionaries", trimmed);
+                    step.setExtensions(extensions);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code config} itself when its uri needs no trimming, else a trimmed copy.
+     */
+    private static Map<String, Object> withTrimmedUri(Map<String, Object> config) {
+        if (config == null || !(config.get("uri") instanceof String uri) || uri.equals(uri.trim())) {
+            return config;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>(config);
+        copy.put("uri", uri.trim());
+        return copy;
     }
 
     @Override

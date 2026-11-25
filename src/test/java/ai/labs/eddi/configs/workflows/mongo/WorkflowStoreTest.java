@@ -107,6 +107,39 @@ class WorkflowStoreTest {
         assertNotNull(result);
     }
 
+    /**
+     * The runtime trims a padded {@code config.uri}, but the in-use lookup matches
+     * the stored value exactly: a padded reference was invisible to it and the
+     * resource it named could be deleted while in use. Stored trimmed, it matches.
+     */
+    @Test
+    @DisplayName("create — stores step and dictionary reference URIs without surrounding whitespace")
+    void createTrimsReferenceUris() throws Exception {
+        String llm = "eddi://ai.labs.llm/llmstore/llms/aabbccddeeff00112233aabb?version=1";
+        String dictionary = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/aabbccddeeff00112233aacc?version=1";
+        var mapper = new ObjectMapper();
+        WorkflowConfiguration config = mapper.readValue("""
+                {"workflowSteps":[
+                  {"type":"eddi://ai.labs.llm","config":{"uri":"  %s "}},
+                  {"type":"eddi://ai.labs.parser","extensions":{"dictionaries":[{"type":"eddi://ai.labs.parser.dictionaries.regular",
+                    "config":{"uri":"\\t%s"}}]}}]}
+                """.formatted(llm, dictionary), WorkflowConfiguration.class);
+
+        IResourceStorage.IResource<WorkflowConfiguration> resource = mock(IResourceStorage.IResource.class);
+        when(resource.getId()).thenReturn("wf-1");
+        when(resource.getVersion()).thenReturn(1);
+        when(resourceStorage.newResource(any())).thenReturn(resource);
+        when(resourceStorage.getCurrentVersion("wf-1")).thenReturn(1);
+
+        store.create(config);
+
+        var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(resourceStorage).newResource(stored.capture());
+        String json = mapper.writeValueAsString(stored.getValue());
+        assertTrue(json.contains("\"uri\":\"" + llm + "\""), json);
+        assertTrue(json.contains("\"uri\":\"" + dictionary + "\""), json);
+    }
+
     // ==================== read ====================
 
     @Test
