@@ -62,7 +62,7 @@ public class McpDocTools {
             + "deployment, one per line, without the .md suffix. The runtime set is smaller than the repository's — "
             + "read this list rather than assuming a page exists, then read pages with read_docs.")
     public String listDocs() {
-        requireAnyRole(identity, authEnabled, McpRoles.DOCS);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_docs"));
         if (!docsService.isAvailable()) {
             // Not an error to the model: an absent or disabled docs directory is a
             // legitimate deployment state, and the message says which it is.
@@ -82,7 +82,7 @@ public class McpDocTools {
             + "not every page in the public repository ships on every deployment.")
     public String readDocs(
                            @ToolArg(description = "Page name without the .md suffix (required)") String name) {
-        requireAnyRole(identity, authEnabled, McpRoles.DOCS);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_docs"));
         String content = docsService.readDoc(name);
         if (content != null) {
             return content;
