@@ -104,6 +104,15 @@ public class AgentFactory implements IAgentFactory {
         Gauge.builder("eddi_agents_deployed", environments, AgentFactory::countReadyAgents)
                 .description("Agents currently deployed and READY in this node's runtime registry")
                 .register(meterRegistry);
+        // Every reason registered at 0: a counter first created by its first failure
+        // starts at 1, and rate() shows no increase for a series' first sample.
+        for (String reason : DeploymentFailures.REASONS) {
+            try {
+                meterRegistry.counter("eddi.deployment.failed", "reason", reason);
+            } catch (RuntimeException metricsMustNotBlockStartup) {
+                log.debugf("Could not register the failed-deployment counter for %s: %s", reason, metricsMustNotBlockStartup.getMessage());
+            }
+        }
     }
 
     private static double countReadyAgents(Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments) {

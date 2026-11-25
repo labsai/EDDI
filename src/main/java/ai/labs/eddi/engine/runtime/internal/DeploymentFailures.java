@@ -35,6 +35,10 @@ public final class DeploymentFailures {
     /** A configuration or workflow the agent references does not exist. */
     public static final String REFERENCE_MISSING = "REFERENCE_MISSING";
 
+    /** Every reason code a failed deployment is counted under. */
+    public static final List<String> REASONS = List.of(DeploymentFailure.VAULT_GRANT_MISSING, STEP_TYPE_UNKNOWN, CONFIG_INVALID,
+            REFERENCE_MISSING, DeploymentFailure.DEPLOYMENT_FAILED);
+
     /** Every code a failed deployment can carry, for the metric's tag values. */
     public static final List<String> CODES = List.of(DeploymentFailure.VAULT_GRANT_MISSING, STEP_TYPE_UNKNOWN, CONFIG_INVALID,
             REFERENCE_MISSING, DeploymentFailure.DEPLOYMENT_FAILED);
