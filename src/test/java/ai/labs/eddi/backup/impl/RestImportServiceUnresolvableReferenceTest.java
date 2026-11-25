@@ -516,6 +516,36 @@ class RestImportServiceUnresolvableReferenceTest {
     }
 
     /**
+     * Detection and pruning count depth the same way. A list at the depth limit
+     * whose missing entry sits one level deeper is out of reach for detection, and
+     * pruning used to re-check each element from depth 0: the entry was removed
+     * without a 422 or a dropped-reference warning, and the import succeeded with a
+     * smaller agent. It now meets the same refusal as any reference past the guard.
+     */
+    @Test
+    @DisplayName("a missing entry in a list at the depth limit is not pruned silently")
+    void entryBeyondTheGuardInAListIsNotPrunedSilently() throws Exception {
+        StringBuilder deepExtensions = new StringBuilder();
+        for (int i = 0; i < 10; i++) {
+            deepExtensions.append("{\"level").append(i).append("\":");
+        }
+        deepExtensions.append("[{\"uri\":\"").append(MISSING_LLM_URI).append("\"}]");
+        deepExtensions.append("}".repeat(10));
+
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.llm","extensions":%s}
+                """.formatted(deepExtensions), false);
+
+        var thrown = assertThrows(BadRequestException.class, () -> {
+            try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                    IWorkflowStore.class, mock(IWorkflowStore.class))) {
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
+            }
+        });
+        assertTrue(thrown.getMessage().contains(MISSING_LLM_ID), thrown.getMessage());
+    }
+
+    /**
      * The preview walks the agent's workflow list before anything is written, and a
      * {@code null} entry there — which Jackson produces from
      * {@code "workflows":[null]} — has no resource id to look anything up by. It is

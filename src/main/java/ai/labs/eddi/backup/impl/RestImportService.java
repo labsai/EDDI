@@ -3646,7 +3646,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 pruned |= pruneMissingEntries(value, workflowPath, depth + 1);
             }
         } else if (node instanceof List<?> list) {
-            pruned = list.removeIf(element -> referencesMissingFile(element, workflowPath, 0));
+            pruned = list.removeIf(element -> referencesMissingFile(element, workflowPath, depth + 1));
             for (Object element : list) {
                 pruned |= pruneMissingEntries(element, workflowPath, depth + 1);
             }
