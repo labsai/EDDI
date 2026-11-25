@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { LayoutGrid, List } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useCallback } from "react";
 import type { ViewMode } from "./view-mode";
 

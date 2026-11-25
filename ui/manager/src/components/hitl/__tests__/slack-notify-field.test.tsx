@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
-import { SlackNotifyField } from "@/components/hitl/slack-notify-field";
+import { SlackNotifyField } from "@eddi/app-kit/components/hitl/slack-notify-field";
 import { HitlConfigSection } from "@/components/editors/agent-config-sections";
-import { GroupHitlEditor } from "@/components/groups/group-hitl-editor";
-import type { Agent } from "@/lib/api/agents";
-import type { AgentGroupConfiguration } from "@/lib/api/groups";
+import { GroupHitlEditor } from "@eddi/app-kit/components/groups/group-hitl-editor";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
+import type { AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
 
 describe("SlackNotifyField", () => {
   it("off without a value; switching on and typing a name hands over the trimmed name", () => {

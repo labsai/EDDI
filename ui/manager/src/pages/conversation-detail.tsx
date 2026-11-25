@@ -24,10 +24,10 @@ import {
   Hand,
   Info,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { AttachmentsSection } from "@/components/conversations/attachments-section";
 import {
   useSimpleConversation,
@@ -37,7 +37,7 @@ import type {
   ConversationState,
   ConversationOutput,
   SimpleConversationStep,
-} from "@/lib/api/conversations";
+} from "@eddi/app-kit/lib/api/conversations";
 import {
   extractInput,
   extractOutput,
@@ -46,8 +46,8 @@ import {
   extractAgentSwitch,
   extractAgentVersion,
   END_REASON_AGENT_VERSION_RETIRED,
-} from "@/lib/api/conversations";
-import { AgentSwitchNotice } from "@/components/conversations/agent-switch-notice";
+} from "@eddi/app-kit/lib/api/conversations";
+import { AgentSwitchNotice } from "@eddi/app-kit/components/conversations/agent-switch-notice";
 import { useNavigate } from "react-router-dom";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -56,12 +56,12 @@ import {
   useResumeConversation,
   useCancelConversation,
   useApprovalStatus,
-} from "@/hooks/use-hitl";
-import type { DecisionReview, HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
-import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
+} from "@eddi/app-kit/hooks/use-hitl";
+import type { DecisionReview, HitlVerdict, ToolCallDecision, PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
+import { isPauseChanged, shownPauseOf } from "@eddi/app-kit/lib/hitl-pause-binding";
 import { ConversationRatingPanel, StepRatingBadge } from "@/components/feedback/conversation-rating-panel";
 import { useConversationRatings } from "@/hooks/use-ratings";
-import type { RatingRow } from "@/lib/api/ratings";
+import type { RatingRow } from "@eddi/app-kit/lib/api/ratings";
 
 /** Same redacted-preview render prop the approvals inbox uses. */
 function renderCallExtra(call: PendingToolCallView) {

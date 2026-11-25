@@ -89,7 +89,8 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * request carrying the {@code functionResponse}; otherwise
      * {@code 400 INVALID_ARGUMENT — Function call is missing a thought_signature}.
      * No thinking budget avoids it — the signature is emitted and demanded even at
-     * {@code thinkingBudget = 0}. langchain4j 1.20.0 models the field but gates it:
+     * {@code thinkingBudget = 0}. langchain4j (as analysed at 1.20.0; the pom now
+     * pins a later release) models the field but gates it:
      * {@code PartsAndContentsMapper} captures it into
      * {@code AiMessage.attributes()} only when {@code returnThinking} is
      * {@code TRUE}, and re-sends it only when {@code sendThinking} is {@code true}.
@@ -164,7 +165,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
             targetPolicy.validateUrl(baseUrl);
         }
 
-        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
+        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high", "xhigh"));
         Integer budget = intValue(p, KEY_THINKING_BUDGET);
         if (level != null && budget != null) {
             LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");

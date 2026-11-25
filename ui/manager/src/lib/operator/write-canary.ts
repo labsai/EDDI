@@ -1,6 +1,6 @@
-import { startConversation, sendMessageStreaming, endConversation } from "@/lib/api/chat";
+import { startConversation, sendMessageStreaming, endConversation } from "@eddi/app-kit/lib/api/chat";
 import { operatorEnvironment } from "@/lib/operator/operator-environment";
-import { resumeConversation, getApprovalStatus } from "@/lib/api/hitl";
+import { resumeConversation, getApprovalStatus } from "@eddi/app-kit/lib/api/hitl";
 import {
   OPERATOR_PROBE_USER_ID,
   gateDryRun,

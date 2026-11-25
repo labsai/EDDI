@@ -381,6 +381,27 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### User Event Stream Metrics
+
+The per-user stream `GET /me/events` (see [User Events](user-events.md)). Charted
+in the **User event stream** row of the Full Metrics Reference. Every value is
+per node: in a cluster, sum across pods.
+
+```text
+eddi_user_events_connections                # Open /me/events streams on this node (gauge)
+eddi_user_events_delivered_total            # Events written to a stream; tag: kind
+eddi_user_events_dropped_total              # Events or streams dropped; tag: reason
+eddi_user_events_rejected_total             # Streams refused at a cap (429); tag: reason
+```
+
+`kind` is the event kind (`approval.pending`, `team.ended`, …). `dropped` has two
+reasons: `slow_consumer` (a stream more than `eddi.user-events.buffer-size` frames
+behind was closed — its client reconnects) and `dispatch_queue_full` (an event
+found the node's fan-out queue full and nobody on this node got it). `rejected`
+is `user_limit` (`eddi.user-events.max-connections-per-user`) or `node_limit`
+(`eddi.user-events.max-connections`). A steady `user_limit` rate usually means a
+client that opens a stream per component instead of one per tab.
+
 ### Self-continuation Metrics
 
 Turns an agent starts itself with the reserved `CONTINUE_CONVERSATION` action
@@ -995,6 +1016,9 @@ eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags:
 eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
 eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
+eddi_channel_config_rejected_total          # Channel integration saves refused by type validation; tags: type, reason
+eddi_channel_config_keys_dropped_total      # Undeclared platformConfig keys the router dropped from stored documents; tag: type
+eddi_channel_credential_refused_total       # Channel sends whose connection could not be resolved; tags: type, reason
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
@@ -1007,6 +1031,20 @@ a load signal, not a configuration one). `type` is the observer's
 target type — `AGENT` today, since observe mode is refused on anything else —
 not the channel platform. A rising throttle share with a flat `MATCHED` share is
 an observer whose triggers are too broad for its budget.
+
+The three `eddi_channel_config_*` / `eddi_channel_credential_*` counters cover
+connection-backed channel types, whose credential comes from an EDDI
+connection rather than `platformConfig`. `type` is a registered channel type
+id, or `other` for an unknown one. A save's `reason` is a short refusal code
+such as `platform_config` (an undeclared key), `routing_key_taken`,
+`connection_not_usable` or `application_needs_edit`, and a send's is the
+lower-cased `ConnectionException` reason (`target_not_allowed`,
+`unsupported_placement`, …). A
+non-zero dropped-key count means a document reached the store without save
+validation (a direct store write). It is counted once per document version and
+key, not on every refresh. A credential refusal means the connection changed
+after the integration was saved, for example it was switched to `PER_USER` or
+its allowlist no longer covers the platform.
 
 ### Backup, Export & Sync Metrics
 
@@ -1161,6 +1199,22 @@ eddi_connection_token_refresh_count_total   # Token endpoint outcomes; tag: outc
 eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: outcome (claimed, awaited, lease_released, lease_expired)
 ```
 
+### Organization Context Metrics
+
+These count how EDDI binds the organization (org) each piece of work runs for. Organizations are
+being built in phases: this release runs single mode only (`eddi.org.mode`, see
+[configuration-reference.md](configuration-reference.md#groups-tenancy--variables)).
+
+```text
+eddi_org_context_fallback_total             # Org lookups that found no binding and used the default org (single mode); tag: site (class#method). Expected to stay 0
+eddi_org_platform_scope_total               # Entries into OrgScope.platform, the audited way to cross orgs; tag: reason
+```
+
+A non-zero `eddi_org_context_fallback_total` is harmless in single mode, but the `site` it names
+has to be fixed before multi mode can be enabled. To keep the series bounded, only the first 200
+call sites and the first 100 reasons get a tag of their own. Later ones are counted under
+`(overflow)`.
+
 ### Deployed Agents
 
 ```text
@@ -1200,6 +1254,8 @@ eddi_cluster_events_published_total         # Cluster events published {type}
 eddi_cluster_events_consumed_total          # Cluster events handled from other nodes {type}
 eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
+eddi_cluster_events_transient_published_total # Transient events (core NATS, never stored or queued — the user event stream) published {type}
+eddi_cluster_events_transient_dropped_total   # Transient events dropped because NATS was unreachable {type}
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_events_dispatch_queue          # Received events waiting to be handled on this node, both lanes (gauge)

@@ -23,7 +23,8 @@ import java.util.concurrent.Callable;
  * for the actual retry implementation. This class provides convenience methods
  * that accept {@link LlmConfiguration.Task} for LLM-specific callers.
  * <p>
- * Used by both {@link LegacyChatExecutor} and {@link AgentOrchestrator}.
+ * Used by {@link LegacyChatExecutor}, {@link AgentOrchestrator} and
+ * {@link ToolLoopRunner}.
  */
 class AgentExecutionHelper {
 

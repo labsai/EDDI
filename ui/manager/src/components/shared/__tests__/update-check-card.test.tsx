@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { UpdateCheckCard } from "@/components/shared/update-check-card";
 import { UpdateBanner } from "@/components/layout/update-banner";
 

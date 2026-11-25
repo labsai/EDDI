@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { api } from "@/lib/api-client";
-import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 
 /**
  * MSW resolves handlers in registration order, and `handlers.ts` registers two

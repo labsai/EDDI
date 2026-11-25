@@ -16,6 +16,7 @@
 
 - [Architecture Overview](architecture.md)
 - [Project Philosophy](project-philosophy.md)
+- [ADR 0001 — Organizations](adr/0001-organizations.md)
 - [Conversation Memory & State Management](conversation-memory.md)
 - [Memory Policy (Commit Flags)](memory-policy.md)
 - [Properties](properties.md)
@@ -56,6 +57,7 @@
   - [HITL Oversight — Analytics, Sampled Audit, Earned Autonomy](hitl-oversight.md)
   - [HITL Approval Card Context](hitl-approval-context.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
+- [User Events — the Per-User Event Stream](user-events.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)
@@ -84,6 +86,7 @@
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
+- [Multi-Org Security — Threat Model (draft)](multi-org-security.md)
 - [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)

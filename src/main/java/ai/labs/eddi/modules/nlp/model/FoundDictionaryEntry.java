@@ -13,7 +13,7 @@ import java.util.Objects;
  */
 public class FoundDictionaryEntry extends DictionaryEntry {
     protected boolean isCorrected;
-    // 0.0 > and <= 1.0
+    // 0.0 (a FoundUnknown, nothing matched) up to 1.0 (an exact match)
     protected double matchingAccuracy;
 
     public FoundDictionaryEntry(String unknownValue, Expressions expressions) {

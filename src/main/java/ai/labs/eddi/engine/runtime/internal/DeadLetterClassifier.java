@@ -13,9 +13,9 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Why a turn was dead-lettered, read from the failure: a write the cluster
- * fence refused, a timeout, or anything else. The admin console filters and
- * explains dead letters by this reason, and a fenced entry also records the two
- * fencing tokens involved.
+ * fence refused, a lost turn lease, a timeout, or anything else. The admin
+ * console filters and explains dead letters by this reason, and a fenced entry
+ * also records the two fencing tokens involved.
  */
 final class DeadLetterClassifier {
 

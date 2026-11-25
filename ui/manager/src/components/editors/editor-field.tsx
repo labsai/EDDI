@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /** What a {@link Field} hands its control so the label and hint reach it. */
 export interface FieldControlProps {

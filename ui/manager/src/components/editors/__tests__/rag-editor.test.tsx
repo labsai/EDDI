@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useLayoutEffect, useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   RagEditor,
   type RagConfig,

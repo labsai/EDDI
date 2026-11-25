@@ -46,7 +46,7 @@ announces its pauses, and every committed pause gets the same card.
   deployment default" (there is no per-agent opt-out), and the wording in all locales says so; collapsing the section
   keeps an unsavable name blocking the save.
 - **Platform Operator.** The prompt explains when a pause gets a Slack card and which settings decide it; revision
-  69 → 70.
+  82 → 84 after merging main (the revision is a counter, not the PR's own step).
 
 ### Design decisions
 

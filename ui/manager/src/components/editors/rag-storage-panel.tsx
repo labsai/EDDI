@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, HardDrive, MoveRight } from "lucide-react";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { Button } from "@eddi/ui";
 import {
   NAMESPACE_ID,

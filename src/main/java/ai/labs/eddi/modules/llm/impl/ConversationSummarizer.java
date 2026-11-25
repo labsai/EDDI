@@ -44,7 +44,10 @@ import java.util.function.UnaryOperator;
  * </ol>
  * <p>
  * The summary is incremental and self-correcting: if a summarization call
- * fails, the next turn will catch up by summarizing a larger batch.
+ * fails, the boundary stays put and the next turn retries from it. Each update
+ * covers at most {@code maxTurnsPerUpdate} new turns and keeps the whole
+ * request within {@code maxCharsPerUpdate} characters, so a backlog is worked
+ * off over several turns.
  *
  * @author ginccc
  * @since 6.0.0

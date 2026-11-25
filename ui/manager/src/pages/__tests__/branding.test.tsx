@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderPage, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { BrandingPage } from "@/pages/branding";
-import { getBrand, setBrand } from "@/lib/brand";
+import { getBrand, setBrand } from "@eddi/app-kit/lib/brand";
 import { writeTimeout } from "@/lib/brand-write-guard";
-import { UNBRANDED_COLORS } from "@/lib/brand-css";
+import { UNBRANDED_COLORS } from "@eddi/app-kit/lib/brand-css";
 import {
   MOCK_BRAND_CONFLICT_TRIGGER,
   MOCK_BRAND_LOCKED_KEY,
   mockBrandScript,
-} from "@/test/mocks/branding-handlers";
+} from "@eddi/app-kit/test/mocks/branding-handlers";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },

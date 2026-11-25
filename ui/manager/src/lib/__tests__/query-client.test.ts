@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { ApiClientError } from "../api-client";
-import { createQueryClient } from "../query-client";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
+import { createQueryClient } from "@eddi/app-kit/lib/query-client";
 
 vi.mock("sonner", () => {
   const history: { type: string }[] = [];

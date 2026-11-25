@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderPage, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { WorkspacesPage } from "@/pages/workspaces";
 
 const PERSONAL = { id: "user:alice@example.com", kind: "personal", label: "alice@example.com" };

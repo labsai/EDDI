@@ -139,8 +139,8 @@ public class RenderedApprovalContext {
     }
 
     /**
-     * SHA-256 (hex) over label, text, source and call id of every item, each field
-     * length-prefixed so two different item lists cannot hash alike.
+     * SHA-256 (hex) over label, text, source, call id and error of every item, each
+     * field length-prefixed so two different item lists cannot hash alike.
      */
     public static String digestOf(List<Item> items) {
         try {

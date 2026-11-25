@@ -140,7 +140,11 @@ public final class RuntimeTemplateEngineFactory {
         public static final String DEFAULT_ITERATION_METADATA_PREFIX = "<alias_>";
         public static final long DEFAULT_TIMEOUT_MILLIS = 10_000L;
 
-        /** The values EDDI ships with — the same as the Quarkus defaults. */
+        /**
+         * The values EDDI ships with in {@code application.properties}: strict
+         * rendering off (Quarkus's own default is on), the rest as the Quarkus
+         * defaults.
+         */
         public static Settings defaults() {
             return new Settings(DEFAULT_MAX_OUTPUT_CHARS, DEFAULT_MAX_ITERATIONS, false, true, DEFAULT_ITERATION_METADATA_PREFIX,
                     DEFAULT_TIMEOUT_MILLIS);

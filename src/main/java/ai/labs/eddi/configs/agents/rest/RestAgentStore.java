@@ -486,6 +486,19 @@ public class RestAgentStore implements IRestAgentStore {
         // delete must leave a running Agent running.
         undeployLiveDeployments(id, liveDeployments);
 
+        // undeployAgent drops cached versions only for deployments that were live. A
+        // permanent delete with none must still drop them, or a version of the deleted
+        // agent stays readable from the cache (CWE-636: an audit entry signed with a
+        // key
+        // revoked later would verify VALID).
+        if (Boolean.TRUE.equals(permanent)) {
+            try {
+                agentFactory.invalidateAgentCaches(id);
+            } catch (Exception e) {
+                log.warnf("Failed to drop cached versions of permanently deleted Agent %s: %s", sanitize(id), sanitize(e.getMessage()));
+            }
+        }
+
         if (cascadeTargets != null) {
             try {
                 int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);

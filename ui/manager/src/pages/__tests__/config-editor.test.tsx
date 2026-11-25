@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { VersionPicker } from "@/components/editors/version-picker";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { ResourceDetailPage } from "@/pages/resource-detail";

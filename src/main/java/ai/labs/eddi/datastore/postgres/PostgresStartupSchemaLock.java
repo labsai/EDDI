@@ -44,7 +44,7 @@ public class PostgresStartupSchemaLock {
     private static final Logger LOGGER = Logger.getLogger(PostgresStartupSchemaLock.class);
 
     /**
-     * Arbitrary, fixed advisory-lock key shared by every EDDI node ("EDDISCHM").
+     * Arbitrary, fixed advisory-lock key shared by every EDDI node ("EDDISCHG").
      */
     static final long LOCK_KEY = 0x4544444953434847L;
 

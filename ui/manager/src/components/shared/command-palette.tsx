@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useCallback, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import { useMayOpenScreen } from "@/hooks/use-auth";
+import { useAppNavigate } from "@eddi/app-kit/hooks/use-app-navigate";
+import { useMayOpenScreen } from "@eddi/app-kit/hooks/use-auth";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { getAgentDescriptors, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
-import { agentKeys } from "@/lib/query-keys";
+import { getAgentDescriptors, parseResourceUri, type AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 import { ALL_PAGES, pageLabel } from "@/lib/route-registry";
 import {
   LayoutDashboard,
@@ -66,7 +66,7 @@ const itemClass =
 
 export function CommandPalette() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const navigate = useAppNavigate();
   const { isOpen, open, close, toggle, recentPages, addRecentPage } = useCommandPalette();
 
   // The page list comes from the same registry as the sidebar and the
