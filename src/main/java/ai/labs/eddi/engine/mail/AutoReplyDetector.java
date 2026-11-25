@@ -12,8 +12,8 @@ import java.util.Set;
  * bounce, a mailing list — and why (email plan §13).
  * <p>
  * The first line of loop prevention: an agent that answers an auto-reply gets
- * an auto-reply back, forever. A later {@code EmailLoopGuard} adds what only it
- * knows (the integration's own address, ids from other integrations' ledgers,
+ * an auto-reply back, forever. {@code EmailLoopGuard} adds what only it knows
+ * (the integration's own address, ids from other integrations' ledgers,
  * budgets); this class looks at the message alone. The signals, each enough on
  * its own:
  * <ul>
@@ -54,8 +54,8 @@ public final class AutoReplyDetector {
         /** {@code Return-Path: <>}. */
         NULL_RETURN_PATH,
         /**
-         * A {@code Return-Path} or {@code From} of {@code MAILER-DAEMON} or
-         * {@code postmaster}.
+         * A {@code Return-Path} of {@code MAILER-DAEMON} or {@code postmaster}, or a
+         * {@code From} of {@code MAILER-DAEMON}.
          */
         MAILER_DAEMON
     }

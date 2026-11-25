@@ -57,8 +57,10 @@ for anything this page does not cover.
 | `POST /agents/{conversationId}/resume` | Submit a human decision for a paused turn | `200` |
 | `GET /agents/{conversationId}/approval-status` | Pause details of a conversation | `200` |
 | `GET /agents/pending-approvals` | Conversations awaiting a human decision | `200` list |
+| `GET /me/events` | The caller's event stream: approvals, team progress, finished jobs, notifications — ids only (see [Your event stream](#your-event-stream)) | `200` `text/event-stream` |
 | `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` (a compare-and-set from the state it read: `409` when the state changed meanwhile or cannot be reset) | `200` |
 | `GET /conversationstore/conversations` | List conversations (paged, filterable) | `200` list |
+| `GET /conversationstore/conversations/search?q=` | Search **my** conversations by title (paged; see [Searching my conversations](#searching-my-conversations)) | `200` list |
 | `GET /conversationstore/conversations/simple/{conversationId}` | Read a conversation (same shape as `GET /agents/{id}`) | `200` |
 | `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory. The `audit:*` step data (the compiled system prompt above all; `audit:token_usage` stays) is withheld unless the caller has `VIEW` on the agent — the same rule `approval-status?detail=full` and MCP `read_audit_trail` apply | `200` |
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
@@ -244,7 +246,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
 | `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
-| `tool_result` | `{"tool","callId","status","durationMs"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval) or `rejected` (a human declined it) | Sent exactly once for every `tool_call`, always after it in the same stream, whichever way the call ends; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the result** |
+| `tool_result` | `{"tool","callId","status","durationMs","ok","summary"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval, or a result that reports `NOT_EXECUTED`) or `rejected` (a human declined it); `ok` is `status == "ok"`; `summary` is the start of the result, or of the refusal, redacted exactly like `task_complete`'s `toolTrace`, whitespace collapsed, at most 200 characters (may be empty) | Sent once for every `tool_call`, always after it in the same stream, whichever way the call ends — except a call cut off by a cancellation or a turn deadline interrupt, which ends the turn without its result; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the raw result** |
 | `hitl_resume` | `{"pauseId","verdict"}` | `/resume/stream` only. The decision was committed; sent once, before any event of the continued turn |
 | `approval_required` | `{"pauseId","pauseType","callCount"}` — `pauseType` is `TOOL_CALL` or `RULE`; `callCount` the number of gated tool calls awaiting a decision (`0` for a rule pause) | The turn ends waiting for a human. Sent immediately before `done` on `/stream` and `/resume/stream`; pass `pauseId` back in the decision |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
@@ -446,6 +448,28 @@ and `toolDecisions` for per-tool-call gates. `?detail=full` on
 | `409 Conversation is not in a resumable state (current state: READY) — …` | Nothing is paused (already resumed, cancelled, timed out, or the agent is not deployed) |
 | `409` naming `pauseId no longer current` | The pause changed after the decision was made |
 
+### Your event stream
+
+Instead of polling `pending-approvals`, a client can hold `GET /me/events` open:
+a Server-Sent Event stream that says, for the signed-in user only, when an
+approval they may decide is waiting (`approval.pending`) or was decided
+(`approval.decided`), and when a team discussion, a long job or a notification
+concerns them. Payloads carry ids and kinds, never content — fetch the details
+here. There is no replay: on (re)connect, refetch. One stream per tab, at most
+8 per user by default (`429` past it); `401` without a sign-in.
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" "$EDDI/me/events"
+# event: ready
+# data: {"v":1,"heartbeatSeconds":20}
+#
+# event: approval.pending
+# data: {"id":"…","kind":"approval.pending","ts":1793961600000,"surface":"regular","conversationId":"6abf…","agentId":"66a0…"}
+```
+
+Every kind, who receives it, the limits and the cluster behaviour:
+[User Events](user-events.md).
+
 ## Resetting a stuck conversation
 
 `PATCH /agents/{conversationId}/state?state=READY` (admin only) moves a
@@ -537,6 +561,40 @@ its descriptor.
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
 
+### Searching my conversations
+
+```bash
+curl -s "$EDDI/conversationstore/conversations/search?q=rome&index=0&limit=20"
+```
+
+Answers the same descriptors as the listing, newest first, for the conversations
+whose **title** contains `q`.
+
+- **Only the caller's own conversations**, for every caller, an administrator
+  included: this is "my conversations". (An administrator who needs everybody's
+  uses the listing's `filter`.) The owner is part of the database query, as an
+  exact match on the descriptor's `userId`, so another user's conversation is
+  never read. With authorization disabled every conversation is searched, as the
+  listing then shows every conversation. A conversation from before v5.1.6 that
+  records no owner on its descriptor is not searched.
+- `q` is literal text, not a pattern: `%`, `_`, `*` or `(` match themselves. It is
+  case-insensitive, whitespace is collapsed the way titles are stored, and it must
+  be 1 to 100 characters (`400` otherwise).
+- `index`, `limit` page as in the listing (`index × limit` at most 10,000). A page
+  can come back short, because a match whose conversation memory is gone is left
+  out, so page until a page comes back empty.
+- **Titles only.** A title never comes from a secret turn, and it lives on the
+  conversation descriptor, which [GDPR erasure](gdpr-compliance.md) deletes, so
+  nothing the search can find outlives an erasure. Conversation *outputs* are not
+  searched yet. Doing that safely needs more than a query: the outputs live in
+  the conversation memory documents, not the descriptors, so they need their own
+  index on both backends. They hold model and tool text that the turn-end scrub
+  does not cover (it removes secret input and secret context, not what a tool
+  echoed), so they would also need a decision on redaction. Both are open.
+- MongoDB matches with an escaped, case-insensitive regex and PostgreSQL with an
+  escaped `ILIKE`, both after the exact owner match narrows the rows to the
+  caller's.
+
 ## Calling an API as the user: secret context
 
 A context entry marked `"secret": true` lives for the request that carried it: the
@@ -589,6 +647,7 @@ For symptoms and fixes beyond the status code, see
 
 - [Conversations](conversations.md) — how conversation state, memory and windowing work
 - [Human-in-the-Loop](hitl.md) — pause configuration, timeouts, per-tool-call gates
+- [User Events](user-events.md) — `GET /me/events`, the per-user event stream
 - [Group Conversations](group-conversations.md) — the `/groups/{groupId}/conversations` API
 - [OpenAI-compatible API](open-webui-integration.md) — `/v1/chat/completions` on top of the same engine
 - [MCP Server](mcp-server.md) — the same operations as MCP tools

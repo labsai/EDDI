@@ -17,7 +17,7 @@ import {
   toVaultReference,
   wrapsConnectionReference,
   REFERENCE_SCHEMES,
-} from "@/lib/secret-reference";
+} from "@eddi/app-kit/lib/secret-reference";
 
 /**
  * The grammar three components used to spell out for themselves.

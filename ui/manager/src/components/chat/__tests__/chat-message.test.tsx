@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatMessage } from "@/components/chat/chat-message";
-import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatMessage } from "@eddi/app-kit/components/chat/chat-message";
+import type { ChatMessage as ChatMessageType } from "@eddi/app-kit/lib/api/chat";
 
 const userMessage: ChatMessageType = {
   id: "msg-1", role: "user",
@@ -163,7 +163,7 @@ describe("ChatMessage", () => {
     expect(timeSpan?.textContent?.length).toBeGreaterThan(0);
   });
 
-  it("applies animate-pulse class for streaming messages", () => {
+  it("marks a streaming reply busy without pulsing the text being read", () => {
     const streamingWithContent: ChatMessageType = {
       id: "msg-5", role: "agent",
       content: "Typing...",
@@ -173,8 +173,18 @@ describe("ChatMessage", () => {
     const { container } = renderWithProviders(
       <ChatMessage message={streamingWithContent} />
     );
-    const pulseEl = container.querySelector(".animate-pulse");
-    expect(pulseEl).not.toBeNull();
+    const bubble = container.querySelector('[data-streaming="true"]');
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("renders a client notice as a system line, not as the agent speaking", () => {
+    renderWithProviders(
+      <ChatMessage message={{ id: "n1", role: "agent", kind: "notice", content: "Stop came too late.", timestamp: Date.now() }} />
+    );
+    expect(screen.getByTestId("chat-notice")).toHaveTextContent("Stop came too late.");
+    expect(screen.queryByTestId("copy-message")).not.toBeInTheDocument();
   });
 
   it("user message uses primary background", () => {
@@ -265,7 +275,7 @@ describe("ChatMessage", () => {
 });
 
 describe("ChatMessage — guardrail notices", () => {
-  it("shows one quiet line per guardrail that fired, with phase, type and action", () => {
+  it("shows one quiet line per guardrail that fired, in plain words naming the guardrail (T2.7)", () => {
     renderWithProviders(
       <ChatMessage
         message={{
@@ -279,8 +289,8 @@ describe("ChatMessage — guardrail notices", () => {
     );
     const lines = screen.getAllByTestId("guardrail-notice").map((l) => l.textContent);
     expect(lines).toEqual([
-      "Guardrail (input): prompt-injection blocked",
-      "Guardrail (output): pii-redaction redacted",
+      "A safety check stopped your message (prompt-injection).",
+      "A safety check removed part of the answer (pii-redaction).",
     ]);
   });
 
@@ -297,7 +307,7 @@ describe("ChatMessage — guardrail notices", () => {
     renderWithProviders(
       <ChatMessage message={{ ...agentMessage, guardrails: [{ type: "t", phase: "mid", action: "quarantine" }] }} />,
     );
-    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
+    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("A safety check acted on this turn (t: mid, quarantine).");
   });
 });
 

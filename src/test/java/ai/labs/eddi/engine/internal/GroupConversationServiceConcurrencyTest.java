@@ -124,7 +124,7 @@ class GroupConversationServiceConcurrencyTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         doReturn(agent).when(agentFactory).getLatestReadyAgent(any(), any());
         var convCounter = new AtomicInteger();

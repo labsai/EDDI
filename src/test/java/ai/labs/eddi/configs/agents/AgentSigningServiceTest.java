@@ -57,13 +57,13 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> now[0];
 
         for (int i = 0; i < 3; i++) {
-            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", 0, "entry"));
             assertTrue(e.getMessage().contains("No signing key found"), e.getMessage());
         }
         assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
 
         now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", 0, "entry"));
         assertEquals(2, secretProvider.resolveCalls, "after the TTL the vault is asked again");
     }
 
@@ -72,7 +72,7 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> 0L;
 
         for (int i = 0; i < 3; i++) {
-            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", "entry"));
+            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", 0, "entry"));
         }
         assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
     }
@@ -81,10 +81,26 @@ class AgentSigningServiceTest {
     void signIfKeyPresent_signsWhenTheKeyExists() throws Exception {
         String publicKey = provisionKey("tenant-1", "agent-1");
 
-        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", "entry");
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", 0, "entry");
 
         assertNotNull(signature);
         assertTrue(signingService.verify(publicKey, "entry", signature));
+    }
+
+    /**
+     * The audit ledger signs with the agent's current versioned key. It used to
+     * sign with the unversioned key only, which provisioning never writes, so a
+     * provisioned agent's entries were never signed.
+     */
+    @Test
+    void signIfKeyPresent_signsWithTheNamedVersion() throws Exception {
+        provisionKey("tenant-1", "agent-1");
+        String publicKeyV2 = provisionKey("tenant-1", "agent-1", 2);
+
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", 2, "entry");
+
+        assertTrue(signingService.verify(publicKeyV2, "entry", signature));
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", 3, "entry"), "no v3 in the vault");
     }
 
     @Test
@@ -98,7 +114,7 @@ class AgentSigningServiceTest {
         var service = new AgentSigningService(failing, new SimpleMeterRegistry());
         service.initMetrics();
 
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", 0, "entry"));
     }
 
     /**
@@ -111,14 +127,14 @@ class AgentSigningServiceTest {
         long[] now = {0L};
         signingService.nanoClock = () -> now[0];
         var envelope = SignedEnvelope.forSigning("agent-x", "agent-y", Map.of("text", "hello"));
-        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-x", "entry"));
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-x", 0, "entry"));
         assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-x", envelope, 2));
 
         String publicKey = provisionKey("tenant-1", "agent-x");
         String publicKeyV2 = provisionKey("tenant-1", "agent-x", 2);
         now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
 
-        assertTrue(signingService.verify(publicKey, "entry", signingService.signIfKeyPresent("tenant-1", "agent-x", "entry")));
+        assertTrue(signingService.verify(publicKey, "entry", signingService.signIfKeyPresent("tenant-1", "agent-x", 0, "entry")));
         assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-x", envelope, 2), publicKeyV2));
     }
 
@@ -136,11 +152,11 @@ class AgentSigningServiceTest {
         long[] now = {0L};
         signingService.nanoClock = () -> now[0];
         String publicKeyA = provisionKey("tenant-1", "agent-1");
-        signingService.sign("tenant-1", "agent-1", "first");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
 
         String publicKeyB = provisionKey("tenant-1", "agent-1");
         now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
-        String signature = signingService.sign("tenant-1", "agent-1", "second");
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "second");
 
         assertTrue(signingService.verify(publicKeyB, "second", signature), "the replaced key must be picked up after the TTL");
         assertFalse(signingService.verify(publicKeyA, "second", signature), "the old key is still cached");
@@ -156,12 +172,12 @@ class AgentSigningServiceTest {
         long[] now = {0L};
         signingService.nanoClock = () -> now[0];
         String publicKeyA = provisionKey("tenant-1", "agent-1");
-        signingService.sign("tenant-1", "agent-1", "first");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
         int readsAfterFirstSignature = secretProvider.resolveCalls;
 
         provisionKey("tenant-1", "agent-1");
         now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS - 1;
-        String signature = signingService.sign("tenant-1", "agent-1", "second");
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "second");
 
         assertTrue(signingService.verify(publicKeyA, "second", signature), "inside the TTL the cached key signs");
         assertEquals(readsAfterFirstSignature, secretProvider.resolveCalls, "inside the TTL the vault is not read again");
@@ -177,12 +193,12 @@ class AgentSigningServiceTest {
         long[] now = {0L};
         signingService.nanoClock = () -> now[0];
         provisionKey("tenant-1", "agent-1");
-        signingService.sign("tenant-1", "agent-1", "first");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
 
         secretProvider.forget("tenant-1:agent-signing-key:agent-1");
         now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
 
-        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", "second"),
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", 0, "second"),
                 "the removed key must not keep signing from memory past the TTL");
     }
 
@@ -191,8 +207,8 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> 0L;
         secretProvider.resolveUnreachable = true;
 
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", 0, "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", 0, "entry"));
 
         assertEquals(2, secretProvider.resolveCalls);
     }
@@ -202,7 +218,7 @@ class AgentSigningServiceTest {
         String publicKey = provisionKey("tenant-1", "agent-1");
         String payload = "Hello from Agent-1";
 
-        String signature = signingService.sign("tenant-1", "agent-1", payload);
+        String signature = signingService.sign("tenant-1", "agent-1", 0, payload);
         assertNotNull(signature);
 
         assertTrue(signingService.verify(publicKey, payload, signature));
@@ -211,7 +227,7 @@ class AgentSigningServiceTest {
     @Test
     void verify_failsOnTamperedPayload() throws Exception {
         String publicKey = provisionKey("tenant-1", "agent-1");
-        String signature = signingService.sign("tenant-1", "agent-1", "original message");
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "original message");
 
         assertFalse(signingService.verify(publicKey, "tampered message", signature));
     }
@@ -221,7 +237,7 @@ class AgentSigningServiceTest {
         String publicKey1 = provisionKey("tenant-1", "agent-1");
         provisionKey("tenant-1", "agent-2");
 
-        String signature = signingService.sign("tenant-1", "agent-2", "message");
+        String signature = signingService.sign("tenant-1", "agent-2", 0, "message");
 
         // Verify with agent-1's public key should fail
         assertFalse(signingService.verify(publicKey1, "message", signature));
@@ -233,7 +249,7 @@ class AgentSigningServiceTest {
         signingService.deleteKeyPair("tenant-1", "agent-1");
 
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "payload"));
+                () -> signingService.sign("tenant-1", "agent-1", 0, "payload"));
     }
 
     @Test
@@ -251,7 +267,7 @@ class AgentSigningServiceTest {
     void sign_throwsAgentSigningExceptionWhenKeyNotFound() {
         // Agent was never generated, so vault has no key
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "nonexistent-agent", "payload"));
+                () -> signingService.sign("t1", "nonexistent-agent", 0, "payload"));
     }
 
     // ==================== Envelope signing/verification ====================
@@ -321,7 +337,7 @@ class AgentSigningServiceTest {
 
         // Both legacy and versioned key should be gone
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "payload"));
+                () -> signingService.sign("tenant-1", "agent-1", 0, "payload"));
     }
 
     /**
@@ -563,10 +579,10 @@ class AgentSigningServiceTest {
     @Test
     void sign_usesTheCachedPrivateKeyOnTheSecondCall() throws Exception {
         String publicKey = provisionKey("tenant-1", "agent-1");
-        signingService.sign("tenant-1", "agent-1", "first");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
 
         secretProvider.forget("tenant-1:agent-signing-key:agent-1");
-        String second = signingService.sign("tenant-1", "agent-1", "second");
+        String second = signingService.sign("tenant-1", "agent-1", 0, "second");
 
         assertTrue(signingService.verify(publicKey, "second", second),
                 "the second signature must come from the cached key, not from a vault round trip");
@@ -583,7 +599,7 @@ class AgentSigningServiceTest {
     void deleteKeyPair_evictsTheCacheEvenWhenTheVaultDeleteFails() throws Exception {
         provisionKey("tenant-1", "agent-1");
         // Populate the private-key cache.
-        signingService.sign("tenant-1", "agent-1", "message");
+        signingService.sign("tenant-1", "agent-1", 0, "message");
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
@@ -593,7 +609,7 @@ class AgentSigningServiceTest {
         // this proves it did: the vault answer is removed out from under it.
         secretProvider.forget("tenant-1:agent-signing-key:agent-1");
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "message"),
+                () -> signingService.sign("tenant-1", "agent-1", 0, "message"),
                 "the private key survived in the cache, so this process can still sign as a deleted agent");
     }
 
@@ -683,7 +699,7 @@ class AgentSigningServiceTest {
         var envelopeFailure = assertThrows(AgentSigningService.AgentSigningException.class,
                 () -> signingService.signEnvelope("t1", "nonexistent", envelope, 0));
         var plainFailure = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "nonexistent", "payload"));
+                () -> signingService.sign("t1", "nonexistent", 0, "payload"));
 
         assertEquals("No signing key found for agent nonexistent", envelopeFailure.getMessage());
         assertEquals(plainFailure.getMessage(), envelopeFailure.getMessage(), "the two signing paths must not drift apart again");
@@ -695,7 +711,7 @@ class AgentSigningServiceTest {
     void sign_throwsWithSecretNotFoundCauseMessage() {
         // Agent was never generated — SecretNotFoundException is the cause
         var ex = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "missing-agent", "payload"));
+                () -> signingService.sign("t1", "missing-agent", 0, "payload"));
         assertTrue(ex.getMessage().contains("No signing key found") || ex.getMessage().contains("Failed to load"));
     }
 

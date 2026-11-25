@@ -349,7 +349,13 @@ export const READ_ENDPOINTS: readonly string[] = [
   // - `POST /administration/quotas/{tenantId}/usage/reset` and
   //   `PUT /administration/quotas/{tenantId}`: resetting usage or changing a quota
   //   is a spending decision, as before.
+  // - `POST /administration/spend-control-changes/{id}/approve` and `…/reject`:
+  //   deciding a looser price or quota an MCP client proposed is a human
+  //   action (docs/spend-control-changes.md); the backend refuses an
+  //   agent-originated call there anyway. The list read below is granted so
+  //   the operator can explain why a proposed change has not taken effect.
   "GET /administration/model-prices",
+  "GET /administration/spend-control-changes",
   "GET /administration/model-prices/resolve",
   "GET /administration/model-prices/unpriced",
   "GET /administration/quotas/{tenantId}/usage",
@@ -662,7 +668,7 @@ export const WRITE_ENDPOINTS: readonly string[] = [
  * (backend `toolApprovals.rules`) can tighten this later without this function
  * ever being able to loosen it.
  */
-export function buildToolApprovals(): import("@/lib/api/hitl").ToolApprovalsConfig {
+export function buildToolApprovals(): import("@eddi/app-kit/lib/api/hitl").ToolApprovalsConfig {
   return {
     requireApproval: ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
     exempt: ["http.get:*"],

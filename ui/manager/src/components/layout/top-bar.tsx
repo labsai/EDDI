@@ -12,8 +12,8 @@ import {
   Languages,
 } from "lucide-react";
 import { useTheme } from "@eddi/ui";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 import { useLanguageSwitcher } from "@/hooks/use-language-switcher";
 import { useRouteEntityName } from "@/hooks/use-route-entity-name";
 import { buildCrumbs } from "@/lib/route-registry";
@@ -22,7 +22,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@eddi/app-kit/components/ui/dropdown-menu";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Wand2 } from "lucide-react";
-import { NumberInput } from "@/components/editors/number-input";
-import { ChipInput } from "@/components/shared/chip-input";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
 import { Button } from "@eddi/ui";
 import type { CatalogParam } from "@/lib/llm-parameter-catalog";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import {
   jsonProblem,
   numberProblem,

@@ -56,6 +56,24 @@ function cap(text: string, max: number): string {
 }
 
 /**
+ * The tool name of a `tool_call` or `tool_result` payload — its `tool` field,
+ * trimmed and capped like the status line's name. Null for anything unusable
+ * (no name, not JSON), so a malformed frame shows nothing.
+ */
+export function parseToolCallName(data: string): string | null {
+  if (!data.trim()) return null;
+  try {
+    const parsed = JSON.parse(data);
+    const tool = parsed && typeof parsed === "object" ? parsed.tool : undefined;
+    if (typeof tool !== "string") return null;
+    const name = tool.trim();
+    return name ? cap(name, MAX_TOOL_NAME_LENGTH) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * What the status line shows for a `tool_call` payload —
  * `{"tool","callId","displayName"?,"display"?}`, emitted right before each tool
  * executes. Arguments are NOT in it (they reach the client only redacted, in

@@ -7,13 +7,14 @@
    actions (`actions`) sit under the bubble.
    ────────────────────────────────────────────── */
 
-import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { RatingInput, RatingProfile, StoredRating } from "@eddi/core";
 import { FileText, ShieldAlert } from "lucide-react";
 import type { ConversationMessage, GuardrailNotice, MessageAttachment } from "../controller/state";
 import { CopyButton, MarkdownContent } from "../markdown/Markdown";
 import { useConversationText } from "../react/hooks";
-import { StepRating } from "./StepRating";
+// Reply thumbs only for an agent that asks for them: not in the widget's first load.
+const StepRating = lazy(() => import("./StepRating").then((m) => ({ default: m.StepRating })));
 
 export interface MessageProps {
   message: ConversationMessage;
@@ -177,7 +178,9 @@ export const Message = memo(function Message({
           ratingStep !== null &&
           ratingProfile?.messageRating &&
           onRateStep && (
-            <StepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+            <Suspense fallback={null}>
+              <StepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+            </Suspense>
           )}
         {actions}
       </div>

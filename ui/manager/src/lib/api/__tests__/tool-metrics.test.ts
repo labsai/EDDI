@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getConversationCosts,
-} from "../tool-metrics";
+} from "@eddi/app-kit/lib/api/tool-metrics";
 
 describe("tool-metrics API", () => {
   // ─── getConversationCosts ───────────────────────────────────────

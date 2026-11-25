@@ -9,7 +9,7 @@
 # Then:  npm run test:e2e:auth
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.0
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     command: ["start-dev", "--import-realm"]
     ports:
       # Loopback only, and 8180 rather than 8080 because that is the port

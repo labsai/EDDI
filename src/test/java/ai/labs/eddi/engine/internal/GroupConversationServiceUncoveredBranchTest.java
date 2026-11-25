@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -103,8 +102,6 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private MeterRegistry meterRegistry;
     @Mock
     private Timer timer;
@@ -126,7 +123,7 @@ class GroupConversationServiceUncoveredBranchTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
+                org.mockito.Mockito.mock(IScheduleStore.class), null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     // === Helpers ===

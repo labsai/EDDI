@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import {
   convertValue,
   effectiveValueKind,
@@ -9,9 +9,9 @@ import {
   setValueKinds,
   withValue,
   type TypedPropertyValue,
-} from "../property-value-utils";
+} from "@eddi/app-kit/components/editors/property-value-utils";
 import { PropertySetterEditor, type PropertySetterConfig } from "../propertysetter-editor";
-import { PropertyInstructionsEditor, type PropertyInstruction } from "../apicalls-editor";
+import { PropertyInstructionsEditor, type PropertyInstruction } from "@eddi/app-kit/components/editors/apicalls-editor";
 
 describe("property-value-utils", () => {
   it("lets the last typed slot in engine order win, and text lose to any typed slot", () => {

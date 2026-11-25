@@ -7,7 +7,7 @@ import {
   safetyPreambleForScope,
   promptSafeName,
 } from "../system-prompt";
-import { setBrand, DEFAULT_BRAND } from "@/lib/brand";
+import { setBrand, DEFAULT_BRAND } from "@eddi/app-kit/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,

@@ -140,8 +140,9 @@ public class ConfigJsonPatcher {
      *             when the body is not a patch, an operation is unsupported or
      *             fails (a {@code test} that does not hold, a path that does not
      *             resolve), copies grow the result past {@link #MAX_GROWTH_FACTOR}
-     *             times the stored document, a protected credential would be
-     *             relocated, or the patched document is not a valid {@code type}
+     *             times the stored document plus {@link #MAX_GROWTH_BYTES}, a
+     *             protected credential would be relocated, or the patched document
+     *             is not a valid {@code type}
      */
     public <T> T apply(T current, String patchBody, Class<T> type, boolean protectCredentials) {
         return apply(current, patchBody, type, protectCredentials, Set.of());

@@ -1,4 +1,5 @@
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+import { AppLink, AppNavigate } from "@eddi/app-kit/components/shared/app-link";
 import { useTranslation } from "react-i18next";
 import {
   Settings2,
@@ -6,12 +7,12 @@ import {
   Sparkles,
   Briefcase,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useTheme } from "@eddi/ui";
-import { BrandIcon } from "@/components/layout/brand-logo";
-import { useWorkforceAccess } from "@/hooks/use-workforce-access";
-import { useMayUse } from "@/hooks/use-auth";
-import { ROLE_APPROVER, ROLE_USER } from "@/lib/roles";
+import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
+import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
+import { useMayUse } from "@eddi/app-kit/hooks/use-auth";
+import { ROLE_APPROVER, ROLE_USER } from "@eddi/app-kit/lib/roles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -61,8 +62,10 @@ function ModeCard({
   features,
   onNavigate,
 }: ModeCardProps) {
+  // AppLink: the Workforce card leaves this app (a page load); the Manager card
+  // stays in it.
   return (
-    <Link
+    <AppLink
       to={to}
       onClick={onNavigate}
       className={cn(
@@ -116,7 +119,7 @@ function ModeCard({
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 rtl:group-hover:-translate-x-1" />
         </div>
       </div>
-    </Link>
+    </AppLink>
   );
 }
 
@@ -145,17 +148,18 @@ export function LandingPage() {
   // dedicated `eddi-viewer` or `eddi-approver` would get nothing but 403s
   // there, so they go to the Manager instead: an approver to the approvals
   // inbox (their whole job, and an endpoint that admits them), a viewer to the
-  // Manager dashboard.
+  // Manager dashboard. Workforce is another app (ui/workforce), so getting there
+  // is a page load, not a router redirect: AppNavigate picks the right one.
   if (!canAuthor) {
-    if (may([ROLE_USER])) return <Navigate to="/workforce" replace />;
-    if (may([ROLE_APPROVER])) return <Navigate to="/manage/approvals" replace />;
-    return <Navigate to="/manage" replace />;
+    if (may([ROLE_USER])) return <AppNavigate to="/workforce" />;
+    if (may([ROLE_APPROVER])) return <AppNavigate to="/manage/approvals" />;
+    return <AppNavigate to="/manage" />;
   }
 
   // Synchronous redirect — no flash
   const pref = getStoredPreference();
   if (!forceChooser && (pref === "manage" || pref === "workforce")) {
-    return <Navigate to={`/${pref}`} replace />;
+    return <AppNavigate to={`/${pref}`} />;
   }
 
   return (

@@ -56,7 +56,8 @@ class McpToolFilterCoverageTest {
             McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class,
             McpGdprTools.class, McpDocTools.class, McpVersionTools.class, McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class);
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class);
 
     private static Set<String> declaredToolNames() {
         var names = new TreeSet<String>();
@@ -83,7 +84,8 @@ class McpToolFilterCoverageTest {
         var missing = new TreeSet<>(declaredToolNames());
         missing.removeAll(McpToolFilter.MCP_TOOLS);
         assertEquals(Set.of(), missing,
-                "These @Tool methods exist but are NOT in McpToolFilter.MCP_TOOLS, so tools/list hides them: " + missing);
+                "These @Tool methods exist but have no tier in McpToolTiers (so not in McpToolFilter.MCP_TOOLS), so tools/list hides them: "
+                        + missing);
     }
 
     @Test

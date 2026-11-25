@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -21,18 +21,18 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
 import {
   useConversationDescriptors,
   useDeleteConversation,
 } from "@/hooks/use-conversations";
-import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@/hooks/use-agents";
-import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@/lib/api/conversations";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@eddi/app-kit/hooks/use-agents";
+import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@eddi/app-kit/lib/api/conversations";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import {

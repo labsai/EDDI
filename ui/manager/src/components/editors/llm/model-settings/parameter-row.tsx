@@ -5,7 +5,7 @@ import {
   evaluateParameter,
   type ParameterCatalog,
 } from "@/lib/llm-parameter-catalog";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { ParameterControl } from "./parameter-control";
 import { ParameterVerdictNote } from "./parameter-verdict-note";
 import { isDropped, type ParamView } from "./model-settings-utils";

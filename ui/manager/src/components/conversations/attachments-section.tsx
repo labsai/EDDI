@@ -2,15 +2,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Paperclip, Download, Trash2, FileText, Image as ImageIcon } from "lucide-react";
-import { getErrorMessage } from "@/lib/api-client";
-import { downloadAttachment, formatBytes, isImageMime } from "@/lib/api/attachments";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { downloadAttachment, formatBytes, isImageMime } from "@eddi/app-kit/lib/api/attachments";
 import {
   useConversationAttachments,
   useDeleteAttachment,
   useDeleteAllAttachments,
   type ConversationAttachment,
 } from "@/hooks/use-attachments";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 
 /**
  * Operator surface for the attachments a conversation owns — browse, download and

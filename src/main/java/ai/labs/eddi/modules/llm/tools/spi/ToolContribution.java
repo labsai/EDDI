@@ -33,9 +33,9 @@ import java.util.Map;
  *            endpoint-qualified approval patterns); empty for every other
  *            source
  * @param toolRequestResolvers
- *            dispatch name → {@link ToolRequestResolver} (http source only —
- *            approval binds to the resolved request, not just the tool name);
- *            empty for every other source, exactly like {@code toolEndpoints}
+ *            dispatch name → {@link ToolRequestResolver} (http, MCP and A2A
+ *            sources — approval binds to the resolved request, not just the
+ *            tool name); empty for every other source
  * @param failures
  *            structured per-server/per-tool discovery failures (MCP-style);
  *            empty when the source has nothing to report
@@ -94,8 +94,8 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
     /**
      * Convenience for an externally-discovered source: no failures, and no
      * canonical names (http/mcp/a2a tools are configured under their dispatch name,
-     * so there is no second slug to record). No resolvers either — only
-     * {@code HttpCallToolsProvider} uses the overload that supplies them.
+     * so there is no second slug to record). No resolvers either — the http, MCP
+     * and A2A providers use the longer overloads that supply them.
      */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints) {
@@ -114,9 +114,9 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
     /**
      * Convenience for a source that supplies canonical names but no resolvers —
      * every object-producing source (builtin, contextual, dynamic, attachment,
-     * group-task, and the LAZY {@code discover_tools} meta-tool). Only
-     * {@code HttpCallToolsProvider} resolves to an HTTP request, so it is the sole
-     * caller of the canonical constructor.
+     * group-task, and the LAZY {@code discover_tools} meta-tool). The sources that
+     * resolve to a remote request (http, MCP, A2A) use the overloads that also take
+     * resolvers.
      */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,

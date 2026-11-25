@@ -195,7 +195,7 @@ public class PostgresUserDirectoryStore implements IUserDirectoryStore {
     }
 
     @Override
-    public List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, int limit) {
+    public List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, Instant seenSince, int limit) {
         if (teamSubjects == null || teamSubjects.isEmpty()) {
             return List.of();
         }
@@ -203,16 +203,23 @@ public class PostgresUserDirectoryStore implements IUserDirectoryStore {
         String lower = DirectoryUser.lower(prefix);
         boolean anyPrefix = lower == null || lower.isEmpty();
         String like = anyPrefix ? "%" : escapeLike(lower) + "%";
+        // idx_user_directory_teams (GIN) serves the overlap and
+        // idx_user_directory_last_seen the window and the sort.
+        String window = seenSince == null ? "" : " AND last_seen >= ?";
         List<DirectoryUser> users = new ArrayList<>();
         try (Connection connection = dataSourceInstance.get().getConnection();
-                PreparedStatement statement = connection.prepareStatement("SELECT " + COLUMNS + " FROM user_directory WHERE teams && ?"
+                PreparedStatement statement = connection.prepareStatement("SELECT " + COLUMNS + " FROM user_directory WHERE teams && ?" + window
                         + " AND (lower(principal) LIKE ? ESCAPE '\\' OR lower(username) LIKE ? ESCAPE '\\'"
                         + " OR lower(email) LIKE ? ESCAPE '\\' OR lower(display_name) LIKE ? ESCAPE '\\') ORDER BY last_seen DESC LIMIT ?")) {
-            statement.setArray(1, connection.createArrayOf("text", teamSubjects.toArray(new String[0])));
-            for (int i = 2; i <= 5; i++) {
-                statement.setString(i, like);
+            int index = 1;
+            statement.setArray(index++, connection.createArrayOf("text", teamSubjects.toArray(new String[0])));
+            if (seenSince != null) {
+                statement.setTimestamp(index++, Timestamp.from(seenSince));
             }
-            statement.setInt(6, Math.max(1, limit));
+            for (int i = 0; i < 4; i++) {
+                statement.setString(index++, like);
+            }
+            statement.setInt(index, Math.max(1, limit));
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     users.add(toUser(rows));

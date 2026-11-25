@@ -236,6 +236,23 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("a permanent delete drops the agent's cached versions even with no live deployment")
+        void permanentDeleteInvalidatesCachesWithoutDeployment() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(agentFactory).invalidateAgentCaches(AGENT_ID);
+            verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a soft delete leaves the cached versions alone")
+        void softDeleteKeepsCaches() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            verify(agentFactory, never()).invalidateAgentCaches(anyString());
+        }
+
+        @Test
         @DisplayName("a refused delete leaves the Agent running")
         void refusedDeleteKeepsAgentRunning() throws Exception {
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))

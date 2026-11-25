@@ -547,7 +547,8 @@ public class RestConnectionStore implements IRestConnectionStore {
         ConnectionIdentity identity = identityOf(id);
         Response response = restVersionInfo.delete(id, version, permanent);
         // Invalidate BEFORE returning, not on a TTL: a deleted connection that keeps
-        // resolving for another five minutes is a revocation that did not revoke.
+        // resolving for another minute (the registry's cache TTL) is a revocation that
+        // did not revoke.
         connectionRegistry.invalidate();
         releaseNameClaim(identity, id);
         deleteOrphanedGrants(identity);
