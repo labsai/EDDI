@@ -603,7 +603,7 @@ agent, produced no LLM latency, token or error signal at all.
 eddi_llm_request_duration_seconds           # Provider call latency (timer); tags: provider, model, outcome (success|error)
 eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output|cache_read|cache_write|reasoning) — cache_* are subsets of input, reasoning of output
 eddi_llm_cost_usd_total                     # Priced LLM spend in USD per model phase; tags: provider, model, source (task|catalog|mixed|unpriced)
-eddi_llm_calls_unpriced_total               # Model calls with no price ($0); tags: provider, model, site (llm_task|group_system|…)
+eddi_llm_calls_unpriced_total               # Model calls with no price ($0); tags: provider, model, site (llm_task|group_system|document|…)
 eddi_llm_pricing_refused_total              # Calls refused by the strict unpriced policy; tags: site, reason (the policy)
 eddi_llm_price_catalog_entries              # Entries in the deployment price catalog (gauge)
 eddi_llm_price_catalog_oldest_asof_days     # Age of the oldest asOf in the catalog (gauge)
@@ -1021,6 +1021,7 @@ eddi_a2a_tool_schema_governed_total         # Peer tool parameter schemas change
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
+eddi_a2a_files_total                        # Files taken in over A2A and stored (eddi.a2a.files.inbound); tag: direction (inbound)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
 eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)

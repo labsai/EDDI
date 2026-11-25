@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
 import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -264,6 +266,11 @@ public class GroupAttachmentBinder {
                 if (a.getFileName() != null) {
                     value.put("fileName", a.getFileName());
                 }
+                // A part of the file travels as one: the member renders these pages,
+                // never the whole file, and never re-derives them from the unit label.
+                putPart(value, a, AttachmentContextExtractor.FIELD_PAGES, AttachmentSelector.META_PAGES);
+                putPart(value, a, AttachmentContextExtractor.FIELD_UNIT, AttachmentSelector.META_UNIT);
+                putPart(value, a, AttachmentContextExtractor.FIELD_SPLIT, AttachmentSelector.META_SPLIT);
             } else if (a.getUrl() != null) {
                 value.put("mimeType", a.getMimeType());
                 value.put("url", a.getUrl());
@@ -275,6 +282,13 @@ public class GroupAttachmentBinder {
             }
             context.put("attachment_" + index, new Context(Context.ContextType.object, value));
             index++;
+        }
+    }
+
+    private static void putPart(Map<String, Object> value, Attachment a, String field, String metadataKey) {
+        String part = a.getMetadata() != null ? a.getMetadata().get(metadataKey) : null;
+        if (part != null && !part.isBlank()) {
+            value.put(field, part);
         }
     }
 }

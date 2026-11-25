@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 class LlmStoreDocumentsValidationTest {
 
     private static final String ID = "5f1c0f3a9d8e4b2a7c6d1e0f";
-    private static final String NOT_LIVE = "langchain.task[0].documents.sharing.delegation is not available in this version";
+    private static final String NOT_LIVE = "langchain.task[0].documents.sharing.handoff is not available in this version";
 
     private LlmStore store;
     private IResourceStorage<LlmConfiguration> storage;
@@ -51,7 +51,7 @@ class LlmStoreDocumentsValidationTest {
 
     private static LlmConfiguration withDelegation() {
         var sharing = new DocumentsConfig.Sharing();
-        sharing.setDelegation(true);
+        sharing.setHandoff(true);
         var documents = new DocumentsConfig();
         documents.setSharing(sharing);
         var task = new LlmConfiguration.Task();

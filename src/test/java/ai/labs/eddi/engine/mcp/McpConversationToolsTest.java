@@ -198,7 +198,7 @@ class McpConversationToolsTest {
         when(jsonSerialization.serialize(any(LinkedHashMap.class)))
                 .thenReturn("{\"conversationState\":\"READY\",\"response\":{\"conversationSteps\":[]}}");
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello agent!", "production");
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello agent!", "production", null);
 
         assertNotNull(result);
         assertTrue(result.contains("conversationState"));
@@ -218,7 +218,7 @@ class McpConversationToolsTest {
             return null;
         }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any(ConversationResponseHandler.class));
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("null response"));
@@ -229,7 +229,7 @@ class McpConversationToolsTest {
         doThrow(new RuntimeException("Connection lost")).when(conversationService).say(any(), anyBoolean(), anyBoolean(), anyList(), any(),
                 anyBoolean(), any());
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Connection lost"));
@@ -253,7 +253,7 @@ class McpConversationToolsTest {
 
         when(jsonSerialization.serialize(any(Map.class))).thenReturn("{\"conversationId\":\"test-conv-id\",\"response\":{}}");
 
-        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, "production");
+        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, "production", null);
 
         assertNotNull(result);
         assertTrue(result.contains("test-conv-id"));
@@ -272,7 +272,7 @@ class McpConversationToolsTest {
 
         when(jsonSerialization.serialize(any(Map.class))).thenReturn("{\"conversationId\":\"test-conv-id\"}");
 
-        tools.chatWithAgent(AGENT_ID, "Follow-up", CONV_ID, null);
+        tools.chatWithAgent(AGENT_ID, "Follow-up", CONV_ID, null, null);
 
         // Should NOT create a new conversation
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
@@ -369,35 +369,35 @@ class McpConversationToolsTest {
 
     @Test
     void talkToAgent_nullAgentId_returnsError() {
-        String result = tools.talkToAgent(null, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(null, CONV_ID, "Hello!", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void talkToAgent_nullConversationId_returnsError() {
-        String result = tools.talkToAgent(AGENT_ID, null, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, null, "Hello!", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("conversationId is required"));
     }
 
     @Test
     void talkToAgent_nullMessage_returnsError() {
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, null, null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
 
     @Test
     void chatWithAgent_nullAgentId_returnsError() {
-        String result = tools.chatWithAgent(null, "Hello!", null, null);
+        String result = tools.chatWithAgent(null, "Hello!", null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void chatWithAgent_nullMessage_returnsError() {
-        String result = tools.chatWithAgent(AGENT_ID, null, null, null);
+        String result = tools.chatWithAgent(AGENT_ID, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
@@ -407,7 +407,7 @@ class McpConversationToolsTest {
         when(conversationService.startConversation(any(), eq(AGENT_ID), isNull(), anyMap()))
                 .thenThrow(new IConversationService.AgentNotReadyException("Agent not deployed"));
 
-        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, null);
+        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Agent not deployed"));

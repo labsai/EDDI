@@ -11,9 +11,9 @@ import java.util.Comparator;
  * or an audio file.
  *
  * <p>
- * Nothing produces blocks yet; they arrive with ordered extraction in a later
- * phase. The types are defined now so the manifest and its consumers are built
- * against the final shape.
+ * Only {@link TextBlock}s are produced so far, by
+ * {@code PdfStructureExtractor.blocks}; the other types are defined now so the
+ * manifest and its consumers are built against the final shape.
  */
 public sealed interface Block permits TextBlock, ImageBlock, TableBlock, AudioBlock {
 

@@ -43,6 +43,9 @@ import ai.labs.eddi.datastore.postgres.PostgresUserConversationStore;
 import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
+import ai.labs.eddi.engine.documents.spend.IDocumentSpendStore;
+import ai.labs.eddi.engine.documents.spend.MongoDocumentSpendStore;
+import ai.labs.eddi.engine.documents.spend.PostgresDocumentSpendStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
@@ -315,6 +318,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IToolQuotaStore toolQuotaStore(Instance<MongoToolQuotaStore> mongo, Instance<PostgresToolQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IDocumentSpendStore documentSpendStore(Instance<MongoDocumentSpendStore> mongo, Instance<PostgresDocumentSpendStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

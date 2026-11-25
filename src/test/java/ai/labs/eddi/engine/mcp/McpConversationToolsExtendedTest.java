@@ -586,21 +586,21 @@ class McpConversationToolsExtendedTest {
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"test-conv-id\"}");
 
         // Blank string should trigger new conversation creation
-        tools.chatWithAgent(AGENT_ID, "Hello!", "  ", "production");
+        tools.chatWithAgent(AGENT_ID, "Hello!", "  ", "production", null);
 
         verify(conversationService).startConversation(any(), eq(AGENT_ID), isNull(), anyMap());
     }
 
     @Test
     void chatWithAgent_blankAgentId_returnsError() {
-        String result = tools.chatWithAgent("  ", "Hello!", null, null);
+        String result = tools.chatWithAgent("  ", "Hello!", null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void chatWithAgent_blankMessage_returnsError() {
-        String result = tools.chatWithAgent(AGENT_ID, "  ", null, null);
+        String result = tools.chatWithAgent(AGENT_ID, "  ", null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
@@ -609,21 +609,21 @@ class McpConversationToolsExtendedTest {
 
     @Test
     void talkToAgent_blankAgentId_returnsError() {
-        String result = tools.talkToAgent("  ", CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent("  ", CONV_ID, "Hello!", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void talkToAgent_blankConversationId_returnsError() {
-        String result = tools.talkToAgent(AGENT_ID, "  ", "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, "  ", "Hello!", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("conversationId is required"));
     }
 
     @Test
     void talkToAgent_blankMessage_returnsError() {
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "  ", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "  ", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
@@ -721,7 +721,7 @@ class McpConversationToolsExtendedTest {
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"agentResponse\":\"Hello! How can I help?\"}");
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertNotNull(result);
         assertTrue(result.contains("agentResponse"));
@@ -746,7 +746,7 @@ class McpConversationToolsExtendedTest {
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"quickReplies\":[\"Yes\",\"No\"]}");
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertNotNull(result);
     }
@@ -766,7 +766,7 @@ class McpConversationToolsExtendedTest {
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{}");
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertNotNull(result);
     }
@@ -786,7 +786,7 @@ class McpConversationToolsExtendedTest {
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{}");
 
-        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null, null);
 
         assertNotNull(result);
     }

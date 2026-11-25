@@ -77,6 +77,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -1254,8 +1255,11 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         ObjectId last = null;
         for (GridFSFile file : primaryReadBucket.find(filter).sort(Sorts.ascending("_id")).limit(limit)) {
             Document metadata = file.getMetadata();
-            List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;
-            blobs.add(new LegacyGrants(canonicalRef(file), grants != null ? List.copyOf(grants) : List.of()));
+            // As stored: a null or non-string element must not stop the page, or every
+            // later start would fail on it again.
+            List<Object> grants = metadata != null ? metadata.getList(META_GRANTS, Object.class) : null;
+            List<String> grantees = grants == null ? List.of() : grants.stream().filter(Objects::nonNull).map(String::valueOf).toList();
+            blobs.add(new LegacyGrants(canonicalRef(file), grantees));
             last = file.getObjectId();
         }
         return new Page(blobs, blobs.size() < limit || last == null ? null : last.toHexString());
@@ -1363,9 +1367,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             }
         }
         Document metadata = root.getMetadata();
-        List<String> legacy = metadata != null && metadata.getList(META_GRANTS, String.class) != null
-                ? metadata.getList(META_GRANTS, String.class)
-                : List.of();
+        // As stored: a null or non-string element must not stop the eviction.
+        List<Object> stored = metadata != null ? metadata.getList(META_GRANTS, Object.class) : null;
+        List<String> legacy = stored == null ? List.of() : stored.stream().filter(Objects::nonNull).map(String::valueOf).toList();
         List<String> evict = LibraryStoreSupport.grantsToEvict(legacy, rows, keep, libraryMaxGrantsPerDocument);
         if (evict.isEmpty()) {
             return;
