@@ -237,6 +237,60 @@ class RestExportServiceExtendedBranchTest {
                     "a snippet this agent never references must stay out of the archive");
         }
 
+        /**
+         * The sweep reads every snippet in the caller's scope and filters by name
+         * afterwards. An unrelated snippet whose read fails used to abort the whole
+         * export; it is skipped once every snippet the agent uses was written.
+         */
+        @Test
+        @DisplayName("an unrelated snippet that cannot be read does not fail the export")
+        void unrelatedUnreadableSnippetIsSkipped() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+
+            String greetingId = "aabbccddeeff112233445566";
+            String farewellId = "665544332211ffeeddccbbaa";
+            DocumentDescriptor greeting = new DocumentDescriptor();
+            greeting.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + greetingId + "?version=1"));
+            DocumentDescriptor farewell = new DocumentDescriptor();
+            farewell.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + farewellId + "?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
+                    .thenReturn(List.of(greeting, farewell));
+            PromptSnippet snippet = new PromptSnippet();
+            snippet.setName("greeting");
+            when(snippetStore.read(greetingId, 1)).thenReturn(snippet);
+            when(snippetStore.read(farewellId, 1)).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenReturn("{}");
+
+            Path agentPath = Files.createTempDirectory("test-snippets");
+            method.invoke(exportService, agentPath, new LinkedHashSet<>(Set.of("greeting")), null);
+
+            assertTrue(Files.exists(agentPath.resolve("snippets").resolve(greetingId + ".snippet.json")),
+                    "the snippet the agent uses is in the archive");
+        }
+
+        @Test
+        @DisplayName("a snippet the agent may use that cannot be read still fails the export")
+        void unreadableReferencedSnippetFailsTheExport() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+
+            String greetingId = "aabbccddeeff112233445566";
+            DocumentDescriptor greeting = new DocumentDescriptor();
+            greeting.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + greetingId + "?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
+                    .thenReturn(List.of(greeting));
+            when(snippetStore.read(greetingId, 1)).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+
+            var failure = assertThrows(InvocationTargetException.class,
+                    () -> method.invoke(exportService, Files.createTempDirectory("test-snippets"), new LinkedHashSet<>(Set.of("greeting")),
+                            null));
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
+        }
+
         @Test
         @DisplayName("ResourceNotFoundException on snippet read is handled gracefully")
         void snippetResourceNotFound() throws Exception {

@@ -624,6 +624,32 @@ class RestExportServiceTest {
             assertEquals(422, failure.getResponse().getStatus(), "the stored resource is the problem, and the message names it");
             assertTrue(failure.getMessage().contains("r1"), failure.getMessage());
         }
+
+        private Map<IResourceId, String> invokeConvert(Map<IResourceId, ?> input, Set<String> selectedIds) throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod("convertConfigsToString", Map.class, Set.class);
+            method.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<IResourceId, String> result = (Map<IResourceId, String>) method.invoke(exportService, input, selectedIds);
+            return result;
+        }
+
+        @Test
+        @DisplayName("a configuration the selection leaves out is dropped when it cannot be serialized; a selected one still fails")
+        void unselectedSerializationFailureIsLeftOut() throws Exception {
+            var kept = testResourceId("r1", 1);
+            var left = testResourceId("r2", 1);
+            Map<IResourceId, Object> input = new LinkedHashMap<>();
+            input.put(kept, "good");
+            input.put(left, "bad");
+            when(jsonSerialization.serialize("good")).thenReturn("{}");
+            when(secretScrubber.scrubJson("{}")).thenReturn("{}");
+            when(jsonSerialization.serialize("bad")).thenThrow(new IOException("fail"));
+
+            assertEquals(Map.of(kept, "{}"), invokeConvert(input, Set.of("r1")));
+
+            Throwable thrown = assertThrows(InvocationTargetException.class, () -> invokeConvert(input, Set.of("r1", "r2")));
+            assertEquals(422, assertInstanceOf(WebApplicationException.class, thrown.getCause()).getResponse().getStatus());
+        }
     }
 
     // ─── writeConfigs ────────────────────────────────────────────
