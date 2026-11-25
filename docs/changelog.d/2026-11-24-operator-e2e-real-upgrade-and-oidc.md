@@ -104,6 +104,19 @@ token is refused. Two Playwright projects close both gaps.
   passes on the layered Keycloak stack, run before the OIDC operator spec as CI
   runs it.
 
+### Review follow-ups
+
+- `updateSecretGrantIfUnchanged` now leaves the stored description alone when it
+  is given `null` (Mongo: the field is left out of the update; Postgres:
+  `COALESCE`), instead of writing back the value read a moment earlier. The deleted-agent
+  sweep passes `null`, so a description edit landing mid-sweep is no longer reverted.
+- The grant dialog body is keyed on whether the allow-every-agent choice is offered,
+  so a replacement request cannot inherit a ticked wildcard from the previous one.
+- The OIDC spec keeps watching the admin-action audit for a second record before it
+  trusts "exactly one", and the upgrade spec waits for the probes to finish instead
+  of sleeping 3 s. `docs/secrets-vault.md` now calls the deleted-agent grant sweep
+  best-effort.
+
 ### Open
 
 - The read canary passed with caller identity switched off: it counts tool calls

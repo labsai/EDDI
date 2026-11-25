@@ -764,6 +764,24 @@ class MongoSecretPersistenceTest {
     }
 
     @Test
+    @DisplayName("updateSecretGrantIfUnchanged — a null description is left out of the update, a given one is written")
+    void updateSecretGrantIfUnchangedLeavesNullDescriptionAlone() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        persistence.updateSecretGrantIfUnchanged(TENANT, "my-key", List.of("agent-a"), List.of("agent-b"), null);
+        persistence.updateSecretGrantIfUnchanged(TENANT, "my-key", List.of("agent-a"), List.of("agent-b"), "new text");
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection, times(2)).updateOne(any(Bson.class), update.capture());
+        String kept = update.getAllValues().get(0).toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        String written = update.getAllValues().get(1).toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertFalse(kept.contains("description"), kept);
+        assertTrue(written.contains("description") && written.contains("new text"), written);
+    }
+
+    @Test
     @DisplayName("deleteDekIfWrappedWith — guarded on the IV")
     void deleteDekIfWrappedWithIsGuarded() {
         DeleteResult result = mock(DeleteResult.class);

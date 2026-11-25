@@ -209,6 +209,11 @@ public interface ISecretPersistence {
      *            the grant the caller read, canonicalised — {@code ["*"]} also
      *            matches a row whose grant is absent or empty, since every layer
      *            reads those as the wildcard too
+     * @param description
+     *            unlike {@link #updateSecretGrant}, {@code null} here leaves the
+     *            stored description untouched in the same atomic write, so a
+     *            description edit that lands after the caller's read is not
+     *            reverted
      * @return false if the row does not exist <em>or</em> its grant is no longer
      *         {@code expectedAllowedAgents}; the caller re-reads to tell which
      * @throws PersistenceException

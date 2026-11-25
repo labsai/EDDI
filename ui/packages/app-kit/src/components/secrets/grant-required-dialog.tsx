@@ -84,7 +84,7 @@ export function GrantRequiredDialog({ request, onDecision }: GrantRequiredDialog
     >
       {request && (
         <GrantRequiredBody
-          key={`${request.agents?.map((a) => a.agentId).join(",") ?? request.agentId}/${request.version}/${request.source}`}
+          key={`${request.agents?.map((a) => a.agentId).join(",") ?? request.agentId}/${request.version}/${request.source}/${request.offerAllowAll !== false}`}
           request={request}
           onDecision={onDecision}
           busyRef={busyRef}

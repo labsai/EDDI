@@ -223,6 +223,18 @@ test.describe("Platform Operator under Keycloak, calling as the signed-in user",
         { message: "the operator's write is not in the admin-action audit", timeout: 30_000 },
       )
       .toBe(1);
+    // The ledger is asynchronous: a duplicate execution would land after the first record,
+    // so keep watching for a bounded period before trusting "exactly one".
+    const writes = async () =>
+      (await adminActions(request, token)).filter(
+        (a) => a.input?.method === "PATCH" && a.input?.path === `/descriptorstore/descriptors/${bystander}`,
+      );
+    for (let i = 0; i < 6; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      recorded = await writes();
+      if (recorded.length !== 1) break;
+    }
+    expect(recorded, "the operator's write was not recorded exactly once").toHaveLength(1);
     expect(recorded[0]!.userId, "the operator's write ran as someone other than the signed-in user").toBe(actor);
     expect(recorded[0]!.output?.status, "the operator's write was refused by the endpoint").toBeLessThan(300);
   });
