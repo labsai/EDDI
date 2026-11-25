@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -44,6 +45,30 @@ class WorkflowConfigSaveValidatorTest {
         List<String> problems = problems("{\"type\":\"eddi://ai.labs.nope\",\"config\":{}}");
         assertEquals(1, problems.size(), problems.toString());
         assertTrue(problems.getFirst().startsWith("workflowSteps[0].type 'eddi://ai.labs.nope' is not a known workflow step"));
+    }
+
+    /**
+     * In a container {@code problems} gets the client proxy CDI hands out for this
+     * {@code @ApplicationScoped} bean. A proxy delegates method calls, not field
+     * reads, and its own fields are null: reading the registry as a field threw,
+     * the no-container fallback swallowed it, and an unknown step type was saved.
+     * The stand-in below behaves like that proxy.
+     */
+    @Test
+    @DisplayName("the step-type registry is read through the bean's methods, so a CDI client proxy still checks it")
+    void registryIsReadThroughAProxy() throws Exception {
+        var target = new WorkflowConfigSaveValidator(Map.of("ai.labs.parser", () -> null));
+        var proxy = new WorkflowConfigSaveValidator(null) {
+            @Override
+            public boolean isKnownStepType(String host) {
+                return target.isKnownStepType(host);
+            }
+        };
+
+        List<String> problems = WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.nope\",\"config\":{}}"), proxy);
+
+        assertEquals(List.of("workflow: workflowSteps[0].type 'eddi://ai.labs.nope' is not a known workflow step"), problems);
+        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.parser\",\"config\":{}}"), proxy).isEmpty());
     }
 
     @Test

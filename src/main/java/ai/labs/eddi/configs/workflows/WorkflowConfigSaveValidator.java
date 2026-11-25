@@ -103,18 +103,38 @@ public class WorkflowConfigSaveValidator {
      * store built by hand in a unit test) only the shape is checked.
      */
     public static List<String> problems(WorkflowConfiguration workflow) {
-        Predicate<String> known = null;
+        WorkflowConfigSaveValidator bean = null;
         try {
-            WorkflowConfigSaveValidator bean = CDI.current().select(WorkflowConfigSaveValidator.class).get();
-            known = bean.lifecycleExtensions::containsKey;
+            bean = CDI.current().select(WorkflowConfigSaveValidator.class).get();
         } catch (RuntimeException noContainer) {
             // shape-only check
         }
+        return problems(workflow, bean);
+    }
+
+    /**
+     * @param bean
+     *            the registry to check step types against — in a container the
+     *            client proxy CDI hands out; null checks only the shape
+     */
+    static List<String> problems(WorkflowConfiguration workflow, WorkflowConfigSaveValidator bean) {
+        // Through a method, never bean.lifecycleExtensions: CDI returns a client proxy
+        // for this @ApplicationScoped bean, and a proxy delegates method calls but not
+        // field reads. Its own field is null, so reading it threw, the catch above took
+        // it for "no container", and the step-type check never ran in production.
+        Predicate<String> known = bean == null ? null : bean::isKnownStepType;
         List<String> problems = new ArrayList<>();
         for (String problem : findProblems(workflow, known)) {
             problems.add(WHAT + ": " + problem);
         }
         return problems;
+    }
+
+    /**
+     * Whether {@code host} names a registered lifecycle task, an alias included.
+     */
+    public boolean isKnownStepType(String host) {
+        return lifecycleExtensions.containsKey(host);
     }
 
     /**

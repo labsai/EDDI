@@ -140,7 +140,9 @@ public final class LlmConfigSaveValidator {
 
     private static void checkCascade(String path, LlmConfiguration.Task task, List<String> problems) {
         LlmConfiguration.ModelCascadeConfig cascade = task.getModelCascade();
-        if (cascade == null || cascade.getSteps() == null) {
+        // A disabled cascade never runs (LlmTask and CascadeConfigValidator skip it),
+        // so its steps cannot fail and are not a reason to refuse the save.
+        if (cascade == null || !cascade.isEnabled() || cascade.getSteps() == null) {
             return;
         }
         for (int s = 0; s < cascade.getSteps().size(); s++) {

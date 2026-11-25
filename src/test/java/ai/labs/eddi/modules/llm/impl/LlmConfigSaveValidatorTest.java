@@ -143,6 +143,15 @@ class LlmConfigSaveValidatorTest {
     }
 
     @Test
+    @DisplayName("a disabled cascade never runs, so its steps are not checked: the same steps pass with enabled=false")
+    void disabledCascadeIsNotChecked() throws Exception {
+        String json = "{\"tasks\":[{\"id\":\"t\",\"type\":\"openai\",\"parameters\":{\"modelName\":\"gpt-4o\"},"
+                + "\"modelCascade\":{\"enabled\":false,\"steps\":[{\"type\":\"bogus\",\"parameters\":{}},"
+                + "{\"type\":\"openai\",\"timeoutMs\":0,\"parameters\":{}}]}}]}";
+        assertEquals(List.of(), problems(json));
+    }
+
+    @Test
     @DisplayName("with a configured cascade the task's own type is not refused: the task model is built only on tool turns")
     void cascadeCoversTheTaskType() throws Exception {
         String json = "{\"tasks\":[{\"id\":\"t\",\"parameters\":{},"

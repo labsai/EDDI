@@ -44,7 +44,9 @@ public class WorkflowCrudIT extends BaseIntegrationIT {
                 },
                 {
                   "type": "eddi://ai.labs.rules",
-                  "config": {}
+                  "config": {
+                    "uri": "eddi://ai.labs.rules/rulestore/rulesets/0000000000000000000000a1?version=1"
+                  }
                 },
                 {
                   "type": "eddi://ai.labs.templating",
@@ -63,7 +65,9 @@ public class WorkflowCrudIT extends BaseIntegrationIT {
                 },
                 {
                   "type": "eddi://ai.labs.rules",
-                  "config": {}
+                  "config": {
+                    "uri": "eddi://ai.labs.rules/rulestore/rulesets/0000000000000000000000a1?version=1"
+                  }
                 },
                 {
                   "type": "eddi://ai.labs.output",
@@ -132,6 +136,27 @@ public class WorkflowCrudIT extends BaseIntegrationIT {
                 .then().assertThat()
                 .statusCode(200)
                 .contentType(ContentType.JSON);
+    }
+
+    /**
+     * Save-time validation runs with the real step registry: an unknown step type
+     * and a rules step without a ruleset are refused with 400, not saved and left
+     * to fail at deployment. The unknown type also checks that the registry is read
+     * through the CDI client proxy (a field read on the proxy is null and used to
+     * skip this check silently).
+     */
+    @Test
+    @Order(8)
+    @DisplayName("A workflow that cannot deploy is refused with 400")
+    void invalidWorkflowIsRefused() {
+        given().body("""
+                {"workflowSteps": [{"type": "eddi://ai.labs.nope", "config": {}}]}
+                """).contentType(ContentType.JSON).post(ROOT_PATH)
+                .then().assertThat().statusCode(400);
+        given().body("""
+                {"workflowSteps": [{"type": "eddi://ai.labs.rules", "config": {}}]}
+                """).contentType(ContentType.JSON).post(ROOT_PATH)
+                .then().assertThat().statusCode(400);
     }
 
     @Test
