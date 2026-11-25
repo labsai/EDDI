@@ -32,6 +32,9 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.ws.rs.WebApplicationException;
+import java.util.LinkedHashMap;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -288,6 +291,43 @@ class McpAdminToolsTest {
         tools.deleteAgent(AGENT_ID, 2, true, true);
 
         verify(AgentStore).deleteAgent(AGENT_ID, 2, true, true);
+    }
+
+    /**
+     * The in-use guard refuses with a 409 whose body names what still uses the
+     * resource and the argument that deletes anyway. The tool used to report it as
+     * an INTERNAL failure with a reference id (a plain WebApplicationException is
+     * not caller-facing), dropping the body the tool's description promises.
+     */
+    @Test
+    void deleteAgent_openConversationsRefusalKeepsTheGuardsBody() throws IOException {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("error", "1 active conversation(s) are open on this deployed agent and it was not deleted.");
+        body.put("code", "AGENT_HAS_OPEN_CONVERSATIONS");
+        body.put("openConversationsCount", 1L);
+        body.put("override", "endAllActiveConversations=true");
+        when(AgentStore.deleteAgent(AGENT_ID, 1, false, false)).thenThrow(new WebApplicationException(
+                "refused", Response.status(409).entity(body).build()));
+        var mapper = new ObjectMapper();
+        when(jsonSerialization.serialize(any())).thenAnswer(inv -> mapper.writeValueAsString(inv.getArgument(0)));
+
+        var result = mapper.readTree(tools.deleteAgent(AGENT_ID, 1, false, false));
+
+        assertEquals("AGENT_HAS_OPEN_CONVERSATIONS", result.path("errorCode").asText(), result.toString());
+        assertEquals("endAllActiveConversations=true", result.path("override").asText(), result.toString());
+        assertEquals(1, result.path("openConversationsCount").asInt(), result.toString());
+        assertTrue(result.path("error").asText().contains("not deleted"), result.toString());
+    }
+
+    @Test
+    void deleteAgent_aRefusalTheStoreReturnsIsNotReportedAsDeleted() throws IOException {
+        when(AgentStore.deleteAgent(AGENT_ID, 1, false, false)).thenReturn(Response.status(409).entity("stale version").build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
+
+        String result = tools.deleteAgent(AGENT_ID, 1, false, false);
+
+        assertFalse(result.contains("deleted\""), result);
+        assertTrue(result.contains("CONFLICT"), result);
     }
 
     @Test

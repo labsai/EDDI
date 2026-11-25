@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -48,6 +49,7 @@ import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -57,6 +59,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -380,8 +383,14 @@ public class McpAdminTools {
             Response response = Boolean.TRUE.equals(endAllActiveConversations)
                     ? getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade, true)
                     : getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade);
+            if (response != null && response.getStatus() >= 300) {
+                return refusalJson(response);
+            }
             return resultJson("deleted",
                     Map.of("agentId", agentId, "version", ver, "permanent", isPermanent, "cascade", isCascade, "status", response.getStatus()));
+        } catch (WebApplicationException e) {
+            String refusal = inUseRefusal(e.getResponse());
+            return refusal != null ? refusal : toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         }
@@ -648,11 +657,80 @@ public class McpAdminTools {
             boolean isPermanent = permanent != null ? permanent : false;
             String type = resourceType.trim().toLowerCase();
             Response response = deleteResourceByType(type, resourceId, ver, isPermanent, Boolean.TRUE.equals(force));
+            if (response != null && response.getStatus() >= 300) {
+                return refusalJson(response);
+            }
 
             return resultJson("deleted",
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
+        } catch (WebApplicationException e) {
+            String refusal = inUseRefusal(e.getResponse());
+            return refusal != null ? refusal : toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
+        }
+    }
+
+    /**
+     * A delete the store answered with a refusal instead of throwing: the in-use
+     * guard's body when it is one, otherwise the status and the store's text —
+     * never the {@code "deleted"} result.
+     */
+    private String refusalJson(Response response) throws IOException {
+        String refusal = inUseRefusal(response);
+        return refusal != null ? refusal : responseJson(jsonSerialization, response);
+    }
+
+    /**
+     * The in-use guard's refusal of a delete ({@code RESOURCE_IN_USE},
+     * {@code AGENT_HAS_OPEN_CONVERSATIONS}, {@code IN_USE_CHECK_FAILED}) as a tool
+     * error that keeps its body: {@code error} and {@code errorCode}, then who uses
+     * the resource or how many conversations are open, and the {@code override}
+     * argument that deletes anyway. A status-only error would leave the caller with
+     * nothing to act on. {@code null} when the response is not such a refusal.
+     */
+    String inUseRefusal(Response response) {
+        Map<?, ?> body = bodyOf(response);
+        if (body == null || !(body.get("code") instanceof String code) || !IN_USE_CODES.contains(code)) {
+            return null;
+        }
+        var result = new LinkedHashMap<String, Object>();
+        result.put("error", body.get("error"));
+        result.put("errorCode", code);
+        body.forEach((key, value) -> {
+            if (!"error".equals(key) && !"code".equals(key)) {
+                result.put(String.valueOf(key), value);
+            }
+        });
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (IOException e) {
+            return errorJson(String.valueOf(body.get("error")), code, null);
+        }
+    }
+
+    private static final Set<String> IN_USE_CODES = Set.of(ResourceInUseGuard.CODE_IN_USE, ResourceInUseGuard.CODE_OPEN_CONVERSATIONS,
+            ResourceInUseGuard.CODE_CHECK_FAILED);
+
+    /**
+     * The JSON body of a refusal: the entity of a response built in this process,
+     * or read from a loopback HTTP response.
+     */
+    private static Map<?, ?> bodyOf(Response response) {
+        if (response == null) {
+            return null;
+        }
+        try {
+            if (response.getEntity() instanceof Map<?, ?> map) {
+                return map;
+            }
+        } catch (RuntimeException notReadable) {
+            // an inbound response whose entity was not buffered: read it below
+        }
+        try {
+            return response.readEntity(Map.class);
+        } catch (RuntimeException notJson) {
+            return null;
         }
     }
 
