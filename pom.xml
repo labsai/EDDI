@@ -775,8 +775,19 @@
                          fails the build rather than silently un-testing Jlama's SIMD
                          path. -->
                     <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector</argLine>
+                    <!-- **/*$* restores surefire's default exclude, which declaring
+                         <excludes> at all replaces. Without it every @Nested class whose
+                         name matches an include pattern (…$ReplayTests) is also scanned
+                         as a test class of its own. In one JVM the JUnit Platform folds
+                         that into its outer class, but with surefire.forkCount > 1 each
+                         class goes to a fork as its own request, so those nested tests
+                         ran twice, the console total counted them twice, and the outer
+                         and inner runs overwrote each other's TEST-*.xml (duplicated and
+                         lost testcases). @Nested classes still run, through their outer
+                         class. BuildQualityGatesTest pins this. -->
                     <excludes>
                         <exclude>**/*IT.java</exclude>
+                        <exclude>**/*$*</exclude>
                     </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>

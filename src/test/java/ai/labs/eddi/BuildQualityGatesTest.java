@@ -38,6 +38,7 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -663,6 +664,53 @@ class BuildQualityGatesTest {
                 gateJob + " must fail on an empty or missing data file and on a missing merged report");
         assertTrue(ciJobNeeds(jobs.get("docker")).contains(gateJob),
                 "docker must need " + gateJob + ", or an image below the coverage threshold is still published");
+
+        // The integration job is what produces jacoco-it.exec and runs the
+        // Testcontainers suite at all: skipITs defaults to true, so without
+        // -DskipITs=false its verify runs no integration test, the coverage gate
+        // above would grade unit-test data only, and docker would publish untested.
+        List<String> integrationVerify = jobs.get("integration-test").lines()
+                .map(String::trim)
+                .filter(line -> line.contains("mvnw verify"))
+                .toList();
+        assertEquals(1, integrationVerify.size(),
+                "integration-test must run exactly one `mvnw verify`. Found: " + integrationVerify);
+        String verify = integrationVerify.get(0);
+        assertTrue(verify.contains(SKIP_ITS_DISABLED),
+                "integration-test's `mvnw verify` must pass " + SKIP_ITS_DISABLED + ", or it runs no integration test"
+                        + " (skipITs defaults to true). Found: " + verify);
+        assertFalse(verify.replace(" ", "").matches(".*\\|\\|(true|:).*") || verify.contains("-DskipTests"),
+                "integration-test's `mvnw verify` must not swallow its exit code or pass -DskipTests: " + verify);
+    }
+
+    /**
+     * Build &amp; Test runs surefire with {@code -Dsurefire.forkCount=3}. Declaring
+     * {@code <excludes>} replaces surefire's default {@code **}{@code /*$*}
+     * exclude, and without it every {@code @Nested} class whose name matches an
+     * include pattern was also sent to a fork as a class of its own: those tests
+     * ran twice, the console total counted them twice (41,178 against 37,823), and
+     * the outer and inner runs overwrote each other's {@code TEST-*.xml}, so the
+     * uploaded reports held duplicated testcases and lost 331 classes. In one JVM
+     * the JUnit Platform folds the duplicate selection away, which is why it only
+     * showed up once CI forked.
+     */
+    @Test
+    @DisplayName("surefire excludes inner classes, so forked runs execute and report each @Nested test once")
+    void surefireExcludesInnerClassesForForkedRuns() throws Exception {
+        Element surefire = buildPlugin(parse(POM), "maven-surefire-plugin");
+        Element configuration = child(surefire, "configuration").orElseThrow();
+        List<String> excludes = child(configuration, "excludes")
+                .map(excludesElement -> children(excludesElement, "exclude").stream()
+                        .map(e -> e.getTextContent().strip())
+                        .toList())
+                .orElse(List.of());
+        assertTrue(excludes.contains("**/*$*"),
+                "surefire's <excludes> must keep **/*$*: declaring <excludes> drops surefire's default inner-class"
+                        + " exclude, and with forkCount > 1 every matching @Nested class then runs a second time as a"
+                        + " test class of its own, double-counting the total and corrupting the XML reports. Found: "
+                        + excludes);
+        assertTrue(excludes.contains("**/*IT.java"),
+                "surefire must keep excluding **/*IT.java, which failsafe runs. Found: " + excludes);
     }
 
     /**
@@ -1562,6 +1610,13 @@ class BuildQualityGatesTest {
      * here. It must run {@code always()}: GitHub treats a skipped required check as
      * passed, so a gate that can be skipped is no gate. And it must not tolerate a
      * skip on a merge-queue run, where every job is forced to run.
+     * <p>
+     * Nor a Secret Scanning failure. An earlier version of this branch excused one
+     * when the PR added fingerprints covering its own findings (and, on main and in
+     * the queue, let such fingerprints approve findings), so a PR adding a secret
+     * plus its own ignore entry could get a green gate and publish. On a pull
+     * request the scan uses main's config, so an entry takes effect only after it
+     * merges; this test keeps it that way.
      */
     @Test
     @DisplayName("CI Gate needs everything docker needs plus the lints, always runs, and is strict in the merge queue")
@@ -1584,41 +1639,65 @@ class BuildQualityGatesTest {
         assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] && [ \"$r\" = \"skipped\" ]"),
                 "ci-gate must fail on ANY skipped need on a merge_group run, not only on the jobs it names one by"
                         + " one: every job is forced to run there, so a skip means it was never graded");
-        assertTrue(gate.contains("[ \"$(output gitleaks pr_config_scan)\" = \"true\" ]")
-                && gate.contains("[ \"$(output gitleaks base_leaks)\" = \"true\" ]"),
-                "ci-gate may tolerate a pull-request Secret Scanning failure only when that scan found leaks (not an"
-                        + " error) and the re-scan with the PR's own fingerprints passed, or a secret riding along with a"
-                        + " config edit merges");
+        // No Secret Scanning tolerance anywhere. A PR that adds a secret and its own
+        // .gitleaksignore fingerprint must not get a green CI Gate or publish: the
+        // gate grades gitleaks like every other need, and the job itself has no
+        // outputs, approval mapping or re-scan that could turn a finding green.
+        // Comment lines are dropped first (a block also carries the next job's
+        // header comment). Two lines legitimately name gitleaks: the needs list, and
+        // the list of jobs every change requires, which must keep it.
+        String requireAlways = "for job in codeql codeql-ui gitleaks e2e-gate ui-gate; do require \"$job\" true; done";
+        assertTrue(gate.contains(requireAlways),
+                "ci-gate must require Secret Scanning to succeed on every change: " + requireAlways);
+        String gateScript = gate.lines()
+                .filter(line -> !line.strip().startsWith("#") && !line.strip().startsWith("needs:"))
+                .filter(line -> !line.strip().equals(requireAlways))
+                .collect(Collectors.joining(LINE_FEED));
+        assertFalse(gateScript.contains("gitleaks"),
+                "ci-gate must not special-case Secret Scanning: a PR whose finding is covered by a fingerprint it adds"
+                        + " itself would get a green gate. Found a gitleaks reference in the ci-gate script");
         String gitleaks = jobs.get("gitleaks");
-        assertTrue(gitleaks.contains("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'")
-                && gitleaks.contains("for f in .gitleaksignore .gitleaks.toml; do"),
+        String gitleaksCode = gitleaks.lines()
+                .filter(line -> !line.strip().startsWith("#"))
+                .collect(Collectors.joining(LINE_FEED));
+        for (String tolerance : List.of("outputs:", "GITHUB_OUTPUT", "APPROVAL_BASE", "APPROVED", "--exit-code 2",
+                "Re-scan with")) {
+            assertFalse(gitleaksCode.contains(tolerance),
+                    "the gitleaks job must fail on every finding, with nothing that approves one or reports a"
+                            + " finding as tolerable downstream. Found: " + tolerance);
+        }
+        assertTrue(gitleaksCode.contains("./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts=\"$LOG_OPTS\" ."),
+                "the scan must run with --exit-code 1 over this event's range, so any finding fails the job");
+        assertTrue(gitleaksCode.contains("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'")
+                && gitleaksCode.contains("for f in .gitleaksignore .gitleaks.toml; do"),
                 "pull-request and merge-queue runs must scan with main's .gitleaks.toml and .gitleaksignore, or a"
-                        + " change loosens the rules it is scanned with");
-        assertTrue(gitleaks.contains("APPROVAL_BASE=\"$MG_BASE\"")
-                && gitleaks.contains("[ \"$(line_at \"$c\" \"$path\" \"$l\")\" = \"$finding\" ]"),
-                "queue and push scans must accept a finding only when an added fingerprint names its path and rule AND"
-                        + " the line it names has the finding's exact text: commit-scoped fingerprints cannot match"
-                        + " squashed commits, and line numbers shift");
-        assertTrue(gitleaks.contains("ignore_lines_added \"$APPROVAL_BASE\" \"$APPROVAL_HEAD\"")
-                && gitleaks.contains("ADDED=$(LC_ALL=C comm -13")
-                && gitleaks.contains("line_at() { git cat-file blob"),
-                "both .gitleaksignore validators and the finding-line comparison must read blobs (git cat-file),"
-                        + " which no .gitattributes setting can alter");
-        assertFalse(gitleaks.replaceAll("LC_ALL=C grep -a -v?E", "").matches("(?s).*grep -v?E [\"'](\\^\\$\\{FINGERPRINT|\\^\\[0-9a-f\\]).*"),
-                "the fingerprint validators must run grep as LC_ALL=C grep -a: in a UTF-8 locale grep drops a line"
-                        + " with an invalid byte, so such an entry would skip validation");
-        assertTrue(gitleaks.split("is a symbolic link; it must be a regular file", -1).length - 1 == 2,
-                "both validators must refuse a symlinked .gitleaksignore, which cat-file reads as the link target");
-        assertFalse(gitleaks.contains("git diff --no-color -U0"),
+                        + " change loosens the rules it is scanned with or allowlists its own finding");
+        assertTrue(gitleaksCode.contains("git cat-file blob \"$1:.gitleaksignore\" | LC_ALL=C sort -u")
+                && gitleaksCode.contains("ADDED=$(LC_ALL=C comm -13"),
+                "the .gitleaksignore validator must read blobs (git cat-file), which no .gitattributes setting can"
+                        + " alter, without hiding a read error behind 2>/dev/null");
+        assertTrue(gitleaksCode.contains("LC_ALL=C grep -a -vE \"$1\" || rc=$?")
+                && gitleaksCode.contains("[ \"$rc\" -le 1 ] || return \"$rc\""),
+                "the fingerprint validator must run grep as LC_ALL=C grep -a (in a UTF-8 locale grep drops a line with"
+                        + " an invalid byte) and fail on a grep error instead of reading it as `no line left`");
+        assertFalse(gitleaksCode.contains("|| true"),
+                "the gitleaks job must fail closed: `|| true` turns a failed read or grep into an empty result");
+        assertTrue(gitleaksCode.contains("is a symbolic link; it must be a regular file")
+                && gitleaksCode.contains("is not a regular file"),
+                "the validator must refuse a symlinked (or otherwise non-regular) .gitleaksignore, which cat-file reads"
+                        + " as the link target");
+        assertTrue(gitleaksCode.contains("gains lines that are not commit:path:rule:line fingerprints")
+                && gitleaksCode.contains("'^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$'"),
+                "a .gitleaksignore line that is not a commit-scoped fingerprint must fail the run: gitleaks honours"
+                        + " commit-less entries, which would silence that finding in every future commit");
+        assertFalse(gitleaksCode.contains("git diff --no-color -U0"),
                 "added .gitleaksignore lines must come from comparing the two blobs' lines (git cat-file): a diff honours"
                         + " .gitattributes, so `.gitleaksignore -diff` would hide every addition, and filtering +++ headers"
                         + " drops an added '++path:rule:line' entry");
-        assertTrue(gitleaks.contains("attributes=$(git rev-parse --git-path info/attributes)")
-                && gitleaks.contains("printf '* diff\\n' >> \"$attributes\""),
+        assertTrue(gitleaksCode.contains("attributes=$(git rev-parse --git-path info/attributes)")
+                && gitleaksCode.contains("printf '* diff\\n' >> \"$attributes\""),
                 "the scans must override .gitattributes (`* diff` in .git/info/attributes): a `-diff` or `binary`"
                         + " attribute makes git log -p print \"Binary files differ\", so gitleaks never sees that file");
-        assertTrue(gitleaks.contains("changes .gitleaks.toml, the rules; no tolerance applies"),
-                "the pull-request re-scan must refuse any change to .gitleaks.toml: only fingerprints may be added");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
                 CI_WORKFLOW + " no longer triggers on merge_group, so the merge queue would wait for checks forever");
     }

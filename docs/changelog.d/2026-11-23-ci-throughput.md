@@ -50,10 +50,10 @@ data.
   needs plus shell-lint, manifest-lint and release-pointers; it fails on any failed or cancelled
   need, and on any job the change required that did not succeed — derived from detect-changes on
   a PR or push, every job on a merge-queue run (so a broken forced-true branch cannot merge
-  untested code). One tolerance, narrowed in the review rounds below to its final form: a PR-level
-  Secret Scanning failure on findings that fingerprints the PR adds cover exactly (see "CodeRabbit
-  review" below for the policy that merged). The script was run against 16 simulated
-  outcomes (PR, push and merge_group; skipped, failed and cancelled needs; both gitleaks cases).
+  untested code). It tolerates nothing: an earlier Secret Scanning tolerance, narrowed over the
+  review rounds below, was removed before merge (see "Quality review: Secret Scanning strict
+  again"). The script was run against 16 simulated
+  outcomes (PR, push and merge_group; skipped, failed and cancelled needs).
   `BuildQualityGatesTest.ciGateBlocksWhateverBlocksPublishing` pins its needs against docker's,
   its `always()` and the merge-queue strictness; the `ciJobNeeds` helper no longer reads the words
   of a comment after a `needs:` list as job names (it reported docker as needing `pushed`/`tagged`).
@@ -108,7 +108,7 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   the manual main-is-green and one-at-a-time rules still apply — now said so.
 - Left as is: `SystemMailerTest` and `SafeSocketConnectorAngusSmokeTest` reserve a free port, close
   it and expect "connection refused"; three forks make a collision on that port slightly more
-  likely, as any other process on the runner already could. Not seen in the 40,817-test forked run.
+  likely, as any other process on the runner already could. Not seen in the full forked run.
   The merged-check warning in the Integration Tests log is now labelled as expected in the step.
 
 ### CodeRabbit review (full review of `a3f2304`)
@@ -125,7 +125,8 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   `.gitleaksignore` line that is not a `commit:path:rule:line` fingerprint now fails outright
   (it used to only withhold the tolerance), and the queue loads `main`'s `.gitleaksignore`, never
   the group's raw file.
-- **The final policy.** `.gitleaks.toml` and `.gitleaksignore` always come from `main` for the scan
+- **The policy at this point** (superseded: "Quality review: Secret Scanning strict again" removed
+  every tolerance). `.gitleaks.toml` and `.gitleaksignore` always come from `main` for the scan
   itself; the only allowlisting a change can bring is commit-scoped fingerprints, accepted for the
   exact findings they name — on the PR through the re-scan and CI Gate's tolerance (base scan
   failed on findings, rules unchanged, re-scan passes), in the queue and on `main` through the
@@ -187,6 +188,57 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   Unrelated to this branch, which does not touch `ui/workforce`; the job was re-run, and the flake
   is left for a separate fix.
 
+### Quality review: Secret Scanning strict again, honest test counts
+
+An independent review found three quality regressions against `main`; each was verified in the
+code before it was changed.
+
+- **Secret Scanning was narrowed (security).** On `main` any gitleaks finding fails the job, and
+  `docker` needs it. This branch had added two ways around that: on a push or merge-queue run a
+  finding exited 0 when the same range added a matching fingerprint to `.gitleaksignore` (read
+  through `< <(jq …)`, so a jq failure saw no findings and reported everything covered), and CI Gate
+  tolerated a red Secret Scanning on a PR that added fingerprints and passed a re-scan with them.
+  Both are gone, with everything that only served them: the approval mapping, the re-scan step, the
+  job's `base_leaks`/`pr_config_scan` outputs, CI Gate's two gitleaks exemptions (one in the
+  failed/cancelled loop, one in `require()`) and detect-changes' `gitleaks_config` filter. A PR that
+  adds a secret plus its own ignore entry stays red and cannot pass CI Gate or publish; as on
+  `main`, the entry only takes effect once it is on `main`. Once CI Gate is a required check, that
+  means a PR with a finding cannot merge by fingerprinting it: rewrite the fixture so it is not
+  secret-shaped. Kept: the `.gitattributes` override, the base-config restore on `pull_request` and
+  `merge_group`, the `merge_group` range scan, and a validation-only step that fails on a symlinked
+  or non-regular `.gitleaksignore` and on any added line that is not a commit-scoped fingerprint.
+  That step now fails closed: `ls-tree` and blob reads are checked instead of hidden behind
+  `2>/dev/null … || true`, and grep's error exit (2) fails it rather than reading as "no line
+  left". CI Gate assigns its job list before looping, so a jq failure stops it instead of grading
+  nothing. Checked with the pinned gitleaks image in scratch repositories: a clean change passes; a
+  secret plus its own fingerprint fails the scan (the same fingerprint passes when the PR's own
+  ignore file is loaded, so the failure is the base-config restore working); a secret with no
+  fingerprint fails; a commit-less entry and a symlinked ignore file fail validation.
+  `BuildQualityGatesTest.ciGateBlocksWhateverBlocksPublishing` now asserts the opposite of what it
+  used to: no gitleaks reference in CI Gate's script, no outputs, approval or re-scan in the job,
+  `--exit-code 1`, no `|| true`, plus the hardening pins.
+- **Unit-test reporting under `forkCount=3` (cause found).** Declaring surefire `<excludes>`
+  replaces its default `**/*$*` exclude, so every `@Nested` class whose own name matches an include
+  pattern (`…$ReplayTests`) was also scanned as a test class. In one JVM the JUnit Platform folds
+  that selection into the outer class; with forks each class is sent as its own request, so those
+  nested tests ran twice, the console counted them twice (41,178 on CI against `main`'s 37,823), and
+  the outer and inner runs overwrote each other's `TEST-*.xml`, leaving duplicated testcases and
+  missing classes in the `test-results` artifact and the Step Summary. `pom.xml` adds the
+  `**/*$*` exclude back; no non-`@Nested` inner class carries tests (checked by a source scan:
+  3,214 `@Nested` classes, none plain). Measured on the crypto, `engine/hitl`, `modules/llm/impl`
+  and `backup/impl` packages through `-Dsurefire.includesFile` (not `-Dtest`, which overrides
+  `<excludes>`), 5,938 tests in 1,044 classes with one fork. Before the fix three forks reported
+  6,773 on the console, 6,148 testcases in the XML (276 duplicated, 66 lost, 16 classes missing);
+  after it, three forks report 5,938 on the console, the XML and the summary's sum, with the same
+  5,938 unique (classname, name) pairs and 1,044 classes as one fork. One fork reports the
+  identical 5,938 pairs before and after, so the exclude drops no test. (The same 143 local
+  failures appear in every run: loopback/HTTP tests the sandbox blocks.)
+  `BuildQualityGatesTest.surefireExcludesInnerClassesForForkedRuns` pins the exclude.
+- **Integration-job pin restored.** `theCoverageGateIsArmedByCi` again asserts that the
+  `integration-test` job's one `mvnw verify` carries `-DskipITs=false` (and no `|| true` or
+  `-DskipTests`), in addition to the `jacoco:check@merged-check` pin.
+- `docs/release-versioning.md` gave Build & Test as ~6-9 min; measured runs take 10-14 min.
+
 ### Considered and not done
 
 - **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that
@@ -207,12 +259,12 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
    — until then every open PR would wait on a check that never comes. A re-run of an old run is
    expected to reuse its old workflow file, so a push or close/reopen would be needed; confirm on
    one open PR before relying on it.
-4. After the first runs: compare the PR run's unit-test count (1,958 classes) and merged
-   coverage counts against `main`'s, and the new critical path against ~30 min.
+4. After the first runs: compare the PR run's unit-test total and merged coverage counts against
+   `main`'s (37,823 tests), and the new critical path against ~30 min.
 
 ### Review fixes (independent review before push)
 
-- **Gitleaks tolerance tightened** (an intermediate step; the "Second review round" and "CodeRabbit review" sections above replace it). A
+- **Gitleaks tolerance tightened** (an intermediate step; removed entirely in "Quality review: Secret Scanning strict again"). A
   PR-level Secret Scanning failure was tolerated only when the PR changed the gitleaks config and a
   re-scan with the PR's own config passed (`pr_config_scan`).
 - **Queue strictness holds for every need.** On `merge_group` CI Gate fails on any skipped need,
@@ -226,11 +278,12 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
 - Docs said CI Gate *is* the required check (it becomes one only via the repository setting) and
   `release-versioning.md`'s docker row lacked `coverage-gate`; two `pom.xml` comments still placed
   the gate in Integration Tests. Fixed.
-- **Verification:** full local unit suite with three forks: 40,817 tests, 0 failures, 1,959 classes.
+- **Verification:** full local unit suite with three forks, 0 failures. Its reported "40,817 tests,
+  1,959 classes" was inflated: those forked runs executed matching `@Nested` classes twice (see
+  "Quality review" below).
   The new re-scan step was executed in scratch repositories with the pinned gitleaks image: config
   untouched → exit 0, no output; allowlisted fixture → pass, `passed=true`; allowlisted fixture
   plus an un-allowlisted key → 1 leak found, exit 1. JUnit on the test classpath is 6.1.3, which
   closes `AutoCloseable` store values, so the lock's store release is live.
-- **Not executed anywhere yet:** every `merge_group` path (until the queue is enabled) and the
-  fingerprint tolerance on a real PR. The speedups are estimates until this PR's own CI run; the
+- **Not executed anywhere yet:** every `merge_group` path (until the queue is enabled). The speedups are estimates until this PR's own CI run; the
   first main push after merge is the first run where publishing depends on Coverage Gate.

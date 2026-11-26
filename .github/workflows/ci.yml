@@ -55,7 +55,6 @@ jobs:
       release_pointers: ${{ steps.result.outputs.release_pointers }}
       ui: ${{ steps.result.outputs.ui }}
       backend: ${{ steps.result.outputs.backend }}
-      gitleaks_config: ${{ steps.result.outputs.gitleaks_config }}
       # JSON list consumed by e2e-fullstack's matrix; see "Resolve E2E databases".
       databases: ${{ steps.dbs.outputs.databases }}
     steps:
@@ -245,15 +244,6 @@ jobs:
             ui:
               - 'ui/**'
               - '.github/workflows/ci.yml'
-            # Not a job gate. CI Gate reads it: on a pull request Secret Scanning takes
-            # the gitleaks config from the BASE branch, so a PR that allowlists a test
-            # fixture in .gitleaksignore can never pass that check on the PR itself.
-            # CI Gate tolerates that one failure only when the PR changes the config
-            # (the change is then in front of the reviewer); the merge-queue run scans
-            # with the PR's config and blocks as usual.
-            gitleaks_config:
-              - '.gitleaksignore'
-              - '.gitleaks.toml'
 
       # The nightly collation PR rewrites the changelog and nothing else, so the
       # Java suite has nothing to grade on it. Exempting the BRANCH NAME alone
@@ -306,7 +296,6 @@ jobs:
             echo "release_pointers=true" >> "$GITHUB_OUTPUT"
             echo "ui=true" >> "$GITHUB_OUTPUT"
             echo "backend=true" >> "$GITHUB_OUTPUT"
-            echo "gitleaks_config=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
@@ -314,7 +303,6 @@ jobs:
             echo "release_pointers=${{ steps.filter.outputs.release_pointers }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
-            echo "gitleaks_config=${{ steps.filter.outputs.gitleaks_config }}" >> "$GITHUB_OUTPUT"
           fi
           # Outside the tag/else split on purpose: DeploymentManifestsTest reads that
           # split positionally. A later write to the same output key wins.
@@ -2166,13 +2154,11 @@ jobs:
   gitleaks:
     name: Secret Scanning
     runs-on: ubuntu-latest
-    # Read by CI Gate. base_leaks: "true" when the scan failed because it FOUND
-    # leaks (not on an error exit). pr_config_scan: "true" when a pull request whose
-    # only gitleaks change is new .gitleaksignore fingerprints passes a re-scan with
-    # them (see the last step).
-    outputs:
-      base_leaks: ${{ steps.scan.outputs.leaks }}
-      pr_config_scan: ${{ steps.pr_config.outputs.passed }}
+    # Any finding fails this job, on every event, and nothing downstream tolerates
+    # that: CI Gate and docker both require it to succeed. On a pull request and in
+    # the merge queue the scan uses main's config, so a change cannot allowlist its
+    # own finding; a fingerprint it adds to .gitleaksignore takes effect only once it
+    # is on main.
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2204,10 +2190,8 @@ jobs:
       # and reviewed, rather than while it is still being proposed.
       #
       # A merge-queue run restores both files from main as well, so a queued change
-      # cannot loosen the rules it is scanned with or load an allowlist entry nobody
-      # has checked. Fingerprints the group adds still count, but only through the
-      # approval mapping in the scan step below, which accepts commit-scoped
-      # fingerprints for exactly the findings this range introduces.
+      # cannot loosen the rules it is scanned with or allowlist its own finding.
+      #
       # gitleaks reads history through `git log -p`, and a change can steer that
       # with .gitattributes: `secrets.txt -diff` (or `binary`, or a textconv
       # driver) prints "Binary files differ" instead of the content, so a secret in
@@ -2238,13 +2222,98 @@ jobs:
             fi
           done
 
+      # What a change adds to .gitleaksignore is checked here, before it can reach
+      # main and start suppressing findings: every added line must be a
+      # commit:path:rule:line fingerprint (or blank, or a comment). gitleaks also
+      # honours entries without a commit, which would silence that finding in every
+      # future commit, so any other line fails the run. This step validates and
+      # never approves: a fingerprint does not make the scan below pass.
+      #
+      # The added lines are the head blob's lines that the base blob lacks, read with
+      # git cat-file. A diff would honour .gitattributes (`-diff`, `binary` or a
+      # textconv driver turn it into "Binary files differ", hiding every addition)
+      # and would need care with "+++" headers; comparing the blobs has neither
+      # problem. Every read fails closed: a blob that exists but cannot be read
+      # fails the step instead of reading as "no lines added".
+      - name: Validate the .gitleaksignore lines this change adds
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+          have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            # Against the merge-base, not the base tip: a line that landed on main
+            # after this branch was cut is not this change's addition.
+            BASE=$(git merge-base "$PR_BASE" "$PR_HEAD")
+            HEAD=$PR_HEAD
+          elif [ "$EVENT" = "merge_group" ]; then
+            BASE=$MG_BASE
+            HEAD=$MG_HEAD
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
+            BASE=$PUSH_BEFORE
+            HEAD=$PUSH_AFTER
+          else
+            echo "no usable base commit for this $EVENT, so there are no added lines to tell apart"
+            exit 0
+          fi
+          for sha in "$BASE" "$HEAD"; do
+            if ! have "$sha"; then
+              echo "::error::gitleaks: $sha is not in this checkout, so .gitleaksignore was not validated"
+              exit 1
+            fi
+          done
+
+          # The sorted, unique lines of .gitleaksignore at commit $1; nothing when the
+          # file is absent. A symlink would be validated as its link TARGET (the path
+          # string cat-file returns), not as the contents gitleaks then loads.
+          ignore_lines() {
+            local entry
+            entry=$(git ls-tree "$1" -- .gitleaksignore) || return 1
+            case "$entry" in
+              "") return 0 ;;
+              120000\ *) echo "::error::.gitleaksignore is a symbolic link; it must be a regular file" >&2; return 1 ;;
+              100644\ * | 100755\ *) ;;
+              *) echo "::error::.gitleaksignore is not a regular file: $entry" >&2; return 1 ;;
+            esac
+            git cat-file blob "$1:.gitleaksignore" | LC_ALL=C sort -u
+          }
+          # grep -v that fails on an error (exit 2) but not on "no line left" (exit 1).
+          # LC_ALL=C grep -a: in a UTF-8 locale GNU grep silently drops a line holding
+          # an invalid byte, so a commit-less entry for a Latin-1 file name would pass
+          # unvalidated while gitleaks still honours it.
+          drop_matching() {
+            local rc=0
+            LC_ALL=C grep -a -vE "$1" || rc=$?
+            [ "$rc" -le 1 ] || return "$rc"
+          }
+
+          BASE_LINES=$(ignore_lines "$BASE")
+          HEAD_LINES=$(ignore_lines "$HEAD")
+          ADDED=$(LC_ALL=C comm -13 <(printf '%s\n' "$BASE_LINES") <(printf '%s\n' "$HEAD_LINES"))
+          NOT_FINGERPRINTS=$(printf '%s\n' "$ADDED" \
+            | drop_matching '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
+            | drop_matching '^[[:space:]]*(#.*)?$')
+          if [ -n "$NOT_FINGERPRINTS" ]; then
+            echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
+            printf '%s\n' "$NOT_FINGERPRINTS"
+            exit 1
+          fi
+          echo "every line this change adds to .gitleaksignore is a commit-scoped fingerprint (or blank, or a comment)"
+
       # Scan only the commits this event introduces, which is what
       # gitleaks-action did. A full-depth scan reports 61 pre-existing findings
       # across 16 commits dated 2016 to 2026, most of them in files deleted
       # years ago, so scanning everything would fail the build on day one for
       # reasons no PR author can fix.
       - name: Scan commits in this event
-        id: scan
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
@@ -2273,8 +2342,7 @@ jobs:
           elif [ "$EVENT" = "merge_group" ]; then
             # The queue's commit(s) on top of main. Without this branch the run
             # fell through to "scan the tip with --no-merges", which finds nothing
-            # when the tip is a merge commit. The config is the group's own (as on
-            # a push): what is about to land, reviewed and approved.
+            # when the tip is a merge commit. The config is main's (restored above).
             for sha in "$MG_BASE" "$MG_HEAD"; do
               if ! have "$sha"; then
                 echo "::error::gitleaks: $sha is not in this checkout, so the merge group was not scanned."
@@ -2293,175 +2361,8 @@ jobs:
             echo "no usable base commit for this $EVENT, scanning only $PUSH_AFTER"
           fi
 
-          # A merge-queue run and a push to main scan commits the queue or a squash
-          # merge rewrote, so a commit-scoped fingerprint the PR added (naming the
-          # PR's own commit) cannot match them. Approval is therefore re-bound to
-          # stable fields: a finding passes when this same range adds a
-          # commit-scoped fingerprint for exactly its path, rule and line. Nothing
-          # broader is accepted, and a line that is not a commit-scoped fingerprint
-          # fails the run outright, so no path-wide or global entry can be added.
-          APPROVAL_BASE=""
-          APPROVAL_HEAD=""
-          if [ "$EVENT" = "merge_group" ]; then
-            APPROVAL_BASE="$MG_BASE"; APPROVAL_HEAD="$MG_HEAD"
-          elif [ "$EVENT" = "push" ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
-            APPROVAL_BASE="$PUSH_BEFORE"; APPROVAL_HEAD="$PUSH_AFTER"
-          fi
-          FINGERPRINT='[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+'
-          ignore_lines() { git cat-file blob "$1:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u; }
-          ignore_lines_added() { LC_ALL=C comm -13 <(ignore_lines "$1") <(ignore_lines "$2"); }
-          APPROVED=""
-          if [ -n "$APPROVAL_BASE" ]; then
-            # The added lines are the head blob's lines that the base blob lacks,
-            # read with cat-file. A diff would honour .gitattributes (`-diff`,
-            # `binary` or a textconv driver turn the file's diff into "Binary files
-            # differ", hiding every addition) and needs care with "+++" headers;
-            # comparing the two blobs' line sets has neither problem.
-            # A symlinked .gitleaksignore would be validated as its link TARGET (the path
-            # string cat-file returns), not as the contents gitleaks then loads.
-            if [ "$(git ls-tree "$APPROVAL_HEAD" -- .gitleaksignore | cut -c1-6)" = "120000" ]; then
-              echo "::error::.gitleaksignore is a symbolic link; it must be a regular file"
-              exit 1
-            fi
-            IGNORE_ADDED=$(ignore_lines_added "$APPROVAL_BASE" "$APPROVAL_HEAD")
-            # LC_ALL=C grep -a: in a UTF-8 locale GNU grep silently drops a line
-            # holding an invalid byte, so a commit-less entry for a Latin-1 file name
-            # would pass unvalidated while gitleaks still honours it.
-            NOT_FINGERPRINTS=$(printf '%s\n' "$IGNORE_ADDED" | LC_ALL=C grep -a -vE "^${FINGERPRINT}[[:space:]]*\$" \
-              | LC_ALL=C grep -a -vE '^[[:space:]]*(#.*)?$' || true)
-            if [ -n "$NOT_FINGERPRINTS" ]; then
-              echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
-              printf '%s\n' "$NOT_FINGERPRINTS"
-              exit 1
-            fi
-            # Whole fingerprints, paths normalised the way gitleaks normalises
-            # them (backslashes to slashes) so a Windows-style entry still matches.
-            APPROVED=$(printf '%s\n' "$IGNORE_ADDED" | LC_ALL=C grep -a -E "^${FINGERPRINT}" \
-              | sed -E 's/[[:space:]]*$//' | tr '\\' '/' | LC_ALL=C sort -u || true)
-          fi
-
-          # Exit code 2 means "leaks found"; anything else non-zero is an error
-          # (bad config, missing commit). CI Gate's tolerance applies to findings
-          # only, so the two are told apart here.
-          rc=0
-          REPORT="$RUNNER_TEMP/gitleaks-report.json"
-          ./gitleaks git --redact=100 --no-banner --exit-code 2 --report-format json --report-path "$REPORT" \
-            --log-opts="$LOG_OPTS" . || rc=$?
-          if [ "$rc" -eq 2 ] && [ -n "$APPROVED" ]; then
-            # A finding is approved by an added fingerprint c:path:rule:L only when
-            # path and rule match AND line L of that path at commit c (the PR commit
-            # the fingerprint names) is the same text as the finding's line in the
-            # scanned commit. That survives the squash rewriting commit ids and
-            # shifting line numbers, and binds the approval to that exact value. Each
-            # fingerprint approves at most one finding.
-            UNAPPROVED=""
-            USED=""
-            line_at() { git cat-file blob "$1:$2" 2> /dev/null | sed -n "${3}p"; }
-            while IFS=$'\t' read -r f_commit f_file f_rule f_line; do
-              finding=$(line_at "$f_commit" "$f_file" "$f_line")
-              approved=""
-              while IFS= read -r fp; do
-                [ -n "$fp" ] || continue
-                if printf '%s\n' "$USED" | grep -Fxq -- "$fp"; then continue; fi
-                c=${fp%%:*}; rest=${fp#*:}; l=${rest##*:}; rest=${rest%:*}; r=${rest##*:}; path=${rest%:*}
-                [ "$path" = "$f_file" ] && [ "$r" = "$f_rule" ] || continue
-                # The PR commit a fingerprint names is not on the queue's branch.
-                git cat-file -e "${c}^{commit}" 2> /dev/null || git fetch -q --no-tags origin "$c" 2> /dev/null || continue
-                if [ -n "$finding" ] && [ "$(line_at "$c" "$path" "$l")" = "$finding" ]; then
-                  approved=yes
-                  USED="$USED"$'\n'"$fp"
-                  break
-                fi
-              done <<< "$APPROVED"
-              [ -n "$approved" ] || UNAPPROVED="$UNAPPROVED$f_file:$f_rule:$f_line (commit $f_commit)"$'\n'
-            done < <(jq -r '.[] | [.Commit, .File, .RuleID, (.StartLine | tostring)] | @tsv' "$REPORT")
-            if [ -z "$UNAPPROVED" ]; then
-              echo "::notice::every finding in this range is covered by a fingerprint the same range adds to .gitleaksignore"
-              exit 0
-            fi
-            echo "::error::findings with no fingerprint added in this range:"
-            printf '%s\n' "$UNAPPROVED"
-          fi
-          if [ "$rc" -eq 2 ]; then
-            echo "leaks=true" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-          exit "$rc"
-
-      # The scan above used the BASE branch's config, so a pull request that
-      # allowlists a test fixture fails it by design. This step decides whether
-      # that failure is the fixture case and nothing more. It applies only when
-      # the PR leaves .gitleaks.toml (the rules) untouched and its .gitleaksignore
-      # change adds nothing but exact commit:path:rule:line fingerprints. It then
-      # re-scans the same range with the base RULES and the PR's fingerprints.
-      # CI Gate tolerates the failure above only if this passes, so every finding
-      # the PR has not fingerprinted one by one still blocks. A fingerprint is a
-      # human decision about one finding: reviewing those lines is the control,
-      # and the check itself stays red for the reviewer to read. A PR that
-      # changes .gitleaks.toml gets no tolerance at all.
-      - name: Re-scan with this pull request's gitleaks fingerprints
-        id: pr_config
-        if: ${{ always() && github.event_name == 'pull_request' }}
-        env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          # Against the merge-base, not the base tip: a config change that landed on
-          # main after this branch was cut is not this PR's change.
-          FORK_POINT=$(git merge-base "$PR_BASE" "$PR_HEAD")
-          if git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore; then
-            echo "this pull request does not change .gitleaksignore; nothing to validate"
-            IGNORE_CHANGED=""
-          else
-            IGNORE_CHANGED=yes
-          fi
-          # Validated before anything else, .gitleaks.toml changes included: every
-          # line the PR adds must be a fingerprint (or blank, or a comment). The
-          # added lines are the head blob's lines the fork point's blob lacks (read
-          # with cat-file, so no .gitattributes setting can hide them, and no
-          # "+++" header handling is needed).
-          # A symlinked .gitleaksignore would be validated as its link TARGET (the
-          # path string cat-file returns), not as the contents gitleaks then loads.
-          if [ "$(git ls-tree "$PR_HEAD" -- .gitleaksignore | cut -c1-6)" = "120000" ]; then
-            echo "::error::.gitleaksignore is a symbolic link; it must be a regular file"
-            exit 1
-          fi
-          ADDED=$(LC_ALL=C comm -13 \
-            <(git cat-file blob "$FORK_POINT:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u) \
-            <(git cat-file blob "$PR_HEAD:.gitleaksignore" 2> /dev/null | LC_ALL=C sort -u))
-          # LC_ALL=C grep -a, as in the scan step: a line with an invalid UTF-8 byte
-          # must be validated, not silently dropped.
-          OTHER=$(printf '%s\n' "$ADDED" | LC_ALL=C grep -a -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
-            | LC_ALL=C grep -a -vE '^[[:space:]]*(#.*)?$' || true)
-          if [ -n "$OTHER" ]; then
-            # Fails, rather than only withholding the tolerance: such a line (a
-            # path-wide or commit-less entry) would suppress future findings once
-            # it reaches main, so it must not merge even when this PR's scan is clean.
-            echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
-            printf '%s\n' "$OTHER"
-            exit 1
-          fi
-          if ! git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaks.toml; then
-            echo "this pull request changes .gitleaks.toml, the rules; no tolerance applies"
-            exit 0
-          fi
-          if [ -z "$IGNORE_CHANGED" ]; then
-            exit 0
-          fi
-          # The base rules with the PR's fingerprints. The rules are restored here
-          # again rather than trusted from the earlier step: this one runs under
-          # always(), so it must not depend on that step having succeeded.
-          if git cat-file -e "$PR_BASE:.gitleaks.toml" 2> /dev/null; then
-            git show "$PR_BASE:.gitleaks.toml" > .gitleaks.toml
-          else
-            rm -f .gitleaks.toml
-          fi
-          if git cat-file -e "$PR_HEAD:.gitleaksignore" 2> /dev/null; then
-            git show "$PR_HEAD:.gitleaksignore" > .gitleaksignore
-          fi
-          ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="--no-merges $PR_BASE..$PR_HEAD" .
-          echo "passed=true" >> "$GITHUB_OUTPUT"
+          # Any finding fails the job; nothing here or downstream excuses one.
+          ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="$LOG_OPTS" .
 
   # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
   sbom:
@@ -3339,20 +3240,17 @@ jobs:
   #
   # always(), so it reports on every run — a skipped required check counts as
   # passed — and grades the results itself:
-  #   1. nothing it needs failed or was cancelled (one exception, below);
+  #   1. nothing it needs failed or was cancelled — no exceptions;
   #   2. every job the change REQUIRED ran and succeeded. On a pull request and a
   #      push that is derived from detect-changes, with the same conditions the
   #      jobs use; on a merge-queue run every job is required, so a regression in
   #      the forced-true branch of detect-changes (filters empty, everything
   #      skipped) fails here instead of merging untested code.
-  # The exception: on a pull request, Secret Scanning reads the gitleaks config
-  # from the base branch, so a PR that allowlists a fixture cannot pass it. That
-  # failure is tolerated, loudly, only when the PR changes .gitleaksignore or
-  # .gitleaks.toml AND a re-scan with the PR's own config passes (Secret
-  # Scanning's pr_config_scan output); otherwise it blocks. Narrower still: the
-  # base scan must have failed on findings (base_leaks), not on an error, and the
-  # PR's change must be .gitleaksignore fingerprints only — .gitleaks.toml (the
-  # rules) is always taken from main, in the merge queue too.
+  # Secret Scanning gets no tolerance either: it scans a pull request with main's
+  # gitleaks config, so a PR that adds a finding stays red here even when it also
+  # adds that finding's fingerprint to .gitleaksignore. The fingerprint takes
+  # effect only once it is on main; until then the fixture has to be rewritten so
+  # it is not secret-shaped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
@@ -3379,14 +3277,20 @@ jobs:
           OPERATOR_DOCS=$(output detect-changes operator_docs)
           SCRIPTS=$(output detect-changes scripts)
           RELEASE_POINTERS=$(output detect-changes release_pointers)
-          GITLEAKS_CONFIG=$(output detect-changes gitleaks_config)
-          echo "event=$EVENT code=$CODE backend=$BACKEND operator_docs=$OPERATOR_DOCS scripts=$SCRIPTS release_pointers=$RELEASE_POINTERS gitleaks_config=$GITLEAKS_CONFIG"
+          echo "event=$EVENT code=$CODE backend=$BACKEND operator_docs=$OPERATOR_DOCS scripts=$SCRIPTS release_pointers=$RELEASE_POINTERS"
 
           # 1. Nothing failed or was cancelled — and on a merge-queue run nothing was
           #    skipped either: every job is forced to run there, so a skip means an
           #    upstream failed or the forcing broke. This holds for every need, not
           #    only the ones step 2 names.
-          for job in $(jq -r 'keys[]' <<< "$NEEDS"); do
+          # Assigned first, so a jq failure stops the script (set -e) instead of
+          # becoming an empty loop that grades nothing.
+          JOBS=$(jq -r 'keys[]' <<< "$NEEDS")
+          if [ -z "$JOBS" ]; then
+            echo "::error::the needs context lists no jobs, so nothing was graded"
+            exit 1
+          fi
+          for job in $JOBS; do
             r=$(result "$job")
             # preflight-check is the one exception: a pull-request-only dry run (it
             # asserts the bare pom version label that only a PR build carries), and
@@ -3397,14 +3301,7 @@ jobs:
             fi
             case "$r" in
               success | skipped) ;;
-              *)
-                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ] \
-                  && [ "$(output gitleaks base_leaks)" = "true" ] && [ "$(output gitleaks pr_config_scan)" = "true" ]; then
-                  echo "::warning::Secret Scanning found leaks with the base branch's gitleaks config; every one of them is covered by a fingerprint this PR adds to .gitleaksignore, and the rules are unchanged. Tolerated, because the PR's own fingerprints cannot apply until it merges. A fingerprint allowlists that finding for good: review each added line as a decision that the value is not a real secret."
-                else
-                  fail "$job=$r"
-                fi
-                ;;
+              *) fail "$job=$r" ;;
             esac
           done
 
@@ -3422,7 +3319,7 @@ jobs:
             if [ "$EVENT" = "merge_group" ] || [ "$required" = "true" ]; then
               local r
               r=$(result "$job")
-              if [ "$r" != "success" ] && ! { [ "$job" = "gitleaks" ] && [ "$r" = "failure" ]; }; then
+              if [ "$r" != "success" ]; then
                 fail "$job had to run for this change but is $r"
               fi
             fi

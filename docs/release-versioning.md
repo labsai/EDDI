@@ -232,7 +232,7 @@ testing `main` plus the queued PR(s) — takes the full pipeline and publishes n
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
-| **build-and-test** | Every push/PR/tag | On a push, when changed paths match the `code` filter (`detect-changes` in `ci.yml`: `src/**`, `pom.xml`, `.github/workflows/**`, Dockerfiles, compose files, `ui/**`, `k8s/**`, `helm/**`, `keycloak/**`, the Maven wrapper, the style configs and more); on a PR, when they match the `backend` filter (the same minus `ui/**`) or the operator docs the tests read (`README.md`, `docs/kubernetes.md`, `docs/security.md`, `docs/monitoring/**`, `docs/metrics.md`); always on tags | ~6-9 min |
+| **build-and-test** | Every push/PR/tag | On a push, when changed paths match the `code` filter (`detect-changes` in `ci.yml`: `src/**`, `pom.xml`, `.github/workflows/**`, Dockerfiles, compose files, `ui/**`, `k8s/**`, `helm/**`, `keycloak/**`, the Maven wrapper, the style configs and more); on a PR, when they match the `backend` filter (the same minus `ui/**`) or the operator docs the tests read (`README.md`, `docs/kubernetes.md`, `docs/security.md`, `docs/monitoring/**`, `docs/metrics.md`); always on tags | ~10-14 min |
 | **integration-test** | `code` filter (and `backend` on a PR) | Runs `mvnw verify -DskipITs=false -DskipUTs=true` beside build-and-test and hands its JaCoCo data to coverage-gate | ~13-15 min |
 | **coverage-gate** | Where integration-test runs | Merges the unit and integration JaCoCo data and enforces the 90/80 gate; blocks `docker` | ~2-3 min |
 | **ci-gate** | Every run (`always()`) | The aggregate verdict (above); intended as the required status check and the merge queue's | seconds |
