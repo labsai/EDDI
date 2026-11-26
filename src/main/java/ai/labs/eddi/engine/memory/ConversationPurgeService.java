@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.ErasureIncompleteException;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -19,6 +21,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -62,6 +68,16 @@ public class ConversationPurgeService {
     @Inject
     Instance<ISecretProvider> secretProvider;
 
+    /**
+     * The erasure guarantee for rows written asynchronously about the conversation
+     * (alert events): tombstone, drain barrier on every node, delete, verify.
+     * Field-injected; null when the service is built by hand — such a service
+     * refuses every permanent delete that needs the guarantee rather than deleting
+     * without it.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
+
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
             IConversationService conversationService, Instance<AutoVaultedSecrets> autoVaultedSecrets, Instance<IAttachmentStore> attachmentStore,
@@ -79,6 +95,44 @@ public class ConversationPurgeService {
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
             IConversationService conversationService, Instance<AutoVaultedSecrets> autoVaultedSecrets, Instance<IAttachmentStore> attachmentStore) {
         this(conversationMemoryStore, conversationDescriptorStore, conversationService, autoVaultedSecrets, attachmentStore, null, null);
+    }
+
+    /**
+     * Gives a service built by hand (not by CDI) the erasure guard it needs for a
+     * permanent delete; without one it refuses them.
+     */
+    public void useErasureGuard(ErasureGuard guard) {
+        this.erasureGuard = guard;
+    }
+
+    static final String NO_GUARD = "This conversation purge service was built without the erasure guard, so it cannot guarantee that "
+            + "asynchronously written data (alerts) of the conversation is gone and cannot be written later.";
+
+    /**
+     * The erasure guarantee for many conversations about to be deleted permanently
+     * — the retention sweep: one tombstone write and one drain barrier for all of
+     * them, then the delete and verification of each one's async-written rows
+     * ({@link ErasureGuard#eraseConversations}). Must run before anything else of
+     * them is deleted.
+     *
+     * @return the conversations to keep for the next run, each with the reason;
+     *         every one of them when this service has no erasure guard
+     */
+    public Map<String, String> eraseAsyncWrittenData(Collection<String> conversationIds) {
+        if (conversationIds.isEmpty()) {
+            return Map.of();
+        }
+        if (erasureGuard == null) {
+            Map<String, String> all = new LinkedHashMap<>();
+            conversationIds.forEach(id -> all.put(id, NO_GUARD));
+            return all;
+        }
+        Map<String, String> failed = erasureGuard.eraseConversations(conversationIds);
+        if (!failed.isEmpty()) {
+            LOGGER.errorf("GDPR: the asynchronously written data of %d of %d conversation(s) could not be erased with a guarantee; they are "
+                    + "kept for the next run: %s", failed.size(), conversationIds.size(), sanitize(failed.values().iterator().next()));
+        }
+        return failed;
     }
 
     /** Thrown when a purge is asked for a conversation the caller does not own. */
@@ -115,7 +169,12 @@ public class ConversationPurgeService {
             throw new PurgeRefusedException("Conversation " + sanitize(conversationId) + " is not a conversation of agent test run "
                     + sanitize(runId) + "; refusing to delete it.");
         }
-        purge(conversationId);
+        // No erasure guarantee here: an agent-test conversation belongs to no person
+        // (its user is the synthetic agent-test:<runId>:… id), so there is nothing to
+        // erase — and a cluster-wide drain plus a 400-day tombstone per test
+        // conversation would make every test run as slow as the slowest node's alert
+        // queue. Its alert rows age out on eddi.alerts.event-retention.
+        purge(conversationId, false);
     }
 
     /**
@@ -130,7 +189,16 @@ public class ConversationPurgeService {
      *             findable and a retry of the same delete finishes the job
      */
     public void purge(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        purge(conversationId, true);
+    }
+
+    private void purge(String conversationId, boolean guarded) throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
+        if (guarded && erasureGuard == null) {
+            // Before anything is touched: deleting without the guarantee would report a
+            // delete as done while a queued alert write could still recreate its data.
+            throw new ResourceStoreException(NO_GUARD + " Conversation " + conversationId + " was not deleted.");
+        }
         // If the conversation is a live pending approval, resolve the HITL state
         // BEFORE removing the document: endConversation disarms the armed
         // timeout schedule (otherwise it fires later against a deleted
@@ -168,6 +236,21 @@ public class ConversationPurgeService {
             // gone.
             throw new ResourceStoreException("Could not end conversation " + conversationId
                     + " before deleting it; nothing was deleted. Retry once the conversation store accepts writes.", e);
+        }
+
+        // Before anything else is deleted: the conversation's tombstone, the drain
+        // barrier of the async writers on every node, and the delete and verification
+        // of their rows. If any of it fails nothing else is deleted, so the owner's
+        // retry of the same delete finishes it (the snapshot is what lets them).
+        if (guarded) {
+            try {
+                erasureGuard.eraseConversation(conversationId);
+            } catch (ErasureIncompleteException e) {
+                LOGGER.errorf("GDPR: the asynchronously written data of conversation %s could not be erased with a guarantee: %s",
+                        sanitize(conversationId), sanitize(e.getMessage()));
+                throw new ResourceStoreException("Could not erase the asynchronously written data (alerts) of conversation " + conversationId
+                        + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.", e);
+            }
         }
 
         // The snapshot holds the only references to the conversation's vault

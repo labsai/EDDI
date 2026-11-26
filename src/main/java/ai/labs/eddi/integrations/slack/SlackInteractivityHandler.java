@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -560,6 +561,12 @@ public class SlackInteractivityHandler {
             LOGGER.debugf("HITL conversation %s already resolved: %s",
                     sanitize(conversationId), e.getMessage());
             finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call of this pause needs a mandatory approval (the conversation user's
+            // consent) that a Slack click cannot give: Slack does not authenticate the
+            // clicker as an EDDI user. Nothing ran; the pause and the card stay as they
+            // are, for a decision in the Manager.
+            LOGGER.infof("Slack HITL decision for %s refused: %s", sanitize(conversationId), e.getMessage());
         } catch (IllegalArgumentException e) {
             // A modal decision the engine refused before consuming the pause (checked
             // synchronously at submission; this is the rare race after it).
