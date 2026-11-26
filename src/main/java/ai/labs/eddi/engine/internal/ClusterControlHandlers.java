@@ -7,7 +7,9 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.ClusterStartable;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -30,7 +32,10 @@ import java.util.Optional;
  * (cancel and end issued on another node)</li>
  * <li>{@code group-control}: cancel a group discussion that runs here</li>
  * <li>{@code gdpr-stop}: stop the in-flight work of an erased user, who arrives
- * as a hash</li>
+ * as a hash, then pass the drain barrier of this node's async writers
+ * ({@code drained=true} in the reply)</li>
+ * <li>{@code erasure-drain}: the same drain barrier alone, for an explicit
+ * conversation delete</li>
  * <li>{@code coordinator-status}: this node's queue depths, for the admin
  * cluster view</li>
  * </ul>
@@ -51,6 +56,13 @@ public class ClusterControlHandlers implements ClusterStartable {
     @Inject
     Instance<ClusterMessageSigner> signer;
 
+    /**
+     * The drain barrier of the erasure guarantee. Field-injected; null in tests,
+     * where there are no async writers to drain.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
+
     @Inject
     public ClusterControlHandlers(IClusterRpc rpc, ConversationService conversationService, GroupConversationService groupConversationService,
             Instance<UserErasureParticipant> erasureParticipants, IConversationCoordinator coordinator) {
@@ -67,6 +79,7 @@ public class ClusterControlHandlers implements ClusterStartable {
                 request -> Map.of("signalled", conversationService.signalLocalInFlight(String.valueOf(request.get("conversationId")))));
         rpc.handle(IClusterRpc.GROUP_CONTROL, this::groupControl);
         rpc.handle(IClusterRpc.GDPR_STOP, this::gdprStop);
+        rpc.handle(IClusterRpc.ERASURE_DRAIN, request -> drainReply());
         rpc.handle(IClusterRpc.COORDINATOR_STATUS, request -> {
             Map<String, Object> reply = new LinkedHashMap<>();
             reply.put("queueDepths", coordinator.getQueueDepths());
@@ -93,7 +106,25 @@ public class ClusterControlHandlers implements ClusterStartable {
         }
     }
 
+    /**
+     * The {@code error} of a {@code gdpr-stop} reply to an erasure that wrote no
+     * tombstones.
+     */
+    static final String UNGUARDED_ERASURE_ERROR = "the erasure wrote no erasure tombstones (its coordinating node runs a release without "
+            + "the erasure guarantee), so this node's asynchronously written rows are not guarded — re-run it once every node is upgraded";
+
     private Map<String, Object> gdprStop(Map<String, Object> request) {
+        boolean unguarded = !Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED));
+        if (unguarded) {
+            // An erasure coordinated by a node of an older release: it wrote no tombstones,
+            // so this node's async writers cannot see it and their late writes are not
+            // guarded. The stop and the drain still run below, but the reply carries an
+            // error, which every release's coordinator records as an incomplete cluster
+            // stop: the erasure is not reported complete over writes nothing guards.
+            LOGGER.warn("GDPR: an erasure was coordinated by a node without the erasure guarantee (an older release). Its "
+                    + "asynchronously written rows (alerts) are not guarded; the stop is answered with an error so the erasure is "
+                    + "reported incomplete. Upgrade every node, then re-run that erasure.");
+        }
         String userIdHash;
         if (request.get("userIdSealed") != null) {
             // Sealed with the cluster signing key (B5); a node without the same key cannot
@@ -118,12 +149,31 @@ public class ClusterControlHandlers implements ClusterStartable {
                 failed.add(participant.erasureStepName());
             }
         }
+        // After the stop: the work this node had queued for its async writers before
+        // the erasure's tombstones existed must have finished before the erasing node
+        // deletes. A drain that times out is reported, which fails the cluster stop.
+        Map<String, Object> drain = drainReply();
         Map<String, Object> reply = new LinkedHashMap<>();
         reply.put("stopped", stopped);
+        reply.put("drained", drain.get("drained"));
+        List<String> errors = new ArrayList<>();
         if (!failed.isEmpty()) {
+            errors.add("stop step(s) failed: " + String.join(", ", failed));
+        }
+        if (drain.get("error") != null) {
+            errors.add(String.valueOf(drain.get("error")));
+        }
+        if (unguarded) {
+            errors.add(UNGUARDED_ERASURE_ERROR);
+        }
+        if (!errors.isEmpty()) {
             // Reported, so the erasing node records its cluster stop as incomplete.
-            reply.put("error", "stop step(s) failed: " + String.join(", ", failed));
+            reply.put("error", String.join("; ", errors));
         }
         return reply;
+    }
+
+    private Map<String, Object> drainReply() {
+        return erasureGuard == null ? Map.of("drained", true) : erasureGuard.drainReply();
     }
 }

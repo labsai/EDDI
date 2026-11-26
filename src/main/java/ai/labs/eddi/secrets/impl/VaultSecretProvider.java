@@ -35,6 +35,9 @@ import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.concurrent.ConcurrentHashMap;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -687,6 +690,43 @@ public class VaultSecretProvider implements ISecretProvider {
     @Override
     public boolean isAvailable() {
         return available;
+    }
+
+    /**
+     * A 32-byte key for another feature, derived with HKDF-Expand (RFC 5869,
+     * HMAC-SHA256, one block) from the deployment's keyed-checksum key under the
+     * fixed {@code label}. Never stored: it is recomputed from the KEK-wrapped
+     * checksum key, which survives KEK rotation, so the subkey does too — and a
+     * database dump without the master key does not reveal it.
+     * <p>
+     * It does <b>not</b> survive a replaced checksum key. When the checksum key
+     * cannot be opened and is discarded — {@link #adoptCurrentMasterKey} after a
+     * lost master key ({@code checksumKeyReset}), or an empty vault at startup — a
+     * new random one is created and every subkey changes with it. For the erasure
+     * tombstone key ({@code ErasureGuard}) that means its stored check value no
+     * longer matches: guarded writes and erasures fail closed until the operator
+     * resolves it as {@code docs/gdpr-compliance.md} describes.
+     *
+     * @throws IllegalStateException
+     *             when the vault is not available
+     * @throws PersistenceException
+     *             when the checksum key cannot be read or stored
+     * @throws EnvelopeCrypto.CryptoException
+     *             when the stored checksum key cannot be unwrapped
+     */
+    public byte[] deploymentSubkey(String label) {
+        if (!available) {
+            throw new IllegalStateException("The secrets vault is not available");
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(checksumKey(), "HmacSHA256"));
+            mac.update(label.getBytes(StandardCharsets.UTF_8));
+            mac.update((byte) 1);
+            return mac.doFinal();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 unavailable", e);
+        }
     }
 
     // ─── Key Rotation ───
