@@ -107,12 +107,12 @@ connection. `headerName` is required by the connection model but not used by a m
 
 #### Gmail and Google Workspace
 
-**Not supported as an inbound channel today.** Gmail's IMAP takes OAuth through SASL `XOAUTH2`, and the token for a
+**Gmail OAuth is not supported as an inbound channel today.** Gmail's IMAP takes OAuth through SASL `XOAUTH2`, and the token for a
 mailbox comes from an authorization-code grant: a person consents on Google's screen. EDDI files that grant `PER_USER`
 only — an `OAUTH2_AUTHORIZATION_CODE` connection must be bound `PER_USER`, the model refuses any other binding at save
 time — and a poll runs as no verified user, so it has no principal to look the grant up under. The integration is
 therefore refused at save: `platformConfig.connection` fails the check above with "is bound PER_USER, but a mailbox
-poll runs as no verified user".
+poll runs as no verified user". An app password is a different route, described next.
 
 An **app password** over `BASIC`, with `imaps://imap.gmail.com` in the connection's allowlist (and
 `smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not
@@ -458,8 +458,11 @@ Microsoft 365 tenant sends **unsigned** mail, which this mode refuses
   must also name `smtp://<smtpHost>:587` (STARTTLS, the default) or `smtps://<smtpHost>` (port 465). Exchange Online:
   keep `smtpPort` at `587` and add `smtp://smtp.office365.com:587` to the allowlist — Microsoft documents port 587 (or
   25) for client submission and says a client that defaults to 465 lacks the TLS it requires. Give the app
-  `SMTP.SendAsApp` and allow SMTP AUTH for the mailbox (`Set-CASMailbox -SmtpClientAuthenticationDisabled $false`);
-  with Entra ID security defaults on, SMTP AUTH stays off. The token's scope `https://outlook.office365.com/.default`
+  `SMTP.SendAsApp`, grant the service principal **SendAs** on the mailbox
+  (`Add-RecipientPermission -Identity <address> -Trustee <service principal> -AccessRights SendAs`; Microsoft's note: a
+  client-credentials flow that sends needs it, on top of `FullAccess`), and allow SMTP AUTH for the mailbox
+  (`Set-CASMailbox -Identity <address> -SmtpClientAuthenticationDisabled $false`); with Entra ID security defaults on,
+  SMTP AUTH stays off. The token's scope `https://outlook.office365.com/.default`
   covers IMAP and SMTP. `smtpHost` passes the same socket policy as `host`.
 - **The agent.** It now writes to people. Everything under [Security](#security) applies, and tool approvals matter
   more: an approved tool's result can end up in a reply.

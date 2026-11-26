@@ -42,7 +42,9 @@ These are properties of EDDI's code on `main`, not of any provider:
 - **Marking processed mail.** `processedAction: flag` sets the keyword `$EddiProcessed`. A folder whose
   `PERMANENTFLAGS` accept neither `\*` nor the keyword gets no keyword: polling goes on, one WARN is logged per
   integration and `eddi_email_poll_marked_total{result="nothing"}` counts it. `move:<folder>` needs the server's IMAP
-  `MOVE`; without it, the mail is only flagged. `label:<name>` is refused for the IMAP transport.
+  `MOVE`; without it, the mail is only flagged. A server with neither `MOVE` nor keyword support leaves
+  the mail unmarked: it is not moved and carries no `$EddiProcessed`, so choose a host or account that supports one of
+  them if processed mail stays in the folder. `label:<name>` is refused for the IMAP transport.
 - **DKIM is the sending provider's job.** EDDI verifies inbound DKIM itself and never signs outbound mail. A reply is
   only as trustworthy to its recipient as the mailbox provider's DKIM signing for the domain of `address`.
 
@@ -70,7 +72,8 @@ conversation mode) it is refused as `unauthenticated:none` and never answered. I
 `requireAuthentication: false` runs it — under a memory-free anonymous identity, and with the `From` unproven. So, on
 Microsoft's statement (EDDI has not yet confirmed it against a live tenant), an integration meant for internal
 senders on Microsoft 365 does not work as a conversation-mode integration today; mail
-from outside the tenant (a customer, a supplier) is signed by its own provider and is unaffected. Whether a
+from outside the tenant (a customer, a supplier) is accepted only when its sender provides an aligned DKIM signature (a
+sender on a Microsoft 365 custom domain whose administrator has not enabled DKIM is refused the same way). Whether a
 recipient-side signal can safely stand in for the missing signature is open; EDDI does not trust Exchange's own
 `Authentication-Results` header (`SignedProviderVerdict`: it carries no authserv-id).
 
