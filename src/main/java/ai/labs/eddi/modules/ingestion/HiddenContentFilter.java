@@ -327,7 +327,8 @@ public final class HiddenContentFilter {
                 fontSize = fontSizePx(size, fontSize);
             }
             String visibility = style.get("visibility");
-            if (honourVisibility && visibility != null) {
+            // inherit and unset (visibility is inherited) keep the parent's state.
+            if (honourVisibility && visibility != null && !"inherit".equals(visibility) && !"unset".equals(visibility)) {
                 // Page mode leaves visibility alone: script toggles it like display. A
                 // descendant that says visibility:visible is visible again, as in CSS.
                 invisible = "hidden".equals(visibility) || "collapse".equals(visibility);

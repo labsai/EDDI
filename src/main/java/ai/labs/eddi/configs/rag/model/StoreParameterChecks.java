@@ -180,6 +180,12 @@ public final class StoreParameterChecks {
     }
 
     private static String httpUrl(Map<String, String> params, String key) {
+        // A key given but blank is not "omitted": the factory keeps the empty value
+        // instead of applying its default, and the store then cannot be built.
+        String raw = params.get(key);
+        if (raw != null && raw.isBlank()) {
+            return "storeParameters." + key + " must not be blank; leave it out to use the default";
+        }
         return httpUrl(params, key, "storeParameters");
     }
 

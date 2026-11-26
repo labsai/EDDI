@@ -103,8 +103,9 @@ An independent review found the single-knowledge-base case sound and these gaps;
   one knowledge base's re-embed no longer resets another's record. `reembed` refuses (409) when another knowledge base
   keeps the same chunks in the same store (`SHARED_CHUNKS`, 6.5.0 name layout) or when a shared pgvector table would have to
   change its column size (`SHARED_TABLE_SIZE`); a store failure ends a run early (`SQLException`).
-- **Crash safety (M3).** `reembed` forgets every source's content hashes before it deletes anything, so a crash at any later
-  point leaves each source refilling on its next run instead of empty with state "unchanged".
+- **Crash safety (M3).** `reembed` forgets every source's content hashes before it deletes anything, so after a crash at any
+  later point no source is left empty with state "unchanged". The "rebuilding" mark (third round, below) stays set, and it
+  refuses source runs too: the recovery is to run `reembed` again, which refills every source.
 - **Older configs (M4).** Imports, syncs and upgrades are lenient: retrieval settings out of range are clamped, the rest
   (unknown `storeType`, host with a port, blank name …) is kept and logged at WARN; only an interactive save refuses. The check
   now also runs for an archive's knowledge base that has no sources.
@@ -200,3 +201,23 @@ answers of `reembed` carry a `code`.
   throws an `OperatorFailureException`, which `RagFailures` passes through. A store exception thrown during a replacement still
   reaches the status as the generic sentence, and `RagIngestionServiceClusterTest` asserts that now instead of the driver's text.
 - **`EDDI_TABLES`** lists `attachment_grants` and `attachment_grants_backfill`, the tables the attachment-grant migration creates.
+
+**Second CodeRabbit round (2026-11-26):**
+
+- **Tests.** `PgVectorScaleLayoutIT` creates its tables through `getOrCreateForIngestion`; the read lookup no longer creates a
+  missing table, so three of its tests failed.
+- **Save-time checks.** A store URL given but blank (`baseUrl: ""` for Chroma, `serverUrl` for Elasticsearch) is refused at save;
+  the factory kept the empty value instead of its default. An omitted key or a `${…}` reference is still accepted.
+- **Hidden text.** `visibility: inherit` and `unset` keep a hidden parent's state. In a workbook, a cell without a reference is
+  checked against the column it is placed in, a row without a row number takes the one after the previous row (so a hidden one is
+  dropped), and a sheet that reaches the row limit is still read to its `autoFilter`, so the filter's hidden rows are kept.
+- **Docs.** `docs/rag.md` states the window a direct `POST /ingest` still has against a re-embed on another node, and a recovery for a
+  store that cannot delete by metadata (move the knowledge base to a new collection).
+
+Left open from this round, as separate changes: a direct ingest is not fenced against a concurrent re-embed on another node (it holds
+no lease); concurrent re-embeds of a knowledge base with no sources are not excluded across nodes; a pgvector tagged delete and the
+layout check are not done under one lock; the layout check matches column names and the `embedding` type, not every column type
+and key; an Atlas location key includes the connection string's credentials; legacy pgvector knowledge bases on one default table
+are guarded per chunk tag although legacy retrieval does not filter by it; a re-embed re-resolves `${vars:…}` at each step; a cache
+publication can briefly replace a newer rebuild mark on the same node. The inbound-mail dashboard panel's grouping is not part of
+this branch.

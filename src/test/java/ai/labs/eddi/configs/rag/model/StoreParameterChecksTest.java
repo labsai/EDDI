@@ -114,6 +114,17 @@ class StoreParameterChecksTest {
     }
 
     @Test
+    @DisplayName("a store URL given but blank is refused; one left out, or a reference, is not")
+    void blankStoreUrls() {
+        for (String blank : new String[]{"", "   "}) {
+            assertTrue(StoreParameterChecks.findProblem("chroma", Map.of("baseUrl", blank)).contains("storeParameters.baseUrl"));
+            assertTrue(StoreParameterChecks.findProblem("elasticsearch", Map.of("serverUrl", blank)).contains("storeParameters.serverUrl"));
+        }
+        assertNull(StoreParameterChecks.findProblem("chroma", Map.of()));
+        assertNull(StoreParameterChecks.findProblem("chroma", Map.of("baseUrl", "${vars:chroma-url}")));
+    }
+
+    @Test
     @DisplayName("a pgvector table named like one of EDDI's own is refused at save, schema-qualified or not")
     void eddiTablesAreRefused() {
         assertTrue(refusal(pgvector(Map.of("table", "resources"))).contains("one of EDDI's own tables"));

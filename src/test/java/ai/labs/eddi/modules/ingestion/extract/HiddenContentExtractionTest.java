@@ -302,6 +302,59 @@ class HiddenContentExtractionTest {
         }
 
         @Test
+        @DisplayName("a hidden row without a row number is still hidden: it takes the number after the previous row")
+        void aHiddenRowWithoutANumberIsDropped() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row><c t="s"><v>0</v></c></row>
+                        <row hidden="1"><c r="A2" t="s"><v>3</v></c></row>
+                      </sheetData>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("SHOWN-ROW"), text);
+            assertFalse(text.contains("HAND-HIDDEN-ROW"), text);
+        }
+
+        @Test
+        @DisplayName("a cell without a reference in a hidden column is left out: its place is the next column")
+        void aCellWithoutAReferenceInAHiddenColumnIsLeftOut() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <cols><col min="1" max="1" width="9" hidden="1"/></cols>
+                      <sheetData>
+                        <row r="1"><c t="s"><v>3</v></c><c r="B1" t="s"><v>0</v></c></row>
+                      </sheetData>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("SHOWN-ROW"), text);
+            assertFalse(text.contains("HAND-HIDDEN-ROW"), text);
+        }
+
+        @Test
+        @DisplayName("at the row limit the autoFilter after the data is still read, so its hidden rows are kept")
+        void theFilterIsReadEvenWhenTheRowLimitIsReached() {
+            var threeRows = new ExtractionLimits(VISIBLE_ONLY.maxCharacters(), VISIBLE_ONLY.maxParts(), 3, VISIBLE_ONLY.maxColumnsPerSheet(),
+                    VISIBLE_ONLY.maxUncompressedBytes());
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                        <row r="2" hidden="1"><c r="A2" t="s"><v>1</v></c></row>
+                        <row r="3" hidden="1"><c r="A3" t="s"><v>1</v></c></row>
+                        <row r="4"><c r="A4" t="s"><v>2</v></c></row>
+                      </sheetData>
+                      <autoFilter ref="A1:A4"/>
+                    </worksheet>
+                    """), threeRows);
+
+            assertTrue(text.contains("SHOWN-ROW") && text.contains("FILTERED-OUT-ROW"), text);
+            assertFalse(text.contains("GROUPED-ROW"), "the row past the limit is not kept: " + text);
+        }
+
+        @Test
         @DisplayName("a row that is grouped and explicitly hidden counts as grouped, and is kept")
         void groupedAndHiddenIsKept() {
             String text = extractor.extract(sheetOnly("""

@@ -473,7 +473,10 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
      (`409` `TABLE_BUSY`) or rows of another knowledge base appeared (`409` `SHARED_TABLE_SIZE`), **nothing is
      removed** and the record is as it was; re-embed again later;
    - *another store*: the chunks are deleted by tag; the collection stays. A store that cannot delete by
-     metadata answers `501` and nothing is removed — empty it by hand first;
+     metadata answers `501` and nothing is removed, and a retry answers the same. To change the model there,
+     give the knowledge base a new, empty collection: the model is recorded per location, so the new one
+     starts without a record and takes the configured model on its first write. Run its sources, then drop
+     the old collection by hand;
    - *in-memory*: the store is dropped.
 
    A table that is not an EDDI pgvector table is never touched. The answer's `tableRecreated` is `true`
@@ -522,7 +525,10 @@ record for up to 30 seconds for **searches** — so for that long after a model 
 node a search there may still be answered under the old record (and, during a re-embed, from a store being
 emptied and refilled), or refused under it. **Writes never use the cache**: a source run reads the record
 from the database once when it starts, and `POST /ingest` reads it before the store is built and again just
-before the vectors are written, so no node writes into a space another node has just changed or marked. The
+before the vectors are written. A source run holds its source's claim, which a re-embed on any node must take
+first. A direct `POST /ingest` holds no claim: a re-embed that another node starts between that second read
+and the write is not seen, and the write can land in the store being rebuilt, under the old model. Do not
+ingest directly into a knowledge base while it is being re-embedded. The
 column size read from a pgvector table is remembered for up to a minute (or until the store is rebuilt or
 its table dropped); a stale value there is fail-safe, because PostgreSQL itself refuses a vector of the wrong
 size. Sources are claimed in the shared state store, so concurrent runs and a concurrent second re-embed (on
@@ -962,7 +968,7 @@ every prompt that retrieves it. So an **uploaded** file is read the way a person
 | Format | Left out |
 | --- | --- |
 | Word | runs marked hidden (`w:vanish`, `w:specVanish` or `w:webHidden`, unless switched off) and runs set at one point or smaller (`w:sz` 2 or less). A paragraph whose *mark* is hidden keeps its text |
-| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** a hidden row that lies inside the sheet's `autoFilter` range (a filter can be the reason), and rows or columns collapsed by grouping (`outlineLevel`) — also when they are explicitly hidden as well, because a collapsed group is not the author hiding text. **Dropped:** a row or column hidden by hand that is neither grouped nor inside a filter's range; a row without a row number (`r`) is kept, since its place cannot be told. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
+| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** a hidden row that lies inside the sheet's `autoFilter` range (a filter can be the reason), and rows or columns collapsed by grouping (`outlineLevel`) — also when they are explicitly hidden as well, because a collapsed group is not the author hiding text. **Dropped:** a row or column hidden by hand that is neither grouped nor inside a filter's range; a row without a row number (`r`) is the one after the previous row, and a cell without a reference (`r`) the one after the previous cell. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
 | PowerPoint | slides marked "hide slide" (`show="0"`) and any shape marked hidden — text boxes, pictures, groups (with everything in them), connectors and any other shape kind; a hidden shape ends where it ends and never takes the next one's text with it |
 | HTML | elements the markup hides outright — the `hidden` attribute, `display:none`, zero `opacity`, off-screen or zero-size elements — on top of what the page converter always drops (comments, one-pixel text, transparent text, text the same colour as an explicitly set background) |
 

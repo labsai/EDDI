@@ -190,18 +190,29 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         // recognised by the sheet's autoFilter element, which follows the data, and a
         // group's by outlineLevel). So hidden rows are kept until the sheet is read.
         boolean rowHidden = false;
-        int rowNumber = -1;
+        // A row may omit its number (r); it is then the one after the previous row.
+        int rowNumber = 0;
         // The rows an autoFilter covers (1-based, inclusive), once its element is read.
         int filterFrom = -1;
         int filterTo = -1;
         // Per kept row: its row number when it is hidden by hand (a candidate to drop),
         // else -1.
         List<Integer> handHiddenRows = new ArrayList<>();
+        // Once the row limit is reached the rest of the sheet is still read, without
+        // keeping its rows: the autoFilter that decides which hidden rows stay follows
+        // the data.
+        boolean full = false;
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(sheetXml)) {
             XMLStreamReader xml = reader.reader();
-            while (xml.hasNext() && rows.size() < limits.maxRowsPerSheet()) {
+            while (xml.hasNext()) {
                 int event = xml.next();
+                if (full && event == XMLStreamConstants.START_ELEMENT && !"autoFilter".equals(xml.getLocalName())) {
+                    continue;
+                }
+                if (full && event == XMLStreamConstants.END_ELEMENT) {
+                    continue;
+                }
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
                         case "col" -> {
@@ -212,7 +223,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                         }
                         case "row" -> {
                             rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml);
-                            rowNumber = intOr(OpenXmlPackage.attribute(xml, "r"), -1);
+                            rowNumber = intOr(OpenXmlPackage.attribute(xml, "r"), rowNumber + 1);
                         }
                         case "autoFilter" -> {
                             int[] range = rowRange(OpenXmlPackage.attribute(xml, "ref"));
@@ -231,13 +242,16 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     if ("c".equals(xml.getLocalName())) {
+                        // A cell without a reference is the one after the previous cell.
+                        int index = column >= 0 ? column : row.size();
                         // A hidden column keeps its place, empty, so the others stay aligned.
-                        placeCell(row, column, hiddenColumns.contains(column) ? "" : resolve(cell.toString(), cellType, sharedStrings),
+                        placeCell(row, index, hiddenColumns.contains(index) ? "" : resolve(cell.toString(), cellType, sharedStrings),
                                 limits);
                     } else if ("row".equals(xml.getLocalName())) {
                         if (row.stream().anyMatch(value -> !value.isEmpty())) {
                             rows.add(List.copyOf(row));
                             handHiddenRows.add(rowHidden ? rowNumber : -1);
+                            full = rows.size() >= limits.maxRowsPerSheet();
                         }
                         row = new ArrayList<>();
                     }

@@ -260,7 +260,7 @@ class PgVectorScaleLayoutIT {
         String qualifiedId = "65f0aa11bb22cc33dd44ef02";
 
         String firstBuild = ddlLoggedDuring(() -> {
-            EmbeddingStore<TextSegment> store = factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
+            EmbeddingStore<TextSegment> store = factory.getOrCreateForIngestion(unqualifiedId, scopedKb("docs", Map.of()));
             store.add(Embedding.from(new float[]{1f, 0f, 0f}), segment("written through docs"));
         });
 
@@ -308,7 +308,7 @@ class PgVectorScaleLayoutIT {
             assertEquals("json", PgVectorSchema.inspect(c, "public.docs_v2").metadataType());
         }
 
-        factory.getOrCreate("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
+        factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
 
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs_v2"));
         assertEquals(4, indexes(SCOPED_SCHEMA, "docs_v2").size());
@@ -323,7 +323,7 @@ class PgVectorScaleLayoutIT {
         Set<String> expected = Set.of("shared_pkey", "shared_hnsw_idx", "shared_doc_src_idx", "shared_src_run_idx");
 
         // A table outside current_schema(), named with its schema.
-        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of())));
+        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreateForIngestion(qualifiedId, scopedKb("public.shared", Map.of())));
         assertEquals("jsonb", metadataType("public.shared"));
         assertEquals(expected, indexes("public", "shared").keySet());
         assertEquals(3, createIndexStatements(qualifiedBuild), qualifiedBuild);
@@ -331,7 +331,7 @@ class PgVectorScaleLayoutIT {
         // The same name unqualified is myschema.shared. public.shared's indexes are on
         // the search_path under the very names this table's indexes get, and must not
         // be mistaken for them.
-        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of())));
+        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreateForIngestion(unqualifiedId, scopedKb("shared", Map.of())));
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".shared"));
         assertEquals(expected, indexes(SCOPED_SCHEMA, "shared").keySet());
         assertEquals(3, createIndexStatements(unqualifiedBuild), unqualifiedBuild);
