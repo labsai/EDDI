@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -80,7 +81,8 @@ class GroupSigningRoundTripTest {
         IAgentStore agentStore = inMemoryAgentStore();
         restAgentStore = new RestAgentStore(agentStore, mock(IRestWorkflowStore.class), descriptorStore(),
                 mock(IJsonSchemaCreator.class), mock(IScheduleStore.class), mock(CapabilityRegistryService.class), mock(IDeploymentStore.class),
-                mock(ResourceAccessGuard.class), signing, mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
+                mock(ResourceAccessGuard.class), signing, mock(IAgentFactory.class), "default", mock(AgentCascadeService.class),
+                mock(VaultGrantService.class));
         guard = new GroupSigningGuard(agentStore, signing, "default");
 
         agents.put(SPEAKER, new ArrayList<>(List.of(agent())));

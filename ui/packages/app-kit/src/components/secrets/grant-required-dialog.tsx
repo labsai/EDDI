@@ -301,6 +301,7 @@ function GrantRequiredBody({
                   defaultValue: "Add \"{{agent}}\" to the grant?",
                 })}
           </p>
+          {request.offerAllowAll !== false && (
           <label className="flex items-start gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
@@ -324,6 +325,7 @@ function GrantRequiredBody({
               )}
             </span>
           </label>
+          )}
         </div>
       )}
 
