@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import ai.labs.eddi.engine.documents.spend.DocumentSpendLimits;
 import ai.labs.eddi.modules.ingestion.extract.ImageLimits;
 import org.junit.jupiter.api.DisplayName;
@@ -149,5 +150,15 @@ class DocumentSettingsDefaultsTest {
         assertEquals(OptionalDouble.of(0.0), limits.maxPerTeamPerDayUsd());
         assertEquals(1, limits.retentionDays());
         assertTrue(new DocumentSpendLimits(OptionalDouble.of(Double.NaN), null, 35).maxPerUserPerDayUsd().isEmpty());
+    }
+
+    // --- WP-5a.1 ---
+
+    @Test
+    @DisplayName("library store limits: the design's defaults, from the deployment's configuration")
+    void libraryLimits() {
+        var expected = new LibraryStoreSupport.Limits(50, 2_147_483_648L, 365, 1000);
+        assertEquals(expected, DocumentSettings.none().libraryLimits());
+        assertEquals(expected, new DocumentSettings().libraryLimits(), "no property set in the test configuration");
     }
 }

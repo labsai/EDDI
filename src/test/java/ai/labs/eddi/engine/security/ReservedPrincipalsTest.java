@@ -48,6 +48,7 @@ class ReservedPrincipalsTest {
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),
             Map.entry("space:", "descriptor access token (Subjects.SPACE_TOKEN_PREFIX)"),
             Map.entry("conversation:", "attachment lock key"),
+            Map.entry("library:", "personal library bucket lock id (LibraryStoreSupport.bucketLock, library:<ownerKey>), never a principal"),
             Map.entry("derived:", "ConversationListing de-duplication key of a recorded derived selector, never a principal"),
             Map.entry("manifest:",
                     "derived-blob unit id of a cached manifest (DocumentStructureService.MANIFEST_UNIT_PREFIX + split hash), never a principal"),

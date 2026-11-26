@@ -339,8 +339,9 @@ class PostgresAttachmentStoreTest {
     @Test
     void delete_rowWithNoOwner_isAllowed() throws Exception {
         // deleting discloses nothing: an ownerless legacy row must stay erasable
-        // the row's owner lookup, then the one row the DELETE ... RETURNING removes
-        when(resultSet.next()).thenReturn(true, true, false);
+        // the row's owner lookup, the owner read again under the root's row lock,
+        // then the one row the DELETE ... RETURNING removes
+        when(resultSet.next()).thenReturn(true, true, true, false);
         when(resultSet.getString("conversation_id")).thenReturn(null);
         when(preparedStatement.executeUpdate()).thenReturn(1);
 

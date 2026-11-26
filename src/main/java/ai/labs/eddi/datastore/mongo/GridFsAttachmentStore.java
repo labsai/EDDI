@@ -14,6 +14,10 @@ import ai.labs.eddi.engine.attachments.DerivedBlobs;
 import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
+import ai.labs.eddi.engine.attachments.LibraryEntry;
+import ai.labs.eddi.engine.attachments.LibraryMeta;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
 import ai.labs.eddi.engine.attachments.QuotaMode;
@@ -64,6 +68,7 @@ import java.nio.file.NoSuchFileException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
@@ -166,6 +171,31 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      * {@link QuotaMode#STANDARD}.
      */
     static final String META_QUOTA_MODE = "quotaMode";
+    /**
+     * A library document's own fields, on its root file; absent on every
+     * conversation-owned file. {@value #META_LAST_ACCESSED_AT} is its last access,
+     * from which retention counts.
+     */
+    static final String META_LIBRARY_TITLE = "libraryTitle";
+    static final String META_LIBRARY_SLUG = "librarySlug";
+    static final String META_AGENT_SCOPE = "agentScope";
+    static final String META_CONTRIBUTED_BY = "contributedBy";
+    static final String META_SAVED_AT = "savedAt";
+    static final String META_REMOVED_AT = "removedAt";
+    static final String META_RETENTION_DAYS = "retentionDays";
+    /** The scopes of a library owner, as stored. */
+    private static final List<String> LIBRARY_SCOPES = List.of(OwnerScope.USER.name(), OwnerScope.TEAM.name());
+    /**
+     * Owned by a conversation: no owner scope recorded (every file stored before it
+     * existed) or {@code CONVERSATION}. {@code $nin} matches a missing field.
+     */
+    private static final Bson CONVERSATION_OWNED = Filters.nin("metadata." + META_OWNER_SCOPE, LIBRARY_SCOPES);
+    private static final Bson LIBRARY_OWNED = Filters.in("metadata." + META_OWNER_SCOPE, LIBRARY_SCOPES);
+    private static final String LIBRARY_DELETE_DENIED = "Delete denied: this is a library document; library documents are removed through the library";
+    /**
+     * How often a derived write starts over when its root changed owner meanwhile.
+     */
+    static final int OWNER_CHANGE_ATTEMPTS = 3;
     static final String LOCKS_COLLECTION = BUCKET_NAME + ".quota_locks";
     static final String GRANTS_COLLECTION = "attachment_grants";
     static final String GRANT_STORAGE_REF = "storageRef";
@@ -224,6 +254,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      */
     private final GridFSBucket primaryReadBucket;
     private final MongoCollection<Document> filesCollection;
+    /**
+     * The bucket's chunks, for a delete that is conditional on the files document.
+     */
+    private final MongoCollection<Document> chunksCollection;
     private final MongoCollection<Document> locksCollection;
     /**
      * Read from the PRIMARY, like the quota usage: a member's first read follows
@@ -274,6 +308,20 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     defaultValue = "" + DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE)
     long derivedMaxTextBytesPerSource = DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE;
 
+    @ConfigProperty(name = "eddi.documents.library.max-per-user", defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_PER_USER)
+    long libraryMaxPerUser = LibraryStoreSupport.DEFAULT_MAX_PER_USER;
+
+    @ConfigProperty(name = "eddi.documents.library.max-total-bytes-per-user",
+                    defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_TOTAL_BYTES_PER_USER)
+    long libraryMaxTotalBytesPerUser = LibraryStoreSupport.DEFAULT_MAX_TOTAL_BYTES_PER_USER;
+
+    @ConfigProperty(name = "eddi.documents.library.retention-days", defaultValue = "" + LibraryStoreSupport.DEFAULT_RETENTION_DAYS)
+    int libraryRetentionDays = LibraryStoreSupport.DEFAULT_RETENTION_DAYS;
+
+    @ConfigProperty(name = "eddi.documents.library.max-grants-per-document",
+                    defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_GRANTS_PER_DOCUMENT)
+    int libraryMaxGrantsPerDocument = LibraryStoreSupport.DEFAULT_MAX_GRANTS_PER_DOCUMENT;
+
     /**
      * The longest a streamed upload may take: the reservation the store takes for
      * one lasts this long.
@@ -291,6 +339,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     @Inject
     Event<AttachmentRootDeleted> rootDeletedEvent;
 
+    /** Announces roots that changed owner; {@code null} outside CDI (tests). */
+    @Inject
+    Event<AttachmentOwnerChanged> ownerChangedEvent;
+
     /** {@code null} outside CDI (tests). */
     @Inject
     MeterRegistry meterRegistry;
@@ -300,6 +352,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
         this.primaryReadBucket = gridFSBucket.withReadPreference(ReadPreference.primary());
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
+        this.chunksCollection = database.getCollection(BUCKET_NAME + ".chunks");
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
         this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
         this.backfillCollection = database.getCollection(BACKFILL_COLLECTION).withReadPreference(ReadPreference.primary());
@@ -361,6 +414,49 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      */
     public void ensureLineageIndexes() {
         ensureLineageIndexes(filesCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+    }
+
+    /**
+     * The library indexes, within a budget of their own; called at startup by
+     * {@link GridFsIndexInitializer}.
+     */
+    public void ensureLibraryIndexes() {
+        ensureLibraryIndexes(filesCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+    }
+
+    /**
+     * The library listings and the reaper's scans, on {@code (ownerKey,
+     * lastAccessedAt)} and {@code (ownerKey, removedAt)}, and the slug check on
+     * {@code (ownerKey, librarySlug)} — partial on library roots (a library owner
+     * scope and a {@code savedAt}), which every owner-keyed query names, so they
+     * hold library roots only and serve those queries. The reaper's scans
+     * ({@code expired}, {@code removedBefore}) name no owner and scan the library
+     * roots. Slug uniqueness itself runs under the library's bucket lock. A failure
+     * is logged, as for the other indexes.
+     */
+    static void ensureLibraryIndexes(MongoCollection<Document> filesCollection, long deadlineNanos, LongSupplier nanoClock) {
+        String ownerKey = "metadata." + META_OWNER_KEY;
+        Bson libraryRoots = Filters.and(Filters.exists("metadata." + META_SAVED_AT), Filters.in("metadata." + META_OWNER_SCOPE, LIBRARY_SCOPES));
+        List<Map.Entry<Bson, IndexOptions>> indexes = List.of(
+                Map.entry(Indexes.ascending(ownerKey, "metadata." + META_LAST_ACCESSED_AT),
+                        new IndexOptions().partialFilterExpression(libraryRoots)),
+                Map.entry(Indexes.ascending(ownerKey, "metadata." + META_REMOVED_AT), new IndexOptions().partialFilterExpression(libraryRoots)),
+                Map.entry(Indexes.ascending(ownerKey, "metadata." + META_LIBRARY_SLUG), new IndexOptions().partialFilterExpression(libraryRoots)));
+        for (Map.Entry<Bson, IndexOptions> index : indexes) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - nanoClock.getAsLong());
+            if (remainingMillis <= 0) {
+                LOGGER.warn("Ran out of time creating the attachment library indexes; library lookups fall back to a scan");
+                return;
+            }
+            try {
+                filesCollection.withTimeout(remainingMillis, TimeUnit.MILLISECONDS).createIndex(index.getKey(), index.getValue());
+            } catch (MongoTimeoutException e) {
+                LOGGER.warnf("Timed out creating an attachment library index; library lookups fall back to a scan: %s", sanitize(e.getMessage()));
+                return;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment library index; library lookups fall back to a scan: %s", sanitize(e.getMessage()));
+            }
+        }
     }
 
     /**
@@ -1008,6 +1104,28 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
     }
 
+    /**
+     * {@link #deleteFile}, but only while the file is still conversation-owned —
+     * one condition on the files document, so a {@link #promote} that committed
+     * after the file was read keeps it. Its bytes elsewhere are marked first, as
+     * for any delete; a file that stayed is still referenced, so the sweep keeps
+     * them and drops the mark.
+     *
+     * @return whether it was deleted
+     */
+    private boolean deleteFileIfConversationOwned(GridFSFile file, List<Map.Entry<BlobLocator, String>> retired) {
+        BlobLocator locator = retire(file);
+        if (filesCollection.deleteOne(Filters.and(Filters.eq("_id", file.getObjectId()), CONVERSATION_OWNED)).getDeletedCount() == 0) {
+            return false;
+        }
+        chunksCollection.deleteMany(Filters.eq("files_id", file.getObjectId()));
+        if (locator != null) {
+            String ownerKey = meta(file, META_OWNER_KEY) != null ? meta(file, META_OWNER_KEY) : meta(file, META_CONVERSATION_ID);
+            retired.add(Map.entry(locator, ownerKey));
+        }
+        return true;
+    }
+
     private void discardAll(List<Map.Entry<BlobLocator, String>> retired) {
         for (Map.Entry<BlobLocator, String> entry : retired) {
             discard(entry.getKey(), entry.getValue());
@@ -1093,9 +1211,16 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         filesCollection.updateOne(Filters.eq("_id", file.getObjectId()), Updates.addToSet("metadata." + META_GRANTS, conversationId));
         // A delete that ran between the lookup and the grant row leaves a row with
         // no blob; take it back, so a grant never outlives its blob.
-        if (primaryReadBucket.find(Filters.eq("_id", file.getObjectId())).first() == null) {
+        GridFSFile current = primaryReadBucket.find(Filters.eq("_id", file.getObjectId())).first();
+        if (current == null) {
             grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef));
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        if (OwnerScope.fromStored(meta(current, META_OWNER_SCOPE)) != OwnerScope.CONVERSATION) {
+            // A library document is opened by any number of conversations: past the cap
+            // the oldest grant goes, never the one just written. Not serialized: two
+            // concurrent grants may leave one too many, until the next.
+            evictGrants(current, canonicalRef, conversationId);
         }
         LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                 sanitize(conversationId), storageRef);
@@ -1225,11 +1350,67 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
     }
 
+    /**
+     * Evicts the grants of a library document beyond
+     * {@code eddi.documents.library.max-grants-per-document}, oldest first, in both
+     * shapes, keeping {@code keep}'s.
+     */
+    private void evictGrants(GridFSFile root, String canonicalRef, String keep) {
+        if (libraryMaxGrantsPerDocument <= 0) {
+            return;
+        }
+        List<String> rows = new ArrayList<>();
+        for (Document grant : grantsCollection.find(Filters.eq(GRANT_STORAGE_REF, canonicalRef))
+                .sort(Sorts.ascending(GRANT_CREATED_AT, "_id")).projection(Projections.include(GRANT_CONVERSATION_ID))) {
+            if (grant.getString(GRANT_CONVERSATION_ID) != null) {
+                rows.add(grant.getString(GRANT_CONVERSATION_ID));
+            }
+        }
+        Document metadata = root.getMetadata();
+        // As stored: a null or non-string element must not stop the eviction.
+        List<Object> stored = metadata != null ? metadata.getList(META_GRANTS, Object.class) : null;
+        List<String> legacy = stored == null ? List.of() : stored.stream().filter(Objects::nonNull).map(String::valueOf).toList();
+        List<String> evict = LibraryStoreSupport.grantsToEvict(legacy, rows, keep, libraryMaxGrantsPerDocument);
+        if (evict.isEmpty()) {
+            return;
+        }
+        grantsCollection.deleteMany(Filters.and(Filters.eq(GRANT_STORAGE_REF, canonicalRef), Filters.in(GRANT_CONVERSATION_ID, evict)));
+        filesCollection.updateOne(Filters.eq("_id", root.getObjectId()), Updates.pullAll("metadata." + META_GRANTS, evict));
+        LOGGER.debugf("Evicted %d grants of library document %s (cap %d)", (Object) evict.size(), canonicalRef, (Object) libraryMaxGrantsPerDocument);
+    }
+
+    /**
+     * Deletes one blob for its owning conversation. The root's source lock is held
+     * while the owner is read again and the files go, so a {@link #promote} — which
+     * holds it too — either made the file a library document before (refused) or
+     * finds it gone after.
+     */
     @Override
     public boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException {
-        GridFSFile file = findFileByRef(storageRef);
+        GridFSFile found = findFileByRef(storageRef);
+        if (found == null) {
+            return false;
+        }
+        String lockRef = meta(found, META_ROOT_REF) != null ? meta(found, META_ROOT_REF) : canonicalRef(found);
+        List<String[]> held = new ArrayList<>();
+        try {
+            lockAll(List.of(new Lock(AttachmentLockOrder.Scope.SOURCE, lockRef)), held);
+            return deleteLocked(storageRef, requestingConversationId);
+        } finally {
+            releaseAll(held);
+        }
+    }
+
+    private boolean deleteLocked(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile file = primaryReadBucket.find(refFilter(storageRef)).first();
         if (file == null) {
             return false;
+        }
+        GridFSFile lineageRoot = rootFileOf(file);
+        // Whichever conversation asks — the one it came from included.
+        if (OwnerScope.fromStored(meta(file, META_OWNER_SCOPE)) != OwnerScope.CONVERSATION
+                || lineageRoot != null && OwnerScope.fromStored(meta(lineageRoot, META_OWNER_SCOPE)) != OwnerScope.CONVERSATION) {
+            throw new AttachmentAccessDeniedException(LIBRARY_DELETE_DENIED);
         }
         Document metadata = file.getMetadata();
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
@@ -1283,8 +1464,15 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         // is refused and its writer deletes the blob, and a blob converted before
         // this line was stored before it, so the scan sees it.
         reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
-        for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
-            deleteFile(file, retired);
+        // A library document that came from this conversation keeps its conversation
+        // id as origin; it is the library's, and stays.
+        // Each file is deleted only while it is still conversation-owned: a promote
+        // that moved it after the cursor read it has made it the library's.
+        for (GridFSFile file : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId),
+                CONVERSATION_OWNED))) {
+            if (!deleteFileIfConversationOwned(file, retired)) {
+                continue;
+            }
             String ref = canonicalRef(file);
             deletedRefs.add(ref);
             if (meta(file, META_ROOT_REF) == null) {
@@ -1318,7 +1506,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
-        return listMatching(Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId), ROOTS_ONLY));
+        // A library document keeps its origin conversation's id, but is not its own.
+        return listMatching(Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId), CONVERSATION_OWNED, ROOTS_ONLY));
     }
 
     @Override
@@ -1336,8 +1525,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 grantedRefs.add(ref);
             }
         }
+        // A library document is listed through a grant only, and not while it is
+        // soft-removed.
         List<Bson> clauses = new ArrayList<>(List.of(
-                Filters.eq("metadata." + META_CONVERSATION_ID, conversationId),
+                Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId), CONVERSATION_OWNED),
                 Filters.eq("metadata." + META_GRANTS, conversationId)));
         if (!grantedRefs.isEmpty()) {
             clauses.add(Filters.in("metadata." + META_STORAGE_REF, grantedRefs));
@@ -1347,7 +1538,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 clauses.add(Filters.in("_id", legacyIds));
             }
         }
-        return listMatching(Filters.and(Filters.or(clauses), ROOTS_ONLY));
+        return listMatching(Filters.and(Filters.or(clauses), ROOTS_ONLY, Filters.eq("metadata." + META_REMOVED_AT, null)));
     }
 
     private List<Attachment> listMatching(Bson filter) {
@@ -1404,7 +1595,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             count += ((Number) sum.get(RESERVATION_COUNT)).longValue();
             totalBytes += ((Number) sum.get(RESERVATION_BYTES)).longValue();
         }
-        for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + field, value))) {
+        // A library document and its views count in the library's bucket only.
+        for (GridFSFile file : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + field, value), CONVERSATION_OWNED))) {
             boolean bytesCount = !largeExempt || QuotaMode.fromStored(meta(file, META_QUOTA_MODE)) != QuotaMode.LARGE_PER_USER;
             if (meta(file, META_ROOT_REF) == null) {
                 count++;
@@ -1438,8 +1630,31 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
         String resolvedMime = MimeValidator.normalize(mimeType != null ? mimeType : MimeValidator.detectMime(bytes));
         String sha256 = DerivedBlobs.sha256Hex(bytes);
-        Kind kind = derivation.kind();
+        // The owner is the root's at write time: when it changes between the read and
+        // the lock (a promote), the write starts over with the new owner — its buckets
+        // and locks — rather than failing.
+        for (int attempt = 1;; attempt++) {
+            try {
+                return storeDerivedOnce(bytes, resolvedMime, filename, derivation, requestingConversationId, sha256);
+            } catch (OwnerChangedException e) {
+                if (attempt >= OWNER_CHANGE_ATTEMPTS) {
+                    throw new AttachmentStoreException("The owner of this file changed while a view of it was being stored. Please retry.");
+                }
+            }
+        }
+    }
 
+    /** A root's owner changed between reading it and locking it. */
+    private static final class OwnerChangedException extends AttachmentStoreException {
+        OwnerChangedException() {
+            super("The owner of this file changed while a view of it was being stored");
+        }
+    }
+
+    private Attachment storeDerivedOnce(byte[] bytes, String resolvedMime, String filename, Derivation derivation, String requestingConversationId,
+                                        String sha256)
+            throws AttachmentStoreException {
+        Kind kind = derivation.kind();
         GridFSFile source = resolveSource(derivation, requestingConversationId);
         GridFSFile root = readableRootOf(source, requestingConversationId,
                 derivation.parentRef() != null ? derivation.parentRef() : derivation.rootRef());
@@ -1448,12 +1663,19 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         String conversationId = meta(root, META_CONVERSATION_ID);
         String userId = meta(root, META_USER_ID);
         String ownerKey = meta(root, META_OWNER_KEY) != null ? meta(root, META_OWNER_KEY) : conversationId;
+        OwnerScope scope = OwnerScope.fromStored(meta(root, META_OWNER_SCOPE));
+        boolean library = scope != OwnerScope.CONVERSATION;
 
         boolean media = DerivedCaps.countsTowardOwnerQuota(kind);
-        boolean conversationQuota = media && maxTotalBytesPerConversation > 0;
-        boolean userQuota = media && userId != null && maxTotalBytesPerUser > 0;
-        // Lock order: conversation → user → source, as every writer takes them.
+        boolean conversationQuota = media && !library && maxTotalBytesPerConversation > 0;
+        boolean userQuota = media && !library && userId != null && maxTotalBytesPerUser > 0;
+        boolean libraryQuota = media && library && libraryMaxTotalBytesPerUser > 0;
+        // Lock order: conversation → user → team → source, as every writer takes them;
+        // a library's bucket locks in its owner's place.
         List<Lock> locks = bucketLocks(conversationQuota ? conversationId : null, userQuota ? userId : null);
+        if (libraryQuota) {
+            locks.add(LibraryStoreSupport.bucketLock(scope, ownerKey));
+        }
         locks.add(new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef));
         List<String[]> held = new ArrayList<>();
         ObjectId uploaded;
@@ -1466,8 +1688,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 throw new AttachmentNotFoundException("Attachment not found: " + rootRef);
             }
             String currentKey = meta(current, META_OWNER_KEY) != null ? meta(current, META_OWNER_KEY) : meta(current, META_CONVERSATION_ID);
-            if (!ownerKey.equals(currentKey) || !conversationId.equals(meta(current, META_CONVERSATION_ID))) {
-                throw new AttachmentStoreException("The owner of this file changed while a view of it was being stored. Please retry.");
+            if (!ownerKey.equals(currentKey) || !conversationId.equals(meta(current, META_CONVERSATION_ID))
+                    || OwnerScope.fromStored(meta(current, META_OWNER_SCOPE)) != scope) {
+                throw new OwnerChangedException();
             }
             GridFSFile duplicate = primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_OWNER_KEY, ownerKey),
                     Filters.eq("metadata." + META_ROOT_REF, rootRef), Filters.eq("metadata." + META_SHA256, sha256)))
@@ -1490,6 +1713,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             if (userQuota) {
                 AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(META_USER_ID, userId)[1], bytes.length, 0,
                         maxTotalBytesPerUser);
+            }
+            if (libraryQuota) {
+                LibraryStoreSupport.checkQuota(0, libraryUsage(scope, ownerKey)[1], 0, bytes.length, libraryLimits());
             }
             for (String ref : evict) {
                 for (GridFSFile slice : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_STORAGE_REF, ref),
@@ -1518,8 +1744,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             }
             uploaded = gridFSBucket.uploadFromStream(filename != null ? filename : "unnamed", new ByteArrayInputStream(bytes),
                     new GridFSUploadOptions().metadata(metadata));
-            // A root deleted while this upload ran (a delete takes no source lock)
-            // must not leave an orphan view: take it back.
+            // A root deleted while this upload ran (only a conversation's own delete takes
+            // the source lock) must not leave an orphan view: take it back.
             if (primaryReadBucket.find(Filters.eq("_id", root.getObjectId())).first() == null) {
                 gridFSBucket.delete(uploaded);
                 throw new AttachmentNotFoundException("Attachment not found: " + rootRef);
@@ -1679,10 +1905,346 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         return Kind.fromStored(meta(file, META_KIND));
     }
 
+    // ------------------------------------------------------------------ library
+
+    private LibraryStoreSupport.Limits libraryLimits() {
+        return new LibraryStoreSupport.Limits(libraryMaxPerUser, libraryMaxTotalBytesPerUser, libraryRetentionDays, libraryMaxGrantsPerDocument);
+    }
+
+    /** The roots a library owns, soft-removed ones included. */
+    private static Bson libraryRoots(String ownerKey) {
+        // savedAt is set on every library root; naming it lets the partial library
+        // indexes serve the query.
+        return Filters.and(Filters.eq("metadata." + META_OWNER_KEY, ownerKey), LIBRARY_OWNED, ROOTS_ONLY,
+                Filters.exists("metadata." + META_SAVED_AT));
+    }
+
+    /**
+     * {count, totalBytes} of a library's bucket: its documents (soft-removed ones
+     * included) and the bytes of them and their media views — two queries, each on
+     * an index: the roots by owner key, their views by root.
+     */
+    private long[] libraryUsage(OwnerScope scope, String ownerKey) {
+        long count = 0;
+        long totalBytes = 0;
+        List<String> refs = new ArrayList<>();
+        for (GridFSFile root : primaryReadBucket
+                .find(Filters.and(libraryRoots(ownerKey), Filters.eq("metadata." + META_OWNER_SCOPE, scope.name())))) {
+            count++;
+            totalBytes += sizeOf(root);
+            refs.add(canonicalRef(root));
+        }
+        if (!refs.isEmpty()) {
+            for (GridFSFile view : primaryReadBucket.find(Filters.and(Filters.in("metadata." + META_ROOT_REF, refs), MEDIA_KINDS))) {
+                totalBytes += sizeOf(view);
+            }
+        }
+        return new long[]{count, totalBytes};
+    }
+
+    /** The derived kinds whose bytes count toward the owner's byte quota. */
+    private static final Bson MEDIA_KINDS = Filters.in("metadata." + META_KIND,
+            Arrays.stream(Kind.values()).filter(DerivedCaps::countsTowardOwnerQuota).map(Kind::name).toList());
+
+    /** The bytes of a root's media views, which move with it into a library. */
+    private long mediaBytesOfLineage(String rootRef) {
+        long bytes = 0;
+        for (GridFSFile view : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_ROOT_REF, rootRef), MEDIA_KINDS))) {
+            bytes += sizeOf(view);
+        }
+        return bytes;
+    }
+
+    private boolean slugTaken(String ownerKey, String slug) {
+        return primaryReadBucket.find(Filters.and(libraryRoots(ownerKey), Filters.eq("metadata." + META_LIBRARY_SLUG, slug))).first() != null;
+    }
+
+    private void rekeyLineage(String rootRef, OwnerRef newOwner) {
+        filesCollection.updateMany(Filters.eq("metadata." + META_ROOT_REF, rootRef), Updates.combine(
+                Updates.set("metadata." + META_OWNER_SCOPE, newOwner.scope().name()),
+                Updates.set("metadata." + META_OWNER_KEY, newOwner.ownerKey())));
+    }
+
+    /**
+     * Under the library's bucket lock and the root's source lock: no view of the
+     * old owner can be stored once they are held, and a conversation's own
+     * {@link #delete} waits for them. The lineage is re-keyed first and the root
+     * last, so a node that stops in between leaves a root its conversation still
+     * owns, whose cascade still reaches every view; promoting it again finishes the
+     * move.
+     */
+    @Override
+    public LibraryEntry promote(String storageRef, String owningConversationId, OwnerRef newOwner, LibraryMeta meta)
+            throws AttachmentStoreException {
+        LibraryStoreSupport.requireLibraryOwner(newOwner);
+        if (meta == null) {
+            throw new IllegalArgumentException("A library document needs its title and slug");
+        }
+        GridFSFile found = primaryReadBucket.find(refFilter(storageRef)).first();
+        if (found == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        if (meta(found, META_ROOT_REF) != null) {
+            throw new AttachmentStoreException("Only an uploaded file can be put into a library, not a view of one");
+        }
+        String rootRef = canonicalRef(found);
+        String oldOwnerKey;
+        LibraryEntry entry;
+        List<String[]> held = new ArrayList<>();
+        try {
+            lockAll(List.of(LibraryStoreSupport.bucketLock(newOwner.scope(), newOwner.ownerKey()),
+                    new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef)), held);
+            GridFSFile root = primaryReadBucket.find(Filters.eq("_id", found.getObjectId())).first();
+            if (root == null) {
+                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+            }
+            if (OwnerScope.fromStored(meta(root, META_OWNER_SCOPE)) != OwnerScope.CONVERSATION) {
+                throw new AttachmentAccessDeniedException("This file is in a library already");
+            }
+            String conversationId = meta(root, META_CONVERSATION_ID);
+            if (conversationId == null || !conversationId.equals(owningConversationId)) {
+                throw new AttachmentAccessDeniedException("Only the conversation a file was uploaded to can put it into a library");
+            }
+            oldOwnerKey = meta(root, META_OWNER_KEY) != null ? meta(root, META_OWNER_KEY) : conversationId;
+            long[] usage = libraryUsage(newOwner.scope(), newOwner.ownerKey());
+            LibraryStoreSupport.checkQuota(usage[0], usage[1], 1, sizeOf(root) + mediaBytesOfLineage(rootRef), libraryLimits());
+            String slug = LibraryStoreSupport.uniqueSlug(meta.slug(), candidate -> slugTaken(newOwner.ownerKey(), candidate));
+            rekeyLineage(rootRef, newOwner);
+            Date now = new Date();
+            var moved = filesCollection.updateOne(Filters.and(Filters.eq("_id", root.getObjectId()), CONVERSATION_OWNED), Updates.combine(
+                    Updates.set("metadata." + META_OWNER_SCOPE, newOwner.scope().name()),
+                    Updates.set("metadata." + META_OWNER_KEY, newOwner.ownerKey()),
+                    Updates.set("metadata." + META_LIBRARY_TITLE, meta.title()),
+                    Updates.set("metadata." + META_LIBRARY_SLUG, slug),
+                    Updates.set("metadata." + META_AGENT_SCOPE, meta.agentScope()),
+                    Updates.set("metadata." + META_CONTRIBUTED_BY, newOwner.ownerUserId()),
+                    Updates.set("metadata." + META_RETENTION_DAYS, meta.retentionDays()),
+                    Updates.set("metadata." + META_SAVED_AT, now),
+                    Updates.set("metadata." + META_LAST_ACCESSED_AT, now),
+                    Updates.unset("metadata." + META_REMOVED_AT),
+                    // The promoting conversation reads it through a grant from now on, in
+                    // both shapes, like any grantee.
+                    Updates.addToSet("metadata." + META_GRANTS, owningConversationId)));
+            if (moved.getMatchedCount() == 0) {
+                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+            }
+            upsertGrant(rootRef, owningConversationId);
+            GridFSFile promoted = primaryReadBucket.find(Filters.eq("_id", root.getObjectId())).first();
+            if (promoted == null) {
+                grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, rootRef));
+                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+            }
+            evictGrants(promoted, rootRef, owningConversationId);
+            entry = readEntry(newOwner.ownerKey(), rootRef)
+                    .orElseThrow(() -> new AttachmentStoreException("A promoted library document could not be read back"));
+        } finally {
+            releaseAll(held);
+        }
+        DerivedBlobs.fireOwnerChanged(ownerChangedEvent, new AttachmentOwnerChanged(rootRef, oldOwnerKey, newOwner.ownerKey(), newOwner.scope()));
+        LOGGER.debugf("Put attachment %s into a %s library", rootRef, newOwner.scope());
+        return entry;
+    }
+
+    @Override
+    public LibraryEntry moveOwner(String storageRef, String oldOwnerKey, OwnerRef newOwner) throws AttachmentStoreException {
+        LibraryStoreSupport.requireLibraryOwner(newOwner);
+        if (newOwner.ownerKey().equals(oldOwnerKey)) {
+            throw new IllegalArgumentException("A document moves to another owner, not to its own");
+        }
+        GridFSFile found = primaryReadBucket.find(Filters.and(refFilter(storageRef), libraryRoots(oldOwnerKey))).first();
+        if (found == null) {
+            throw new AttachmentNotFoundException("Library document not found: " + storageRef);
+        }
+        String rootRef = canonicalRef(found);
+        LibraryEntry entry;
+        List<String[]> held = new ArrayList<>();
+        try {
+            lockAll(List.of(LibraryStoreSupport.bucketLock(newOwner.scope(), newOwner.ownerKey()),
+                    new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef)), held);
+            GridFSFile root = primaryReadBucket.find(Filters.and(Filters.eq("_id", found.getObjectId()), libraryRoots(oldOwnerKey))).first();
+            if (root == null) {
+                throw new AttachmentNotFoundException("Library document not found: " + storageRef);
+            }
+            long[] usage = libraryUsage(newOwner.scope(), newOwner.ownerKey());
+            LibraryStoreSupport.checkQuota(usage[0], usage[1], 1, sizeOf(root) + mediaBytesOfLineage(rootRef), libraryLimits());
+            String slug = LibraryStoreSupport.uniqueSlug(meta(root, META_LIBRARY_SLUG), candidate -> slugTaken(newOwner.ownerKey(), candidate));
+            rekeyLineage(rootRef, newOwner);
+            var moved = filesCollection.updateOne(Filters.and(Filters.eq("_id", root.getObjectId()), libraryRoots(oldOwnerKey)), Updates.combine(
+                    Updates.set("metadata." + META_OWNER_SCOPE, newOwner.scope().name()),
+                    Updates.set("metadata." + META_OWNER_KEY, newOwner.ownerKey()),
+                    Updates.set("metadata." + META_LIBRARY_SLUG, slug),
+                    Updates.set("metadata." + META_SAVED_AT, new Date())));
+            if (moved.getMatchedCount() == 0) {
+                throw new AttachmentNotFoundException("Library document not found: " + storageRef);
+            }
+            entry = readEntry(newOwner.ownerKey(), rootRef)
+                    .orElseThrow(() -> new AttachmentStoreException("A moved library document could not be read back"));
+        } finally {
+            releaseAll(held);
+        }
+        DerivedBlobs.fireOwnerChanged(ownerChangedEvent, new AttachmentOwnerChanged(rootRef, oldOwnerKey, newOwner.ownerKey(), newOwner.scope()));
+        return entry;
+    }
+
+    private Optional<LibraryEntry> readEntry(String ownerKey, String storageRef) {
+        GridFSFile file = primaryReadBucket.find(Filters.and(refFilter(storageRef), libraryRoots(ownerKey))).first();
+        return file != null ? Optional.of(entry(file)) : Optional.empty();
+    }
+
+    private static LibraryEntry entry(GridFSFile file) {
+        Document metadata = file.getMetadata() != null ? file.getMetadata() : new Document();
+        return new LibraryEntry(canonicalRef(file), metadata.getString(META_LIBRARY_TITLE), metadata.getString(META_LIBRARY_SLUG),
+                OwnerScope.fromStored(metadata.getString(META_OWNER_SCOPE)), metadata.getString(META_OWNER_KEY), metadata.getString(META_AGENT_SCOPE),
+                metadata.getString(META_CONTRIBUTED_BY), file.getFilename(),
+                metadata.getString(META_MIME_TYPE) != null ? metadata.getString(META_MIME_TYPE) : "application/octet-stream", sizeOf(file),
+                metadata.getInteger(META_PAGE_COUNT), instant(metadata, META_SAVED_AT), instant(metadata, META_LAST_ACCESSED_AT),
+                instant(metadata, META_REMOVED_AT), metadata.getInteger(META_RETENTION_DAYS));
+    }
+
+    private static Instant instant(Document metadata, String field) {
+        Date value = metadata.getDate(field);
+        return value != null ? value.toInstant() : null;
+    }
+
+    private List<LibraryEntry> entries(Bson filter, Bson sort, int offset, int limit) {
+        List<LibraryEntry> entries = new ArrayList<>();
+        for (GridFSFile file : primaryReadBucket.find(filter).sort(sort).skip(LibraryStoreSupport.pageOffset(offset))
+                .limit(LibraryStoreSupport.pageLimit(limit))) {
+            entries.add(entry(file));
+        }
+        return entries;
+    }
+
+    @Override
+    public List<LibraryEntry> listByOwner(String ownerKey, String agentScopeOrNull, boolean includeRemoved, int offset, int limit) {
+        if (ownerKey == null) {
+            return List.of();
+        }
+        List<Bson> filters = new ArrayList<>(List.of(libraryRoots(ownerKey)));
+        if (agentScopeOrNull != null) {
+            filters.add(Filters.or(Filters.eq("metadata." + META_AGENT_SCOPE, agentScopeOrNull), Filters.eq("metadata." + META_AGENT_SCOPE, null)));
+        }
+        if (!includeRemoved) {
+            filters.add(Filters.eq("metadata." + META_REMOVED_AT, null));
+        }
+        return entries(Filters.and(filters), Sorts.orderBy(Sorts.descending("metadata." + META_LAST_ACCESSED_AT),
+                Sorts.ascending("metadata." + META_STORAGE_REF)), offset, limit);
+    }
+
+    @Override
+    public Optional<LibraryEntry> getLibraryEntry(String ownerKey, String storageRef) {
+        if (ownerKey == null || storageRef == null) {
+            return Optional.empty();
+        }
+        return readEntry(ownerKey, storageRef);
+    }
+
+    @Override
+    public void touchAccess(String storageRef) {
+        filesCollection.updateOne(Filters.and(refFilter(storageRef), LIBRARY_OWNED, ROOTS_ONLY),
+                Updates.set("metadata." + META_LAST_ACCESSED_AT, new Date()));
+    }
+
+    @Override
+    public boolean softRemove(String ownerKey, String storageRef, Instant when) {
+        if (when == null) {
+            throw new IllegalArgumentException("A soft removal needs its time");
+        }
+        if (ownerKey == null) {
+            return false;
+        }
+        return filesCollection.updateOne(Filters.and(refFilter(storageRef), libraryRoots(ownerKey), Filters.eq("metadata." + META_REMOVED_AT, null)),
+                Updates.set("metadata." + META_REMOVED_AT, Date.from(when))).getModifiedCount() > 0;
+    }
+
+    @Override
+    public boolean restore(String ownerKey, String storageRef) {
+        if (ownerKey == null) {
+            return false;
+        }
+        return filesCollection.updateOne(Filters.and(refFilter(storageRef), libraryRoots(ownerKey), Filters.ne("metadata." + META_REMOVED_AT, null)),
+                Updates.unset("metadata." + META_REMOVED_AT)).getModifiedCount() > 0;
+    }
+
+    @Override
+    public long deleteByOwner(String ownerKey) {
+        return deleteLibraryRoots(ownerKey, null);
+    }
+
+    @Override
+    public boolean deleteLibraryDocument(String ownerKey, String storageRef) {
+        return storageRef != null && deleteLibraryRoots(ownerKey, storageRef) > 0;
+    }
+
+    /**
+     * Deletes the library roots of {@code ownerKey} — one, or all of them with
+     * {@code storageRef} {@code null} (and then the owner's reservations too) —
+     * with their lineage and the grants on them, then their located bytes and one
+     * announcement per root. A view stored while this runs is taken back by its
+     * writer, which checks its root after the upload.
+     */
+    private long deleteLibraryRoots(String ownerKey, String storageRef) {
+        if (ownerKey == null) {
+            return 0;
+        }
+        if (storageRef == null) {
+            // The library's own reservations; a conversation's (whose owner key is its
+            // id) are never the library's, whatever key was passed.
+            reservationsCollection.deleteMany(Filters.and(Filters.eq(RESERVATION_OWNER_KEY, ownerKey), Filters.ne(META_CONVERSATION_ID, ownerKey)));
+        }
+        Bson filter = storageRef != null ? Filters.and(refFilter(storageRef), libraryRoots(ownerKey)) : libraryRoots(ownerKey);
+        List<AttachmentRootDeleted> roots = new ArrayList<>();
+        List<String> refs = new ArrayList<>();
+        List<Map.Entry<BlobLocator, String>> retired = new ArrayList<>();
+        for (GridFSFile root : primaryReadBucket.find(filter)) {
+            String ref = canonicalRef(root);
+            deleteFile(root, retired);
+            refs.add(ref);
+            roots.add(rootDeleted(root, ref));
+        }
+        if (!refs.isEmpty()) {
+            for (GridFSFile derived : primaryReadBucket.find(Filters.in("metadata." + META_ROOT_REF, refs))) {
+                deleteFile(derived, retired);
+            }
+            grantsCollection.deleteMany(Filters.in(GRANT_STORAGE_REF, refs));
+            LOGGER.debugf("Deleted %d library documents", refs.size());
+        }
+        discardAll(retired);
+        DerivedBlobs.fireRootDeleted(rootDeletedEvent, roots);
+        return roots.size();
+    }
+
+    @Override
+    public List<LibraryEntry> expired(Instant now, int limit) {
+        if (now == null) {
+            throw new IllegalArgumentException("Expiry is decided at a given time");
+        }
+        // Retention counts from the last access; a document without its own retention
+        // has the deployment's, and zero (its own or the default) never runs out. The
+        // arithmetic runs on the server, so no document is read to decide.
+        Document retention = new Document("$ifNull", List.of("$metadata." + META_RETENTION_DAYS, Math.max(0, libraryRetentionDays)));
+        Document expiresAt = new Document("$add",
+                List.of("$metadata." + META_LAST_ACCESSED_AT, new Document("$multiply", List.of(retention, 86_400_000L))));
+        Bson due = Filters.expr(new Document("$and", List.of(new Document("$gt", List.of(retention, 0)),
+                new Document("$lte", List.of(expiresAt, Date.from(now))))));
+        return entries(Filters.and(LIBRARY_OWNED, ROOTS_ONLY, Filters.exists("metadata." + META_SAVED_AT), due),
+                Sorts.orderBy(Sorts.ascending("metadata." + META_LAST_ACCESSED_AT), Sorts.ascending("metadata." + META_STORAGE_REF)), 0, limit);
+    }
+
+    @Override
+    public List<LibraryEntry> removedBefore(Instant cutoff, int limit) {
+        if (cutoff == null) {
+            throw new IllegalArgumentException("A purge needs its cutoff");
+        }
+        return entries(Filters.and(LIBRARY_OWNED, ROOTS_ONLY, Filters.lt("metadata." + META_REMOVED_AT, Date.from(cutoff))),
+                Sorts.orderBy(Sorts.ascending("metadata." + META_REMOVED_AT), Sorts.ascending("metadata." + META_STORAGE_REF)), 0, limit);
+    }
+
     // ------------------------------------------------------- quota reservations
 
     @Override
-    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+    public QuotaReservation reserve(
+                                    OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
                                     QuotaMode mode)
             throws AttachmentStoreException {
         QuotaReservation.validateRequest(owner, conversationId, userId, bytes, count, ttl, mode);
@@ -1900,7 +2462,11 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         if (mayRead(file, requester)) {
             return;
         }
+        if (OwnerScope.fromStored(meta(file, META_OWNER_SCOPE)) != OwnerScope.CONVERSATION) {
+            throw new AttachmentAccessDeniedException("Access denied: this library document has not been opened in this conversation");
+        }
         throw new AttachmentAccessDeniedException(
+
                 "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
                         .formatted(meta(file, META_CONVERSATION_ID), requester));
     }
@@ -1911,8 +2477,10 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         // Fails closed, as the PostgreSQL store does: a blob with no recorded owner
         // (a pre-ownership legacy blob) used to be readable by any conversation that
         // knew its reference. Ownership that cannot be established is not ownership.
+        // And only a conversation-owned root is its conversation's own: a library
+        // document is read through a grant, even by the conversation it came from.
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
-        if (owner != null && owner.equals(requester)) {
+        if (owner != null && owner.equals(requester) && OwnerScope.fromStored(meta(root, META_OWNER_SCOPE)) == OwnerScope.CONVERSATION) {
             return true;
         }
         List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;

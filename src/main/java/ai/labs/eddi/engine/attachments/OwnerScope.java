@@ -9,10 +9,11 @@ import java.util.Locale;
 /**
  * Who an uploaded blob — and with it its whole lineage — belongs to.
  * <p>
- * Every blob stored so far is {@link #CONVERSATION}-owned, and in this release
- * nothing else is written: {@link #USER} (a personal library) and {@link #TEAM}
- * (a team library) are declared so that the owner key can be part of every
- * dedup, cache, job and index key from the start.
+ * Every upload is {@link #CONVERSATION}-owned. A file put into a personal
+ * library ({@code IAttachmentStore.promote}) becomes {@link #USER}-owned with
+ * its whole lineage. {@link #TEAM} (a team library) is declared so that the
+ * owner key can be part of every dedup, cache, job and index key from the
+ * start; nothing writes it yet.
  *
  * @since 6.8.0
  */

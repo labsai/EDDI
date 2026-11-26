@@ -9,7 +9,12 @@ import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
+import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
+import ai.labs.eddi.engine.attachments.LibraryStoreContract;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
 import ai.labs.eddi.engine.attachments.Derivation;
 import ai.labs.eddi.engine.attachments.DerivedCaps;
@@ -35,6 +40,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -55,7 +61,8 @@ class GridFsAttachmentStoreIT extends MongoTestBase
         implements
             AttachmentStoreContract,
             QuotaReservationContract,
-            StreamingAttachmentStoreContract {
+            StreamingAttachmentStoreContract,
+            LibraryStoreContract {
 
     private GridFsAttachmentStore store;
 
@@ -71,8 +78,12 @@ class GridFsAttachmentStoreIT extends MongoTestBase
         setQuotas(0, 0, 0, 0);
         rootDeleted = new RecordingEvent<>();
         store.rootDeletedEvent = rootDeleted;
+        ownerChanged = new RecordingEvent<>();
+        store.ownerChangedEvent = ownerChanged;
+        setLibraryLimits(LibraryStoreSupport.Limits.defaults());
         store.ensureIndexes();
         store.ensureLineageIndexes();
+        store.ensureLibraryIndexes();
         // The real GridFS backend, with 255 KiB chunks so a large test file spans
         // several.
         blobBackend = new FaultInjectingBlobBackend(new GridFsBlobBackend(getDatabase(), 255 * 1024));
@@ -121,6 +132,49 @@ class GridFsAttachmentStoreIT extends MongoTestBase
 
     private GroupConversationStore groupConversations;
     private RecordingEvent<AttachmentRootDeleted> rootDeleted;
+    private RecordingEvent<AttachmentOwnerChanged> ownerChanged;
+
+    @Override
+    public void setLibraryLimits(LibraryStoreSupport.Limits limits) {
+        store.libraryMaxPerUser = limits.maxPerOwner();
+        store.libraryMaxTotalBytesPerUser = limits.maxTotalBytesPerOwner();
+        store.libraryRetentionDays = limits.defaultRetentionDays();
+        store.libraryMaxGrantsPerDocument = limits.maxGrantsPerDocument();
+    }
+
+    @Override
+    public List<AttachmentOwnerChanged> ownerChanges() {
+        return ownerChanged.fired();
+    }
+
+    @Override
+    public void setLastAccessed(String storageRef, Instant when) {
+        assertEquals(1, getDatabase().getCollection("attachments.files")
+                .updateOne(Filters.eq("metadata.storageRef", storageRef), Updates.set("metadata.lastAccessedAt", Date.from(when))).getMatchedCount(),
+                "no file " + storageRef);
+    }
+
+    @Override
+    public void seedReservation(String ownerKey, String conversationId) {
+        getDatabase().getCollection(GridFsAttachmentStore.RESERVATIONS_COLLECTION).insertOne(new Document("_id", new ObjectId().toHexString())
+                .append(GridFsAttachmentStore.RESERVATION_OWNER_KEY, ownerKey).append("conversationId", conversationId)
+                .append(GridFsAttachmentStore.RESERVATION_BYTES, 1L).append(GridFsAttachmentStore.RESERVATION_COUNT, 1)
+                .append(GridFsAttachmentStore.RESERVATION_EXPIRES_AT, new Date(System.currentTimeMillis() + 3_600_000L)));
+    }
+
+    @Override
+    public AutoCloseable holdConversationQuotaLock(String conversationId) {
+        String key = GridFsAttachmentStore.lockKey(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
+        MongoCollection<Document> locks = getDatabase().getCollection(GridFsAttachmentStore.LOCKS_COLLECTION);
+        locks.insertOne(new Document("_id", key).append("owner", "test").append("expiresAt", new Date(System.currentTimeMillis() + 60_000L)));
+        return () -> locks.deleteOne(Filters.and(Filters.eq("_id", key), Filters.eq("owner", "test")));
+    }
+
+    @Override
+    public long reservationsOf(String ownerKey) {
+        return getDatabase().getCollection(GridFsAttachmentStore.RESERVATIONS_COLLECTION)
+                .countDocuments(Filters.eq(GridFsAttachmentStore.RESERVATION_OWNER_KEY, ownerKey));
+    }
 
     @Override
     public IMigrationLogStore migrationLog() {

@@ -6,12 +6,15 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.engine.attachments.Derivation;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.LibraryEntry;
+import ai.labs.eddi.engine.attachments.LibraryMeta;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.QuotaMode;
 import ai.labs.eddi.engine.attachments.QuotaReservation;
 
 import java.io.InputStream;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -239,6 +242,61 @@ final class FakeAttachmentStore implements IAttachmentStore {
 
     @Override
     public int sweepTombstones(int max) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public LibraryEntry promote(String storageRef, String owningConversationId, OwnerRef newOwner, LibraryMeta meta) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public LibraryEntry moveOwner(String storageRef, String oldOwnerKey, OwnerRef newOwner) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public List<LibraryEntry> listByOwner(String ownerKey, String agentScopeOrNull, boolean includeRemoved, int offset, int limit) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public Optional<LibraryEntry> getLibraryEntry(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public void touchAccess(String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public boolean softRemove(String ownerKey, String storageRef, Instant when) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public boolean restore(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public long deleteByOwner(String ownerKey) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public boolean deleteLibraryDocument(String ownerKey, String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public List<LibraryEntry> expired(Instant now, int limit) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public List<LibraryEntry> removedBefore(Instant cutoff, int limit) {
         throw new UnsupportedOperationException("not used by the inbound A2A tests");
     }
 }

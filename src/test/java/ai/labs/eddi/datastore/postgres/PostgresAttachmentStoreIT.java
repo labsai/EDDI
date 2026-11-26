@@ -8,7 +8,12 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
+import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
+import ai.labs.eddi.engine.attachments.LibraryStoreContract;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
 import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.RecordingEvent;
@@ -44,7 +49,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -64,7 +71,8 @@ class PostgresAttachmentStoreIT extends PostgresTestBase
         implements
             AttachmentStoreContract,
             QuotaReservationContract,
-            StreamingAttachmentStoreContract {
+            StreamingAttachmentStoreContract,
+            LibraryStoreContract {
 
     private static final DataSource DATA_SOURCE = createDataSource();
 
@@ -77,6 +85,9 @@ class PostgresAttachmentStoreIT extends PostgresTestBase
         setQuotas(0, 0, 0, 0);
         rootDeleted = new RecordingEvent<>();
         store.rootDeletedEvent = rootDeleted;
+        ownerChanged = new RecordingEvent<>();
+        store.ownerChangedEvent = ownerChanged;
+        setLibraryLimits(LibraryStoreSupport.Limits.defaults());
         // The first calls create the schemas; then start from empty tables.
         store.listByConversation(OWNER);
         store.ensureGrantIndexes();
@@ -126,6 +137,60 @@ class PostgresAttachmentStoreIT extends PostgresTestBase
     private JsonSerialization json;
     private GroupConversationStore groupConversations;
     private RecordingEvent<AttachmentRootDeleted> rootDeleted;
+    private RecordingEvent<AttachmentOwnerChanged> ownerChanged;
+
+    @Override
+    public void setLibraryLimits(LibraryStoreSupport.Limits limits) {
+        store.libraryMaxPerUser = limits.maxPerOwner();
+        store.libraryMaxTotalBytesPerUser = limits.maxTotalBytesPerOwner();
+        store.libraryRetentionDays = limits.defaultRetentionDays();
+        store.libraryMaxGrantsPerDocument = limits.maxGrantsPerDocument();
+    }
+
+    @Override
+    public List<AttachmentOwnerChanged> ownerChanges() {
+        return ownerChanged.fired();
+    }
+
+    @Override
+    public void setLastAccessed(String storageRef, Instant when) {
+        try (Connection conn = DATA_SOURCE.getConnection();
+                PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET last_accessed_at = ? WHERE storage_ref = ?")) {
+            ps.setTimestamp(1, Timestamp.from(when));
+            ps.setString(2, storageRef);
+            assertEquals(1, ps.executeUpdate(), "no row " + storageRef);
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public void seedReservation(String ownerKey, String conversationId) {
+        execute("INSERT INTO attachment_reservations (id, owner_key, conversation_id, bytes, count, expires_at) "
+                + "VALUES (gen_random_uuid()::text, ?, ?, 1, 1, NOW() + INTERVAL '1 hour')", ownerKey, conversationId);
+    }
+
+    @Override
+    public AutoCloseable holdConversationQuotaLock(String conversationId) throws Exception {
+        Connection conn = DATA_SOURCE.getConnection();
+        conn.setAutoCommit(false);
+        try (PreparedStatement ps = conn.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+            ps.setString(1, PostgresAttachmentStore.lockKey(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId)));
+            ps.executeQuery().close();
+        }
+        AtomicBoolean released = new AtomicBoolean();
+        return () -> {
+            if (released.compareAndSet(false, true)) {
+                conn.rollback();
+                conn.close();
+            }
+        };
+    }
+
+    @Override
+    public long reservationsOf(String ownerKey) {
+        return count("SELECT COUNT(*) FROM attachment_reservations WHERE owner_key = ?", ownerKey);
+    }
 
     @Override
     public void setDerivedLimits(DerivedCaps.Limits limits) {

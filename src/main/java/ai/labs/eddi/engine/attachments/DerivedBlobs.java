@@ -58,6 +58,22 @@ public final class DerivedBlobs {
     }
 
     /**
+     * Announces a root's new owner, after the change committed. An observer that
+     * throws is logged and does not undo the change.
+     */
+    public static void fireOwnerChanged(Event<AttachmentOwnerChanged> event, AttachmentOwnerChanged changed) {
+        if (event == null || changed == null) {
+            return;
+        }
+        try {
+            event.fire(changed);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("An observer of an attachment's owner change failed; what it keeps under the old owner is left for its own cleanup: %s",
+                    sanitize(e.getMessage()));
+        }
+    }
+
+    /**
      * Announces each deleted root, after the delete succeeded. An observer that
      * throws is logged and does not undo the delete, nor stop the other
      * announcements.

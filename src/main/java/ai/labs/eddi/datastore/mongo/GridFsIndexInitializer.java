@@ -48,6 +48,7 @@ public class GridFsIndexInitializer {
             GridFsAttachmentStore store = attachmentStore.get();
             store.ensureIndexes();
             store.ensureLineageIndexes();
+            store.ensureLibraryIndexes();
             store.ensureReservationIndexes();
             store.ensureBlobIndexes();
         } catch (RuntimeException e) {

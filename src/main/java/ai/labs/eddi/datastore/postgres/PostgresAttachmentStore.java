@@ -14,6 +14,10 @@ import ai.labs.eddi.engine.attachments.DerivedBlobs;
 import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.AttachmentOwnerChanged;
+import ai.labs.eddi.engine.attachments.LibraryEntry;
+import ai.labs.eddi.engine.attachments.LibraryMeta;
+import ai.labs.eddi.engine.attachments.LibraryStoreSupport;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
 import ai.labs.eddi.engine.attachments.QuotaMode;
@@ -188,6 +192,39 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 PRIMARY KEY (backend, blob_key)
             )
             """;
+    /**
+     * A library document's own fields, on its root row: null on every
+     * conversation-owned row. {@code last_accessed_at} (a lineage column) is its
+     * last access, from which retention counts.
+     */
+    private static final List<String> ADD_LIBRARY_COLUMNS = List.of(
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS library_title TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS library_slug TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS agent_scope TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS contributed_by TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS saved_at TIMESTAMPTZ",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS retention_days INT");
+    /**
+     * The library listings, the reaper's scans and the slug check, for library
+     * roots only; built CONCURRENTLY with the lineage indexes.
+     */
+    private static final List<String> CREATE_LIBRARY_INDEXES = List.of(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_library_access ON attachments (owner_key, last_accessed_at) "
+                    + "WHERE owner_scope <> 'CONVERSATION' AND root_ref IS NULL",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_library_removed ON attachments (owner_key, removed_at) "
+                    + "WHERE owner_scope <> 'CONVERSATION' AND root_ref IS NULL",
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_library_slug ON attachments (owner_key, library_slug) "
+                    + "WHERE library_slug IS NOT NULL");
+    /** A library root: owned by a library, not a conversation. */
+    private static final String LIBRARY_ROOT = "owner_scope <> 'CONVERSATION' AND root_ref IS NULL";
+    private static final String ENTRY_COLUMNS = "storage_ref, library_title, library_slug, owner_scope, owner_key, agent_scope, "
+            + "contributed_by, filename, mime_type, size_bytes, page_count, saved_at, last_accessed_at, removed_at, retention_days";
+    private static final String LIBRARY_DELETE_DENIED = "Delete denied: this is a library document; library documents are removed through the library";
+    /**
+     * How often a derived write starts over when its root changed owner meanwhile.
+     */
+    static final int OWNER_CHANGE_ATTEMPTS = 3;
     private static final String CREATE_INDEX_TOMBSTONES_DUE = "CREATE INDEX IF NOT EXISTS idx_attach_tomb_due ON attachment_blob_tombstones (not_before)";
     private static final String CREATE_INDEX_TOMBSTONES_OWNER = "CREATE INDEX IF NOT EXISTS idx_attach_tomb_owner ON attachment_blob_tombstones (owner_key)";
     /** How long past its reservation an upload's intent tombstone waits. */
@@ -286,6 +323,20 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     defaultValue = "" + DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE)
     long derivedMaxTextBytesPerSource = DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE;
 
+    @ConfigProperty(name = "eddi.documents.library.max-per-user", defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_PER_USER)
+    long libraryMaxPerUser = LibraryStoreSupport.DEFAULT_MAX_PER_USER;
+
+    @ConfigProperty(name = "eddi.documents.library.max-total-bytes-per-user",
+                    defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_TOTAL_BYTES_PER_USER)
+    long libraryMaxTotalBytesPerUser = LibraryStoreSupport.DEFAULT_MAX_TOTAL_BYTES_PER_USER;
+
+    @ConfigProperty(name = "eddi.documents.library.retention-days", defaultValue = "" + LibraryStoreSupport.DEFAULT_RETENTION_DAYS)
+    int libraryRetentionDays = LibraryStoreSupport.DEFAULT_RETENTION_DAYS;
+
+    @ConfigProperty(name = "eddi.documents.library.max-grants-per-document",
+                    defaultValue = "" + LibraryStoreSupport.DEFAULT_MAX_GRANTS_PER_DOCUMENT)
+    int libraryMaxGrantsPerDocument = LibraryStoreSupport.DEFAULT_MAX_GRANTS_PER_DOCUMENT;
+
     /**
      * The longest a streamed upload may take: the reservation the store takes for
      * one lasts this long.
@@ -302,6 +353,10 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     /** Announces deleted roots; {@code null} outside CDI (tests). */
     @Inject
     Event<AttachmentRootDeleted> rootDeletedEvent;
+
+    /** Announces roots that changed owner; {@code null} outside CDI (tests). */
+    @Inject
+    Event<AttachmentOwnerChanged> ownerChangedEvent;
 
     /** {@code null} outside CDI (tests). */
     @Inject
@@ -333,6 +388,9 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             stmt.execute(CREATE_INDEX_RESERVATIONS_USER);
             stmt.execute(CREATE_INDEX_RESERVATIONS_EXPIRY);
             for (String column : ADD_BLOB_COLUMNS) {
+                stmt.execute(column);
+            }
+            for (String column : ADD_LIBRARY_COLUMNS) {
                 stmt.execute(column);
             }
             stmt.execute(CREATE_TOMBSTONES_TABLE);
@@ -974,27 +1032,41 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         String legacy = "UPDATE attachments SET grants = "
                 + "CASE WHEN ? = ANY(COALESCE(grants, '{}')) THEN grants "
                 + "ELSE array_append(COALESCE(grants, '{}'), ?) END "
-                + "WHERE storage_ref = COALESCE((SELECT root_ref FROM attachments WHERE storage_ref = ?), ?) AND root_ref IS NULL";
+                + "WHERE storage_ref = COALESCE((SELECT root_ref FROM attachments WHERE storage_ref = ?), ?) AND root_ref IS NULL "
+                + "RETURNING storage_ref, owner_scope";
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             inTransaction(conn, () -> {
-                int updated;
+                String rootRef;
+                OwnerScope scope;
                 try (PreparedStatement ps = conn.prepareStatement(legacy)) {
                     ps.setString(1, conversationId);
                     ps.setString(2, conversationId);
                     ps.setString(3, storageRef);
                     ps.setString(4, storageRef);
-                    updated = ps.executeUpdate();
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            // The same subtype the MongoDB store throws, so a caller telling "gone"
+                            // from "the store failed" gets the same answer on both backends.
+                            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+                        }
+                        rootRef = rs.getString(1);
+                        scope = OwnerScope.fromStored(rs.getString(2));
+                    }
                 }
-                if (updated == 0) {
-                    // The same subtype the MongoDB store throws, so a caller telling "gone"
-                    // from "the store failed" gets the same answer on both backends.
-                    throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
-                }
+                boolean added;
                 try (PreparedStatement ps = conn.prepareStatement(INSERT_GRANT_ON_ROOT)) {
                     ps.setString(1, conversationId);
                     ps.setString(2, storageRef);
-                    return ps.executeUpdate() > 0;
+                    added = ps.executeUpdate() > 0;
                 }
+                if (scope != OwnerScope.CONVERSATION) {
+                    // A library document is opened by any number of conversations: past the
+                    // cap the oldest grant goes, never the one just written. The legacy
+                    // UPDATE above holds the root's row, so evictions of one document run
+                    // one at a time.
+                    evictGrants(conn, rootRef, conversationId);
+                }
+                return added;
             });
             LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                     sanitize(conversationId), storageRef);
@@ -1108,6 +1180,13 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 LOGGER.warnf("Could not create an attachment lineage index; lineage lookups fall back to a scan: %s", sanitize(e.getMessage()));
             }
         }
+        for (String index : CREATE_LIBRARY_INDEXES) {
+            try {
+                executeUpdate(index);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment library index; library lookups fall back to a scan: %s", sanitize(e.getMessage()));
+            }
+        }
     }
 
     @Override
@@ -1146,6 +1225,58 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         }
     }
 
+    /**
+     * Evicts the grants of a library document beyond
+     * {@code eddi.documents.library.max-grants-per-document}, oldest first, in both
+     * shapes, keeping {@code keep}'s; inside the caller's transaction, which holds
+     * the root's row.
+     */
+    private void evictGrants(Connection conn, String rootRef, String keep) throws SQLException {
+        if (libraryMaxGrantsPerDocument <= 0) {
+            return;
+        }
+        List<String> rows = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT conversation_id FROM attachment_grants WHERE storage_ref = ? ORDER BY created_at, conversation_id")) {
+            ps.setString(1, rootRef);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(rs.getString(1));
+                }
+            }
+        }
+        List<String> legacy = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT grants FROM attachments WHERE storage_ref = ?")) {
+            ps.setString(1, rootRef);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next() && rs.getArray(1) != null && rs.getArray(1).getArray() instanceof Object[] elements) {
+                    for (Object element : elements) {
+                        if (element != null) {
+                            legacy.add(String.valueOf(element));
+                        }
+                    }
+                }
+            }
+        }
+        List<String> evict = LibraryStoreSupport.grantsToEvict(legacy, rows, keep, libraryMaxGrantsPerDocument);
+        if (evict.isEmpty()) {
+            return;
+        }
+        Array evicted = conn.createArrayOf("text", evict.toArray());
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_grants WHERE storage_ref = ? AND conversation_id = ANY(?)")) {
+            ps.setString(1, rootRef);
+            ps.setArray(2, evicted);
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "UPDATE attachments SET grants = ARRAY(SELECT g FROM unnest(grants) AS g WHERE NOT (g = ANY(?))) WHERE storage_ref = ?")) {
+            ps.setArray(1, evicted);
+            ps.setString(2, rootRef);
+            ps.executeUpdate();
+        }
+        LOGGER.debugf("Evicted %d grants of library document %s (cap %d)", (Object) evict.size(), rootRef, (Object) libraryMaxGrantsPerDocument);
+    }
+
     @Override
     public boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         ensureSchema();
@@ -1172,6 +1303,10 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     userId = rs.getString("user_id");
                 }
             }
+            // Whichever conversation asks — the one it came from included.
+            if (OwnerScope.fromStored(scope) != OwnerScope.CONVERSATION) {
+                throw new AttachmentAccessDeniedException(LIBRARY_DELETE_DENIED);
+            }
             // A row that records no owner stays deletable, though the read path refuses
             // it: deleting discloses nothing, and refusing would strand personal data.
             if (owner != null && !owner.equals(requestingConversationId)) {
@@ -1182,15 +1317,21 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             // The blob, its lineage (a root's; a derived blob has none of its own) and
             // the grants on it in one transaction: neither outlives the root.
             deleted = inTransaction(conn, () -> {
-                if (rootRef == null) {
-                    // A root: lock its row first. A storeDerived holding it FOR SHARE has
-                    // its view committed before this returns, and the DELETE below, a new
-                    // statement, sees that view; one starting now finds the root gone.
-                    // Without it the DELETE would wait on the root row and then work from
-                    // its old snapshot, leaving a view inserted meanwhile behind.
-                    try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM attachments WHERE storage_ref = ? FOR UPDATE")) {
-                        ps.setString(1, storageRef);
-                        ps.executeQuery().close();
+                // Lock the root's row first — a root FOR UPDATE, a view's root FOR SHARE.
+                // A storeDerived holding the root FOR SHARE has its view committed before
+                // this returns, and the DELETE below, a new statement, sees that view; one
+                // starting now finds the root gone. Without it the DELETE would wait on the
+                // root row and then work from its old snapshot, leaving a view inserted
+                // meanwhile behind. Under the lock the owner is read again: a promote that
+                // committed meanwhile made it a library document, which this may not delete.
+                try (PreparedStatement ps = conn.prepareStatement(rootRef == null
+                        ? "SELECT owner_scope FROM attachments WHERE storage_ref = ? FOR UPDATE"
+                        : "SELECT owner_scope FROM attachments WHERE storage_ref = ? AND root_ref IS NULL FOR SHARE")) {
+                    ps.setString(1, rootRef == null ? storageRef : rootRef);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next() && OwnerScope.fromStored(rs.getString(1)) != OwnerScope.CONVERSATION) {
+                            throw new AttachmentAccessDeniedException(LIBRARY_DELETE_DENIED);
+                        }
                     }
                 }
                 boolean removed = false;
@@ -1267,8 +1408,20 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     ps.setString(1, conversationId);
                     ps.executeUpdate();
                 }
+                // The conversation's roots first, one at a time in one order: a promote
+                // holds its root FOR UPDATE and then updates the root's views, so a
+                // DELETE that reached a view first and then waited on its root would
+                // deadlock with it. Locked here, a promote that committed meanwhile has
+                // made its root the library's, which the DELETE below then skips.
+                try (PreparedStatement ps = conn.prepareStatement("SELECT storage_ref FROM attachments WHERE conversation_id = ? "
+                        + "AND owner_scope = 'CONVERSATION' AND root_ref IS NULL ORDER BY storage_ref FOR UPDATE")) {
+                    ps.setString(1, conversationId);
+                    ps.executeQuery().close();
+                }
+                // A library document that came from this conversation keeps its
+                // conversation id as origin; it is the library's, and stays.
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "DELETE FROM attachments WHERE conversation_id = ? "
+                        "DELETE FROM attachments WHERE conversation_id = ? AND owner_scope = 'CONVERSATION' "
                                 + "RETURNING storage_ref, root_ref, owner_scope, owner_key, user_id, blob_backend, blob_key")) {
                     ps.setString(1, conversationId);
                     try (ResultSet rs = ps.executeQuery()) {
@@ -1360,16 +1513,18 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
-        return listWhere("root_ref IS NULL AND conversation_id = ?", conversationId);
+        // A library document keeps its origin conversation's id, but is not its own.
+        return listWhere("root_ref IS NULL AND conversation_id = ? AND owner_scope = 'CONVERSATION'", conversationId);
     }
 
     @Override
     public List<Attachment> listAccessible(String conversationId) {
         // Owned, OR granted in the legacy shape, OR granted in the new one — one
         // query over the roots, so a blob granted in both shapes is listed once and a
-        // grant row whose blob is gone lists nothing.
-        return listWhere("root_ref IS NULL AND (conversation_id = ? OR grants @> ARRAY[?]::text[] "
-                + "OR storage_ref IN (SELECT storage_ref FROM attachment_grants WHERE conversation_id = ?))",
+        // grant row whose blob is gone lists nothing. A library document is listed
+        // through a grant only, and not while it is soft-removed.
+        return listWhere("root_ref IS NULL AND removed_at IS NULL AND ((conversation_id = ? AND owner_scope = 'CONVERSATION') "
+                + "OR grants @> ARRAY[?]::text[] OR storage_ref IN (SELECT storage_ref FROM attachment_grants WHERE conversation_id = ?))",
                 conversationId, conversationId, conversationId);
     }
 
@@ -1476,64 +1631,99 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         Kind kind = derivation.kind();
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            Lineage from = resolveSource(conn, derivation, requestingConversationId);
-            String rootRef = from.lineageRoot();
-            String parentRef = from.derived() ? from.storageRef() : null;
-            boolean media = DerivedCaps.countsTowardOwnerQuota(kind);
-            boolean conversationQuota = media && maxTotalBytesPerConversation > 0;
-            boolean userQuota = media && from.userId() != null && maxTotalBytesPerUser > 0;
-            String[] stored = new String[1];
-            Attachment result = inTransaction(conn, () -> {
-                // Lock order: conversation → user → source, as every writer takes them.
-                List<Lock> locks = new ArrayList<>();
-                if (conversationQuota) {
-                    locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, from.conversationId()));
-                }
-                if (userQuota) {
-                    locks.add(new Lock(AttachmentLockOrder.Scope.USER, from.userId()));
-                }
-                locks.add(new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef));
-                lockAll(conn, locks);
-                // The root again, under the lock and held FOR SHARE: a delete that
-                // committed meanwhile reads as gone, one that starts now waits for this
-                // insert and then deletes it with the lineage (delete() locks the root
-                // FOR UPDATE before it deletes; deleteByConversation() deletes the
-                // lineage again in a statement after its wait).
-                String ownerKey = lockRoot(conn, rootRef, from);
-                Attachment existing = findByContent(conn, ownerKey, rootRef, sha256);
-                if (existing != null) {
-                    return existing;
-                }
-                List<String> evict = DerivedCaps.check(kind, bytes.length, lineageOf(conn, rootRef), derivedLimits());
-                if (conversationQuota) {
-                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, 0,
-                            usage(conn, "conversation_id = ?", from.conversationId())[1], bytes.length, 0, maxTotalBytesPerConversation);
-                }
-                if (userQuota) {
-                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(conn, "user_id = ?", from.userId())[1],
-                            bytes.length, 0, maxTotalBytesPerUser);
-                }
-                if (!evict.isEmpty()) {
-                    try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE root_ref = ? AND storage_ref = ANY(?)")) {
-                        ps.setString(1, rootRef);
-                        ps.setArray(2, conn.createArrayOf("text", evict.toArray()));
-                        ps.executeUpdate();
+            // The owner is the root's at write time: when it changes between the read
+            // and the lock (a promote), the write starts over with the new owner — its
+            // buckets and locks — rather than failing.
+            for (int attempt = 1;; attempt++) {
+                Lineage from = resolveSource(conn, derivation, requestingConversationId);
+                try {
+                    return storeDerivedOnce(conn, from, bytes, resolvedMime, filename, derivation, sha256);
+                } catch (OwnerChangedException e) {
+                    if (attempt >= OWNER_CHANGE_ATTEMPTS) {
+                        throw new AttachmentStoreException("The owner of this file changed while a view of it was being stored. Please retry.");
                     }
                 }
-                String storageRef = UUID.randomUUID().toString();
-                insertDerived(conn, storageRef, from, ownerKey, filename, resolvedMime, bytes,
-                        derivation.resolved(rootRef, parentRef, sha256));
-                stored[0] = storageRef;
-                return new Attachment(storageRef, filename, resolvedMime, bytes.length, from.conversationId());
-            });
-            if (stored[0] != null) {
-                DerivedBlobs.recordStored(meterRegistry, kind, bytes.length);
-                LOGGER.debugf("Stored derived %s (%d bytes) of attachment %s", kind, bytes.length, rootRef);
             }
-            return result;
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to store a derived attachment", e);
         }
+    }
+
+    /** A root's owner changed between reading it and locking it. */
+    private static final class OwnerChangedException extends AttachmentStoreException {
+        OwnerChangedException() {
+            super("The owner of this file changed while a view of it was being stored");
+        }
+    }
+
+    private Attachment storeDerivedOnce(Connection conn, Lineage from, byte[] bytes, String resolvedMime, String filename, Derivation derivation,
+                                        String sha256)
+            throws SQLException, AttachmentStoreException {
+        Kind kind = derivation.kind();
+        String rootRef = from.lineageRoot();
+        String parentRef = from.derived() ? from.storageRef() : null;
+        boolean media = DerivedCaps.countsTowardOwnerQuota(kind);
+        OwnerScope scope = OwnerScope.fromStored(from.ownerScope());
+        boolean library = scope != OwnerScope.CONVERSATION;
+        boolean conversationQuota = media && !library && maxTotalBytesPerConversation > 0;
+        boolean userQuota = media && !library && from.userId() != null && maxTotalBytesPerUser > 0;
+        boolean libraryQuota = media && library && libraryMaxTotalBytesPerUser > 0;
+        String[] stored = new String[1];
+        Attachment result = inTransaction(conn, () -> {
+            // Lock order: conversation → user → team → source, as every writer takes
+            // them; a library's bucket locks in its owner's place.
+            List<Lock> locks = new ArrayList<>();
+            if (conversationQuota) {
+                locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, from.conversationId()));
+            }
+            if (userQuota) {
+                locks.add(new Lock(AttachmentLockOrder.Scope.USER, from.userId()));
+            }
+            if (libraryQuota) {
+                locks.add(LibraryStoreSupport.bucketLock(scope, from.ownerKey()));
+            }
+            locks.add(new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef));
+            lockAll(conn, locks);
+            // The root again, under the lock and held FOR SHARE: a delete that
+            // committed meanwhile reads as gone, one that starts now waits for this
+            // insert and then deletes it with the lineage (delete() locks the root
+            // FOR UPDATE before it deletes; deleteByConversation() deletes the
+            // lineage again in a statement after its wait).
+            String ownerKey = lockRoot(conn, rootRef, from);
+            Attachment existing = findByContent(conn, ownerKey, rootRef, sha256);
+            if (existing != null) {
+                return existing;
+            }
+            List<String> evict = DerivedCaps.check(kind, bytes.length, lineageOf(conn, rootRef), derivedLimits());
+            if (conversationQuota) {
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, 0,
+                        usage(conn, "conversation_id = ?", from.conversationId())[1], bytes.length, 0, maxTotalBytesPerConversation);
+            }
+            if (userQuota) {
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(conn, "user_id = ?", from.userId())[1],
+                        bytes.length, 0, maxTotalBytesPerUser);
+            }
+            if (libraryQuota) {
+                LibraryStoreSupport.checkQuota(0, libraryUsage(conn, scope, ownerKey)[1], 0, bytes.length, libraryLimits());
+            }
+            if (!evict.isEmpty()) {
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE root_ref = ? AND storage_ref = ANY(?)")) {
+                    ps.setString(1, rootRef);
+                    ps.setArray(2, conn.createArrayOf("text", evict.toArray()));
+                    ps.executeUpdate();
+                }
+            }
+            String storageRef = UUID.randomUUID().toString();
+            insertDerived(conn, storageRef, from, ownerKey, filename, resolvedMime, bytes,
+                    derivation.resolved(rootRef, parentRef, sha256));
+            stored[0] = storageRef;
+            return new Attachment(storageRef, filename, resolvedMime, bytes.length, from.conversationId());
+        });
+        if (stored[0] != null) {
+            DerivedBlobs.recordStored(meterRegistry, kind, bytes.length);
+            LOGGER.debugf("Stored derived %s (%d bytes) of attachment %s", kind, bytes.length, rootRef);
+        }
+        return result;
     }
 
     /**
@@ -1556,20 +1746,21 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
 
     /**
      * Locks the root's row for the rest of the transaction and returns its owner
-     * key; a root that is gone, or whose owner changed since it was read, is
-     * refused.
+     * key; a root that is gone is not found, and one whose owner changed since it
+     * was read makes the write start over ({@link OwnerChangedException}).
      */
     private static String lockRoot(Connection conn, String rootRef, Lineage expected) throws SQLException, AttachmentStoreException {
-        try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT conversation_id, COALESCE(owner_key, conversation_id) FROM attachments WHERE storage_ref = ? AND root_ref IS NULL FOR SHARE")) {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT conversation_id, COALESCE(owner_key, conversation_id), owner_scope "
+                + "FROM attachments WHERE storage_ref = ? AND root_ref IS NULL FOR SHARE")) {
             ps.setString(1, rootRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     throw new AttachmentNotFoundException("Attachment not found: " + rootRef);
                 }
                 String ownerKey = rs.getString(2);
-                if (!rs.getString(1).equals(expected.conversationId()) || !ownerKey.equals(expected.ownerKey())) {
-                    throw new AttachmentStoreException("The owner of this file changed while a view of it was being stored. Please retry.");
+                if (!rs.getString(1).equals(expected.conversationId()) || !ownerKey.equals(expected.ownerKey())
+                        || OwnerScope.fromStored(rs.getString(3)) != OwnerScope.fromStored(expected.ownerScope())) {
+                    throw new OwnerChangedException();
                 }
                 return ownerKey;
             }
@@ -1804,7 +1995,9 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 "SELECT a.files + r.files, a.bytes + r.bytes FROM "
                         + "(SELECT COUNT(*) FILTER (WHERE root_ref IS NULL) AS files, "
                         + "COALESCE(SUM(size_bytes) FILTER (WHERE (root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + ")" + largeExempt
-                        + "), 0) AS bytes FROM attachments WHERE " + where + ") a, "
+                        // A library document and its views count in the library's bucket only.
+                        + "), 0) AS bytes FROM attachments WHERE " + where + " AND owner_scope = 'CONVERSATION') a, "
+
                         + "(SELECT COALESCE(SUM(count), 0) AS files, COALESCE(SUM(bytes) FILTER (WHERE TRUE" + largeExempt + "), 0) AS bytes "
                         + "FROM attachment_reservations WHERE " + where + " AND expires_at > NOW()) r")) {
             ps.setString(1, value);
@@ -1816,10 +2009,427 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         }
     }
 
+    // ------------------------------------------------------------------ library
+
+    private LibraryStoreSupport.Limits libraryLimits() {
+        return new LibraryStoreSupport.Limits(libraryMaxPerUser, libraryMaxTotalBytesPerUser, libraryRetentionDays, libraryMaxGrantsPerDocument);
+    }
+
+    /**
+     * {count, totalBytes} of a library's bucket: its documents (soft-removed ones
+     * included) and the bytes of them and their media views.
+     */
+    private static long[] libraryUsage(Connection conn, OwnerScope scope, String ownerKey) throws SQLException {
+        // Two parts, each on an index: the roots by owner key (the partial library
+        // index, whose predicate LIBRARY_ROOT repeats), their media views by root.
+        try (PreparedStatement ps = conn.prepareStatement("WITH roots AS (SELECT storage_ref, size_bytes FROM attachments "
+                + "WHERE owner_key = ? AND " + LIBRARY_ROOT + " AND owner_scope = ?) "
+                + "SELECT (SELECT COUNT(*) FROM roots), (SELECT COALESCE(SUM(size_bytes), 0) FROM roots) + "
+                + "(SELECT COALESCE(SUM(v.size_bytes), 0) FROM attachments v WHERE v.root_ref IN (SELECT storage_ref FROM roots) "
+                + "AND v.kind IN " + MEDIA_KINDS_SQL + ")")) {
+            ps.setString(1, ownerKey);
+            ps.setString(2, scope.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return new long[]{rs.getLong(1), rs.getLong(2)};
+            }
+        }
+    }
+
+    /** The bytes of a root's media views, which move with it into a library. */
+    private static long mediaBytesOfLineage(Connection conn, String rootRef) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM attachments WHERE root_ref = ? AND kind IN " + MEDIA_KINDS_SQL)) {
+            ps.setString(1, rootRef);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private static LibraryStoreSupport.SlugLookup slugLookup(Connection conn, String ownerKey) {
+        return candidate -> {
+            try {
+                return slugTaken(conn, ownerKey, candidate);
+            } catch (SQLException e) {
+                throw new AttachmentStoreException("Failed to check a library slug", e);
+            }
+        };
+    }
+
+    private static boolean slugTaken(Connection conn, String ownerKey, String slug) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT 1 FROM attachments WHERE owner_key = ? AND " + LIBRARY_ROOT + " AND library_slug = ? LIMIT 1")) {
+            ps.setString(1, ownerKey);
+            ps.setString(2, slug);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /**
+     * Moves a root's lineage to the new owner, as a statement after the root's
+     * update: the root is locked FOR UPDATE by then, so a view committed before it
+     * is seen here and one written after it reads the new owner.
+     */
+    private static void rekeyLineage(Connection conn, String rootRef, OwnerRef newOwner) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET owner_scope = ?, owner_key = ? WHERE root_ref = ?")) {
+            ps.setString(1, newOwner.scope().name());
+            ps.setString(2, newOwner.ownerKey());
+            ps.setString(3, rootRef);
+            ps.executeUpdate();
+        }
+    }
+
+    @Override
+    public LibraryEntry promote(String storageRef, String owningConversationId, OwnerRef newOwner, LibraryMeta meta)
+            throws AttachmentStoreException {
+        LibraryStoreSupport.requireLibraryOwner(newOwner);
+        if (meta == null) {
+            throw new IllegalArgumentException("A library document needs its title and slug");
+        }
+        ensureSchema();
+        String[] oldOwnerKey = new String[1];
+        LibraryEntry entry;
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            entry = inTransaction(conn, () -> {
+                // Lock order: the library's bucket, then the root's source lock — after it
+                // no view of the old owner can be stored, before it none was half-stored.
+                lockAll(conn, List.of(LibraryStoreSupport.bucketLock(newOwner.scope(), newOwner.ownerKey()),
+                        new Lock(AttachmentLockOrder.Scope.SOURCE, storageRef)));
+                long size;
+                try (PreparedStatement ps = conn.prepareStatement("SELECT root_ref, owner_scope, conversation_id, "
+                        + "COALESCE(owner_key, conversation_id), size_bytes FROM attachments WHERE storage_ref = ? FOR UPDATE")) {
+                    ps.setString(1, storageRef);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+                        }
+                        if (rs.getString(1) != null) {
+                            throw new AttachmentStoreException("Only an uploaded file can be put into a library, not a view of one");
+                        }
+                        if (OwnerScope.fromStored(rs.getString(2)) != OwnerScope.CONVERSATION) {
+                            throw new AttachmentAccessDeniedException("This file is in a library already");
+                        }
+                        if (owningConversationId == null || !owningConversationId.equals(rs.getString(3))) {
+                            throw new AttachmentAccessDeniedException("Only the conversation a file was uploaded to can put it into a library");
+                        }
+                        oldOwnerKey[0] = rs.getString(4);
+                        size = rs.getLong(5);
+                    }
+                }
+                long[] usage = libraryUsage(conn, newOwner.scope(), newOwner.ownerKey());
+                LibraryStoreSupport.checkQuota(usage[0], usage[1], 1, size + mediaBytesOfLineage(conn, storageRef), libraryLimits());
+                String slug = LibraryStoreSupport.uniqueSlug(meta.slug(), slugLookup(conn, newOwner.ownerKey()));
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET owner_scope = ?, owner_key = ?, library_title = ?, "
+                        + "library_slug = ?, agent_scope = ?, contributed_by = ?, retention_days = ?, saved_at = NOW(), last_accessed_at = NOW(), "
+                        + "removed_at = NULL WHERE storage_ref = ?")) {
+                    ps.setString(1, newOwner.scope().name());
+                    ps.setString(2, newOwner.ownerKey());
+                    ps.setString(3, meta.title());
+                    ps.setString(4, slug);
+                    ps.setString(5, meta.agentScope());
+                    ps.setString(6, newOwner.ownerUserId());
+                    ps.setObject(7, meta.retentionDays(), Types.INTEGER);
+                    ps.setString(8, storageRef);
+                    ps.executeUpdate();
+                }
+                rekeyLineage(conn, storageRef, newOwner);
+                // The promoting conversation reads it through a grant from now on, in both
+                // shapes, like any grantee.
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET grants = CASE WHEN ? = ANY(COALESCE(grants, '{}')) "
+                        + "THEN grants ELSE array_append(COALESCE(grants, '{}'), ?) END WHERE storage_ref = ?")) {
+                    ps.setString(1, owningConversationId);
+                    ps.setString(2, owningConversationId);
+                    ps.setString(3, storageRef);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO attachment_grants (storage_ref, conversation_id) VALUES (?, ?) ON CONFLICT DO NOTHING")) {
+                    ps.setString(1, storageRef);
+                    ps.setString(2, owningConversationId);
+                    ps.executeUpdate();
+                }
+                evictGrants(conn, storageRef, owningConversationId);
+                return readEntry(conn, newOwner.ownerKey(), storageRef)
+                        .orElseThrow(() -> new AttachmentStoreException("A promoted library document could not be read back"));
+            });
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to put an attachment into a library", e);
+        }
+        DerivedBlobs.fireOwnerChanged(ownerChangedEvent,
+                new AttachmentOwnerChanged(storageRef, oldOwnerKey[0], newOwner.ownerKey(), newOwner.scope()));
+        LOGGER.debugf("Put attachment %s into a %s library", storageRef, newOwner.scope());
+        return entry;
+    }
+
+    @Override
+    public LibraryEntry moveOwner(String storageRef, String oldOwnerKey, OwnerRef newOwner) throws AttachmentStoreException {
+        LibraryStoreSupport.requireLibraryOwner(newOwner);
+        if (newOwner.ownerKey().equals(oldOwnerKey)) {
+            throw new IllegalArgumentException("A document moves to another owner, not to its own");
+        }
+        ensureSchema();
+        LibraryEntry entry;
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            entry = inTransaction(conn, () -> {
+                lockAll(conn, List.of(LibraryStoreSupport.bucketLock(newOwner.scope(), newOwner.ownerKey()),
+                        new Lock(AttachmentLockOrder.Scope.SOURCE, storageRef)));
+                long size;
+                String wantedSlug;
+                try (PreparedStatement ps = conn.prepareStatement("SELECT size_bytes, library_slug FROM attachments WHERE storage_ref = ? "
+                        + "AND owner_key = ? AND " + LIBRARY_ROOT + " FOR UPDATE")) {
+                    ps.setString(1, storageRef);
+                    ps.setString(2, oldOwnerKey);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new AttachmentNotFoundException("Library document not found: " + storageRef);
+                        }
+                        size = rs.getLong(1);
+                        wantedSlug = rs.getString(2);
+                    }
+                }
+                long[] usage = libraryUsage(conn, newOwner.scope(), newOwner.ownerKey());
+                LibraryStoreSupport.checkQuota(usage[0], usage[1], 1, size + mediaBytesOfLineage(conn, storageRef), libraryLimits());
+                String slug = LibraryStoreSupport.uniqueSlug(wantedSlug, slugLookup(conn, newOwner.ownerKey()));
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET owner_scope = ?, owner_key = ?, library_slug = ?, "
+                        + "saved_at = NOW() WHERE storage_ref = ?")) {
+                    ps.setString(1, newOwner.scope().name());
+                    ps.setString(2, newOwner.ownerKey());
+                    ps.setString(3, slug);
+                    ps.setString(4, storageRef);
+                    ps.executeUpdate();
+                }
+                rekeyLineage(conn, storageRef, newOwner);
+                return readEntry(conn, newOwner.ownerKey(), storageRef)
+                        .orElseThrow(() -> new AttachmentStoreException("A moved library document could not be read back"));
+            });
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to move a library document", e);
+        }
+        DerivedBlobs.fireOwnerChanged(ownerChangedEvent, new AttachmentOwnerChanged(storageRef, oldOwnerKey, newOwner.ownerKey(), newOwner.scope()));
+        return entry;
+    }
+
+    private static Optional<LibraryEntry> readEntry(Connection conn, String ownerKey, String storageRef) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT " + ENTRY_COLUMNS + " FROM attachments WHERE storage_ref = ? AND owner_key = ? AND " + LIBRARY_ROOT)) {
+            ps.setString(1, storageRef);
+            ps.setString(2, ownerKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(entry(rs)) : Optional.empty();
+            }
+        }
+    }
+
+    private static LibraryEntry entry(ResultSet rs) throws SQLException {
+        return new LibraryEntry(rs.getString("storage_ref"), rs.getString("library_title"), rs.getString("library_slug"),
+                OwnerScope.fromStored(rs.getString("owner_scope")), rs.getString("owner_key"), rs.getString("agent_scope"),
+                rs.getString("contributed_by"), rs.getString("filename"), rs.getString("mime_type"), rs.getLong("size_bytes"),
+                (Integer) rs.getObject("page_count"), instant(rs, "saved_at"), instant(rs, "last_accessed_at"), instant(rs, "removed_at"),
+                (Integer) rs.getObject("retention_days"));
+    }
+
+    private static Instant instant(ResultSet rs, String column) throws SQLException {
+        Timestamp value = rs.getTimestamp(column);
+        return value != null ? value.toInstant() : null;
+    }
+
+    /** Library entries matching {@code where} (after {@link #LIBRARY_ROOT}). */
+    private List<LibraryEntry> entriesWhere(String where, String orderBy, int limit, int offset, Object... params) {
+        ensureSchema();
+        String sql = "SELECT " + ENTRY_COLUMNS + " FROM attachments WHERE " + LIBRARY_ROOT + where + " ORDER BY " + orderBy
+                + " LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            int i = 1;
+            for (Object param : params) {
+                if (param instanceof Instant when) {
+                    ps.setTimestamp(i++, Timestamp.from(when));
+                } else if (param instanceof Integer number) {
+                    ps.setInt(i++, number);
+                } else {
+                    ps.setString(i++, (String) param);
+                }
+            }
+            ps.setInt(i++, LibraryStoreSupport.pageLimit(limit));
+            ps.setInt(i, LibraryStoreSupport.pageOffset(offset));
+            try (ResultSet rs = ps.executeQuery()) {
+                List<LibraryEntry> entries = new ArrayList<>();
+                while (rs.next()) {
+                    entries.add(entry(rs));
+                }
+                return entries;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list library documents", e);
+        }
+    }
+
+    @Override
+    public List<LibraryEntry> listByOwner(String ownerKey, String agentScopeOrNull, boolean includeRemoved, int offset, int limit) {
+        if (ownerKey == null) {
+            return List.of();
+        }
+        String where = " AND owner_key = ?" + (agentScopeOrNull != null ? " AND (agent_scope = ? OR agent_scope IS NULL)" : "")
+                + (includeRemoved ? "" : " AND removed_at IS NULL");
+        Object[] params = agentScopeOrNull != null ? new Object[]{ownerKey, agentScopeOrNull} : new Object[]{ownerKey};
+        return entriesWhere(where, "COALESCE(last_accessed_at, saved_at) DESC, storage_ref", limit, offset, params);
+    }
+
+    @Override
+    public Optional<LibraryEntry> getLibraryEntry(String ownerKey, String storageRef) {
+        if (ownerKey == null || storageRef == null) {
+            return Optional.empty();
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return readEntry(conn, ownerKey, storageRef);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read a library document", e);
+        }
+    }
+
+    @Override
+    public void touchAccess(String storageRef) {
+        ensureSchema();
+        executeUpdate("UPDATE attachments SET last_accessed_at = NOW() WHERE storage_ref = ? AND " + LIBRARY_ROOT, storageRef);
+    }
+
+    @Override
+    public boolean softRemove(String ownerKey, String storageRef, Instant when) {
+        if (when == null) {
+            throw new IllegalArgumentException("A soft removal needs its time");
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("UPDATE attachments SET removed_at = ? WHERE storage_ref = ? AND owner_key = ? AND "
+                        + LIBRARY_ROOT + " AND removed_at IS NULL")) {
+            ps.setTimestamp(1, Timestamp.from(when));
+            ps.setString(2, storageRef);
+            ps.setString(3, ownerKey);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to remove a library document", e);
+        }
+    }
+
+    @Override
+    public boolean restore(String ownerKey, String storageRef) {
+        ensureSchema();
+        return executeUpdate("UPDATE attachments SET removed_at = NULL WHERE storage_ref = ? AND owner_key = ? AND " + LIBRARY_ROOT
+                + " AND removed_at IS NOT NULL", storageRef, ownerKey) > 0;
+    }
+
+    @Override
+    public long deleteByOwner(String ownerKey) {
+        return deleteLibraryRoots(ownerKey, null);
+    }
+
+    @Override
+    public boolean deleteLibraryDocument(String ownerKey, String storageRef) {
+        return storageRef != null && deleteLibraryRoots(ownerKey, storageRef) > 0;
+    }
+
+    /**
+     * Deletes the library roots of {@code ownerKey} — one, or all of them with
+     * {@code storageRef} {@code null} (and then the owner's reservations too) —
+     * with their lineage and the grants on them, in one transaction; then their
+     * located bytes and one announcement per root. The roots are locked FOR UPDATE
+     * first, so the lineage DELETE, a later statement, sees a view a concurrent
+     * {@code storeDerived} committed while it waited.
+     */
+    private long deleteLibraryRoots(String ownerKey, String storageRef) {
+        if (ownerKey == null) {
+            return 0;
+        }
+        ensureSchema();
+        List<AttachmentRootDeleted> roots = new ArrayList<>();
+        List<Removed> located = new ArrayList<>();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            inTransaction(conn, () -> {
+                roots.clear();
+                located.clear();
+                try (PreparedStatement ps = conn.prepareStatement("SELECT storage_ref, owner_scope, conversation_id, user_id FROM attachments "
+                        + "WHERE owner_key = ? AND " + LIBRARY_ROOT + (storageRef != null ? " AND storage_ref = ?" : "") + " FOR UPDATE")) {
+                    ps.setString(1, ownerKey);
+                    if (storageRef != null) {
+                        ps.setString(2, storageRef);
+                    }
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            roots.add(new AttachmentRootDeleted(rs.getString(1), OwnerScope.fromStored(rs.getString(2)), ownerKey, rs.getString(4)));
+                        }
+                    }
+                }
+                if (storageRef == null) {
+                    // The library's own reservations; a conversation's (whose owner key is
+                    // its id) are never the library's, whatever key was passed.
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "DELETE FROM attachment_reservations WHERE owner_key = ? AND conversation_id IS DISTINCT FROM owner_key")) {
+                        ps.setString(1, ownerKey);
+                        ps.executeUpdate();
+                    }
+                }
+                if (roots.isEmpty()) {
+                    return null;
+                }
+                Array refs = conn.createArrayOf("text", roots.stream().map(AttachmentRootDeleted::rootRef).toArray());
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE storage_ref = ANY(?) OR root_ref = ANY(?) "
+                        + "RETURNING blob_backend, blob_key, COALESCE(owner_key, conversation_id)")) {
+                    ps.setArray(1, refs);
+                    ps.setArray(2, refs);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            collectLocated(rs, 1, rs.getString(3), located);
+                        }
+                    }
+                }
+                tombstoneAll(conn, located);
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_grants WHERE storage_ref = ANY(?)")) {
+                    ps.setArray(1, refs);
+                    ps.executeUpdate();
+                }
+                return null;
+            });
+        } catch (SQLException | AttachmentStoreException e) {
+            throw new RuntimeException("Failed to delete library documents", e);
+        }
+        discardAll(located);
+        DerivedBlobs.fireRootDeleted(rootDeletedEvent, roots);
+        if (!roots.isEmpty()) {
+            LOGGER.debugf("Deleted %d library documents", roots.size());
+        }
+        return roots.size();
+    }
+
+    @Override
+    public List<LibraryEntry> expired(Instant now, int limit) {
+        if (now == null) {
+            throw new IllegalArgumentException("Expiry is decided at a given time");
+        }
+        // Retention counts from the last access; a document without its own retention
+        // has the deployment's, and zero (its own or the default) never runs out.
+        int fallback = Math.max(0, libraryRetentionDays);
+        return entriesWhere(" AND COALESCE(retention_days, ?) > 0 "
+                + "AND COALESCE(last_accessed_at, saved_at) + COALESCE(retention_days, ?) * INTERVAL '1 day' <= ?",
+                "COALESCE(last_accessed_at, saved_at), storage_ref", limit, 0, fallback, fallback, now);
+    }
+
+    @Override
+    public List<LibraryEntry> removedBefore(Instant cutoff, int limit) {
+        if (cutoff == null) {
+            throw new IllegalArgumentException("A purge needs its cutoff");
+        }
+        return entriesWhere(" AND removed_at IS NOT NULL AND removed_at < ?", "removed_at, storage_ref", limit, 0, cutoff);
+    }
+
     // ------------------------------------------------------- quota reservations
 
     @Override
-    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+    public QuotaReservation reserve(
+                                    OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
                                     QuotaMode mode)
             throws AttachmentStoreException {
         QuotaReservation.validateRequest(owner, conversationId, userId, bytes, count, ttl, mode);
@@ -1983,14 +2593,19 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         if (rs.getString("root_ref") != null) {
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
+        if (OwnerScope.fromStored(rs.getString("root_owner_scope")) != OwnerScope.CONVERSATION) {
+            throw new AttachmentAccessDeniedException("Access denied: this library document has not been opened in this conversation");
+        }
         throw new AttachmentAccessDeniedException(
                 "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
                         .formatted(rs.getString("conversation_id"), requester));
     }
 
     private static boolean mayRead(ResultSet rs, String requester) throws SQLException {
+        // Only a conversation-owned root is its conversation's own: a library
+        // document is read through a grant, even by the conversation it came from.
         String owner = rs.getString("conversation_id");
-        if (owner != null && owner.equals(requester)) {
+        if (owner != null && owner.equals(requester) && OwnerScope.fromStored(rs.getString("root_owner_scope")) == OwnerScope.CONVERSATION) {
             return true;
         }
         if (grantsContain(rs, requester)) {
