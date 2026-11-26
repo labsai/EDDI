@@ -167,7 +167,9 @@ CodeRabbit's full review of the merge-ready round:
   the user's last check (`verifyNoPendingRemovals`) every tombstone must still be
   valid; one that expired while the erasure ran fails it for a re-run, and the ones
   that held are written again (expiry and, for the user, the cutoff move to the
-  completion). The retention floor stays as a sanity bound.
+  completion) — within the hold check's one-minute margin, or, like a renewal that
+  fails, it fails the conversation or the user's last check, since a late renewal
+  cannot confirm there was no gap. The retention floor stays as a sanity bound.
 - **Writers carry the guard's admission.** `beforeWrite` returns an
   `ErasureGuard.Admission` (`allowed()`), and `afterWrite(name, rowId, admission,
   remover)` checks and records against the user key and conversation it resolved.

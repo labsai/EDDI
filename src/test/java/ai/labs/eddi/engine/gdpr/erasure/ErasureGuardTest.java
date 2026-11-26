@@ -21,6 +21,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -470,6 +471,70 @@ class ErasureGuardTest {
                     "renewed: still there past the expiry the start would give");
             assertTrue(store.erasedAt(Kind.CONVERSATION, "again", completed.plus(retention).minusSeconds(1)).isPresent(),
                     "the retention counts from the completion");
+        }
+
+        /**
+         * A store whose second tombstone write — the renewal — runs {@code renewal}.
+         */
+        private InMemoryErasureTombstoneStore renewing(Runnable renewal) {
+            AtomicInteger puts = new AtomicInteger();
+            return new InMemoryErasureTombstoneStore() {
+                @Override
+                public void putTombstones(Kind kind, Collection<String> keys, Instant erasedAt, Instant expiresAt) {
+                    if (puts.incrementAndGet() == 2) {
+                        renewal.run();
+                    }
+                    super.putTombstones(kind, keys, erasedAt, expiresAt);
+                }
+            };
+        }
+
+        private ErasureGuard guardOn(InMemoryErasureTombstoneStore on) {
+            return new ErasureGuard(on, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(30), Duration.ofMinutes(5), new Clock() {
+                        @Override
+                        public ZoneOffset getZone() {
+                            return ZoneOffset.UTC;
+                        }
+
+                        @Override
+                        public Clock withZone(ZoneId zone) {
+                            return this;
+                        }
+
+                        @Override
+                        public Instant instant() {
+                            return clockNow;
+                        }
+                    });
+        }
+
+        @Test
+        @DisplayName("a renewal that lands after the hold check's margin, or fails, fails the conversations instead of confirming them")
+        void lateOrFailedRenewalFails() {
+            // Late: the renewal is delayed past the margin the hold check proved.
+            Map<String, String> late = guardOn(renewing(() -> clockNow = clockNow.plus(ErasureGuard.TOMBSTONE_HOLD_MARGIN).plusSeconds(1)))
+                    .eraseConversations(List.of("c-late"));
+            assertTrue(late.containsKey("c-late") && late.get("c-late").contains("could not be renewed"), late.toString());
+
+            // Failed: the renewal write throws.
+            Map<String, String> broken = guardOn(renewing(() -> {
+                throw new IllegalStateException("tombstone store down");
+            })).eraseConversations(List.of("c-broken"));
+            assertTrue(broken.containsKey("c-broken") && broken.get("c-broken").contains("could not be renewed"), broken.toString());
+
+            // In time: confirmed.
+            assertEquals(Map.of(), guardOn(renewing(() -> clockNow = clockNow.plusSeconds(10))).eraseConversations(List.of("c-ok")));
+        }
+
+        @Test
+        @DisplayName("the user's renewal must land within the margin too")
+        void lateUserRenewalFails() {
+            InMemoryErasureTombstoneStore on = renewing(() -> clockNow = clockNow.plus(ErasureGuard.TOMBSTONE_HOLD_MARGIN).plusSeconds(1));
+            ErasureGuard g = guardOn(on);
+            g.tombstoneUser(USER, List.of());
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> g.verifyNoPendingRemovals(USER));
+            assertTrue(e.getMessage().contains("could not be renewed"), e.getMessage());
         }
 
         @Test

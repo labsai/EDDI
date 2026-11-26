@@ -526,7 +526,8 @@ public class ErasureGuard {
      * the whole batch ends (and for a minute beyond): one that expired during the
      * erasure may have let a write through that this verification did not see, so
      * the conversation fails for a re-run. The tombstones that held are then
-     * written again, so their retention counts from the completion of the erasure,
+     * written again — within the hold check's margin, or they fail too, as when the
+     * renewal fails — so their retention counts from the completion of the erasure,
      * not its start.
      *
      * @return the conversations whose rows are not all gone, each with the reason;
@@ -566,7 +567,10 @@ public class ErasureGuard {
         }
         // Checked after the whole batch, not after each conversation: a tombstone
         // present now has been present throughout, while one checked early could
-        // still expire while a later conversation is being erased.
+        // still expire while a later conversation is being erased. Every check asks
+        // for validity until checkedAt + margin at least, so a renewal that lands
+        // before that instant keeps each tombstone valid without a gap.
+        Instant checkedAt = clock.instant();
         Set<String> held = new LinkedHashSet<>();
         for (String conversationId : new LinkedHashSet<>(conversationIds)) {
             if (failed.containsKey(conversationId)) {
@@ -583,18 +587,38 @@ public class ErasureGuard {
             }
         }
         if (!held.isEmpty()) {
+            String unconfirmed;
             try {
-                Instant now = clock.instant();
-                store.putTombstones(Kind.CONVERSATION, held, now, now.plus(retention));
+                renewHeld(Kind.CONVERSATION, held, checkedAt);
+                unconfirmed = null;
             } catch (RuntimeException e) {
-                // Logged, not failed: the tombstones written at the start still hold for the
-                // full retention, and a conversation tombstone has no cutoff to move — only
-                // the extension from the completion is missing. (The user tombstone's
-                // renewal, in verifyNoPendingRemovals, fails the step: it moves a cutoff.)
-                LOGGER.warnf("GDPR: erasure tombstones could not be renewed at completion: %s", e.toString());
+                unconfirmed = "the conversation's tombstone could not be renewed at completion — retry it: " + e;
+            }
+            if (unconfirmed != null) {
+                for (String conversationId : held) {
+                    failed.put(conversationId, unconfirmed);
+                }
             }
         }
         return failed;
+    }
+
+    /**
+     * Writes held tombstones again, so their retention counts from now, and
+     * confirms the renewal landed before {@code checkedAt} +
+     * {@link #TOMBSTONE_HOLD_MARGIN} — the instant up to which the hold check
+     * proved them valid. A renewal later than that may have left a gap in which a
+     * tombstone had expired, so it is not confirmed.
+     *
+     * @throws IllegalStateException
+     *             when the renewal failed or was not confirmed in time
+     */
+    private void renewHeld(Kind kind, Collection<String> keys, Instant checkedAt) {
+        Instant now = clock.instant();
+        store.putTombstones(kind, keys, now, now.plus(retention));
+        if (clock.instant().isAfter(checkedAt.plus(TOMBSTONE_HOLD_MARGIN))) {
+            throw new IllegalStateException("the renewal landed after the hold check's margin of " + TOMBSTONE_HOLD_MARGIN);
+        }
     }
 
     /**
@@ -632,11 +656,15 @@ public class ErasureGuard {
         }
         // The user tombstone must have held throughout (see eraseConversationRows);
         // then it is written again, so its retention counts from the completion.
+        Instant checkedAt = clock.instant();
         if (!tombstoneHolds(Kind.USER, key)) {
             throw new IllegalStateException("the user's erasure tombstone expired during the erasure — retry it");
         }
-        Instant now = clock.instant();
-        store.putTombstones(Kind.USER, List.of(key), now, now.plus(retention));
+        try {
+            renewHeld(Kind.USER, List.of(key), checkedAt);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("the user's erasure tombstone could not be renewed at completion — retry it: " + e, e);
+        }
     }
 
     /** The conversation-delete barrier on every other node. */
