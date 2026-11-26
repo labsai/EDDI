@@ -813,7 +813,9 @@ public class McpHitlTools {
      * The truth about a cancel just accepted: {@code CANCELLING} while the
      * discussion still runs (it stops before its next turn), otherwise the state it
      * ended in — {@code CANCELLED}, or {@code COMPLETED}/{@code FAILED} when it
-     * finished before the cancel landed. Unreadable reads as {@code CANCELLED}.
+     * finished before the cancel landed. Unreadable reads as {@code CANCELLING}:
+     * the accepted signal does not establish that execution has stopped, so a
+     * terminal status needs a successful read.
      */
     private String cancelStatus(String conversationId) {
         try {
@@ -822,9 +824,9 @@ public class McpHitlTools {
                     || state == GroupConversation.GroupConversationState.CREATED) {
                 return "CANCELLING";
             }
-            return state != null ? state.name() : "CANCELLED";
+            return state != null ? state.name() : "CANCELLING";
         } catch (Exception e) {
-            return "CANCELLED";
+            return "CANCELLING";
         }
     }
 

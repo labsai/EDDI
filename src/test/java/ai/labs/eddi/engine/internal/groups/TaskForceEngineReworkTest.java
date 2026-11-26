@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -234,6 +235,11 @@ class TaskForceEngineReworkTest {
             assertEquals(TaskStatus.FAILED, task(gc).status());
             assertEquals(1, verifierCalls, "a deterministic skip is not retried through reworks");
             assertTrue(workerInputs.isEmpty(), "no member is asked to rework");
+            // The reset above dropped the worker stub that fills workerInputs, so the
+            // check on it is vacuous: also assert the worker turn (the nine-argument
+            // overload) is never called.
+            Mockito.verify(memberTurnExecutor, Mockito.never()).executeAgentTurn(any(), any(), anyString(), any(),
+                    anyInt(), any(), any(), any(), any());
         }
     }
 

@@ -341,7 +341,11 @@ public class GroupHitlCoordinator {
         gc.getTranscript().add(new TranscriptEntry(
                 "system", "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.ERROR, Instant.now(), msg, null));
-        gc.setState(GroupConversationState.FAILED);
+        // The stalled round fails; the discussion fails only if no earlier round
+        // answered (the rule of a round that ends without an answer): an answered one
+        // stays COMPLETED, continuable, with its agents kept.
+        boolean discussionFails = !gc.hasAnsweredRound();
+        gc.setState(discussionFails ? GroupConversationState.FAILED : GroupConversationState.COMPLETED);
         DiscussionOutcomes.noProgress(gc);
         gc.setPausedAt(null);
         gc.setHitlApprovalContext(null);
@@ -351,7 +355,9 @@ public class GroupHitlCoordinator {
         RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
         counterGroupFailure.increment();
         deleteGroupHitlTimeoutSchedule(gc.getId());
-        cleanupAfterTerminalState(gc);
+        if (discussionFails) {
+            cleanupAfterTerminalState(gc);
+        }
         if (listener != null) {
             listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(msg));
         }

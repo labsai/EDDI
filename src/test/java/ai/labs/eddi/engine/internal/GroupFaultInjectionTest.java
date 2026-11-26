@@ -54,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.atLeastOnce;
@@ -76,6 +77,11 @@ class GroupFaultInjectionTest {
     private IGroupConversationStore conversationStore;
     private IConversationService conversationService;
     private IAgentFactory agentFactory;
+    private ITemplatingEngine templatingEngine;
+    /**
+     * The data model of every rendered template — what a prompt could interpolate.
+     */
+    private final List<Object> renderedModels = new ArrayList<>();
     private GroupConversationService service;
 
     @BeforeEach
@@ -84,8 +90,11 @@ class GroupFaultInjectionTest {
         conversationStore = mock(IGroupConversationStore.class);
         conversationService = mock(IConversationService.class);
         agentFactory = mock(IAgentFactory.class);
-        var templatingEngine = mock(ITemplatingEngine.class);
-        doAnswer(inv -> inv.getArgument(0)).when(templatingEngine).processTemplate(anyString(), any(), any());
+        templatingEngine = mock(ITemplatingEngine.class);
+        doAnswer(inv -> {
+            renderedModels.add(inv.getArgument(1));
+            return inv.getArgument(0);
+        }).when(templatingEngine).processTemplate(anyString(), any(), any());
         service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory,
                 templatingEngine, mock(IJsonSerialization.class), new SimpleMeterRegistry(), mock(AgentSigningService.class),
                 mock(IAgentStore.class), mock(IScheduleStore.class), null, new CallerIdentityContext(null, null), "default", 3);
@@ -181,7 +190,9 @@ class GroupFaultInjectionTest {
         if (style == DiscussionStyle.TASK_FORCE) {
             // The moderator also plans and verifies: whatever the members did, there is
             // no answer, and FAILED comes with the FAILED state only.
-            assertEquals(gc.getOutcome() == DiscussionOutcome.FAILED, gc.getState() == GroupConversationState.FAILED, style.name());
+            boolean failedPair = gc.getState() == GroupConversationState.FAILED && gc.getOutcome() == DiscussionOutcome.FAILED;
+            boolean noAnswerPair = gc.getState() == GroupConversationState.COMPLETED && gc.getOutcome() == DiscussionOutcome.NO_ANSWER;
+            assertTrue(failedPair || noAnswerPair, style + ": a terminal state with its outcome, got " + gc.getState() + "/" + gc.getOutcome());
         } else {
             assertEquals(GroupConversationState.COMPLETED, gc.getState(), style.name());
             assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome(), style.name());
@@ -219,6 +230,13 @@ class GroupFaultInjectionTest {
 
         var inputs = ArgumentCaptor.forClass(InputData.class);
         verify(conversationService, atLeastOnce()).say(any(), any(), any(), any(), any(), any(), inputs.capture(), anyBoolean(), any());
+        // The synthesis turn was reached, so its prompt is among the ones checked.
+        verify(conversationService, atLeastOnce()).say(any(), eq(MODERATOR), any(), any(), any(), any(), any(), anyBoolean(), any());
+        // Whatever the templates were given to interpolate carries no failure reason.
+        assertFalse(renderedModels.isEmpty(), "prompts were rendered");
+        for (Object model : renderedModels) {
+            assertFalse(String.valueOf(model).contains(MemberTurnExecutor.REASON_ERROR_STATE), "a failed turn's reason is in a template model");
+        }
         for (InputData input : inputs.getAllValues()) {
             assertFalse(input.getInput().contains(MemberTurnExecutor.REASON_ERROR_STATE), input.getInput());
             assertFalse(input.getInput().contains("Agent failed"), input.getInput());
@@ -297,6 +315,23 @@ class GroupFaultInjectionTest {
         assertEquals(DiscussionOutcome.FAILED, gc.getOutcome(), "the outcome describes the latest round");
         assertEquals(DiscussionOutcomes.NO_MEMBER_ANSWERED, gc.getOutcomeReason());
         assertNull(gc.getSynthesizedAnswer());
+    }
+
+    /**
+     * A legacy discussion whose only round never answered: continuing it must not
+     * read the round increment as an earlier answer, so a second failure ends it.
+     */
+    @Test
+    void continuingALegacyDiscussionThatNeverAnswered_andFailingAgain_endsFailed() throws Exception {
+        givenGroup(DiscussionStyle.ROUND_TABLE);
+        givenProviderFailureFor(Set.of("a", "b", MODERATOR));
+        completedDiscussion(-1, new TranscriptEntry("a", "Alpha", null, 0, "Initial Opinions", GroupConversation.TranscriptEntryType.SKIPPED,
+                Instant.now(), "Agent not deployed", null));
+
+        GroupConversation gc = service.continueDiscussion("gc-old", "Q2", null);
+
+        assertEquals(GroupConversationState.FAILED, gc.getState(), "no round ever answered");
+        assertEquals(DiscussionOutcome.FAILED, gc.getOutcome());
     }
 
     @ParameterizedTest

@@ -16,6 +16,9 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -164,6 +167,107 @@ class DiscussionOutcomesTest {
         assertFalse(DiscussionOutcomes.failsDiscussion(legacyContinued), "a continued legacy document had answered rounds");
     }
 
+    /**
+     * A callback that returned no text is not a contribution (an abstention is).
+     */
+    @Test
+    void answeredEntryWithoutContent_isNotAContribution() {
+        var blank = new TranscriptEntry("a", "a", "   ", 0, "Opinions", TranscriptEntryType.OPINION, Instant.now(), null, null);
+        var gc = gc(blank);
+
+        DiscussionOutcomes.settle(gc, List.of(phase("Opinions", PhaseType.OPINION, 1)), false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome(), "an opinion-only round with no usable text did not answer");
+
+        var abstained = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.ABSTAINED, Instant.now(), null, null));
+        DiscussionOutcomes.settle(abstained, List.of(phase("Opinions", PhaseType.OPINION, 1)), false);
+        assertEquals(DiscussionOutcome.ANSWERED, abstained.getOutcome(), "a deliberate pass still counts as taking part");
+    }
+
+    /** Ballots are not an answer when the vote reached no decision. */
+    @Test
+    void voteWithNoDecision_andNoSynthesisPhase_isNoAnswer() {
+        var ballot = new TranscriptEntry("a", "a", "ballot", 0, "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+        var gc = gc(ballot);
+        gc.setDecision(new GroupConversation.DecisionRecord(GroupConversation.DecisionType.NONE, null, null, null, List.of(), "vote", "Ballot",
+                null));
+
+        DiscussionOutcomes.settle(gc, List.of(phase("Ballot", PhaseType.VOTE, 1)), false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.NO_DECISION, gc.getOutcomeReason());
+        assertFalse(gc.hasAnsweredRound());
+    }
+
+    /** The reason names what cut the round short, not always the turn limit. */
+    @Test
+    void costCeilingWithNoContribution_keepsItsOwnReason() {
+        var gc = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.SKIPPED, Instant.now(),
+                MemberTurnExecutor.REASON_TURN_BUDGET, null));
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, true);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.COST_CEILING_REACHED, gc.getOutcomeReason());
+    }
+
+    /**
+     * What the registry counted since it was added (the global meter may predate
+     * it).
+     */
+    private static double unanswered(SimpleMeterRegistry registry) {
+        return registry.find(DiscussionOutcomes.METER_UNANSWERED).counters().stream().mapToDouble(Counter::count).sum();
+    }
+
+    /**
+     * The unanswered meter counts only once the caller says the write committed.
+     */
+    @Test
+    void unansweredMeter_isEmittedByCountUnanswered_notBySettle() {
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            var gc = gc(failed("a", 0, "Opinions"));
+            DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+            assertEquals(0.0, unanswered(registry), "classifying a round counts nothing");
+
+            DiscussionOutcomes.countUnanswered(gc);
+            assertEquals(1.0, unanswered(registry));
+
+            var answered = gc(opinion("a"));
+            answered.setSynthesizedAnswer("x");
+            DiscussionOutcomes.settle(answered, OPINION_THEN_SYNTHESIS, false);
+            DiscussionOutcomes.countUnanswered(answered);
+            assertEquals(1.0, unanswered(registry), "an answered round is never counted");
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    /**
+     * A legacy document's answer history is pinned from the record, not from the
+     * round number.
+     */
+    @Test
+    void establishAnswerHistory_readsTheRecordBeforeContinuationClearsIt() {
+        var unanswered = gc(failed("a", 0, "Opinions"));
+        unanswered.establishAnswerHistory();
+        unanswered.setRound(2);
+        assertFalse(unanswered.hasAnsweredRound(), "round 1 without an answer: the increment is not evidence");
+
+        var answered = gc(opinion("a"));
+        answered.setSynthesizedAnswer("the answer");
+        answered.establishAnswerHistory();
+        answered.setSynthesizedAnswer(null);
+        answered.setRound(2);
+        assertTrue(answered.hasAnsweredRound());
+
+        var alreadyContinued = gc();
+        alreadyContinued.setRound(3);
+        alreadyContinued.establishAnswerHistory();
+        assertNull(alreadyContinued.getAnsweredRounds(), "a continued legacy record cannot say: it stays unknown");
+    }
+
     @Test
     void everyMemberSkipped_isNoAnswerNotAFailure() {
         var gc = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.SKIPPED, Instant.now(),
@@ -261,6 +365,8 @@ class DiscussionOutcomesTest {
 
         assertEquals(8, TurnBudget.phaseCap(10, phases, 0));
         assertEquals(9, TurnBudget.phaseCap(10, phases, 2));
+        assertEquals(9, TurnBudget.phaseCap(10, phases, 1), "an earlier synthesis phase leaves a turn for the later one");
+        assertEquals(10, TurnBudget.phaseCap(10, phases, 3), "the final synthesis phase keeps the whole budget");
         assertEquals(1, TurnBudget.phaseCap(1, phases, 0), "a one-turn budget is not reserved away");
     }
 

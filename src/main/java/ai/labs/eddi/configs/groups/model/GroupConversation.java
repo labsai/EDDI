@@ -66,6 +66,13 @@ public class GroupConversation {
      * from a fresh state. The bump makes such a pod refuse the document instead. No
      * migration entry: a v4 document has no state and Jackson leaves it null, which
      * is what an unbudgeted run carries (identity hop).
+     * <p>
+     * Version 6 — {@code inheritedMaxTurns}: the turn cap a nested discussion's
+     * resumed leg runs under. Resume-consumed and not soft: an older pod would
+     * resume the child under its own configured limit, ignoring the inherited cap,
+     * and re-saving the document would drop the field. The bump makes it refuse.
+     * Identity hop: a v5 document has none, which is a top-level discussion's
+     * value.
      */
     // v4: the 2026-08 release shape — adds I11's negotiationState, I12's
     // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
@@ -78,7 +85,7 @@ public class GroupConversation {
     // would re-run the vote's last repeat. Identity hop: a null detail is the
     // pre-v5 speaking turn.
     // Also v5 (same release): teamBudgetState (team budgets). Identity hop as well.
-    public static final int CURRENT_SCHEMA_VERSION = 5;
+    public static final int CURRENT_SCHEMA_VERSION = 6;
     /**
      * The version a stored document claims when its JSON carries no
      * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
@@ -1470,9 +1477,29 @@ public class GroupConversation {
     }
 
     /**
+     * Pins the answer history of a document from before the count existed, from
+     * what the record holds <em>now</em> — call it before a continuation clears the
+     * previous round's answer and decision. A round-1 document shows its own answer
+     * or none; one already continued cannot say, and stays unknown (see
+     * {@link #hasAnsweredRound()}).
+     */
+    public void establishAnswerHistory() {
+        if (answeredRounds != null) {
+            return;
+        }
+        boolean answerOnRecord = synthesizedAnswer != null || (decision != null && decision.type() != DecisionType.NONE);
+        if (answerOnRecord) {
+            answeredRounds = 1;
+        } else if (round <= 1) {
+            answeredRounds = 0;
+        }
+    }
+
+    /**
      * Whether any round of this discussion ended with an answer. A document from
-     * before the count existed has none: a continued one ({@code round > 1}) is
-     * assumed to have answered, as it was continuable.
+     * before the count existed and not pinned by {@link #establishAnswerHistory()}
+     * has none recorded: a continued one ({@code round > 1}) is assumed to have
+     * answered, as it was continuable.
      */
     public boolean hasAnsweredRound() {
         return answeredRounds != null ? answeredRounds > 0 : round > 1;
@@ -1520,34 +1547,43 @@ public class GroupConversation {
      * remaining turns (runtime only); 1 outside a batch.
      */
     @JsonIgnore
-    private transient volatile int legNestedShares = 1;
+    private transient int legNestedShares = 1;
+    @JsonIgnore
+    private final transient Object legClaimLock = new Object();
 
     /**
      * Sets how many nested members share the remaining turns (a parallel batch).
      */
     public void shareLegTurns(int shares) {
-        this.legNestedShares = Math.max(1, shares);
+        synchronized (legClaimLock) {
+            this.legNestedShares = Math.max(1, shares);
+        }
     }
 
     /**
      * Reserves turns for a nested discussion: the leg's remaining turns, divided
-     * among the nested members of a parallel batch. Counted at once, so siblings
-     * see what really remains. {@code null} when no leg is bound.
+     * among the nested members of a parallel batch that have not claimed yet — each
+     * claim takes one share off, so the last unclaimed member receives what
+     * remains. Counted at once, so siblings see what really remains. {@code null}
+     * when no leg is bound.
      */
     public Integer claimLegTurns() {
         var counter = legTurnCounter;
         if (counter == null) {
             return null;
         }
-        while (true) {
-            int used = counter.get();
-            int remaining = legMaxTurns - used;
-            if (remaining <= 0) {
-                return 0;
-            }
-            int claim = Math.max(1, remaining / legNestedShares);
-            if (counter.compareAndSet(used, used + claim)) {
-                return claim;
+        synchronized (legClaimLock) {
+            while (true) {
+                int used = counter.get();
+                int remaining = legMaxTurns - used;
+                if (remaining <= 0) {
+                    return 0;
+                }
+                int claim = Math.max(1, remaining / legNestedShares);
+                if (counter.compareAndSet(used, used + claim)) {
+                    legNestedShares = Math.max(1, legNestedShares - 1);
+                    return claim;
+                }
             }
         }
     }

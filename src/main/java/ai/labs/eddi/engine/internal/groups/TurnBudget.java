@@ -49,16 +49,13 @@ public final class TurnBudget {
     }
 
     /**
-     * The cap the phase at {@code phaseIdx} runs under: {@code maxTurns} for a
-     * {@code SYNTHESIS} phase, otherwise {@code maxTurns} minus one turn per
-     * {@code SYNTHESIS} phase after it — never below one turn.
+     * The cap the phase at {@code phaseIdx} runs under: {@code maxTurns} minus one
+     * turn per {@code SYNTHESIS} phase after it — never below one turn. A
+     * {@code SYNTHESIS} phase reserves for the synthesis phases after it too; the
+     * final one has none after it and keeps the full cap.
      */
     public static int phaseCap(int maxTurns, List<DiscussionPhase> phases, int phaseIdx) {
         if (phases == null || phaseIdx < 0 || phaseIdx >= phases.size()) {
-            return maxTurns;
-        }
-        DiscussionPhase phase = phases.get(phaseIdx);
-        if (phase != null && phase.type() == PhaseType.SYNTHESIS) {
             return maxTurns;
         }
         int reserve = 0;

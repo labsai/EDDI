@@ -583,8 +583,15 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
+                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey, cancellation);
                         if (graceful != null) {
+                            // The resumed run failed: the same member failure as an ERROR
+                            // without a pause, under the same policy — ABORT stops the phase,
+                            // SKIP keeps the contentless FAILED entry. Never a retry: that
+                            // would replay the tool call the group just rejected.
+                            if (graceful.outcome() == TurnOutcome.FAILED) {
+                                return failedTurn(member, phaseIdx, phase, protocol, graceful.errorReason(), targetAgentId);
+                            }
                             return graceful;
                         }
                     }
@@ -802,6 +809,22 @@ public class MemberTurnExecutor {
                                                      int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId, String costKey) {
+        return tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId, costKey, null);
+    }
+
+    /**
+     * As above, with the turn's cancellation scope: the resume wait is registered
+     * with it, so an immediate cancel releases the wait instead of leaving it to
+     * run to the member timeout, and stops the resumed private turn.
+     *
+     * @throws GroupConversationService.MemberTurnCancelledException
+     *             when the discussion was cancelled while the resume ran
+     */
+    public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                     int timeoutSeconds, int phaseIdx,
+                                                     DiscussionPhase phase, TranscriptEntryType entryType,
+                                                     String targetAgentId, String costKey,
+                                                     GroupConversationService.MemberTurnCancellation cancellation) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
@@ -838,15 +861,28 @@ public class MemberTurnExecutor {
 
         SimpleConversationMemorySnapshot resumed;
         try {
+            if (cancellation != null) {
+                cancellation.register(resumeFuture);
+            }
             resumed = resumeFuture.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw cancelledDuringResume(member, convId, cancellation);
+            }
             LOGGER.warnf("Graceful tool-pause resume did not complete within %ds for member '%s' (conv %s) — falling back to SKIP+cancel",
                     timeoutSeconds, member.agentId(), convId);
             return null;
         } catch (Exception e) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw cancelledDuringResume(member, convId, cancellation);
+            }
             LOGGER.warnf("Graceful tool-pause resume errored for member '%s' (conv %s): %s — falling back to SKIP+cancel",
                     member.agentId(), convId, e instanceof ExecutionException && e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
             return null;
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(resumeFuture);
+            }
         }
 
         // Whatever the resumed run did — answered, abstained or paused again — it
@@ -913,6 +949,20 @@ public class MemberTurnExecutor {
         return new TranscriptEntry(member.agentId(), member.displayName(), null,
                 phaseIdx, phase.name(), TranscriptEntryType.ABSTAINED, Instant.now(),
                 null, targetAgentId);
+    }
+
+    /**
+     * The discussion was cancelled while a tool-pause resume ran: stop the resumed
+     * private turn when the cancel is immediate, and hand back the cancellation to
+     * throw — a cancel is not a failed resume.
+     */
+    private GroupConversationService.MemberTurnCancelledException cancelledDuringResume(
+                                                                                        GroupMember member, String convId,
+                                                                                        GroupConversationService.MemberTurnCancellation cancellation) {
+        if (cancellation.stopsInFlight()) {
+            stopMemberTurn(member, convId);
+        }
+        return new GroupConversationService.MemberTurnCancelledException();
     }
 
     /**
@@ -1004,8 +1054,10 @@ public class MemberTurnExecutor {
                 subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
                         gc.getAttachments(), remainingBudget, gc.getId(), parentToken, claimedTurns);
                 childTurns = subConversation.legTurnsUsed();
-            } catch (GroupDepthExceededException | GroupMembersUnresolvableException e) {
-                // Refused before the child ran a turn.
+            } catch (GroupDepthExceededException | GroupMembersUnresolvableException
+                    | GroupConversationService.NestedGroupNotFoundException e) {
+                // Refused before the child ran a turn (including a subgroup deleted since
+                // the parent saved: the lookup fails before the child exists).
                 childTurns = 0;
                 throw e;
             } finally {
@@ -1015,7 +1067,6 @@ public class MemberTurnExecutor {
                     gc.settleLegTurns(claimedTurns, childTurns);
                 }
             }
-            DiscussionCancellation.checkpoint(parentToken);
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
@@ -1036,8 +1087,9 @@ public class MemberTurnExecutor {
             // save-time validation rejects HUMAN members in nested groups, but the
             // child config can gain a human AFTER the parent saved; this is the
             // runtime backstop.
-            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL
-                    || subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
+            boolean strandedPause = subConversation.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT;
+            if (strandedPause) {
                 LOGGER.warnf("Sub-group '%s' paused (%s) — nested pauses are not supported in v1; cancelling sub-pause",
                         subGroupId, subConversation.getState());
                 try {
@@ -1047,6 +1099,15 @@ public class MemberTurnExecutor {
                     LOGGER.warnf("Failed to cancel stranded sub-group pause %s: %s",
                             subConversation.getId(), cancelEx.getMessage());
                 }
+            }
+
+            // The parent's cancel is honoured only now: the child's spend is on the
+            // books and a stranded child pause is released first, so neither is lost to
+            // the checkpoint. Answer extraction stays after it, so a cancelled parent
+            // still gets no child reply.
+            DiscussionCancellation.checkpoint(parentToken);
+
+            if (strandedPause) {
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
                         TranscriptEntryType.SKIPPED, Instant.now(),
                         subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT

@@ -429,6 +429,40 @@ class GroupLifecycleOpsTest {
     }
 
     @Test
+    void failConversation_aRoundFailsAfterAnEarlierAnswer_staysCompletedAndContinuable() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+
+        ops.failConversation(gc);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState(), "round 1 answered: the discussion stays continuable");
+        assertEquals(GroupConversation.DiscussionOutcome.FAILED, gc.getOutcome(), "the outcome still describes the failed round");
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+    }
+
+    @Test
+    void failConversation_alreadyTerminal_restoresTheOutcomeWithTheState() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        var persisted = gc();
+        persisted.setState(GroupConversationState.CANCELLED);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+
+        ops.failConversation(gc);
+
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+        assertNull(gc.getOutcome(), "no FAILED outcome next to a CANCELLED state the persisted record never got");
+        assertNull(gc.getOutcomeReason());
+    }
+
+    @Test
     void failConversation_storeReadThrows_fallsBackToInMemoryState() throws Exception {
         var ops = ops();
         var gc = gc();
@@ -489,6 +523,34 @@ class GroupLifecycleOpsTest {
                 () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
 
         verify(followUpConversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void followUp_thatFails_keepsTheSpendAndCreatedAgents_butNotTheQuestion() throws Exception {
+        var gc = completedGc();
+        var ops = followUpOps(gc);
+        int transcriptBefore = gc.getTranscript().size();
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId("member-conv");
+        snapshot.setConversationState(ConversationState.ERROR);
+        snapshot.setConversationCost(0.25);
+        when(followUpFacade.extractResponse(any())).thenReturn(null);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(followUpConversationService).say(any(), eq(AGENT_A), eq("member-conv"), any(), any(), any(), any(),
+                anyBoolean(), any());
+
+        assertThrows(IGroupConversationService.GroupExecutionException.class, () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
+
+        // The failed turn cost money: it is written (conditionally, on the run state)
+        // so
+        // later ceilings and cleanup see it — but no answer and no question are
+        // recorded.
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        assertEquals(0.25, gc.getTotalCost());
+        assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        assertEquals(transcriptBefore, gc.getTranscript().size(), "the unanswered question is not recorded");
     }
 
     @Test

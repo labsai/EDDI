@@ -14,12 +14,17 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelledException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -38,8 +43,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -183,10 +190,10 @@ class DiscussionCancellationTest {
         int second = gc.claimLegTurns();
 
         assertEquals(4, first, "half of the 8 that remain");
-        assertEquals(2, second, "half of what remains after the sibling's claim");
+        assertEquals(4, second, "the last unclaimed sibling receives what remains, not half of it again");
         assertTrue(counter.get() <= 10, "the claims never pass the cap: the synthesis turn stays reserved");
         gc.settleLegTurns(first, 1);
-        assertEquals(5, counter.get(), "an unused claim is given back");
+        assertEquals(7, counter.get(), "an unused claim is given back");
     }
 
     /** S2: a child that throws is charged its whole claim. */
@@ -228,6 +235,166 @@ class DiscussionCancellationTest {
         var unanswered = executor(service).executeAgentTurn(SUB_GROUP, parent(), "input", protocol(), 0, opinion(), null, null);
         assertEquals(GroupConversation.TurnOutcome.FAILED, unanswered.outcome());
         assertNull(unanswered.content(), "its partial entries are not passed off as the member's answer");
+    }
+
+    /**
+     * A subgroup deleted since the parent saved is refused before it ran: its claim
+     * is refunded.
+     */
+    @Test
+    void nestedGroup_thatIsMissing_refundsItsClaim() throws Exception {
+        var service = Mockito.mock(GroupConversationService.class);
+        when(service.discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new GroupConversationService.NestedGroupNotFoundException("Group not found."));
+        var gc = parent();
+        var counter = new AtomicInteger(40);
+        gc.bindLegTurnBudget(counter, 50);
+
+        var entry = executor(service).executeAgentTurn(SUB_GROUP, gc, "input", protocol(), 0, opinion(), null, null);
+
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
+        assertEquals(40, counter.get(), "nothing ran, so the next healthy member still has its turns");
+    }
+
+    /**
+     * The parent was cancelled while the child ran: the child's spend is still
+     * booked.
+     */
+    @Test
+    void nestedGroup_parentCancelledAfterChildSpent_stillBooksTheSpend() throws Exception {
+        var service = Mockito.mock(GroupConversationService.class);
+        var token = new DiscussionControlToken();
+        when(service.controlTokenOf("gc-parent")).thenReturn(token);
+        var child = new GroupConversation();
+        child.setId("gc-child");
+        child.setSynthesizedAnswer("child answer");
+        child.setTotalCost(0.5);
+        when(service.discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+            token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+            return child;
+        });
+        var gc = parent();
+
+        assertThrows(MemberTurnCancelledException.class,
+                () -> executor(service).executeAgentTurn(SUB_GROUP, gc, "input", protocol(), 0, opinion(), null, null));
+
+        assertEquals(0.5, gc.getTotalCost(), 1e-12, "the child's cost is on the parent's books");
+        verify(service).chargeTeamBudget(gc);
+    }
+
+    /**
+     * An unsupported child pause is released even when the parent was cancelled
+     * meanwhile.
+     */
+    @Test
+    void nestedGroup_strandedPause_isCancelledEvenWhenTheParentIsCancelled() throws Exception {
+        var service = Mockito.mock(GroupConversationService.class);
+        var token = new DiscussionControlToken();
+        when(service.controlTokenOf("gc-parent")).thenReturn(token);
+        var child = new GroupConversation();
+        child.setId("gc-child");
+        child.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
+        when(service.discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+            token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+            return child;
+        });
+
+        assertThrows(MemberTurnCancelledException.class,
+                () -> executor(service).executeAgentTurn(SUB_GROUP, parent(), "input", protocol(), 0, opinion(), null, null));
+
+        verify(service).cancelDiscussion("gc-child", ControlSignal.CANCEL_GRACEFUL);
+    }
+
+    // --- a member's tool pause, auto-rejected by the group ---
+
+    private static final GroupMember AGENT = new GroupMember("agent-a", "Agent A", 1, null);
+
+    private static SimpleConversationMemorySnapshot toolPausedSnapshot() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPauseType("TOOL_CALL");
+        return snapshot;
+    }
+
+    private static SimpleConversationMemorySnapshot erroredSnapshot() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.ERROR);
+        return snapshot;
+    }
+
+    private static ProtocolConfig protocol(MemberFailurePolicy policy) {
+        return new ProtocolConfig(60, policy, 2, MemberUnavailablePolicy.SKIP);
+    }
+
+    /**
+     * Runs a turn whose member pauses on a tool call and whose resumed run then
+     * ends in ERROR.
+     */
+    private static TranscriptEntry turnWhoseResumeErrors(MemberFailurePolicy policy, IConversationService conversationService) throws Exception {
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq("agent-a"))).thenReturn(Mockito.mock(IAgent.class));
+        var service = Mockito.mock(GroupConversationService.class);
+        when(conversationService.startConversation(any(), eq("agent-a"), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-a", null));
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(toolPausedSnapshot());
+            return null;
+        }).when(conversationService).say(any(), eq("agent-a"), eq("conv-a"), any(), any(), any(), any(), anyBoolean(), any());
+        doAnswer(inv -> {
+            inv.getArgument(2, IConversationService.ConversationResponseHandler.class).onComplete(erroredSnapshot());
+            return null;
+        }).when(conversationService).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                new GroupContextBuilder(null), service, new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        return executor.executeAgentTurn(AGENT, parent(), "input", protocol(policy), 0, opinion(), null, null);
+    }
+
+    @Test
+    void toolPauseResumeThatErrors_underSkip_isAContentlessFailedEntry() throws Exception {
+        var entry = turnWhoseResumeErrors(MemberFailurePolicy.SKIP, Mockito.mock(IConversationService.class));
+
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
+        assertNull(entry.content());
+    }
+
+    @Test
+    void toolPauseResumeThatErrors_underAbort_stopsThePhase() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
+                () -> turnWhoseResumeErrors(MemberFailurePolicy.ABORT, conversationService));
+
+        // The rejected tool call is not replayed to give ABORT its say.
+        verify(conversationService, Mockito.times(1)).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void toolPauseResumeWait_isReleasedByAnImmediateCancel() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        // The resumed run never answers.
+        doAnswer(inv -> null).when(conversationService).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
+        var token = new DiscussionControlToken();
+        var link = DiscussionCancellation.link(token);
+        var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class), new GroupSigningGuard(null, null, "default"),
+                new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var canceller = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+        });
+        long start = System.nanoTime();
+        canceller.start();
+
+        assertThrows(MemberTurnCancelledException.class, () -> executor.tryResolveMemberToolPause(AGENT, parent(), "conv-a", 60, 0, opinion(),
+                TranscriptEntryType.OPINION, null, "agent-a", link.cancellation()));
+
+        assertTrue((System.nanoTime() - start) / 1_000_000_000L < 20, "released at once, not at the 60 s member timeout");
+        verify(conversationService).cancelConversation("conv-a", ControlSignal.CANCEL_IMMEDIATE, "system:group");
+        link.close();
     }
 
     @Test

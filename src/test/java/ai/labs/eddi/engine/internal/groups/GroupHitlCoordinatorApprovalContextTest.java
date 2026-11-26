@@ -149,6 +149,19 @@ class GroupHitlCoordinatorApprovalContextTest {
     }
 
     @Test
+    @DisplayName("a no-progress failure after an answered round leaves the discussion COMPLETED")
+    void noProgressAfterAnAnsweredRound_staysContinuable() throws Exception {
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+
+        coordinator.failDiscussionNoProgress(gc, 0, phase, null);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        assertEquals(GroupConversation.DiscussionOutcome.FAILED, gc.getOutcome());
+        assertEquals("NO_PROGRESS", gc.getOutcomeReason());
+    }
+
+    @Test
     @DisplayName("a restored pause (failed resume) gets its context again")
     void restoreRendersAgain() throws Exception {
         when(renderer.render(any(), any(), anyInt(), anyString())).thenReturn(context("again"));

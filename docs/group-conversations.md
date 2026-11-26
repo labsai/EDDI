@@ -1045,7 +1045,9 @@ same wave once its dependency completes, and is verified with it.
 
 **A verifier that does not answer** — not deployed, skipped, failed (its provider is down) or timed out —
 verifies nothing: every task of that pass is failed with the note *"Not verified: the verifier did not answer"*
-(and reworked, within `maxReworks`). A missing verdict is never a pass.
+(and reworked, within `maxReworks`, unless the verifier's turn was `SKIPPED` — not deployed, a pause the group
+cannot honour — which would be skipped again, so the tasks are failed once and no rework starts). A missing
+verdict is never a pass.
 
 **An unparseable verdict** (the verifier answered, but not with the JSON array) still auto-verifies every task of that
 pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
@@ -1389,7 +1391,7 @@ round ended, not the discussion as a whole.
 | `outcome` | State | When |
 |---|---|---|
 | `ANSWERED` | `COMPLETED` | A synthesized answer, or a decision record of a deciding type (a vote with a winner, a verdict, an agreement); for a style without a synthesis phase, at least one member's answered contribution. `outcomeReason` is `null`, or `TURN_LIMIT_REACHED` / `COST_CEILING_REACHED` when the round was cut short on its way to the answer. A decision record of type `NONE` (dissents only, no quorum, a tie, an unreadable verdict) is not an answer |
-| `NO_ANSWER` | `COMPLETED` | `SYNTHESIS_FAILED` (the synthesizer's turn did not answer, also when every member was skipped), `TURN_LIMIT_REACHED` (the turn limit, or a nested group's inherited budget, cut the round — also when it skipped every member), `COST_CEILING_REACHED`, `SYNTHESIS_NOT_RUN`, `NO_MEMBER_ANSWERED` (every member turn was skipped: agents not deployed or unknown) |
+| `NO_ANSWER` | `COMPLETED` | `SYNTHESIS_FAILED` (the synthesizer's turn did not answer, also when every member was skipped), `TURN_LIMIT_REACHED` (the turn limit, or a nested group's inherited budget, cut the round — also when it skipped every member), `COST_CEILING_REACHED`, `SYNTHESIS_NOT_RUN`, `NO_DECISION` (a vote or verdict ended without a decision — a tie, no quorum — in a style with no synthesis phase), `NO_MEMBER_ANSWERED` (every member turn was skipped: agents not deployed or unknown). A cut-short round keeps what cut it: `COST_CEILING_REACHED` is not reported as `TURN_LIMIT_REACHED` |
 | `NO_ANSWER` | `REJECTED` | `REJECTED_BY_HUMAN` (a person rejected the result at an approval gate), `APPROVAL_TIMED_OUT` (the gate timed out and `AUTO_REJECT` rejected it) |
 | `FAILED` | `FAILED`, or `COMPLETED` | `NO_MEMBER_ANSWERED` — member turns failed or timed out and nobody answered (a provider outage); `DISCUSSION_ERROR` — the run failed with an error; `NO_PROGRESS` — a TASK approval cycle made no progress. The state is `FAILED` only when no round of the discussion ever answered; a later round (`continue`) that fails leaves it `COMPLETED`, so it can be continued once the provider is back, and its created and retained agents are kept |
 
@@ -1426,7 +1428,8 @@ The cancel response tells the truth: **`202 Accepted`** with the conversation (s
 `IN_PROGRESS` or `SYNTHESIZING`) while the running discussion is stopping — watch for
 the `cancelled` event or poll; **`200`** with the conversation once it is no longer
 running — read `state`: `CANCELLED`, or `COMPLETED`/`FAILED` if it finished before the
-cancel landed. The MCP tool answers `{"status":"CANCELLING"}` while it stops, otherwise
+cancel landed. The MCP tool answers `{"status":"CANCELLING"}` while it stops — also when the
+state cannot be read, since an accepted cancel does not prove the run has stopped — otherwise
 the state it ended in (`CANCELLED`, `COMPLETED`, `FAILED`, …).
 
 ## REST API

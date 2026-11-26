@@ -284,6 +284,9 @@ public class GroupLifecycleOps {
             }
 
             boolean success = false;
+            // The user's question as appended to the transcript; set once a member turn
+            // is about to run, so a failure knows it has spend to keep (see finally).
+            TranscriptEntry questionEntry = null;
             try {
                 // Re-read after CAS to get the freshest transcript
                 gc = conversationStore.read(groupConversationId);
@@ -322,9 +325,10 @@ public class GroupLifecycleOps {
                 String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
 
                 // Record the user's follow-up question on the transcript
-                gc.getTranscript().add(new TranscriptEntry(
+                questionEntry = new TranscriptEntry(
                         "user", "User", question, -1, "Follow-up",
-                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, resolvedAgentId));
+                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, resolvedAgentId);
+                gc.getTranscript().add(questionEntry);
 
                 // Call the agent's private conversation
                 InputData inputData = new InputData();
@@ -419,9 +423,33 @@ public class GroupLifecycleOps {
                 if (!success) {
                     // Restore COMPLETED state so the conversation remains usable.
                     // Wrap in try-catch to avoid masking the original exception.
+                    boolean bookkeepingPersisted = false;
+                    if (questionEntry != null) {
+                        // The failed turn may still have cost money or created agents, and
+                        // the callback already folded both into this document: keep them
+                        // (later ceilings and terminal cleanup read them), but not the
+                        // question — no answer was recorded for it. Conditional on the
+                        // run state, so a concurrent cancel or delete is never overwritten.
+                        try {
+                            gc.getTranscript().remove(questionEntry);
+                            gc.setState(GroupConversationState.COMPLETED);
+                            gc.setLastModified(Instant.now());
+                            conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+                            bookkeepingPersisted = true;
+                        } catch (IResourceStore.ResourceModifiedException
+                                | IGroupConversationStore.GroupConversationGoneException concurrent) {
+                            // Cancelled or deleted meanwhile: that state stands.
+                            bookkeepingPersisted = true;
+                        } catch (Exception writeEx) {
+                            LOGGER.warnf("Failed to persist follow-up bookkeeping for %s: %s",
+                                    LogSanitizer.sanitize(groupConversationId), writeEx.getMessage());
+                        }
+                    }
                     try {
-                        conversationStore.compareAndSetState(groupConversationId,
-                                GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
+                        if (!bookkeepingPersisted) {
+                            conversationStore.compareAndSetState(groupConversationId,
+                                    GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
+                        }
                     } catch (Exception recoveryEx) {
                         LOGGER.warnf("Failed to restore COMPLETED state after follow-up error for %s: %s",
                                 LogSanitizer.sanitize(groupConversationId), recoveryEx.getMessage());
@@ -465,6 +493,10 @@ public class GroupLifecycleOps {
             // resumeDiscussion re-runs the remaining phases with THIS question rather than
             // the stale round-1 one. Uses a dedicated field (not originalQuestion, which
             // the UI shows as the conversation title) so continuations don't rewrite it.
+            // A document from before answered rounds were counted: pin its history from
+            // the record as it stands, before the next lines clear the evidence and the
+            // round number stops saying anything.
+            gc.establishAnswerHistory();
             gc.setRound(gc.getRound() + 1);
             // Mark where this round's transcript begins, BEFORE appending its
             // question. Everything that asks "what did this round conclude?" scopes
@@ -479,6 +511,10 @@ public class GroupLifecycleOps {
             // and had this round's dissents merged onto them.
             gc.setSynthesizedAnswer(null);
             gc.setDecision(null);
+            // The previous round's outcome goes in the same persisted write: a status
+            // read while round 2 is IN_PROGRESS must not report round 1's ANSWERED.
+            // answeredRounds is the discussion's history and stays.
+            DiscussionOutcomes.clear(gc);
             // I12: same defensive class as the two fields above — completion already
             // clears the facilitator's one-off phase divergence, but a continuation
             // must never run round N+1 against round N's inserted phases or count
@@ -878,7 +914,12 @@ public class GroupLifecycleOps {
             expected = inMemoryState;
         }
 
-        gc.setState(GroupConversationState.FAILED);
+        // The round failed; the discussion fails only if no round of it ever answered
+        // (the same rule as a round that ends without an answer): an earlier answer
+        // keeps it COMPLETED — continuable once the provider is back, agents kept.
+        var priorOutcome = gc.getOutcome();
+        var priorOutcomeReason = gc.getOutcomeReason();
+        gc.setState(gc.hasAnsweredRound() ? GroupConversationState.COMPLETED : GroupConversationState.FAILED);
         DiscussionOutcomes.failed(gc);
         gc.setLastModified(Instant.now());
         // Count the failure itself, never the outcome of the race — otherwise a lost
@@ -895,6 +936,10 @@ public class GroupLifecycleOps {
             if (expected != null) {
                 gc.setState(expected);
             }
+            // The outcome goes back with the state: a returned object must not say
+            // CANCELLED next to a FAILED outcome the persisted record never got.
+            gc.setOutcome(priorOutcome);
+            gc.setOutcomeReason(priorOutcomeReason);
             LOGGER.infof("Not failing group conversation %s — it is already terminal (%s)",
                     LogSanitizer.sanitize(gc.getId()), expected);
             return;

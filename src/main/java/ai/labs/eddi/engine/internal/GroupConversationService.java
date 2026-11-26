@@ -577,11 +577,11 @@ public class GroupConversationService implements IGroupConversationService, User
         // PostgreSQL
         IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
         if (currentGroupId == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group not found.");
+            throw new NestedGroupNotFoundException("Group not found.");
         }
         AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
         if (config == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
+            throw new NestedGroupNotFoundException("Group configuration not found.");
         }
 
         // Resolve phases
@@ -599,11 +599,13 @@ public class GroupConversationService implements IGroupConversationService, User
         gc.setInheritedMaxTurns(inheritedMaxTurns);
         Runnable unlinkParent = () -> {
         };
+        DiscussionControlToken installedToken = null;
         if (parentToken != null) {
             // Registered before the leg starts (executeDiscussion keeps an existing
             // token), so a parent cancel that lands now already reaches the child.
             var childToken = new DiscussionControlToken();
             discussionControls.put(gc.getId(), childToken);
+            installedToken = childToken;
             unlinkParent = parentToken.onCancel(childToken::setSignal);
         }
         try {
@@ -613,6 +615,24 @@ public class GroupConversationService implements IGroupConversationService, User
             return withArtifacts(executeDiscussion(gc, config, phases, question, listener, 0));
         } finally {
             unlinkParent.run();
+            if (installedToken != null) {
+                // A setup failure before executeDiscussion's own cleanup scope would leave
+                // the token behind for a child that has no running leg. By identity, so a
+                // replacement token is never removed.
+                discussionControls.remove(gc.getId(), installedToken);
+            }
+        }
+    }
+
+    /**
+     * The nested group (or its configuration) could not be found — thrown by
+     * {@link #discussNested} before any child conversation exists, so the parent
+     * can tell it from a lookup failure raised after the child ran and refund the
+     * turns it claimed for it.
+     */
+    public static final class NestedGroupNotFoundException extends IResourceStore.ResourceNotFoundException {
+        public NestedGroupNotFoundException(String message) {
+            super(message);
         }
     }
 
@@ -1733,9 +1753,6 @@ public class GroupConversationService implements IGroupConversationService, User
             // M3: FAILED ends the discussion only if no round of it ever answered; a
             // continuation that fails stays COMPLETED (continuable, agents kept).
             boolean noMemberAnswered = DiscussionOutcomes.failsDiscussion(gc);
-            if (noMemberAnswered) {
-                counterGroupFailure.increment();
-            }
             gc.setState(noMemberAnswered ? GroupConversationState.FAILED : GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
@@ -1751,6 +1768,12 @@ public class GroupConversationService implements IGroupConversationService, User
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
             persistWhileRunning(gc);
+            // Counted only now, past the conditional write: a result a cross-pod cancel
+            // discarded is not a failed or unanswered round.
+            if (noMemberAnswered) {
+                counterGroupFailure.increment();
+            }
+            DiscussionOutcomes.countUnanswered(gc);
 
             // Only past the CAS above: a discussion a human cancelled mid-flight must not
             // file work for another team. Idempotent (deterministic dedupe keys), never

@@ -111,7 +111,8 @@ authoring tool.
   answered — often a provider outage) come with a reason code; tell the user there
   is no answer and why, instead of presenting the transcript as one. `outcome` describes the
   latest round: a continued discussion can be `COMPLETED` with `FAILED`. A transcript entry
-  whose `outcome` is not `ANSWERED` is a member that did not answer, not something it said.
+  whose `outcome` is `SKIPPED`, `FAILED` or `TIMED_OUT` is a member that did not answer, not something it
+  said; an entry with no `outcome` field comes from an older server and is read as before.
 - Afterwards: `followup_with_member` asks one member a question with its full context;
   `continue_group_discussion` runs another round on a new question;
   `list_group_conversations` finds earlier ones.

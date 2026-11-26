@@ -48,6 +48,11 @@ public final class DiscussionOutcomes {
          * failed or timed out, {@code NO_ANSWER} when they were all skipped.
          */
         NO_MEMBER_ANSWERED,
+        /**
+         * A decision-producing phase (a vote, a verdict) ended without a decision — a
+         * tie, no quorum, an unreadable verdict — and no synthesis phase followed.
+         */
+        NO_DECISION,
         /** The synthesis phase ran, but its turn did not answer. */
         SYNTHESIS_FAILED,
         /** The round has a synthesis phase that never ran. */
@@ -79,6 +84,7 @@ public final class DiscussionOutcomes {
     }
 
     public static final String NO_MEMBER_ANSWERED = Reason.NO_MEMBER_ANSWERED.name();
+    public static final String NO_DECISION = Reason.NO_DECISION.name();
     public static final String SYNTHESIS_FAILED = Reason.SYNTHESIS_FAILED.name();
     public static final String SYNTHESIS_NOT_RUN = Reason.SYNTHESIS_NOT_RUN.name();
     public static final String TURN_LIMIT_REACHED = Reason.TURN_LIMIT_REACHED.name();
@@ -124,8 +130,7 @@ public final class DiscussionOutcomes {
         List<DiscussionPhase> phaseList = phases != null ? phases : List.of();
         boolean hasWorkPhases = phaseList.stream().anyMatch(p -> p != null && p.type() != PhaseType.SYNTHESIS);
         boolean hasSynthesisPhase = phaseList.stream().anyMatch(p -> p != null && p.type() == PhaseType.SYNTHESIS);
-        boolean memberContributed = round.stream()
-                .anyMatch(e -> e != null && e.speakerAgentId() != null && CONTRIBUTIONS.contains(e.type()) && e.outcome() == TurnOutcome.ANSWERED);
+        boolean memberContributed = round.stream().anyMatch(e -> e != null && e.speakerAgentId() != null && isContribution(e));
         String cutShort = TurnBudget.wasCut(gc) ? TURN_LIMIT_REACHED : costCeilingHit ? COST_CEILING_REACHED : null;
 
         boolean synthesisRan = round.stream().anyMatch(e -> e != null && e.speakerAgentId() != null && inSynthesisPhase(e, phaseList));
@@ -147,7 +152,9 @@ public final class DiscussionOutcomes {
             if (memberTurnsFailed) {
                 record(gc, DiscussionOutcome.FAILED, NO_MEMBER_ANSWERED);
             } else if (cutShort != null || skippedForTurnBudget(round)) {
-                record(gc, DiscussionOutcome.NO_ANSWER, TURN_LIMIT_REACHED);
+                // What actually cut the round short; the turn limit is only the fallback
+                // for a nested group whose inherited budget skipped every member.
+                record(gc, DiscussionOutcome.NO_ANSWER, cutShort != null ? cutShort : TURN_LIMIT_REACHED);
             } else {
                 // The synthesis is the reason only when it ran and failed; a skipped
                 // synthesizer is one more member that was not there to answer.
@@ -157,12 +164,20 @@ public final class DiscussionOutcomes {
             }
             return;
         }
-        if (gc.getSynthesizedAnswer() != null || (!hasSynthesisPhase && memberContributed)) {
+        // Ballots are not an answer when the decision-producing phase explicitly ended
+        // without a decision (a tie, no quorum): this round's decision is cleared when
+        // the round starts, so a NONE record here is this round's own.
+        boolean endedWithoutDecision = gc.getDecision() != null && gc.getDecision().type() == GroupConversation.DecisionType.NONE;
+        if (gc.getSynthesizedAnswer() != null || (!hasSynthesisPhase && memberContributed && !endedWithoutDecision)) {
             record(gc, DiscussionOutcome.ANSWERED, cutShort);
             return;
         }
         if (cutShort != null) {
             record(gc, DiscussionOutcome.NO_ANSWER, cutShort);
+            return;
+        }
+        if (endedWithoutDecision && !hasSynthesisPhase) {
+            record(gc, DiscussionOutcome.NO_ANSWER, NO_DECISION);
             return;
         }
         record(gc, DiscussionOutcome.NO_ANSWER, synthesisRan ? SYNTHESIS_FAILED : SYNTHESIS_NOT_RUN);
@@ -177,6 +192,19 @@ public final class DiscussionOutcomes {
      */
     public static boolean failsDiscussion(GroupConversation gc) {
         return gc.getOutcome() == DiscussionOutcome.FAILED && !gc.hasAnsweredRound();
+    }
+
+    /**
+     * Whether {@code e} is a member's contribution: an abstention (a deliberate
+     * pass) or an answered turn of a contributing type that left usable content. An
+     * {@code ANSWERED} entry without text — a callback that returned no output — is
+     * not one, and must not count as the round's answer.
+     */
+    private static boolean isContribution(TranscriptEntry e) {
+        if (!CONTRIBUTIONS.contains(e.type()) || e.outcome() != TurnOutcome.ANSWERED) {
+            return false;
+        }
+        return e.type() == TranscriptEntryType.ABSTAINED || (e.content() != null && !e.content().isBlank());
     }
 
     private static boolean inSynthesisPhase(TranscriptEntry e, List<DiscussionPhase> phases) {
@@ -232,7 +260,19 @@ public final class DiscussionOutcomes {
             gc.markRoundAnswered();
         } else {
             LOGGER.warnf("Group discussion %s ended %s (%s)", LogSanitizer.sanitize(gc.getId()), outcome, reason);
-            Metrics.counter(METER_UNANSWERED, "outcome", outcome.name(), "reason", reason).increment();
+        }
+    }
+
+    /**
+     * Counts the round {@link #settle} classified, if it ended without an answer.
+     * Separate from {@code settle} so the caller emits it only after the terminal
+     * write has committed: a result discarded because a cross-pod cancel won the
+     * conditional write is not an unanswered round.
+     */
+    public static void countUnanswered(GroupConversation gc) {
+        DiscussionOutcome outcome = gc.getOutcome();
+        if (outcome != null && outcome != DiscussionOutcome.ANSWERED && gc.getOutcomeReason() != null) {
+            Metrics.counter(METER_UNANSWERED, "outcome", outcome.name(), "reason", gc.getOutcomeReason()).increment();
         }
     }
 }

@@ -1000,7 +1000,27 @@ class GroupConversationServiceTest {
 
             assertThrows(GroupDiscussionException.class,
                     () -> service.followUpWithMember("gc-1", "Alice", "hello"));
-            // finally-block must restore COMPLETED so the conversation stays usable
+            // finally-block must restore COMPLETED so the conversation stays usable — now
+            // by
+            // a conditional write that also keeps the failed turn's bookkeeping
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        }
+
+        @Test
+        void followUp_agentCallFails_andTheBookkeepingWriteFails_stillRestoresCompletedState() throws Exception {
+            givenGroupConfigReadable();
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            doThrow(new RuntimeException("agent boom")).when(conversationService)
+                    .say(any(), eq("agentA"), eq("convA"), any(), any(), any(), any(), anyBoolean(), any());
+            doThrow(new RuntimeException("store down")).when(conversationStore).updateIfState(any(), any());
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+
             verify(conversationStore).compareAndSetState("gc-1",
                     GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
         }

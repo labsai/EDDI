@@ -153,3 +153,19 @@ The two new counters are charted in
 [`eddi-full-metrics-dashboard.json`](../monitoring/eddi-full-metrics-dashboard.json): unanswered
 rounds by `outcome` on "Discussions started vs failed", unanswered VERIFY passes beside the
 unparseable ones on "Unparseable / unanswered VERIFY verdicts".
+
+**Review follow-ups (2026-11-26).** A round whose only "contributions" are blank is no answer; a vote
+that ended without a decision is `NO_ANSWER` / `NO_DECISION` (a new reason) rather than `ANSWERED` on
+its ballots; a cost-ceiling cut keeps `COST_CEILING_REACHED` instead of reading as the turn limit; the
+unanswered and failure counters are emitted only after the terminal write commits. A failed round
+(an `ABORT` failure, a no-progress TASK cycle, a failed config load) leaves the discussion `COMPLETED`
+and continuable when an earlier round answered. A failed follow-up keeps its spend and created agents
+(written conditionally, the question and no answer are not recorded). A tool-pause resume that ends in
+`ERROR` now obeys `onAgentFailure`, and its wait is released by an immediate cancel. A nested
+discussion's spend is booked, and a stranded child pause cancelled, before the parent's cancel
+propagates; a deleted subgroup refunds the turns it claimed; parallel nested members split what is
+still unclaimed, the last receiving the rest. A continuation clears the previous round's outcome in
+its persisted write and pins a legacy document's answer history first. `phaseCap` reserves a turn for
+each later synthesis phase, also from a synthesis phase. `inheritedMaxTurns` bumps the group
+conversation schema to 6 (identity hop). The MCP `cancel_group_discussion` answers `CANCELLING` when
+the status cannot be read.
