@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
@@ -88,7 +89,31 @@ class PostgresErasureTombstoneStoreIT extends PostgresTestBase implements Erasur
                 ExecutorService writer = Executors.newSingleThreadExecutor();
                 try {
                     Future<?> waiting = writer.submit(() -> store.putTombstones(Kind.USER, List.of("locked"), past, expires));
-                    Thread.sleep(700); // the write is now waiting for the row lock
+                    // Not a sleep: wait until the database says the write is blocked by this
+                    // holder, or the test proves nothing.
+                    // Polled on its own connection: pg_stat_activity is a per-transaction snapshot.
+                    int holderPid;
+                    try (ResultSet rs = stmt.executeQuery("SELECT pg_backend_pid()")) {
+                        rs.next();
+                        holderPid = rs.getInt(1);
+                    }
+                    boolean blocked = false;
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (!blocked && System.nanoTime() < deadline) {
+                        try (Connection probe = DATA_SOURCE.getConnection();
+                                PreparedStatement ps = probe.prepareStatement(
+                                        "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))")) {
+                            ps.setInt(1, holderPid);
+                            try (ResultSet rs = ps.executeQuery()) {
+                                rs.next();
+                                blocked = rs.getInt(1) > 0;
+                            }
+                        }
+                        if (!blocked) {
+                            Thread.sleep(20);
+                        }
+                    }
+                    assertTrue(blocked, "setup: the tombstone write never waited for the row lock");
                     try (ResultSet rs = stmt.executeQuery("SELECT clock_timestamp()")) {
                         rs.next();
                         released = rs.getObject(1, OffsetDateTime.class).toInstant();

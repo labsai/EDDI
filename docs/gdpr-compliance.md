@@ -445,7 +445,12 @@ are the next), the contract is:
   check and a pending removal it records need no second key lookup (a key-check read
   failing in between cannot leave a removal without its user). `capturedAt` is when
   the content was captured (the turn), not when the row is written; a row derived
-  from several captures passes the earliest.
+  from several captures passes the earliest. `afterWrite` returning `true` means
+  *withhold the row* (do not deliver or use it), not that it is gone or that a retry
+  is recorded: if the store fails for both, the guard logs an ERROR and counts
+  `outcome="record_failed"`, and only the erasure's own delete reaches the row. A row
+  written without its personal part after a refused admission is not a guarded write
+  and must not pass that admission to `afterWrite`.
 - **Store a user reference the erasure can find the row by**: the plain user id when
   the export needs it (Agent Health), or `ErasureGuard.subjectKey(userId)` when it
   must not be stored at all (rating excerpts).

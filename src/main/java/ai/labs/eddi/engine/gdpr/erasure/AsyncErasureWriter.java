@@ -24,7 +24,13 @@ import java.time.Duration;
  * is stored, call {@link ErasureGuard#afterWrite} with that admission and a
  * remover of that one row: if an erasure started in between, the guard removes
  * it — or records a durable pending removal that is retried, and that keeps the
- * erasure failed until it is gone.</li>
+ * erasure failed until it is gone. A {@code true} from {@code afterWrite} means
+ * "withhold this row": do not deliver or use it. It is not proof that the row
+ * is gone or that a retry is recorded — when the store fails for both the
+ * removal and the record, the guard only logs an ERROR and counts it, and the
+ * erasure's own delete must reach the row. A row written without its personal
+ * part after a refused admission is not a guarded write: do not pass that
+ * admission to {@code afterWrite}.</li>
  * <li><b>A drain barrier</b> ({@link #awaitDrained}): every node, during the
  * erasure's stop handshake and an explicit conversation delete, waits until the
  * work this writer had queued before the barrier has finished. Work queued

@@ -118,6 +118,9 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
         found.sort(dueBy == null
                 ? Comparator.comparing(PendingRemoval::createdAt)
                 : Comparator.comparing(this::next).thenComparing(PendingRemoval::createdAt));
+        if (limit <= 0) {
+            return new ArrayList<>();
+        }
         return found.size() > limit ? found.subList(0, limit) : found;
     }
 

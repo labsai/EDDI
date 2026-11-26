@@ -128,6 +128,9 @@ public interface ErasureTombstoneStoreContract {
         store.addPendingRemoval(new PendingRemoval("alerts", "z1", null, "c-zero", T0));
         assertEquals(List.of(), store.pendingRemovals(null, null, null, null, 0));
         assertEquals(List.of(), store.pendingRemovals(null, null, null, T0.plusSeconds(60), 0));
+        assertEquals(List.of(), store.pendingRemovals(null, null, null, null, -1), "a negative limit returns nothing, never throws");
+        assertEquals(List.of(), store.pendingRemovals(null, null, null, T0.plusSeconds(60), -1));
+        assertEquals(1, store.pendingRemovals(null, null, null, null, 5).size(), "a positive limit still returns the removal");
     }
 
     @Test

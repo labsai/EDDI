@@ -217,6 +217,10 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Override
     public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit) {
+        if (limit <= 0) {
+            // LIMIT takes no negative value; the contract is "at most limit".
+            return new ArrayList<>();
+        }
         ensureSchema();
         List<Object> params = new ArrayList<>();
         String where = where(writer, userKey, conversationId, params);
