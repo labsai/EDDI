@@ -189,8 +189,14 @@ CodeRabbit's full review of the merge-ready round:
   `$max` over `$$NOW`), and PostgreSQL takes `clock_timestamp()` so a wait for the
   row lock is inside the cutoff.
 - A negative `eddi.gdpr.tombstone-clock-skew` (or drain timeout) fails the start;
-  MongoDB `pendingRemovals(..., 0)` returns nothing, as PostgreSQL does; docs: an
-  alert storm's evaluation backlog can still hold the barrier.
+  `pendingRemovals` returns nothing for a limit of 0 or less in every store; docs: an
+  alert storm's evaluation backlog can still hold the barrier, and `afterWrite`
+  returning `true` means "withhold the row", not proof of removal or of a recorded
+  retry. Declined as documented residual limits: an erasure that stalls past its
+  tombstones' retention (a later chunk, two concurrent erasures of one conversation,
+  an expired tombstone deleted during a Postgres insert's conflict wait). A slow store
+  that makes a hold chunk late fails the erasure safely; time-budget chunking is a
+  possible follow-up.
 
 ### Still open
 

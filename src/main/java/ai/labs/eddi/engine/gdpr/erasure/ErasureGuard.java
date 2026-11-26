@@ -275,8 +275,11 @@ public class ErasureGuard {
      * {@link #beforeWrite} resolved rather than resolving it again: a key replaced
      * between the two is outside supported operation (the reset stops every node).
      *
-     * @return {@code true} when the row's content must be treated as gone (removed
-     *         or pending removal) — the writer must not deliver or use it further
+     * @return {@code true} when the writer must withhold the row — not deliver or
+     *         use it further. Usually it was removed or a pending removal was
+     *         recorded, but not always: when the store fails for both, the guard
+     *         only logs an ERROR and counts it, and the erasure's own delete must
+     *         reach the row
      * @throws IllegalArgumentException
      *             for a refused admission: the writer must not have written
      */

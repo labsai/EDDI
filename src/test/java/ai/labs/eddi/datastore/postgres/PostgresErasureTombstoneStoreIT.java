@@ -99,7 +99,7 @@ class PostgresErasureTombstoneStoreIT extends PostgresTestBase implements Erasur
                     }
                     boolean blocked = false;
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                    while (!blocked && System.nanoTime() < deadline) {
+                    while (!blocked && System.nanoTime() < deadline && !waiting.isDone()) {
                         try (Connection probe = DATA_SOURCE.getConnection();
                                 PreparedStatement ps = probe.prepareStatement(
                                         "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))")) {
@@ -112,6 +112,9 @@ class PostgresErasureTombstoneStoreIT extends PostgresTestBase implements Erasur
                         if (!blocked) {
                             Thread.sleep(20);
                         }
+                    }
+                    if (!blocked && waiting.isDone()) {
+                        waiting.get(); // a write that failed fast: its own exception, not a setup message
                     }
                     assertTrue(blocked, "setup: the tombstone write never waited for the row lock");
                     try (ResultSet rs = stmt.executeQuery("SELECT clock_timestamp()")) {

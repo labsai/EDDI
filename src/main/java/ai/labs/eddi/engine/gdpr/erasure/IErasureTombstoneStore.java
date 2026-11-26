@@ -103,7 +103,7 @@ public interface IErasureTombstoneStore {
      * only those whose next attempt is due by then, the longest-due first: a
      * removal that failed was {@link #deferPendingRemoval deferred}, so it moves
      * behind the others and a batch of removals that keep failing cannot starve the
-     * rest.
+     * rest. A {@code limit} of 0 or less returns nothing.
      */
     List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit);
 
