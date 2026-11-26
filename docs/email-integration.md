@@ -55,6 +55,8 @@ Basic authentication is retired on Exchange Online; IMAP uses OAuth 2.0 client c
    ```powershell
    New-ServicePrincipal -AppId <application-id> -ObjectId <enterprise-application-object-id>
    Add-MailboxPermission -Identity "invoices@contoso.com" -User <service-principal-object-id> -AccessRights FullAccess
+   # conversation mode only: Microsoft requires SendAs for a client-credentials flow that sends
+   Add-RecipientPermission -Identity "invoices@contoso.com" -Trustee <service-principal-object-id> -AccessRights SendAs
    ```
 
    `IMAP.AccessAsApp` lets the app use the protocol; which mailboxes it may open is decided by `Add-MailboxPermission`.
@@ -459,7 +461,7 @@ Microsoft 365 tenant sends **unsigned** mail, which this mode refuses
   keep `smtpPort` at `587` and add `smtp://smtp.office365.com:587` to the allowlist — Microsoft documents port 587 (or
   25) for client submission and says a client that defaults to 465 lacks the TLS it requires. Give the app
   `SMTP.SendAsApp`, grant the service principal **SendAs** on the mailbox
-  (`Add-RecipientPermission -Identity <address> -Trustee <service principal> -AccessRights SendAs`; Microsoft's note: a
+  (`Add-RecipientPermission -Identity <address> -Trustee <service-principal-object-id> -AccessRights SendAs`; Microsoft's note: a
   client-credentials flow that sends needs it, on top of `FullAccess`), and allow SMTP AUTH for the mailbox
   (`Set-CASMailbox -Identity <address> -SmtpClientAuthenticationDisabled $false`); with Entra ID security defaults on,
   SMTP AUTH stays off. The token's scope `https://outlook.office365.com/.default`
