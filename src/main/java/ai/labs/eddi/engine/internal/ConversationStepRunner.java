@@ -1535,10 +1535,12 @@ class ConversationStepRunner {
     /**
      * Single node: fences raised by {@link #fenceAbandonedWrite}, so the
      * conversation's next turn — loaded before the raise, i.e. already queued —
-     * writes with a token the store accepts. Consumed when that turn starts; any
-     * later turn loads the raised {@code _fence} from the store and needs no entry.
-     * Bounded (see {@link #raisedFenceRetention}), so a conversation abandoned once
-     * and never continued does not keep its entry for the life of the JVM.
+     * writes with a token the store accepts. Read by every turn until it expires
+     * (never removed on use: a turn that wrote nothing leaves the revision, and so
+     * the queued snapshots, unchanged); a turn loaded after the raise reads the
+     * raised {@code _fence} from the store anyway. Bounded (see
+     * {@link #raisedFenceRetention}), so a conversation abandoned once and never
+     * continued does not keep its entry for the life of the JVM.
      */
     private final ConcurrentMap<String, Long> raisedFences;
 
