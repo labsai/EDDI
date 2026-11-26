@@ -83,6 +83,9 @@ class GdprErasureGuaranteeTest {
         final Map<String, String> conversationRows = new HashMap<>();
         boolean drains = true;
         boolean failRemoval;
+        int drainCalls;
+        /** The drain call (1-based) that times out; 0: none. */
+        int failDrainCall;
 
         @Override
         public String name() {
@@ -91,7 +94,8 @@ class GdprErasureGuaranteeTest {
 
         @Override
         public boolean awaitDrained(Duration timeout) {
-            return drains;
+            drainCalls++;
+            return drains && drainCalls != failDrainCall;
         }
 
         @Override
@@ -213,6 +217,9 @@ class GdprErasureGuaranteeTest {
     @DisplayName("after a drain that timed out, a late conversation-only pending removal keeps the re-run failed until it is cleared")
     void lateConversationOnlyRemovalAfterADrainTimeout() throws Exception {
         registerParticipant();
+        // A write admitted before the erasure, for a row that names only conv-2.
+        ErasureGuard.Admission late = guard.beforeWrite(null, "conv-2", NOW.minusSeconds(1));
+        assertTrue(late.allowed());
         // The store as it behaves: once the snapshots are deleted, the user lists no
         // conversation any more.
         AtomicBoolean snapshotsDeleted = new AtomicBoolean();
@@ -230,7 +237,7 @@ class GdprErasureGuaranteeTest {
         // remove itself: the user's own last check never counts that record.
         writer.conversationRows.put("late", "conv-2");
         writer.failRemoval = true;
-        assertTrue(guard.afterWrite("fake", "late", null, "conv-2", NOW.minusSeconds(1), () -> {
+        assertTrue(guard.afterWrite("fake", "late", late, () -> {
             throw new IllegalStateException("row store down");
         }));
         writer.drains = true;
@@ -328,6 +335,39 @@ class GdprErasureGuaranteeTest {
     }
 
     @Test
+    @DisplayName("a conversation started after the first drain is drained again before its rows are counted")
+    void conversationStartedMeanwhileIsDrainedAgain() throws Exception {
+        registerParticipant();
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"), List.of("conv-1", "conv-new"));
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.complete(), result.failedSteps().toString());
+        assertEquals(2, writer.drainCalls, "the stop's drain, then one for the conversation tombstoned after it");
+    }
+
+    @Test
+    @DisplayName("that second drain timing out fails the conversations step and keeps the snapshots")
+    void secondDrainTimeoutKeepsTheSnapshots() throws Exception {
+        registerParticipant();
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"), List.of("conv-1", "conv-new"));
+        writer.failDrainCall = 2;
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertEquals(List.of("asyncWriteConversations", "conversations"), result.failedSteps());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
+    @DisplayName("no conversation started meanwhile: one drain only")
+    void noLateConversationNoSecondDrain() {
+        registerParticipant();
+        assertTrue(service.deleteUserData(USER_ID).complete());
+        assertEquals(1, writer.drainCalls);
+    }
+
+    @Test
     @DisplayName("a conversation whose async rows cannot be erased is kept for the re-run, and the erasure fails")
     void conversationRowsThatStayKeepTheConversation() throws Exception {
         registerParticipant();
@@ -366,11 +406,12 @@ class GdprErasureGuaranteeTest {
         registerParticipant();
         // A write that passed beforeWrite just before the tombstone, landed after it,
         // and could not remove itself: a pending removal is left.
-        assertTrue(guard.beforeWrite(USER_ID, "conv-1", NOW.minusSeconds(1)));
+        ErasureGuard.Admission admission = guard.beforeWrite(USER_ID, "conv-1", NOW.minusSeconds(1));
+        assertTrue(admission.allowed());
         writer.rows.put("r1", USER_ID);
         guard.tombstoneUser(USER_ID, List.of("conv-1"));
         writer.failRemoval = true;
-        assertTrue(guard.afterWrite("fake", "r1", USER_ID, "conv-1", NOW.minusSeconds(1), () -> writer.removeRow("r1")));
+        assertTrue(guard.afterWrite("fake", "r1", admission, () -> writer.removeRow("r1")));
         // The participant's own delete keeps working (it is another path), but the
         // pending removal is not cleared while the removal fails.
         writer.rows.put("r1", USER_ID);

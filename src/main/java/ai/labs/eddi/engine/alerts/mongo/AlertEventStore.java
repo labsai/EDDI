@@ -110,6 +110,10 @@ public class AlertEventStore implements IAlertEventStore {
         // An explicit conversation delete finds the stored values of the conversation.
         events.createIndex(Indexes.ascending("conversationId"),
                 new IndexOptions().name("idx_alertevent_conversation_value").partialFilterExpression(exists("match.value", true)));
+        // ... and its excerpts and subjects, which that partial index does not cover
+        // (conversationContent): every event of the conversation, by its id.
+        events.createIndex(Indexes.ascending("conversationId"),
+                new IndexOptions().name("idx_alertevent_conversation").partialFilterExpression(exists("conversationId", true)));
         events.createIndex(Indexes.ascending("match.ratingId"),
                 new IndexOptions().name("idx_alertevent_rating").partialFilterExpression(exists("match.ratingId", true)));
         windows.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_alertwindow_ttl").expireAfter(0L, TimeUnit.SECONDS));

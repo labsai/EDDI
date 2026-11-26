@@ -83,7 +83,8 @@ public class HealthShapedWriter implements AsyncErasureWriter, AutoCloseable {
     }
 
     private void write(Row row, Instant capturedAt) {
-        if (!guard.beforeWrite(row.userId(), row.conversationId(), capturedAt)) {
+        ErasureGuard.Admission admission = guard.beforeWrite(row.userId(), row.conversationId(), capturedAt);
+        if (!admission.allowed()) {
             return;
         }
         CountDownLatch hold = holdBeforeInsert;
@@ -103,7 +104,7 @@ public class HealthShapedWriter implements AsyncErasureWriter, AutoCloseable {
         }
         rows.put(row.id(), row);
         inserted.incrementAndGet();
-        guard.afterWrite(NAME, row.id(), row.userId(), row.conversationId(), capturedAt, () -> delete(row.id()));
+        guard.afterWrite(NAME, row.id(), admission, () -> delete(row.id()));
     }
 
     private void delete(String rowId) {

@@ -17,8 +17,13 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,6 +68,40 @@ class PostgresErasureTombstoneStoreIT extends PostgresTestBase implements Erasur
 
         Instant after = store.erasedAt(Kind.USER, "overlap", Instant.now()).orElseThrow();
         assertFalse(after.isBefore(later), "the cutoff moved back from " + later + " to " + after);
+    }
+
+    /**
+     * The write time is taken when the row is written, not when the transaction
+     * started: a tombstone write that waited for the row lock records the end of
+     * that wait, so content captured during it is not before the cutoff.
+     */
+    @Test
+    void theWriteTimeIncludesAWaitForTheRowLock() throws Exception {
+        Instant past = Instant.now().minus(Duration.ofDays(1));
+        Instant expires = Instant.now().plus(Duration.ofDays(400));
+        store.putTombstones(Kind.USER, List.of("locked"), past, expires);
+        Instant released;
+        try (Connection holder = DATA_SOURCE.getConnection()) {
+            holder.setAutoCommit(false);
+            try (Statement stmt = holder.createStatement()) {
+                stmt.execute("SELECT 1 FROM erasure_tombstones WHERE tkey = 'locked' FOR UPDATE");
+                ExecutorService writer = Executors.newSingleThreadExecutor();
+                try {
+                    Future<?> waiting = writer.submit(() -> store.putTombstones(Kind.USER, List.of("locked"), past, expires));
+                    Thread.sleep(700); // the write is now waiting for the row lock
+                    try (ResultSet rs = stmt.executeQuery("SELECT clock_timestamp()")) {
+                        rs.next();
+                        released = rs.getObject(1, OffsetDateTime.class).toInstant();
+                    }
+                    holder.commit();
+                    waiting.get(10, TimeUnit.SECONDS);
+                } finally {
+                    writer.shutdownNow();
+                }
+            }
+        }
+        Instant cutoff = store.erasedAt(Kind.USER, "locked", Instant.now()).orElseThrow();
+        assertFalse(cutoff.isBefore(released), "the cutoff " + cutoff + " is from before the lock was released at " + released);
     }
 
     @Test

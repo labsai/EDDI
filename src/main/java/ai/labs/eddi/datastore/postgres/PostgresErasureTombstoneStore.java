@@ -121,13 +121,15 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
             return;
         }
         ensureSchema();
-        // written_at is the database's clock (see erasedAt). now() is the start of the
-        // writing transaction, so of two overlapping writes the one that started first
-        // can commit last: keep the later value, or the cutoff could move backward.
-        String sql = "INSERT INTO erasure_tombstones (kind, tkey, erased_at, expires_at, written_at) VALUES (?, ?, ?, ?, now()) "
+        // written_at is the database's clock (see erasedAt) when the row is written:
+        // clock_timestamp(), not now() — now() is the start of the transaction, before
+        // any wait for the row lock, so content captured during that wait would fall
+        // before the cutoff. Of two overlapping writes the one that started first can
+        // still commit last: keep the later value, or the cutoff could move backward.
+        String sql = "INSERT INTO erasure_tombstones (kind, tkey, erased_at, expires_at, written_at) VALUES (?, ?, ?, ?, clock_timestamp()) "
                 + "ON CONFLICT (kind, tkey) DO UPDATE SET erased_at = GREATEST(erasure_tombstones.erased_at, EXCLUDED.erased_at), "
                 + "expires_at = GREATEST(erasure_tombstones.expires_at, EXCLUDED.expires_at), "
-                + "written_at = GREATEST(erasure_tombstones.written_at, now())";
+                + "written_at = GREATEST(erasure_tombstones.written_at, clock_timestamp())";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (String key : keys) {
                 ps.setString(1, kind.name());

@@ -23,6 +23,7 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -109,6 +110,25 @@ class MongoErasureTombstoneStoreIT extends MongoTestBase implements ErasureTombs
                 assertEquals("v1", replicated.meta("m").orElseThrow());
             }
         }
+    }
+
+    /**
+     * The write time only moves later: a write on a primary whose clock is behind
+     * the one that wrote the tombstone keeps the stored, later write time.
+     */
+    @Test
+    void anEarlierClockNeverMovesTheWriteTimeBack() {
+        Instant past = Instant.now().minus(Duration.ofDays(1));
+        Instant expires = Instant.now().plus(Duration.ofDays(400));
+        store.putTombstones(Kind.USER, List.of("ahead"), past, expires);
+        Instant ahead = Instant.now().plus(Duration.ofHours(1));
+        getDatabase().getCollection("erasuretombstones").updateOne(new Document("_id", "USER:ahead"),
+                new Document("$set", new Document("writtenAt", Date.from(ahead))));
+
+        store.putTombstones(Kind.USER, List.of("ahead"), past, expires);
+
+        Instant after = store.erasedAt(Kind.USER, "ahead", Instant.now()).orElseThrow();
+        assertEquals(ahead.toEpochMilli(), after.toEpochMilli(), "the cutoff moved back");
     }
 
     @Test

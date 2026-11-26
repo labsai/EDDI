@@ -476,8 +476,10 @@ public class GdprComplianceService {
         // it again, once it sees them (ErasureGuard). Not best effort: a failure here
         // is
         // a failed step, because nothing then stops a late write from recreating data.
+        // The conversations tombstoned here, before the drain barrier of step 0; one
+        // listed later (3b) has its tombstone written after that barrier.
+        List<String> tombstonedConversations = List.of();
         if (erasureGuard != null) {
-            List<String> tombstonedConversations = List.of();
             try {
                 tombstonedConversations = conversationMemoryStore.getConversationIdsByUserId(userId);
             } catch (Exception e) {
@@ -749,6 +751,21 @@ public class GdprComplianceService {
                 // The ids were listed again after step 00: a conversation created in
                 // between has no tombstone yet, and one is written before its rows go.
                 erasureGuard.tombstoneConversations(conversationIds);
+                // Its tombstone postdates the drain of step 0, so a write admitted before it
+                // — a row that names only that conversation, which no user tombstone
+                // refuses — may still be queued. Drain again, everywhere, before its rows
+                // are counted; only when there is such a conversation.
+                Set<String> lateConversations = new LinkedHashSet<>(conversationIds);
+                lateConversations.removeAll(tombstonedConversations);
+                if (!lateConversations.isEmpty()) {
+                    List<String> undrained = erasureGuard.drainEverywhere(lateConversations.size());
+                    if (!undrained.isEmpty()) {
+                        dependentCleanupIncomplete = true;
+                        recordFailure(failedSteps, "asyncWriteConversations", new IllegalStateException(lateConversations.size()
+                                + " conversation(s) started during the erasure could not be drained: " + String.join("; ", undrained)),
+                                pseudonym);
+                    }
+                }
                 Map<String, String> notErased = erasureGuard.eraseConversationRows(conversationIds);
                 if (!notErased.isEmpty()) {
                     dependentCleanupIncomplete = true;

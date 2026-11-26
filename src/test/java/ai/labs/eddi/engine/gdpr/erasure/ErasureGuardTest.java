@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,9 +78,15 @@ class ErasureGuardTest {
             removed.add(rowId);
         }
 
+        /** Test seam: runs at the start of every conversation delete. */
+        Consumer<String> onErase;
+
         @Override
         public long eraseConversation(String conversationId) {
             erasedConversations++;
+            if (onErase != null) {
+                onErase.accept(conversationId);
+            }
             if (conversationId.equals(stuckConversation)) {
                 return 0;
             }
@@ -125,12 +132,13 @@ class ErasureGuardTest {
 
     /** A guarded write the way an async writer does it. */
     private boolean write(String rowId, Instant capturedAt, Runnable betweenCheckAndWrite) {
-        if (!guard.beforeWrite(USER, CONVERSATION, capturedAt)) {
+        ErasureGuard.Admission admission = guard.beforeWrite(USER, CONVERSATION, capturedAt);
+        if (!admission.allowed()) {
             return false;
         }
         betweenCheckAndWrite.run();
         writer.rows.put(rowId, CONVERSATION);
-        return !guard.afterWrite(writer.name(), rowId, USER, CONVERSATION, capturedAt, () -> writer.removeRow(rowId));
+        return !guard.afterWrite(writer.name(), rowId, admission, () -> writer.removeRow(rowId));
     }
 
     @Nested
@@ -140,39 +148,39 @@ class ErasureGuardTest {
         @Test
         @DisplayName("allows a write when nothing was erased")
         void allows() {
-            assertTrue(guard.beforeWrite(USER, CONVERSATION, NOW));
+            assertTrue(guard.beforeWrite(USER, CONVERSATION, NOW).allowed());
         }
 
         @Test
         @DisplayName("a queued write of an erased conversation is blocked, whenever it was captured")
         void conversationTombstone() {
             guard.tombstoneConversation(CONVERSATION);
-            assertFalse(guard.beforeWrite("someone", CONVERSATION, NOW.plus(Duration.ofDays(30))));
+            assertFalse(guard.beforeWrite("someone", CONVERSATION, NOW.plus(Duration.ofDays(30))).allowed());
         }
 
         @Test
         @DisplayName("a queued write captured before the user's erasure is blocked; one captured later (new activity) is not")
         void userTombstone() {
             guard.tombstoneUser(USER, List.of());
-            assertFalse(guard.beforeWrite(USER, "other-conv", NOW.minusSeconds(30)));
-            assertFalse(guard.beforeWrite(USER, "other-conv", NOW.plus(Duration.ofMinutes(4))), "within the clock-skew tolerance");
-            assertTrue(guard.beforeWrite(USER, "other-conv", NOW.plus(Duration.ofMinutes(6))));
-            assertFalse(guard.beforeWrite(USER, "other-conv", null), "unknown capture time: blocked");
-            assertTrue(guard.beforeWrite("someone-else", "other-conv", NOW.minusSeconds(30)));
+            assertFalse(guard.beforeWrite(USER, "other-conv", NOW.minusSeconds(30)).allowed());
+            assertFalse(guard.beforeWrite(USER, "other-conv", NOW.plus(Duration.ofMinutes(4))).allowed(), "within the clock-skew tolerance");
+            assertTrue(guard.beforeWrite(USER, "other-conv", NOW.plus(Duration.ofMinutes(6))).allowed());
+            assertFalse(guard.beforeWrite(USER, "other-conv", null).allowed(), "unknown capture time: blocked");
+            assertTrue(guard.beforeWrite("someone-else", "other-conv", NOW.minusSeconds(30)).allowed());
         }
 
         @Test
         @DisplayName("the user's conversations are tombstoned with the user")
         void userConversations() {
             guard.tombstoneUser(USER, List.of(CONVERSATION));
-            assertFalse(guard.beforeWrite(null, CONVERSATION, NOW.plus(Duration.ofDays(1))));
+            assertFalse(guard.beforeWrite(null, CONVERSATION, NOW.plus(Duration.ofDays(1))).allowed());
         }
 
         @Test
         @DisplayName("fails closed when the tombstones cannot be read")
         void failsClosed() {
             store.failReads = true;
-            assertFalse(guard.beforeWrite(USER, CONVERSATION, NOW));
+            assertFalse(guard.beforeWrite(USER, CONVERSATION, NOW).allowed());
         }
 
         @Test
@@ -180,7 +188,7 @@ class ErasureGuardTest {
         void expiry() {
             guard.tombstoneConversation(CONVERSATION);
             clockNow = NOW.plus(Duration.ofDays(400));
-            assertTrue(guard.beforeWrite(USER, CONVERSATION, NOW));
+            assertTrue(guard.beforeWrite(USER, CONVERSATION, NOW).allowed());
             assertEquals(1, guard.deleteExpiredTombstones());
         }
     }
@@ -233,6 +241,31 @@ class ErasureGuardTest {
             new ErasureGuardMaintenance(guard).run();
             assertEquals(0, store.pendingCount());
             assertFalse(writer.rows.containsKey("r1"));
+        }
+
+        @Test
+        @DisplayName("reads failing after the write: the pending removal keeps the user scope beforeWrite resolved, no second key lookup")
+        void failedReadsAfterTheWriteKeepTheUserScope() {
+            String userKey = guard.userKey(KvKeys.sha256(USER));
+            writer.failRemoval = true;
+            // Between the check and the write, the tombstone and key-check reads start
+            // failing (the meta read of the key check included); pending removals can
+            // still be written.
+            assertFalse(write("r1", NOW, () -> store.failReads = true));
+            store.failReads = false;
+            assertEquals(1, store.pendingCount(), "a retry record exists");
+            assertEquals(1, store.countPendingRemovals("fake", userKey, null), "recorded under the user's key, so the user's erasure finds it");
+            assertEquals(1, store.countPendingRemovals("fake", null, CONVERSATION), "and under the conversation");
+        }
+
+        @Test
+        @DisplayName("afterWrite for a write beforeWrite refused is a programming error")
+        void refusedAdmission() {
+            guard.tombstoneConversation(CONVERSATION);
+            ErasureGuard.Admission refused = guard.beforeWrite(USER, CONVERSATION, NOW);
+            assertFalse(refused.allowed());
+            assertThrows(IllegalArgumentException.class, () -> guard.afterWrite("fake", "r1", refused, () -> {
+            }));
         }
 
         @Test
@@ -386,6 +419,70 @@ class ErasureGuardTest {
         }
 
         @Test
+        @DisplayName("a negative clock skew is refused, zero is allowed")
+        void negativeSkewIsRefused() {
+            ErasureMetrics metrics = new ErasureMetrics(new SimpleMeterRegistry());
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () -> new ErasureGuard(store, List.of(writer),
+                    metrics, Duration.ofDays(400), Duration.ofSeconds(30), Duration.ofSeconds(-1), Clock.systemUTC()));
+            assertTrue(refused.getMessage().contains("eddi.gdpr.tombstone-clock-skew"), refused.getMessage());
+            new ErasureGuard(store, List.of(writer), metrics, Duration.ofDays(400), Duration.ofSeconds(30), Duration.ZERO, Clock.systemUTC());
+        }
+
+        @Test
+        @DisplayName("a tombstone that expired while its conversation was being erased fails it; one that held is renewed from the completion")
+        void tombstoneMustHoldThroughTheErasure() {
+            ErasureGuard shortLived = new ErasureGuard(store, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()),
+                    ErasureGuard.minimumRetention(Duration.ofSeconds(30), Duration.ofMinutes(5)), Duration.ofSeconds(30), Duration.ofMinutes(5),
+                    new Clock() {
+                        @Override
+                        public ZoneOffset getZone() {
+                            return ZoneOffset.UTC;
+                        }
+
+                        @Override
+                        public Clock withZone(ZoneId zone) {
+                            return this;
+                        }
+
+                        @Override
+                        public Instant instant() {
+                            return clockNow;
+                        }
+                    });
+            Duration retention = ErasureGuard.minimumRetention(Duration.ofSeconds(30), Duration.ofMinutes(5));
+            // The delete of "slow" outlasts the retention (a stuck store, a huge batch).
+            writer.onErase = conversation -> {
+                if (conversation.equals("slow")) {
+                    clockNow = clockNow.plus(retention).plusSeconds(1);
+                }
+            };
+            Map<String, String> failed = shortLived.eraseConversations(List.of("fast", "slow"));
+            assertEquals(Set.of("fast", "slow"), failed.keySet(), "both tombstones expired before the erasure ended");
+            assertTrue(failed.get("slow").contains("expired during the erasure"), failed.get("slow"));
+
+            writer.onErase = null;
+            Instant completed = clockNow;
+            assertEquals(Map.of(), shortLived.eraseConversations(List.of("again")));
+            assertTrue(store.erasedAt(Kind.CONVERSATION, "again", completed.plus(retention).minusSeconds(1)).isPresent(),
+                    "renewed: the retention counts from the completion");
+        }
+
+        @Test
+        @DisplayName("the user's tombstone must hold through the erasure, and is renewed from its completion")
+        void userTombstoneMustHold() {
+            Duration retention = Duration.ofDays(400);
+            guard.tombstoneUser(USER, List.of());
+            clockNow = NOW.plus(Duration.ofDays(10));
+            guard.verifyNoPendingRemovals(USER);
+            String key = guard.userKey(KvKeys.sha256(USER));
+            assertTrue(store.erasedAt(Kind.USER, key, clockNow.plus(retention).minusSeconds(1)).isPresent(), "renewed from the completion");
+
+            clockNow = clockNow.plus(retention).plusSeconds(1);
+            IllegalStateException expired = assertThrows(IllegalStateException.class, () -> guard.verifyNoPendingRemovals(USER));
+            assertTrue(expired.getMessage().contains("expired during the erasure"), expired.getMessage());
+        }
+
+        @Test
         @DisplayName("a long drain timeout raises the minimum with it")
         void scalesWithTheDrainTimeout() {
             assertEquals(Duration.ofDays(5).plus(Duration.ofMinutes(5)), ErasureGuard.minimumRetention(Duration.ofDays(2), Duration.ofMinutes(5)));
@@ -434,7 +531,7 @@ class ErasureGuardTest {
             // A vault configured after tombstones were written under the salt.
             ErasureGuard switched = guardWith(store, new byte[32]);
             assertThrows(IllegalStateException.class, () -> switched.userKey("h"));
-            assertFalse(switched.beforeWrite(USER, "other", NOW.plus(Duration.ofDays(1))), "a guarded write is skipped");
+            assertFalse(switched.beforeWrite(USER, "other", NOW.plus(Duration.ofDays(1))).allowed(), "a guarded write is skipped");
             assertThrows(IllegalStateException.class, () -> switched.tombstoneUser("someone", List.of()), "an erasure step fails");
             assertThrows(IllegalStateException.class, () -> switched.verifyUserErased("fake", USER, () -> 0));
 
@@ -445,7 +542,7 @@ class ErasureGuardTest {
 
             // Restored: the same guard recovers (a mismatch is never cached).
             store.replaceMeta(ErasureGuard.SALT_META, salt);
-            assertFalse(lostSalt.beforeWrite(USER, "other", NOW.minusSeconds(1)), "the old tombstone matches again");
+            assertFalse(lostSalt.beforeWrite(USER, "other", NOW.minusSeconds(1)).allowed(), "the old tombstone matches again");
         }
     }
 
@@ -453,8 +550,8 @@ class ErasureGuardTest {
     @DisplayName("clock skew: content captured up to erasedAt + skew is refused, a millisecond later it is new activity")
     void skewBoundary() {
         guard.tombstoneUser(USER, List.of());
-        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5))));
-        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5)).plusMillis(1)));
+        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5))).allowed());
+        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5)).plusMillis(1)).allowed());
     }
 
     @Test
@@ -463,8 +560,8 @@ class ErasureGuardTest {
         // The erasing node's clock is 20 minutes behind the database's.
         store.databaseNow = NOW.plus(Duration.ofMinutes(20));
         guard.tombstoneUser(USER, List.of());
-        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(19))), "captured before the tombstone was written");
-        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(26))));
+        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(19))).allowed(), "captured before the tombstone was written");
+        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(26))).allowed());
     }
 
     @Test
@@ -526,6 +623,7 @@ class ErasureGuardTest {
         @Test
         @DisplayName("the user's own pending removals of every writer are retried by the last check")
         void lastCheckRetries() {
+            guard.tombstoneUser(USER, List.of()); // step 00 of the erasure
             writer.rows.put("r1", CONVERSATION);
             store.addPendingRemoval(new IErasureTombstoneStore.PendingRemoval("fake", "r1", guard.userKey(KvKeys.sha256(USER)), null, NOW));
             guard.verifyNoPendingRemovals(USER);
@@ -571,7 +669,7 @@ class ErasureGuardTest {
             newKey[0] = 1;
             ErasureGuard running = nodeWith(oldKey);
             String before = running.userKey("h");
-            assertTrue(running.beforeWrite(USER, "c", NOW));
+            assertTrue(running.beforeWrite(USER, "c", NOW).allowed());
 
             // The operator adopts a new key: the check row is deleted, and a node with
             // the new key writes its own.
@@ -580,7 +678,7 @@ class ErasureGuardTest {
             assertNotEquals(before, restarted.userKey("h"));
 
             assertThrows(IllegalStateException.class, () -> running.userKey("h"), "the cached old key is not used any more");
-            assertFalse(running.beforeWrite(USER, "c", NOW), "a guarded write on the stale node fails closed");
+            assertFalse(running.beforeWrite(USER, "c", NOW).allowed(), "a guarded write on the stale node fails closed");
             assertThrows(IllegalStateException.class, () -> running.tombstoneUser("someone", List.of()));
         }
 

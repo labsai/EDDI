@@ -221,7 +221,13 @@ How it holds:
    with a list of e-mail addresses could recompute (see
    [The tombstone key](#the-tombstone-key)). Conversations are recorded by id. A
    tombstone is kept for `eddi.gdpr.tombstone-retention` (default `400d`), longer
-   than any guarded data can still arrive (alert events live 90 days). A tombstone
+   than any guarded data can still arrive (alert events live 90 days), **counted from
+   the completion of the erasure**: when the verification ends, each tombstone must
+   still be valid (for a minute beyond), and is then written again. One that expired
+   while its erasure ran fails that conversation (or the user's last check,
+   `asyncWritePending`) for a re-run, because a write could have passed in between.
+   Writing the user's tombstone again moves its cutoff to the completion, so the
+   user's content captured while the erasure ran is refused too. A tombstone
    that cannot be written fails the step `erasureTombstone`. On MongoDB every read
    and write of these collections goes to the primary with majority read and write
    concern, whatever the client's `nearest()` default: a lagging secondary must never
@@ -242,8 +248,9 @@ How it holds:
    writers had queued *before the tombstones existed* has been written (at most
    `eddi.gdpr.drain-timeout`, default `30s`, for all writers together). Work queued
    later sees the tombstones. Only the guarded **write** is waited for: an alert's
-   Slack or webhook delivery runs on a separate stage, so a slow webhook or an alert
-   storm does not occupy the drain barrier and cannot make it time out. A send already
+   Slack or webhook delivery runs on a separate stage, so a slow webhook does not
+   occupy the drain barrier. (A backlog of alert evaluation and storage work — an
+   alert storm — still can: the barrier waits for every queued write.) A send already
    in progress can still delay the later redaction, which waits until that send's
    short claim on the event is released or expires (bounded; see
    [Alerts](alerts.md)). On the node running the erasure a writer that does
@@ -425,12 +432,15 @@ are the next), the contract is:
   through the same barrier with a direct executor, `barrier.execute(Runnable::run,
   job)`, so a barrier waits for a job in progress. Keep anything slow (network
   sends) out of the barrier-tracked task.
-- **Guard every write**: `ErasureGuard.beforeWrite(userId, conversationId,
-  capturedAt)` before it — skip the row (or its personal part) on `false` — and
-  `ErasureGuard.afterWrite(name, rowId, userId, conversationId, capturedAt, remover)`
-  right after, with a remover of exactly that row. `capturedAt` is when the content
-  was captured (the turn), not when the row is written; a row derived from several
-  captures passes the earliest.
+- **Guard every write**: `Admission admission = ErasureGuard.beforeWrite(userId,
+  conversationId, capturedAt)` before it — skip the row (or its personal part) when
+  `!admission.allowed()` — and `ErasureGuard.afterWrite(name, rowId, admission,
+  remover)` right after, with a remover of exactly that row. The admission carries
+  the user's tombstone key and the conversation the check resolved, so the post-write
+  check and a pending removal it records need no second key lookup (a key-check read
+  failing in between cannot leave a removal without its user). `capturedAt` is when
+  the content was captured (the turn), not when the row is written; a row derived
+  from several captures passes the earliest.
 - **Store a user reference the erasure can find the row by**: the plain user id when
   the export needs it (Agent Health), or `ErasureGuard.subjectKey(userId)` when it
   must not be stored at all (rating excerpts).

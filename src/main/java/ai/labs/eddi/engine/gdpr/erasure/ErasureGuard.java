@@ -163,6 +163,14 @@ public class ErasureGuard {
 
     private ErasureGuard(IErasureTombstoneStore store, Instance<AsyncErasureWriter> writers, ErasureMetrics metrics, Duration retention,
             Duration drainTimeout, Duration clockSkew, Clock clock) {
+        if (clockSkew.isNegative()) {
+            // A negative skew would pull the user cutoff before the erasure and let
+            // content captured right at it through, clocks in sync or not.
+            throw new IllegalArgumentException(CLOCK_SKEW_PROPERTY + " is " + clockSkew + "; it must not be negative (0 is allowed)");
+        }
+        if (drainTimeout.isNegative()) {
+            throw new IllegalArgumentException(DRAIN_TIMEOUT_PROPERTY + " is " + drainTimeout + "; it must not be negative");
+        }
         Duration minimum = minimumRetention(drainTimeout, clockSkew);
         if (retention.compareTo(minimum) < 0) {
             throw new IllegalArgumentException(TOMBSTONE_RETENTION_PROPERTY + " is " + retention + ", shorter than the minimum " + minimum
@@ -202,44 +210,84 @@ public class ErasureGuard {
     // ------------------------------------------------------------ write side
 
     /**
+     * The verdict of {@link #beforeWrite}, and what {@link #afterWrite} checks the
+     * stored row against: the scope the check resolved — the user's tombstone key,
+     * the conversation, the capture time. Carrying the resolved key means the
+     * post-write check and a pending removal it records need no second key lookup,
+     * so a key-check read that fails after the write cannot leave a removal without
+     * its user scope.
+     */
+    public static final class Admission {
+
+        private static final Admission REFUSED = new Admission(false, null, null, null);
+
+        private final boolean allowed;
+        private final String userKey;
+        private final String conversationId;
+        private final Instant capturedAt;
+
+        private Admission(boolean allowed, String userKey, String conversationId, Instant capturedAt) {
+            this.allowed = allowed;
+            this.userKey = userKey;
+            this.conversationId = conversationId;
+            this.capturedAt = capturedAt;
+        }
+
+        /** Whether the writer may write the row; {@code false}: skip it. */
+        public boolean allowed() {
+            return allowed;
+        }
+    }
+
+    /**
      * Whether an asynchronous writer may write a row of {@code userId} and
-     * {@code conversationId} captured at {@code capturedAt}. {@code false} when
-     * either was erased — the user: at or after {@code capturedAt}, give or take
+     * {@code conversationId} captured at {@code capturedAt}. Refused when either
+     * was erased — the user: at or after {@code capturedAt}, give or take
      * {@code eddi.gdpr.tombstone-clock-skew}; the conversation: ever — or when that
-     * cannot be checked (fail closed).
+     * cannot be checked (fail closed). Pass the returned admission to
+     * {@link #afterWrite} once the row is stored.
      *
      * @param capturedAt
      *            when the content was captured; null is treated as "before any
      *            erasure"
      */
-    public boolean beforeWrite(String userId, String conversationId, Instant capturedAt) {
+    public Admission beforeWrite(String userId, String conversationId, Instant capturedAt) {
         try {
-            if (erased(userId, conversationId, capturedAt)) {
+            String userKey = userId == null ? null : userKey(KvKeys.sha256(userId));
+            if (erased(userKey, conversationId, capturedAt)) {
                 metrics.writeSkipped(ErasureMetrics.REASON_TOMBSTONE);
-                return false;
+                return Admission.REFUSED;
             }
-            return true;
+            return new Admission(true, userKey, conversationId, capturedAt);
         } catch (RuntimeException e) {
             LOGGER.warnf("Erasure tombstones could not be read; skipping a guarded write: %s", e.toString());
             metrics.writeSkipped(ErasureMetrics.REASON_CHECK_FAILED);
-            return false;
+            return Admission.REFUSED;
         }
     }
 
     /**
-     * Called by a writer right after it stored a row. When the row's user or
-     * conversation has been erased meanwhile (or that cannot be checked), the row
-     * is removed through {@code remover}; if that fails, a durable pending removal
-     * is recorded and retried later.
+     * Called by a writer right after it stored the row {@code admission} allowed.
+     * When the row's user or conversation has been erased meanwhile (or that cannot
+     * be checked), the row is removed through {@code remover}; if that fails, a
+     * durable pending removal is recorded, under the user key and conversation the
+     * admission resolved, and retried later. The check uses the tombstone key
+     * {@link #beforeWrite} resolved rather than resolving it again: a key replaced
+     * between the two is outside supported operation (the reset stops every node).
      *
      * @return {@code true} when the row's content must be treated as gone (removed
      *         or pending removal) — the writer must not deliver or use it further
+     * @throws IllegalArgumentException
+     *             for a refused admission: the writer must not have written
      */
-    public boolean afterWrite(String writer, String rowId, String userId, String conversationId, Instant capturedAt,
-                              RowRemover remover) {
+    public boolean afterWrite(String writer, String rowId, Admission admission, RowRemover remover) {
+        Objects.requireNonNull(admission, "admission");
+        if (!admission.allowed) {
+            throw new IllegalArgumentException("afterWrite for a write beforeWrite refused");
+        }
         boolean erased;
         try {
-            erased = erased(userId, conversationId, capturedAt);
+            erased = erased(admission.userKey, admission.conversationId, admission.capturedAt);
         } catch (RuntimeException e) {
             LOGGER.warnf("Erasure tombstones could not be read after a guarded write; removing the row: %s", e.toString());
             erased = true;
@@ -254,15 +302,14 @@ public class ErasureGuard {
         } catch (Exception e) {
             LOGGER.warnf("A %s row of an erased user or conversation could not be removed; recording it for a retry: %s", writer,
                     e.toString());
-            recordPending(writer, rowId, userId, conversationId);
+            recordPending(writer, rowId, admission.userKey, admission.conversationId);
             return true;
         }
     }
 
-    private void recordPending(String writer, String rowId, String userId, String conversationId) {
+    private void recordPending(String writer, String rowId, String userKey, String conversationId) {
         try {
-            store.addPendingRemoval(new PendingRemoval(writer, rowId, userId == null ? null : userKey(KvKeys.sha256(userId)), conversationId,
-                    clock.instant()));
+            store.addPendingRemoval(new PendingRemoval(writer, rowId, userKey, conversationId, clock.instant()));
             metrics.pendingRemoval(ErasureMetrics.PENDING_RECORDED);
         } catch (RuntimeException e) {
             // Neither removed nor recorded. The erasure's own delete, which runs after the
@@ -274,15 +321,16 @@ public class ErasureGuard {
         }
     }
 
-    boolean erased(String userId, String conversationId, Instant capturedAt) {
+    /** {@code userKey}: the user's tombstone key ({@link #userKey}), or null. */
+    private boolean erased(String userKey, String conversationId, Instant capturedAt) {
         Instant now = clock.instant();
         if (conversationId != null && store.erasedAt(Kind.CONVERSATION, conversationId, now).isPresent()) {
             return true;
         }
-        if (userId == null) {
+        if (userKey == null) {
             return false;
         }
-        Optional<Instant> erasedAt = store.erasedAt(Kind.USER, userKey(KvKeys.sha256(userId)), now);
+        Optional<Instant> erasedAt = store.erasedAt(Kind.USER, userKey, now);
         return erasedAt.isPresent() && (capturedAt == null || !capturedAt.isAfter(erasedAt.get().plus(clockSkew)));
     }
 
@@ -432,12 +480,7 @@ public class ErasureGuard {
             ids.forEach(id -> failed.put(id, "could not record the erasure tombstone: " + e));
             return failed;
         }
-        List<String> problems = new ArrayList<>();
-        List<String> undrained = drainLocal();
-        if (!undrained.isEmpty()) {
-            problems.add("async writer(s) not drained on this node: " + undrained);
-        }
-        problems.addAll(drainCluster(ids.size()));
+        List<String> problems = drainEverywhere(ids.size());
         // The barrier must hold before the delete: a row still queued could land after
         // it. Without it, nothing is deleted here and the whole delete is retried.
         if (!problems.isEmpty()) {
@@ -450,6 +493,27 @@ public class ErasureGuard {
     }
 
     /**
+     * The drain barrier on this node and on every other: what it leaves
+     * unconfirmed, empty when every node drained. For a caller that wrote
+     * tombstones after an earlier barrier — a user erasure that tombstones the
+     * conversations it listed again — and must drain once more before it deletes
+     * their rows.
+     *
+     * @param conversations
+     *            how many conversations the barrier is for (a count only; it ends
+     *            up in the peers' logs)
+     */
+    public List<String> drainEverywhere(int conversations) {
+        List<String> problems = new ArrayList<>();
+        List<String> undrained = drainLocal();
+        if (!undrained.isEmpty()) {
+            problems.add("async writer(s) not drained on this node: " + undrained);
+        }
+        problems.addAll(drainCluster(conversations));
+        return problems;
+    }
+
+    /**
      * Deletes and verifies every async writer's rows of each conversation, and
      * requires no pending removal of it to be left — <em>whatever writer</em> the
      * removal names, so a record of a writer that is no longer deployed keeps the
@@ -457,6 +521,13 @@ public class ErasureGuard {
      * no barrier: the caller must have done both. A user erasure calls it for the
      * user's conversations, so a row that carries a conversation id but no user
      * reference is erased with them.
+     * <p>
+     * Each conversation's tombstone must still be there when the verification of
+     * the whole batch ends (and for a minute beyond): one that expired during the
+     * erasure may have let a write through that this verification did not see, so
+     * the conversation fails for a re-run. The tombstones that held are then
+     * written again, so their retention counts from the completion of the erasure,
+     * not its start.
      *
      * @return the conversations whose rows are not all gone, each with the reason;
      *         empty when all are
@@ -493,7 +564,51 @@ public class ErasureGuard {
                 failed.put(conversationId, String.join("; ", problems));
             }
         }
+        // Checked after the whole batch, not after each conversation: a tombstone
+        // present now has been present throughout, while one checked early could
+        // still expire while a later conversation is being erased.
+        Set<String> held = new LinkedHashSet<>();
+        for (String conversationId : new LinkedHashSet<>(conversationIds)) {
+            if (failed.containsKey(conversationId)) {
+                continue;
+            }
+            try {
+                if (tombstoneHolds(Kind.CONVERSATION, conversationId)) {
+                    held.add(conversationId);
+                } else {
+                    failed.put(conversationId, "the conversation's tombstone expired during the erasure — retry it");
+                }
+            } catch (RuntimeException e) {
+                failed.put(conversationId, "the conversation's tombstone could not be read: " + e);
+            }
+        }
+        if (!held.isEmpty()) {
+            try {
+                Instant now = clock.instant();
+                store.putTombstones(Kind.CONVERSATION, held, now, now.plus(retention));
+            } catch (RuntimeException e) {
+                // The tombstones written at the start still hold for the full retention;
+                // only the extension from the completion is missing.
+                LOGGER.warnf("GDPR: erasure tombstones could not be renewed at completion: %s", e.toString());
+            }
+        }
         return failed;
+    }
+
+    /**
+     * How far beyond the end of a verification a tombstone must still be valid to
+     * count as having held throughout: a tombstone about to expire is treated as
+     * expired.
+     */
+    static final Duration TOMBSTONE_HOLD_MARGIN = Duration.ofMinutes(1);
+
+    /**
+     * Whether the tombstone is present now and for {@link #TOMBSTONE_HOLD_MARGIN}
+     * beyond. Its expiry only ever moves later, so present now means it never
+     * expired since it was written.
+     */
+    private boolean tombstoneHolds(Kind kind, String key) {
+        return store.erasedAt(kind, key, clock.instant().plus(TOMBSTONE_HOLD_MARGIN)).isPresent();
     }
 
     /**
@@ -513,6 +628,13 @@ public class ErasureGuard {
         if (pending > 0) {
             throw new IllegalStateException(pending + " pending removal(s) of the user remain");
         }
+        // The user tombstone must have held throughout (see eraseConversationRows);
+        // then it is written again, so its retention counts from the completion.
+        if (!tombstoneHolds(Kind.USER, key)) {
+            throw new IllegalStateException("the user's erasure tombstone expired during the erasure — retry it");
+        }
+        Instant now = clock.instant();
+        store.putTombstones(Kind.USER, List.of(key), now, now.plus(retention));
     }
 
     /** The conversation-delete barrier on every other node. */

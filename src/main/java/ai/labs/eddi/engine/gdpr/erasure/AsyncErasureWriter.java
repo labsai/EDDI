@@ -19,12 +19,12 @@ import java.time.Duration;
  * part in all three:
  * <ol>
  * <li><b>Guarded writes.</b> Before writing a row, call
- * {@link ErasureGuard#beforeWrite} and do not write when it says no (or write
- * the row without its personal part). After the row is stored, call
- * {@link ErasureGuard#afterWrite} with a remover of that one row: if an erasure
- * started in between, the guard removes it — or records a durable pending
- * removal that is retried, and that keeps the erasure failed until it is
- * gone.</li>
+ * {@link ErasureGuard#beforeWrite} and do not write when its admission is not
+ * {@code allowed()} (or write the row without its personal part). After the row
+ * is stored, call {@link ErasureGuard#afterWrite} with that admission and a
+ * remover of that one row: if an erasure started in between, the guard removes
+ * it — or records a durable pending removal that is retried, and that keeps the
+ * erasure failed until it is gone.</li>
  * <li><b>A drain barrier</b> ({@link #awaitDrained}): every node, during the
  * erasure's stop handshake and an explicit conversation delete, waits until the
  * work this writer had queued before the barrier has finished. Work queued

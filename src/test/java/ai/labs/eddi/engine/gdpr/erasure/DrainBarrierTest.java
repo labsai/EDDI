@@ -209,7 +209,11 @@ class DrainBarrierTest {
             barrier.execute(discarding, () -> await(release));
             barrier.execute(discarding, () -> await(release)); // dropped without a word
             release.countDown();
-            assertFalse(barrier.awaitDrained(Duration.ofMillis(300)), "the dropped task stays outstanding");
+            // Both accepted tasks have run once the pool terminated: the dropped one is
+            // then the only entry left, however slow the worker was.
+            discarding.shutdown();
+            assertTrue(discarding.awaitTermination(5, TimeUnit.SECONDS));
+            assertFalse(barrier.awaitDrained(Duration.ofMillis(100)), "the dropped task stays outstanding");
             assertEquals(1, barrier.outstanding());
         } finally {
             release.countDown();

@@ -160,6 +160,36 @@ CodeRabbit's full review of the merge-ready round:
   why the reset stops every node first. `DrainBarrierTest` no longer leaves a worker
   blocked when an assertion fails.
 
+### Second review round (2026-11-26)
+
+- **Tombstones hold through the erasure, and their retention counts from its
+  completion.** At the end of a conversation batch (`eraseConversationRows`) and of
+  the user's last check (`verifyNoPendingRemovals`) every tombstone must still be
+  valid; one that expired while the erasure ran fails it for a re-run, and the ones
+  that held are written again (expiry and, for the user, the cutoff move to the
+  completion). The retention floor stays as a sanity bound.
+- **Writers carry the guard's admission.** `beforeWrite` returns an
+  `ErasureGuard.Admission` (`allowed()`), and `afterWrite(name, rowId, admission,
+  remover)` checks and records against the user key and conversation it resolved.
+  A key-check read failing after the write no longer leaves a pending removal
+  without its user scope, and the post-write check saves the key-check read.
+  `AlertEngine`, the `HealthShapedWriter` adoption test and the "For a new async
+  writer" contract use the new shape.
+- **A conversation started during a user erasure is drained again.** Its tombstone
+  (step 3b) postdates the stop's drain, so a row naming only that conversation could
+  still be queued; the erasure drains every node again before counting its rows,
+  only when there is such a conversation, and keeps the snapshots if that drain
+  fails.
+- **Indexes for the conversation-content lookup** (`idx_alert_events_conversation`,
+  `idx_alertevent_conversation`): the value-only partial index could not serve the
+  predicate that now includes excerpts and subjects.
+- **Tombstone write times only move later on MongoDB too** (an update pipeline with
+  `$max` over `$$NOW`), and PostgreSQL takes `clock_timestamp()` so a wait for the
+  row lock is inside the cutoff.
+- A negative `eddi.gdpr.tombstone-clock-skew` (or drain timeout) fails the start;
+  MongoDB `pendingRemovals(..., 0)` returns nothing, as PostgreSQL does; docs: an
+  alert storm's evaluation backlog can still hold the barrier.
+
 ### Still open
 
 - The residual limits (clock assumption, rows written by a node cut off from NATS)
@@ -189,5 +219,7 @@ row kind, as the GDPR guide's "For a new async writer" list says and
 | 2026-11-26 | Cluster drains and `gdpr-stop` are confirmed by node id: every node read before the scatter must answer `drained=true` | A count let a node that joined meanwhile stand in for one that never answered, which may still hold a queued write | Comparing counts; ignoring late joiners entirely |
 | 2026-11-26 | MongoDB tombstone and key-check point reads are linearizable on a replica set or mongos, majority on a standalone server | Majority reads do not make a deposed primary confirm it is still primary; a standalone server refuses linearizable reads and has only one primary | Majority everywhere; linearizable everywhere (every guarded write would fail closed on a standalone server) |
 | 2026-11-26 | `eddi.gdpr.tombstone-retention` below 1 day + 2 × drain timeout + clock skew fails the start | A tombstone must outlive the erasure that writes it; the delete phase has no fixed bound, so the day is a margin | Keeping the tombstone alive until the erasure returns; no check |
+| 2026-11-26 | A tombstone must still be valid when its erasure's verification ends, and is then written again so its retention (and the user cutoff) counts from the completion | A tombstone that expired mid-erasure could admit a write the verification did not see; a fixed retention floor cannot bound an erasure's length | Only the retention floor; keeping tombstones without expiry until the erasure returns |
+| 2026-11-26 | `beforeWrite` returns an `Admission` that `afterWrite` takes, carrying the resolved user key | A failed key-check read after the write lost the pending removal's user scope | Re-resolving the key after the write; passing the raw user id |
 | 2026-11-25 | Pending removals are checked across every writer, and a failed one is deferred rather than retried first | A removal of a writer no longer deployed must not be overlooked; a stuck batch must not starve the rest | Per-writer counts only; a larger batch |
 ```

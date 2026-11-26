@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.security.ConversationReviewPolicy;
@@ -93,7 +94,11 @@ public class AlertEngine {
         // The work may have waited in the queue while the rating was erased (GDPR) or
         // changed: evaluate only the rating as it still is, and re-check after the
         // event is written, because an erasure can fall between the two.
-        if (!stillCurrent(rating)) {
+        // A rating of an erased user or conversation (GDPR) is not evaluated at all;
+        // the
+        // admission goes on to the post-write check of every event written for it.
+        Admission admission = admit(rating.userId(), rating.conversationId(), rating.updatedAt());
+        if (!allowed(admission) || !stillCurrent(rating)) {
             return;
         }
         for (AlertRule rule : ruleCache.rulesFor(rating.agentId())) {
@@ -106,7 +111,7 @@ public class AlertEngine {
                         ? match.withoutCommentExcerpt()
                         : match;
                 fire(rule, stored, rating.agentId(), rating.agentVersion(), rating.conversationId(), subject,
-                        event -> afterRatingInsert(rating, event));
+                        event -> afterRatingInsert(rating, admission, event));
             });
         }
     }
@@ -132,10 +137,6 @@ public class AlertEngine {
      * always.
      */
     boolean stillCurrent(ConversationRating rating) {
-        // A rating of an erased user or conversation (GDPR) is not evaluated at all.
-        if (!guardAllows(rating.userId(), rating.conversationId(), rating.updatedAt())) {
-            return false;
-        }
         if (ratingStore == null || rating.id() == null) {
             return true;
         }
@@ -148,14 +149,14 @@ public class AlertEngine {
      * erasure's own sweep may have run before this event existed, so the excerpt is
      * blanked here — before anything is delivered.
      */
-    private AlertEvent afterRatingInsert(ConversationRating rating, AlertEvent stored) {
+    private AlertEvent afterRatingInsert(ConversationRating rating, Admission admission, AlertEvent stored) {
         if (stored.match() == null || stored.match().commentExcerpt() == null) {
             return stored;
         }
         // The erasure guarantee first: an erasure of the user or conversation that
         // started while the event was written removes the excerpt (or leaves a
         // pending removal that keeps that erasure failed until it is gone).
-        if (guardRemoved(stored, rating.userId(), rating.conversationId(), rating.updatedAt())) {
+        if (guardRemoved(stored, admission)) {
             return stored.withMatch(stored.match().withoutCommentExcerpt(), stored.subjectUserId());
         }
         if (ratingStore == null || rating.id() == null || ratingStore.readById(rating.id()).isPresent()) {
@@ -190,18 +191,22 @@ public class AlertEngine {
                 continue;
             }
             String value = null;
+            Admission admission = null;
             // Content of an erased conversation, or captured before an erasure of its
             // user, is never stored (the durable tombstones of ErasureGuard).
-            if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)
-                    && guardAllows(snapshot.userId(), snapshot.conversationId(), snapshot.capturedAt())) {
-                value = OutputMatcher.resolve(rule.condition().path(), snapshot)
-                        .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
+            if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)) {
+                admission = admit(snapshot.userId(), snapshot.conversationId(), snapshot.capturedAt());
+                if (allowed(admission)) {
+                    value = OutputMatcher.resolve(rule.condition().path(), snapshot)
+                            .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
+                }
             }
+            Admission valueAdmission = admission;
             // Whose conversation a stored value came from — internal, so erasure can find
             // it.
             String subject = value == null ? null : snapshot.userId();
             fire(rule, AlertMatch.output(OutputMatcher.describe(rule.condition()), value), snapshot.agentId(), snapshot.agentVersion(),
-                    snapshot.conversationId(), subject, stored -> afterOutputInsert(snapshot, stored));
+                    snapshot.conversationId(), subject, stored -> afterOutputInsert(valueAdmission, stored));
         }
     }
 
@@ -210,16 +215,22 @@ public class AlertEngine {
      * written may have swept before the event existed, so the value and its subject
      * are removed here, before delivery (see {@link ErasureGuard#afterWrite}).
      */
-    private AlertEvent afterOutputInsert(TurnSnapshot snapshot, AlertEvent stored) {
-        if (stored.match() == null || stored.match().value() == null
-                || !guardRemoved(stored, snapshot.userId(), snapshot.conversationId(), snapshot.capturedAt())) {
+    private AlertEvent afterOutputInsert(Admission admission, AlertEvent stored) {
+        if (stored.match() == null || stored.match().value() == null || !guardRemoved(stored, admission)) {
             return stored;
         }
         return stored.withMatch(stored.match().withoutValue(), null);
     }
 
-    private boolean guardAllows(String userId, String conversationId, Instant capturedAt) {
-        return erasureGuard == null || erasureGuard.beforeWrite(userId, conversationId, capturedAt);
+    /**
+     * The guard's admission of a write; null without a guard (everything allowed).
+     */
+    private Admission admit(String userId, String conversationId, Instant capturedAt) {
+        return erasureGuard == null ? null : erasureGuard.beforeWrite(userId, conversationId, capturedAt);
+    }
+
+    private static boolean allowed(Admission admission) {
+        return admission == null || admission.allowed();
     }
 
     /**
@@ -227,8 +238,8 @@ public class AlertEngine {
      * its removal as pending). Before delivery, so no send claim on the event can
      * exist yet and the conditional redaction is not skipped.
      */
-    private boolean guardRemoved(AlertEvent stored, String userId, String conversationId, Instant capturedAt) {
-        return erasureGuard != null && erasureGuard.afterWrite(AlertErasureWriter.NAME, stored.id(), userId, conversationId, capturedAt,
+    private boolean guardRemoved(AlertEvent stored, Admission admission) {
+        return admission != null && erasureGuard.afterWrite(AlertErasureWriter.NAME, stored.id(), admission,
                 () -> AlertErasureWriter.removeContent(eventStore, stored.id(), clock.instant()));
     }
 

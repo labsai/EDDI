@@ -123,6 +123,14 @@ public interface ErasureTombstoneStoreContract {
     }
 
     @Test
+    default void aLimitOfZeroReturnsNoPendingRemoval() {
+        IErasureTombstoneStore store = tombstoneStore();
+        store.addPendingRemoval(new PendingRemoval("alerts", "z1", null, "c-zero", T0));
+        assertEquals(List.of(), store.pendingRemovals(null, null, null, null, 0));
+        assertEquals(List.of(), store.pendingRemovals(null, null, null, T0.plusSeconds(60), 0));
+    }
+
+    @Test
     default void aMetaValueIsReadWithoutBeingWritten() {
         IErasureTombstoneStore store = tombstoneStore();
         assertEquals(Optional.empty(), store.meta("tombstone-key-check"));

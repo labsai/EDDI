@@ -109,6 +109,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
             "CREATE INDEX IF NOT EXISTS idx_alert_events_subject ON alert_events (subject_user_id) WHERE subject_user_id IS NOT NULL",
             // An explicit conversation delete finds the stored values of the conversation.
             "CREATE INDEX IF NOT EXISTS idx_alert_events_conversation_value ON alert_events (conversation_id) WHERE (match->>'value') IS NOT NULL",
+            // ... and its excerpts and subjects, which that partial index does not cover
+            // (CONVERSATION_CONTENT): every event of the conversation, by its id.
+            "CREATE INDEX IF NOT EXISTS idx_alert_events_conversation ON alert_events (conversation_id) WHERE conversation_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_windows_expiry ON alert_windows (expires_at)"};
 
     /** No send claim, or an expired one (one parameter: now). */

@@ -38,11 +38,7 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.or;
-import static com.mongodb.client.model.Updates.combine;
-import static com.mongodb.client.model.Updates.currentDate;
-import static com.mongodb.client.model.Updates.max;
 import static com.mongodb.client.model.Updates.set;
-import static com.mongodb.client.model.Updates.setOnInsert;
 
 /**
  * MongoDB implementation of {@link IErasureTombstoneStore}: tombstones in
@@ -139,9 +135,16 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
         }
         List<WriteModel<Document>> writes = new ArrayList<>(keys.size());
         for (String key : keys) {
-            // writtenAt is the database's clock (see erasedAt).
-            Bson update = combine(setOnInsert("kind", kind.name()), max("erasedAt", Date.from(erasedAt)), max("expiresAt", Date.from(expiresAt)),
-                    currentDate("writtenAt"));
+            // writtenAt is the database's clock (see erasedAt), and like erasedAt and
+            // expiresAt it only moves later: a write on a primary whose clock is behind
+            // the one that wrote the tombstone must not pull the cutoff back. An update
+            // pipeline, so $$NOW and the stored value meet in one $max ($max skips a
+            // missing field, so the first write takes the database time).
+            List<Bson> update = List.of(new Document("$set",
+                    new Document("kind", new Document("$ifNull", List.of("$kind", kind.name())))
+                            .append("erasedAt", new Document("$max", List.of("$erasedAt", Date.from(erasedAt))))
+                            .append("expiresAt", new Document("$max", List.of("$expiresAt", Date.from(expiresAt))))
+                            .append("writtenAt", new Document("$max", List.of("$writtenAt", "$$NOW")))));
             writes.add(new UpdateOneModel<>(eq("_id", id(kind, key)), update, new UpdateOptions().upsert(true)));
         }
         tombstones.bulkWrite(writes);
@@ -213,6 +216,10 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     @Override
     public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit) {
         List<PendingRemoval> found = new ArrayList<>();
+        if (limit <= 0) {
+            // MongoDB reads limit(0) as "no limit"; the contract is "at most limit".
+            return found;
+        }
         Bson filter = filter(writer, userKey, conversationId);
         Bson sort = Sorts.ascending("createdAt", "_id");
         if (dueBy != null) {
