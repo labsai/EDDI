@@ -192,8 +192,9 @@ public interface IAlertEventStore {
     long redactConversationContent(String conversationId, Instant now);
 
     /**
-     * How many events of {@code conversationId} still hold an output value or a
-     * rating comment excerpt.
+     * How many events of {@code conversationId} still hold an output value, a
+     * rating comment excerpt, or a subject — what
+     * {@link #redactConversationContent} removes.
      */
     long countConversationContent(String conversationId);
 

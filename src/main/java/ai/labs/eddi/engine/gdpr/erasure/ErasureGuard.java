@@ -180,10 +180,12 @@ public class ErasureGuard {
 
     /**
      * The shortest tombstone retention accepted: a tombstone must outlive the
-     * erasure that wrote it — its local and cluster drain waits (each up to
+     * erasure that wrote it — its local drain (up to {@code drainTimeout}), its
+     * cluster drain (up to {@code eddi.cluster.gdpr-stop-timeout} plus
      * {@code drainTimeout}), the deletes and the verification — and the clock skew
-     * its user tombstone is compared with. The delete and verification phase has no
-     * fixed bound, so the one-day base is a conservative margin, not an exact one.
+     * its user tombstone is compared with. The cluster stop timeout and the delete
+     * and verification phase are covered by the one-day base, a conservative
+     * margin, not an exact bound.
      */
     static Duration minimumRetention(Duration drainTimeout, Duration clockSkew) {
         return MIN_RETENTION_BASE.plus(drainTimeout.multipliedBy(2)).plus(clockSkew);

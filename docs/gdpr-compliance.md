@@ -378,7 +378,10 @@ consequence of a deployment condition the guarantee states it relies on:
    including the retention sweep's: a failure, not a leak, because a node that does
    not answer cannot be told apart from one that is cut off and still writing. Retry
    once the entry has expired; a node that shuts down cleanly leaves presence at
-   once.)
+   once. The nodes are matched by id: a replacement pod with a new name answers, but
+   does not stand in for the old one, so during a rolling restart erasures and
+   permanent deletes fail — and user erasures keep the conversation snapshots — until
+   the old pod's entry is gone.)
 2. **A row that could neither be removed nor recorded.** If `afterWrite` finds its row
    erased, cannot remove it, and also cannot record the pending removal (the store
    is down for both), the row stays: ERROR log, `eddi_gdpr_guard_pending_removals_total{outcome="record_failed"}`.
