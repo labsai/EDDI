@@ -1149,8 +1149,13 @@ public class Conversation implements IConversation {
             if (!sameSlot) {
                 continue;
             }
-            // Decoded values, not their text: a list ["a, b"] and ["a", "b"] print alike.
-            if (Objects.equals(entry.value(), PropertyValues.valueOf(property))) {
+            // Scalars are compared as text (the stores decode numbers to whatever type
+            // they like); lists and maps as decoded values, since ["a, b"] and
+            // ["a", "b"] print alike.
+            Object owedValue = PropertyValues.valueOf(property);
+            boolean container = owedValue instanceof Collection<?> || owedValue instanceof Map<?, ?>
+                    || entry.value() instanceof Collection<?> || entry.value() instanceof Map<?, ?>;
+            if (container ? Objects.equals(entry.value(), owedValue) : String.valueOf(entry.value()).equals(String.valueOf(owedValue))) {
                 return true;
             }
             return entry.updatedAt() != null && entry.updatedAt().toEpochMilli() > since;
