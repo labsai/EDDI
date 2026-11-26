@@ -1487,7 +1487,9 @@ public class GroupConversation {
         if (answeredRounds != null) {
             return;
         }
-        boolean answerOnRecord = synthesizedAnswer != null || (decision != null && decision.type() != DecisionType.NONE);
+        // a blank synthesis is no answer, as settle judges it
+        boolean answerOnRecord = (synthesizedAnswer != null && !synthesizedAnswer.isBlank())
+                || (decision != null && decision.type() != DecisionType.NONE);
         // (a dissent-only NONE record is no evidence either way: members may have
         // answered)
         if (answerOnRecord) {

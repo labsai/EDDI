@@ -1376,6 +1376,9 @@ convergence judge, the synthesized answer:
 A turn that is not `ANSWERED` never carries content, so it cannot be quoted as a
 position, counted as a vote or taken as the answer. A `FAILED` turn counts against
 `onAgentFailure` like any failure: `RETRY` asks again, `ABORT` fails the discussion.
+In a `PARALLEL` phase, `ABORT` does not fail the discussion: the failed turn is recorded
+as `FAILED`, and the phase continues with its other speakers. A quota refusal still
+fails the discussion there.
 Its `errorReason` is a short fixed text (for example *"Agent failed to produce an
 answer (its conversation ended in ERROR)"*); provider, driver and exception text goes
 to the server log only. Entries stored by an older version carry no `outcome` and

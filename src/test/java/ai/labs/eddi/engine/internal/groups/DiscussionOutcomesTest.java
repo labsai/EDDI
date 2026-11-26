@@ -303,6 +303,14 @@ class DiscussionOutcomesTest {
     }
 
     @Test
+    void establishAnswerHistory_aBlankSynthesisIsNoAnswer() {
+        var blankSynthesis = gc();
+        blankSynthesis.setSynthesizedAnswer("   ");
+        blankSynthesis.establishAnswerHistory();
+        assertEquals(0, blankSynthesis.getAnsweredRounds(), "settle rejects a blank synthesis, so it is no answer on record");
+    }
+
+    @Test
     void blankSynthesizedAnswer_isNoAnswer() {
         var gc = gc(opinion("a"));
         gc.setSynthesizedAnswer("   ");
