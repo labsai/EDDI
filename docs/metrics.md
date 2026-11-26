@@ -958,9 +958,10 @@ No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for 
 `queue_full` means the health worker cannot keep up with the turn rate (raise
 `eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
 that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
-or removed because their user was erased or their conversation deleted — `orphaned` counts the rows the daily orphan sweep removed,
-left either by a failed clean-up on the health worker or by a conversation delete whose own removal of its health rows failed. A dropped row is a gap in the health views, never a slower or
-failed turn. See [Agent Health](agent-health.md).
+or removed because their user was erased or their conversation deleted — `erased` by the
+[erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) on the health worker, `orphaned` by
+the daily orphan sweep (rows of purged agent-test conversations, the one delete outside the guarantee). A dropped row is a gap in
+the health views, never a slower or failed turn. See [Agent Health](agent-health.md).
 
 ### GDPR Erasure Guarantee Metrics
 

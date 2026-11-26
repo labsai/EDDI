@@ -5,11 +5,12 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.engine.gdpr.erasure.DrainBarrier;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.health.HealthTurnFactory.Capture;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -18,6 +19,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -46,27 +50,26 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code eddi.health.enabled=false} switches recording off; nothing else
  * changes.
  * <p>
- * <b>Erasure and deletion win over a queued write.</b> A row can wait in the
- * queue while its user is erased or its conversation deleted; written after the
- * delete, it would outlive it. So the worker
+ * <b>Erasure and deletion win over a queued write</b> — the GDPR erasure
+ * guarantee ({@link ErasureGuard}, with {@link HealthErasureWriter} as this
+ * worker's writer). A row can wait in the queue while its user is erased or its
+ * conversation deleted; written after the delete, it would outlive it. So
  * <ul>
- * <li>writes nothing — neither the row nor its discard markers — for a user
- * under a {@link HealthErasureFence} (raised by the erasure's step 0, on every
- * node), counting {@code eddi_health_dropped_total{reason="erased"}};</li>
- * <li>after each write, checks again: when the user is now fenced, or the
- * conversation no longer exists in the conversation store, it deletes the
- * conversation's rows and markers ({@code deleteByConversationId}). Both
- * deleters remove the conversation (or the user's conversations)
- * <em>before</em> their health rows, so either their delete sees the row or
- * this check sees the conversation gone — on whichever node the row was queued.
- * The check is one primary-key projection read per recorded turn, on this
- * worker, never on the turn's thread.</li>
+ * <li>every write is queued through a {@link DrainBarrier}: an erasure or a
+ * permanent conversation delete waits, on every node, until the work queued
+ * before its tombstone has finished;</li>
+ * <li>before writing, the worker asks {@link ErasureGuard#beforeWrite} with the
+ * turn's capture time and writes nothing — neither the row nor its discard
+ * markers — when it is refused (the user was erased after the turn was
+ * captured, the conversation was deleted, or the tombstones cannot be read),
+ * counting {@code eddi_health_dropped_total{reason="erased"}};</li>
+ * <li>after writing — also after a failed write, part of which may have landed
+ * — it calls {@link ErasureGuard#afterWrite} for the row and for each marker,
+ * with a remover of exactly that row: a tombstone that went up meanwhile has
+ * the row deleted again, or a durable pending removal recorded that keeps the
+ * erasure failing until it is gone.</li>
  * </ul>
- * Limits: when the conversation store cannot answer, or the cleanup delete
- * fails, the row stays (a WARN, at most once a minute) until the daily orphan
- * sweep of {@link HealthTurnRetention} finds its conversation gone — the
- * durable second chance; an erasure that a node did not confirm the cluster
- * stop for is already reported incomplete ({@code clusterStop}).
+ * The tombstone reads run on this worker, never on the turn's thread.
  */
 @ApplicationScoped
 @Startup
@@ -77,32 +80,29 @@ public class HealthTurnRecorder {
     private static final long WARN_INTERVAL_MILLIS = 60_000;
 
     private final Instance<IHealthTurnStore> store;
-    private final Instance<IConversationMemoryStore> conversations;
-    private final HealthErasureFence erasureFence;
+    private final ErasureGuard erasureGuard;
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
     private final ThreadPoolExecutor executor;
+    private final DrainBarrier barrier = new DrainBarrier();
     private final AtomicLong lastQueueWarning = new AtomicLong();
     private final AtomicLong lastStoreWarning = new AtomicLong();
-    private final AtomicLong lastCleanupWarning = new AtomicLong();
+    private final AtomicLong lastGuardWarning = new AtomicLong();
 
     @Inject
-    public HealthTurnRecorder(Instance<IHealthTurnStore> store, Instance<IConversationMemoryStore> conversations,
-            HealthErasureFence erasureFence, HealthSettings settings, HealthMetrics metrics) {
-        this(store, conversations, erasureFence, settings, metrics, Clock.systemUTC());
+    public HealthTurnRecorder(Instance<IHealthTurnStore> store, ErasureGuard erasureGuard, HealthSettings settings, HealthMetrics metrics) {
+        this(store, erasureGuard, settings, metrics, Clock.systemUTC());
     }
 
-    /** Without the erasure checks — for tests of the queue alone. */
+    /** Without the erasure guard — for tests of the queue alone. */
     HealthTurnRecorder(Instance<IHealthTurnStore> store, HealthSettings settings, HealthMetrics metrics, Clock clock) {
-        this(store, null, null, settings, metrics, clock);
+        this(store, null, settings, metrics, clock);
     }
 
-    HealthTurnRecorder(Instance<IHealthTurnStore> store, Instance<IConversationMemoryStore> conversations, HealthErasureFence erasureFence,
-            HealthSettings settings, HealthMetrics metrics, Clock clock) {
+    HealthTurnRecorder(Instance<IHealthTurnStore> store, ErasureGuard erasureGuard, HealthSettings settings, HealthMetrics metrics, Clock clock) {
         this.store = store;
-        this.conversations = conversations;
-        this.erasureFence = erasureFence;
+        this.erasureGuard = erasureGuard;
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
@@ -164,7 +164,7 @@ public class HealthTurnRecorder {
     /** Queues the write of {@code capture}; {@code false} when it was dropped. */
     boolean submit(Capture capture) {
         try {
-            executor.execute(() -> write(capture));
+            barrier.execute(executor, () -> write(capture));
             return true;
         } catch (RejectedExecutionException e) {
             if (executor.isShutdown()) {
@@ -183,23 +183,29 @@ public class HealthTurnRecorder {
 
     void write(Capture capture) {
         HealthTurn turn = capture.turn();
-        if (erased(turn)) {
-            // Neither the row nor its discard markers: the user is being erased.
+        // beforeWrite fails closed on its own: a tombstone store that cannot be read
+        // refuses.
+        Admission admission = admit(turn);
+        if (admission != null && !admission.allowed()) {
+            // Neither the row nor its discard markers: the user or the conversation was
+            // erased.
             metrics.dropped(HealthMetrics.REASON_ERASED);
             return;
         }
+        List<String> markers = List.of();
         try {
             IHealthTurnStore turns = store.get();
             if (!capture.settled()) {
                 // What the conversation keeps may be the earlier execution, or nothing at
                 // all: never replace a row on the strength of this one.
-                turns.insertIfAbsent(capture.turn());
+                turns.insertIfAbsent(turn);
             } else {
-                turns.upsert(capture.turn());
+                turns.upsert(turn);
                 // After the new row: the discard is only true once the replacing turn
                 // exists.
                 if (!capture.discardedExecutionIds().isEmpty()) {
-                    turns.markDiscarded(capture.turn(), capture.discardedExecutionIds());
+                    markers = List.copyOf(capture.discardedExecutionIds());
+                    turns.markDiscarded(turn, markers);
                 }
             }
             metrics.recorded();
@@ -207,64 +213,68 @@ public class HealthTurnRecorder {
             metrics.dropped(HealthMetrics.REASON_STORE_ERROR);
             if (due(lastStoreWarning)) {
                 LOGGER.warnf("Could not store an Agent Health turn row (conversation %s): %s — rows are being lost; see "
-                        + "eddi_health_dropped_total", sanitize(capture.turn().conversationId()), sanitize(e.getMessage()));
+                        + "eddi_health_dropped_total", sanitize(turn.conversationId()), sanitize(e.getMessage()));
             }
         }
-        // Also after a failed write: part of it (the row before its markers) may have
+        // Also after a failed write: part of it (the row, some markers) may have
         // landed.
-        removeIfDeletedMeanwhile(turn);
-    }
-
-    private boolean erased(HealthTurn turn) {
-        return erasureFence != null && erasureFence.covers(turn.userId());
+        if (admission != null) {
+            guardWritten(turn, markers, admission);
+        }
     }
 
     /**
-     * The second check: an erasure or a conversation delete that ran while the row
-     * was being written may have deleted before the row existed. Both remove the
-     * conversation before its health rows, so a conversation still there means
-     * their own delete of the rows is yet to come.
+     * The guard's admission of {@code turn}'s write, captured when the turn
+     * finished; {@code null} without a guard (everything allowed).
      */
-    private void removeIfDeletedMeanwhile(HealthTurn turn) {
+    private Admission admit(HealthTurn turn) {
+        if (erasureGuard == null) {
+            return null;
+        }
+        Instant capturedAt = turn.updatedAt() != null ? turn.updatedAt() : turn.timestamp();
+        return erasureGuard.beforeWrite(turn.userId(), turn.conversationId(), capturedAt);
+    }
+
+    /**
+     * The post-write check of every row this write may have stored — the turn's row
+     * and each discard marker: an erasure that started while they were being
+     * written has each one removed again, or its removal recorded as pending.
+     */
+    private void guardWritten(HealthTurn turn, List<String> markers, Admission admission) {
+        String conversationId = turn.conversationId();
+        boolean withheld = false;
         try {
-            if (erased(turn) || conversationGone(turn.conversationId())) {
-                store.get().deleteByConversationId(turn.conversationId());
-                metrics.dropped(HealthMetrics.REASON_ERASED);
+            withheld = afterWrite(conversationId, turn.executionId(), admission);
+            for (String executionId : markers) {
+                if (!executionId.equals(turn.executionId())) {
+                    withheld |= afterWrite(conversationId, executionId, admission);
+                }
             }
         } catch (RuntimeException e) {
-            if (due(lastCleanupWarning)) {
-                LOGGER.warnf("Could not check or remove the Agent Health rows of an erased or deleted conversation (%s); the daily "
-                        + "orphan sweep may remove them if it checks and deletes them within its window; otherwise they expire "
-                        + "with eddi.health.facts-retention: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
+            // afterWrite handles store failures itself; this is the never-throw promise.
+            if (due(lastGuardWarning)) {
+                LOGGER.warnf("The erasure check after an Agent Health write failed (conversation %s): %s", sanitize(conversationId),
+                        sanitize(e.getMessage()));
             }
+        }
+        if (withheld) {
+            metrics.dropped(HealthMetrics.REASON_ERASED);
         }
     }
 
+    private boolean afterWrite(String conversationId, String executionId, Admission admission) {
+        return erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.rowId(conversationId, executionId), admission,
+                () -> store.get().deleteRow(conversationId, executionId));
+    }
+
     /**
-     * Whether the conversation store says the conversation does not exist -
-     * {@code false} when it cannot say (no store, or one that does not answer in
-     * one read).
+     * Waits until every write queued before the call has finished — the drain
+     * barrier of {@link HealthErasureWriter}.
+     *
+     * @return {@code false} on timeout
      */
-    private boolean conversationGone(String conversationId) {
-        if (conversations == null || !conversations.isResolvable()) {
-            if (due(lastCleanupWarning)) {
-                LOGGER.warnf("No conversation store to check whether conversation %s still exists; if it was deleted meanwhile, "
-                        + "its Agent Health rows are removed by the daily orphan sweep or expire with eddi.health.facts-retention",
-                        sanitize(conversationId));
-            }
-            return false;
-        }
-        StateAndRevision stored = conversations.get().getStateAndRevision(conversationId);
-        if (stored == null) {
-            // The store cannot say; the cleanup is skipped, so say so rather than fail
-            // silently.
-            if (due(lastCleanupWarning)) {
-                LOGGER.warnf("Could not tell whether conversation %s still exists; if it was deleted meanwhile, the daily orphan "
-                        + "sweep may remove its Agent Health rows; otherwise they expire with eddi.health.facts-retention", sanitize(conversationId));
-            }
-            return false;
-        }
-        return stored.state() == null && stored.revision() == null;
+    public boolean awaitDrained(Duration timeout) throws InterruptedException {
+        return barrier.awaitDrained(timeout);
     }
 
     private static boolean due(AtomicLong last) {

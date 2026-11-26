@@ -81,7 +81,7 @@ class ConversationStepRunnerHealthHookTest {
         store = mock(IHealthTurnStore.class);
         Instance<IHealthTurnStore> instance = mock(Instance.class);
         when(instance.get()).thenReturn(store);
-        recorder = new HealthTurnRecorder(instance, null, null, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()));
+        recorder = new HealthTurnRecorder(instance, null, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()));
         service.healthTurnRecorder = recorder;
         doCallRealMethod().when(service).reportHealthTurn(any(), any(TurnWait.class), anyLong(), anyBoolean());
         doCallRealMethod().when(service).reportHealthTurn(any(), any(), any(TurnWait.class), anyLong());

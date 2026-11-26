@@ -172,11 +172,10 @@ A daily sweep (`health-turn-retention`, on every node — it is one idempotent
 days older than `eddi.health.facts-retention`. It runs even with
 `eddi.health.enabled=false`. With the defaults, turn rows are kept for less time
 than conversations (90 against 365 days), so a conversation removed by its own
-retention has no rows left. That holds only while `eddi.health.facts-retention`
-is the shorter of the two: the conversation-retention sweep does not delete
-health rows — only an explicit conversation delete does — so with a longer
-setting a conversation's rows outlive it until their own retention takes them.
-A user's [erasure](#gdpr) removes them whatever either setting says. Daily
+retention has no rows left. Whatever the two settings, a conversation's rows go
+with it: an explicit permanent delete and the conversation-retention sweep both
+erase them through the [erasure guarantee](#gdpr), and so does a user's erasure.
+Daily
 aggregates (H2b) will be kept longer and hold no personal data.
 
 The same daily job then runs the **orphan sweep**: it reads the distinct
@@ -193,10 +192,11 @@ not guaranteed a check before they leave the window, and their rows then stay
 until retention. The window is measured by **capture** time — `updatedAt` is
 set when the turn's thread captures the row, before it is queued — so a row
 delayed long enough on a queue can be written after its conversation was
-deleted yet already be outside the window; if its post-write clean-up also
-failed, it stays until retention. Like the retention it runs on every node and
-is idempotent.
-It is the durable second chance for the [queued-row race](#gdpr) below.
+deleted yet already be outside the window, and then stays until retention. Like
+the retention it runs on every node and is idempotent. Every delete but one is
+covered by the [erasure guarantee](#gdpr), so the sweep matters only for that
+one: an agent-test conversation, purged without a tombstone (its user is
+synthetic), whose row was still queued.
 
 ## GDPR
 
@@ -207,36 +207,27 @@ Turn rows are personal data about a user's use of an agent:
   discussion's user and are covered by the same erasure.
 - **Export** includes the user's rows (newest first, at most 10,000) under
   `agentHealthTurns.turns`.
-- **Deleting a conversation** deletes its rows (best effort — a failure is
-  logged and the rows expire with the retention).
-- **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health
-  worker's queue, so a turn finished just before an erasure or a delete can
-  reach the store after it. The erasure's first step raises a fence for the user
-  on every node (through the cluster stop in cluster mode); while it lasts (15
-  minutes) the worker writes none of the user's rows or discard markers. After
-  every write the worker checks again, and deletes the conversation's rows when
-  the user is now fenced or the conversation no longer exists — both the erasure
-  and a conversation delete remove the conversation before its rows, so one of
-  the two sees the other on whichever node the row was queued — provided its
-  check and delete succeed (the limits follow). Withheld
-  and removed rows count as `eddi_health_dropped_total{reason="erased"}`. That
-  second check costs one primary-key read of the conversation per recorded
-  turn, on the worker. What it cannot cover: a node that did not confirm the
-  erasure's cluster stop (the erasure then reports `clusterStop` as failed and
-  must be re-run), a conversation store that cannot answer, or a cleanup delete
-  that fails. Each logs a WARN, at most once a minute (the stores EDDI ships
-  always answer the check; only a store without `getStateAndRevision` cannot).
-  Such a row is **normally** removed by the next daily [orphan sweep](#retention),
-  which finds its conversation gone and deletes it — the erasure deletes the
-  user's conversations, so this covers a row left behind by an erasure (also
-  one a node wrote without having confirmed the cluster stop) as well as by a
-  conversation delete. The sweep's own limits: it looks only at rows captured
-  within `eddi.health.orphan-sweep-window`, so if it cannot ask the
-  conversation store, or cannot delete, for longer than that, the row is left
-  to the retention (each failed or skipped run — also one with no conversation
-  store to ask — logs a WARN); and a conversation delete
-  whose own delete of older rows failed is not caught by it (that failure is
-  logged by the delete, and those rows expire with the retention).
+- **Deleting a conversation** permanently — explicitly or by the
+  conversation-retention sweep — deletes its rows and verifies that none is
+  left; otherwise the delete fails and a retry finishes it.
+- **A row still queued cannot outlive the erasure or the delete — the
+  [erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).**
+  Rows are written on the health worker's queue, so a turn finished just before
+  an erasure or a delete could reach the store after it. The health worker is
+  an async writer of that guarantee (`agentHealthTurns`): the erasure or delete
+  writes durable tombstones first and waits until every node's health queue has
+  written what it held; the worker asks before each write and writes neither
+  the row nor its discard markers of a tombstoned conversation, or of an erased
+  user's turn captured before the erasure; and right after a write (also a
+  failed one) it asks again and deletes each row it wrote, or records a durable
+  pending removal that keeps the erasure failing until a retry removes it.
+  Withheld and removed rows count as `eddi_health_dropped_total{reason="erased"}`.
+  The checks run on the worker, never on the turn's thread. The limits are the
+  guarantee's own, listed in the
+  [GDPR guide](gdpr-compliance.md#residual-limits-of-the-erasure-guarantee). The
+  one delete outside it is the purge of an agent-test conversation (its user is
+  synthetic): its rows are deleted best effort, and the daily
+  [orphan sweep](#retention) removes a row its queue wrote afterwards.
 - **A turn whose snapshot was not stored** — a pause that lost its
   compare-and-store to a concurrent end or cancel, a write conflict, a fenced or
   failed write — is recorded unsettled: inserted only if absent, never as
@@ -262,6 +253,6 @@ eddi_health_queue_depth      # Gauge: records waiting for the health worker
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because
-their user was erased or their conversation deleted; a rising `orphaned` (rows
-the daily sweep removed) means the worker's own clean-up had failed. See
+their user was erased or their conversation deleted; `orphaned` counts the rows
+the daily sweep removed (rows of purged agent-test conversations). See
 [Metrics](metrics.md#agent-health-metrics).

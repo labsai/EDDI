@@ -221,20 +221,12 @@ each of their conversations, and every node drains its asynchronous writers — 
     conversations are owned by the discussion's user, so they are included). A row holds ids,
     counts, failure classes and action names of one turn, no text. Rows also go when their
     conversation is deleted, and expire after `eddi.health.facts-retention` (90 days). Rows still
-    queued on a node's health worker are withheld or removed on a **best-effort** basis — this is
-    not a guarantee: step 0 fences the user (`agentHealthErasureFence`) for 15 minutes on every node
-    that confirms the erasure's cluster stop, and a row written while the fence is up — or for a
-    conversation that no longer exists — is deleted right after the write when that check and the
-    clean-up succeed ([details](agent-health.md#gdpr)). If a node did not confirm the cluster stop,
-    the fence had expired, the conversation check cannot answer, or the clean-up delete fails, the
-    row stays until a daily orphan sweep finds its conversation gone (the erasure deletes the user's
-    conversations) and deletes it. Failed checks and clean-ups log a rate-limited WARN, not one per
-    row, and an expired fence logs nothing. That sweep only looks at rows captured within
-    `eddi.health.orphan-sweep-window` (48 hours, by the time the row was captured, not written),
-    checks at most `eddi.health.orphan-sweep-max` conversations per run without resuming where it
-    stopped, and keeps a row whenever the conversation store cannot answer. A failure that outlasts
-    the window, a row delayed past it, or a conversation beyond the cap therefore leaves the row
-    until `eddi.health.facts-retention` removes it. The export
+    queued on a node's health worker are covered by
+    [the erasure guarantee](#the-erasure-guarantee-for-asynchronously-written-data): the health
+    worker is an async writer (`agentHealthTurns`) — its queue is drained, every write is guarded,
+    and the participant verifies that no row, discard marker or pending removal of the user is left;
+    otherwise the step `agentHealthTurns` fails and a re-run finishes it
+    ([details](agent-health.md#gdpr)). The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 
@@ -307,7 +299,8 @@ How it holds:
    `clusterStop`.
 4. **Delete, then verify.** The writer's participant deletes the user's rows and then
    checks — on MongoDB again from the primary — that none is left and no pending
-   removal of the user remains; otherwise its step fails (`alerts` for alert events).
+   removal of the user remains; otherwise its step fails (`alerts` for alert events,
+   `agentHealthTurns` for Agent Health turn rows).
    Two checks do not depend on a participant at all. Before the conversations are
    deleted, every writer's rows *of the user's conversations* are deleted and counted
    (`asyncWriteConversations`), which reaches a row that names a conversation but not
