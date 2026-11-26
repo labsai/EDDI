@@ -87,6 +87,49 @@ class BoundedPdfLoaderTest {
     }
 
     @Test
+    @DisplayName("object-stream entries a lenient rebuild adds are counted: a header listing 200 objects is refused at cap 50, loads at cap 5000")
+    void objectStreamEntriesAddedByLenientRebuildAreCounted() throws IOException {
+        byte[] pdf = objectStreamWithoutXrefPdf(200);
+
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                IOUtils.createMemoryOnlyStreamCache(), 5000, true)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+        }
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf), IOUtils.createMemoryOnlyStreamCache(),
+                        50, true));
+        assertTrue(refused.getMessage().contains("declares more than 50 objects"), refused.getMessage());
+    }
+
+    /**
+     * The five objects of {@link #fiveObjectPdf()} and an object stream whose
+     * header lists {@code listed} object numbers, with no cross-reference table and
+     * no {@code startxref}, so PDFBox rebuilds the table by scanning the file and
+     * writes the stream's entries into it without going through {@code setXRef}.
+     */
+    static byte[] objectStreamWithoutXrefPdf(int listed) {
+        String content = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";
+        List<String> objects = List.of(
+                "<</Type/Catalog/Pages 2 0 R>>",
+                "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+                "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+                "<</Length " + content.length() + ">>stream\n" + content + "\nendstream",
+                "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>");
+        var out = new ByteArrayOutputStream();
+        write(out, "%PDF-1.5\n");
+        for (int i = 0; i < objects.size(); i++) {
+            write(out, (i + 1) + " 0 obj\n" + objects.get(i) + "\nendobj\n");
+        }
+        var header = new StringBuilder();
+        for (int i = 0; i < listed; i++) {
+            header.append(100 + i).append(" 0 ");
+        }
+        write(out, "6 0 obj\n<</Type/ObjStm/N " + listed + "/First " + header.length() + "/Length " + header.length()
+                + ">>stream\n" + header + "\nendstream\nendobj\n");
+        write(out, "trailer<</Size 7/Root 1 0 R>>\n%%EOF\n");
+        return out.toByteArray();
+    }
+    @Test
     @DisplayName("an ordinary PDF loads under the default cap and reads as before")
     void ordinaryPdfLoads() throws IOException {
         try (PDDocument document = BoundedPdfLoader.load(fiveObjectPdf(), IOUtils.createMemoryOnlyStreamCache())) {

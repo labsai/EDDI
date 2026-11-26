@@ -13,6 +13,9 @@ import org.apache.pdfbox.pdfparser.XrefTrailerResolver;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 import java.io.IOException;
+import java.util.AbstractMap;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Opens a PDF the way {@link org.apache.pdfbox.Loader} does, with the one bound
@@ -27,15 +30,20 @@ import java.io.IOException;
  * or a stream, and every object a lenient rebuild hands back to the resolver,
  * goes through {@link XrefTrailerResolver#setXRef}, so the parser's own
  * resolver is replaced by one that counts the calls and stops the parse when
- * they pass the cap. That holds whatever the file's syntax, which a separate
- * pre-scan of the cross-reference sections could not.
+ * they pass the cap. The one writer that bypasses it, a lenient rebuild adding
+ * the objects an object stream lists, puts into the resolved table, which the
+ * replacement hands out behind the same cap. That holds whatever the file's
+ * syntax, which a separate pre-scan of the cross-reference sections could not.
  *
  * <p>
  * Not covered: a lenient rebuild first collects the objects it finds in maps of
  * its own, and only then passes them to the resolver, so a damaged file made of
  * many tiny {@code N 0 obj} markers is held there before the cap refuses it.
  * That costs a multiple of the file's size, not anything the file merely
- * declares, so the upload size limit bounds it.
+ * declares, so the upload size limit bounds it. The same holds for the header
+ * of an object stream, which PDFBox reads whole into a map of its own before
+ * the first entry is put into the capped table: it is bounded by the decoded
+ * stream, which the stream decode limits bound.
  *
  * <p>
  * Every PDF EDDI reads from untrusted bytes is opened here, never with
@@ -148,6 +156,71 @@ public final class BoundedPdfLoader {
         protected void reset() {
             super.reset();
             entries = 0;
+        }
+
+        /**
+         * The resolved table, behind a guard on {@code put}. A lenient rebuild that
+         * searches for object streams writes the objects they list straight into this
+         * map, past {@link #setXRef}, so the cap must hold here too.
+         */
+        @Override
+        public Map<COSObjectKey, Long> getXrefTable() {
+            Map<COSObjectKey, Long> table = super.getXrefTable();
+            return table == null ? null : new CappedTable(table, maxEntries);
+        }
+    }
+
+    /**
+     * A view of PDFBox's xref map that refuses to store a new key once the map
+     * holds {@code maxEntries}. Only {@code put} is guarded; {@code putAll} and the
+     * {@code Map} default methods reach it through {@code AbstractMap}, and the
+     * rest delegates unchanged, so PDFBox sees the map it expects.
+     */
+    private static final class CappedTable extends AbstractMap<COSObjectKey, Long> {
+        private final Map<COSObjectKey, Long> delegate;
+        private final long maxEntries;
+
+        CappedTable(Map<COSObjectKey, Long> delegate, long maxEntries) {
+            this.delegate = delegate;
+            this.maxEntries = maxEntries;
+        }
+
+        @Override
+        public Long put(COSObjectKey key, Long value) {
+            if (delegate.size() >= maxEntries && !delegate.containsKey(key)) {
+                throw new XrefLimitExceeded();
+            }
+            return delegate.put(key, value);
+        }
+
+        @Override
+        public Long get(Object key) {
+            return delegate.get(key);
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            return delegate.containsKey(key);
+        }
+
+        @Override
+        public Long remove(Object key) {
+            return delegate.remove(key);
+        }
+
+        @Override
+        public int size() {
+            return delegate.size();
+        }
+
+        @Override
+        public void clear() {
+            delegate.clear();
+        }
+
+        @Override
+        public Set<Entry<COSObjectKey, Long>> entrySet() {
+            return delegate.entrySet();
         }
     }
 

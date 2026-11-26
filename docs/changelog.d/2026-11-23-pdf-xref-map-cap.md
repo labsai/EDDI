@@ -19,6 +19,12 @@ help, because nothing is decoded.
   whose table broke partway is not counted twice and refused where `Loader` repaired it. The exception
   is deliberately not an `IllegalArgumentException`, because PDFBox catches that around `setXRef`. It becomes an
   `UnreadableDocumentException`: *"This PDF declares more than 500000 objects…"*.
+- **Object streams during a lenient rebuild are counted too.** A file without a usable `startxref` is rebuilt by
+  scanning it, and `BruteForceParser.bfSearchForObjStreams` then puts every object an object-stream header lists
+  straight into the resolved xref map, past `setXRef`. The counting resolver hands that map out behind a guard that
+  refuses a new key once it holds the cap (`getXrefTable()`), so a header listing millions of numbers is refused like
+  any other over-cap file. `BoundedPdfLoaderTest` has a hand-written file with no `startxref` and an object stream
+  listing 200 objects: refused at cap 50, loaded at cap 5000.
 - **Both loads from a byte array use it:** `PdfTextExtractor` (document ingestion) and `AttachmentTextExtractor`, which
   `PdfReaderTool`, `readAttachment` and the attachment forwarder read through. No `Loader.loadPDF` call remains in
   `src/main/java`. The class is public because the attachment extractor is in another package.
