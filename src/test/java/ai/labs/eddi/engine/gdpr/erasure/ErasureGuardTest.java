@@ -528,6 +528,36 @@ class ErasureGuardTest {
         }
 
         @Test
+        @DisplayName("a large batch is checked and renewed in chunks, so slow hold reads do not make every renewal late")
+        void largeBatchConfirmsInChunks() {
+            // Every hold read takes half a second: 250 of them outlast the margin, 100 do
+            // not.
+            InMemoryErasureTombstoneStore slowReads = new InMemoryErasureTombstoneStore() {
+                @Override
+                public Optional<Instant> erasedAt(Kind kind, String key, Instant now) {
+                    clockNow = clockNow.plusMillis(500);
+                    return super.erasedAt(kind, key, now);
+                }
+            };
+            List<String> batch = new ArrayList<>();
+            for (int i = 0; i < 250; i++) {
+                batch.add("bulk-" + i);
+            }
+            assertEquals(Map.of(), guardOn(slowReads).eraseConversations(batch));
+        }
+
+        @Test
+        @DisplayName("a tombstone due to expire within the margin plus the clock skew counts as expired: another clock may be that far ahead")
+        void holdHorizonCoversTheClockSkew() {
+            // The delete runs until the tombstone the erasure wrote at its start expires in
+            // 3 minutes: past the 1-minute margin, inside margin + 5-minute skew.
+            Instant start = clockNow;
+            writer.onErase = conversation -> clockNow = start.plus(Duration.ofDays(400)).minus(Duration.ofMinutes(3));
+            ErasureIncompleteException e = assertThrows(ErasureIncompleteException.class, () -> guard.eraseConversation("c-edge"));
+            assertTrue(e.getMessage().contains("expired during the erasure"), e.getMessage());
+        }
+
+        @Test
         @DisplayName("the user's renewal must land within the margin too")
         void lateUserRenewalFails() {
             InMemoryErasureTombstoneStore on = renewing(() -> clockNow = clockNow.plus(ErasureGuard.TOMBSTONE_HOLD_MARGIN).plusSeconds(1));

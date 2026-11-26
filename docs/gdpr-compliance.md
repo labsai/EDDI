@@ -223,8 +223,9 @@ How it holds:
    tombstone is kept for `eddi.gdpr.tombstone-retention` (default `400d`), longer
    than any guarded data can still arrive (alert events live 90 days), **counted from
    the completion of the erasure**: when the verification ends, each tombstone must
-   still be valid (for a minute beyond), and is then written again within that
-   minute; a renewal that fails or lands later fails the conversation (or the user's
+   still be valid for a minute plus `eddi.gdpr.tombstone-clock-skew` beyond (another
+   node's or the database's clock may be ahead), checked and written again in chunks
+   of 100, each renewal within that minute; a renewal that fails or lands later fails the conversation (or the user's
    last check) too, since it could not confirm the tombstone held without a gap. One that expired
    while its erasure ran fails that conversation (or the user's last check,
    `asyncWritePending`) for a re-run, because a write could have passed in between.

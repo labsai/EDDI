@@ -567,58 +567,75 @@ public class ErasureGuard {
         }
         // Checked after the whole batch, not after each conversation: a tombstone
         // present now has been present throughout, while one checked early could
-        // still expire while a later conversation is being erased. Every check asks
-        // for validity until checkedAt + margin at least, so a renewal that lands
-        // before that instant keeps each tombstone valid without a gap.
-        Instant checkedAt = clock.instant();
-        Set<String> held = new LinkedHashSet<>();
+        // still expire while a later conversation is being erased. In chunks, each
+        // checked and renewed well inside the hold margin, so a large batch (the
+        // retention sweep's, a user with many conversations) still confirms in time.
+        List<String> toCheck = new ArrayList<>();
         for (String conversationId : new LinkedHashSet<>(conversationIds)) {
-            if (failed.containsKey(conversationId)) {
-                continue;
-            }
-            try {
-                if (tombstoneHolds(Kind.CONVERSATION, conversationId)) {
-                    held.add(conversationId);
-                } else {
-                    failed.put(conversationId, "the conversation's tombstone expired during the erasure — retry it");
-                }
-            } catch (RuntimeException e) {
-                failed.put(conversationId, "the conversation's tombstone could not be read: " + e);
+            if (!failed.containsKey(conversationId)) {
+                toCheck.add(conversationId);
             }
         }
-        if (!held.isEmpty()) {
-            String unconfirmed;
-            try {
-                renewHeld(Kind.CONVERSATION, held, checkedAt);
-                unconfirmed = null;
-            } catch (RuntimeException e) {
-                unconfirmed = "the conversation's tombstone could not be renewed at completion — retry it: " + e;
-            }
-            if (unconfirmed != null) {
-                for (String conversationId : held) {
-                    failed.put(conversationId, unconfirmed);
-                }
-            }
+        for (int from = 0; from < toCheck.size(); from += HOLD_CHUNK) {
+            failed.putAll(holdAndRenew(Kind.CONVERSATION, toCheck.subList(from, Math.min(toCheck.size(), from + HOLD_CHUNK)),
+                    "the conversation's tombstone"));
         }
         return failed;
     }
 
+    /** How many tombstones one hold check and renewal covers. */
+    static final int HOLD_CHUNK = 100;
+
     /**
-     * Writes held tombstones again, so their retention counts from now, and
-     * confirms the renewal landed before {@code checkedAt} +
-     * {@link #TOMBSTONE_HOLD_MARGIN} — the instant up to which the hold check
-     * proved them valid. A renewal later than that may have left a gap in which a
-     * tombstone had expired, so it is not confirmed.
+     * Checks that each tombstone held, then writes the ones that did again, so
+     * their retention counts from now. Every check asks for validity until
+     * {@code checkedAt} + {@link #TOMBSTONE_HOLD_MARGIN} + the clock skew at least;
+     * a renewal confirmed before {@code checkedAt} + {@link #TOMBSTONE_HOLD_MARGIN}
+     * — by the clock and by elapsed time, so a clock stepping back cannot hide a
+     * late one — therefore leaves no gap, even on a node or database whose clock is
+     * up to the skew ahead. A renewal that fails or lands later is not confirmed.
      *
-     * @throws IllegalStateException
-     *             when the renewal failed or was not confirmed in time
+     * @return the keys that did not hold or whose renewal was not confirmed, each
+     *         with the reason; empty when all did
      */
-    private void renewHeld(Kind kind, Collection<String> keys, Instant checkedAt) {
-        Instant now = clock.instant();
-        store.putTombstones(kind, keys, now, now.plus(retention));
-        if (clock.instant().isAfter(checkedAt.plus(TOMBSTONE_HOLD_MARGIN))) {
-            throw new IllegalStateException("the renewal landed after the hold check's margin of " + TOMBSTONE_HOLD_MARGIN);
+    private Map<String, String> holdAndRenew(Kind kind, List<String> keys, String what) {
+        Map<String, String> failed = new LinkedHashMap<>();
+        long startedNanos = System.nanoTime();
+        Instant checkedAt = clock.instant();
+        List<String> held = new ArrayList<>();
+        for (String key : keys) {
+            try {
+                if (tombstoneHolds(kind, key)) {
+                    held.add(key);
+                } else {
+                    failed.put(key, what + " expired during the erasure — retry it");
+                }
+            } catch (RuntimeException e) {
+                failed.put(key, what + " could not be read: " + e);
+            }
         }
+        if (held.isEmpty()) {
+            return failed;
+        }
+        String unconfirmed = null;
+        try {
+            Instant now = clock.instant();
+            store.putTombstones(kind, held, now, now.plus(retention));
+            boolean late = clock.instant().isAfter(checkedAt.plus(TOMBSTONE_HOLD_MARGIN))
+                    || System.nanoTime() - startedNanos > TOMBSTONE_HOLD_MARGIN.toNanos();
+            if (late) {
+                unconfirmed = what + " could not be renewed at completion — retry it: the renewal landed after the hold check's margin of "
+                        + TOMBSTONE_HOLD_MARGIN;
+            }
+        } catch (RuntimeException e) {
+            unconfirmed = what + " could not be renewed at completion — retry it: " + e;
+        }
+        if (unconfirmed != null) {
+            for (String key : held) {
+                failed.put(key, unconfirmed);
+            }
+        }
+        return failed;
     }
 
     /**
@@ -630,11 +647,12 @@ public class ErasureGuard {
 
     /**
      * Whether the tombstone is present now and for {@link #TOMBSTONE_HOLD_MARGIN}
-     * beyond. Its expiry only ever moves later, so present now means it never
-     * expired since it was written.
+     * plus the clock skew beyond (another node's or the database's clock may be
+     * that far ahead). Its expiry only ever moves later, so present now means it
+     * never expired since it was written.
      */
     private boolean tombstoneHolds(Kind kind, String key) {
-        return store.erasedAt(kind, key, clock.instant().plus(TOMBSTONE_HOLD_MARGIN)).isPresent();
+        return store.erasedAt(kind, key, clock.instant().plus(TOMBSTONE_HOLD_MARGIN).plus(clockSkew)).isPresent();
     }
 
     /**
@@ -656,14 +674,9 @@ public class ErasureGuard {
         }
         // The user tombstone must have held throughout (see eraseConversationRows);
         // then it is written again, so its retention counts from the completion.
-        Instant checkedAt = clock.instant();
-        if (!tombstoneHolds(Kind.USER, key)) {
-            throw new IllegalStateException("the user's erasure tombstone expired during the erasure — retry it");
-        }
-        try {
-            renewHeld(Kind.USER, List.of(key), checkedAt);
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("the user's erasure tombstone could not be renewed at completion — retry it: " + e, e);
+        Map<String, String> notHeld = holdAndRenew(Kind.USER, List.of(key), "the user's erasure tombstone");
+        if (!notHeld.isEmpty()) {
+            throw new IllegalStateException(notHeld.values().iterator().next());
         }
     }
 
