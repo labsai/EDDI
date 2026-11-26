@@ -1488,6 +1488,8 @@ public class GroupConversation {
             return;
         }
         boolean answerOnRecord = synthesizedAnswer != null || (decision != null && decision.type() != DecisionType.NONE);
+        // (a dissent-only NONE record is no evidence either way: members may have
+        // answered)
         if (answerOnRecord) {
             answeredRounds = 1;
         } else if (round <= 1) {

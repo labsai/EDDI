@@ -167,7 +167,9 @@ public final class DiscussionOutcomes {
         // Ballots are not an answer when the decision-producing phase explicitly ended
         // without a decision (a tie, no quorum): this round's decision is cleared when
         // the round starts, so a NONE record here is this round's own.
-        boolean endedWithoutDecision = gc.getDecision() != null && gc.getDecision().type() == GroupConversation.DecisionType.NONE;
+        // (A dissent-only record, made when no deciding phase ran, is not that.)
+        boolean endedWithoutDecision = gc.getDecision() != null && gc.getDecision().type() == GroupConversation.DecisionType.NONE
+                && !"dissent-round".equals(gc.getDecision().method());
         if (gc.getSynthesizedAnswer() != null || (!hasSynthesisPhase && memberContributed && !endedWithoutDecision)) {
             record(gc, DiscussionOutcome.ANSWERED, cutShort);
             return;

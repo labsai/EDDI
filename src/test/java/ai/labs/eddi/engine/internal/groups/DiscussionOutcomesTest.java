@@ -199,6 +199,21 @@ class DiscussionOutcomesTest {
         assertFalse(gc.hasAnsweredRound());
     }
 
+    /**
+     * A dissent-only NONE record (no deciding phase ran) does not turn answered
+     * opinions into no answer.
+     */
+    @Test
+    void dissentOnlyRecord_doesNotUndoAnAnsweredOpinionRound() {
+        var gc = gc(opinion("a"));
+        gc.setDecision(new GroupConversation.DecisionRecord(GroupConversation.DecisionType.NONE, null, null, null, List.of(), "dissent-round",
+                "Opinions", null));
+
+        DiscussionOutcomes.settle(gc, List.of(phase("Opinions", PhaseType.OPINION, 1)), false);
+
+        assertEquals(DiscussionOutcome.ANSWERED, gc.getOutcome());
+    }
+
     /** The reason names what cut the round short, not always the turn limit. */
     @Test
     void costCeilingWithNoContribution_keepsItsOwnReason() {

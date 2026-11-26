@@ -287,6 +287,7 @@ public class GroupLifecycleOps {
             // The user's question as appended to the transcript; set once a member turn
             // is about to run, so a failure knows it has spend to keep (see finally).
             TranscriptEntry questionEntry = null;
+            int transcriptSizeBeforeQuestion = -1;
             try {
                 // Re-read after CAS to get the freshest transcript
                 gc = conversationStore.read(groupConversationId);
@@ -325,6 +326,7 @@ public class GroupLifecycleOps {
                 String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
 
                 // Record the user's follow-up question on the transcript
+                transcriptSizeBeforeQuestion = gc.getTranscript().size();
                 questionEntry = new TranscriptEntry(
                         "user", "User", question, -1, "Follow-up",
                         TranscriptEntryType.FOLLOW_UP, Instant.now(), null, resolvedAgentId);
@@ -431,7 +433,10 @@ public class GroupLifecycleOps {
                         // question — no answer was recorded for it. Conditional on the
                         // run state, so a concurrent cancel or delete is never overwritten.
                         try {
-                            gc.getTranscript().remove(questionEntry);
+                            // The question and any answer appended after it: neither stays.
+                            while (gc.getTranscript().size() > transcriptSizeBeforeQuestion) {
+                                gc.getTranscript().remove(gc.getTranscript().size() - 1);
+                            }
                             gc.setState(GroupConversationState.COMPLETED);
                             gc.setLastModified(Instant.now());
                             conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
