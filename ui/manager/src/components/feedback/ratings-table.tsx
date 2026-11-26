@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -147,8 +148,8 @@ export function RatingsTable({ rows, selectable = false, selected = new Set(), o
                   </Badge>
                 )}
               </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap justify-end gap-1">
+              <td className="px-4 py-3 min-w-[15rem] xl:w-px xl:whitespace-nowrap">
+                <RowActions className="xl:flex-nowrap">
                   {row.reviewStatus === "REVIEWED" ? (
                     <Button size="sm" variant="ghost" onClick={() => void triage(row, { reviewStatus: "NEW" })} data-testid={`rating-reopen-${row.id}`}>
                       <RotateCcw className="h-4 w-4" />
@@ -172,7 +173,7 @@ export function RatingsTable({ rows, selectable = false, selected = new Set(), o
                       </Link>
                     </Button>
                   )}
-                </div>
+                </RowActions>
               </td>
             </tr>
           ))}

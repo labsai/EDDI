@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
 import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -61,7 +62,7 @@ public class SlackWebApiClient {
      * vaulted token's {@code allowedHosts} against this destination before it
      * resolves it.
      */
-    public static final String SLACK_API_BASE = "https://slack.com/api/";
+    public static final String SLACK_API_BASE = SlackChannelType.API_BASE;
 
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
