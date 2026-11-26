@@ -199,7 +199,7 @@ class HumanTieBreakDiscussionTest {
         assertEquals(gc.getPendingHumanInput().detail(), back.getPendingHumanInput().detail());
         assertEquals(GroupConversation.RESUME_KIND_TIE_BREAK, back.getResumePoint().pauseKind());
         assertEquals(new HumanTieBreakConfig(DECIDER, "PT24H", null), configBack.getPhases().getFirst().voteConfig().humanTieBreak());
-        assertEquals(5, GroupConversation.CURRENT_SCHEMA_VERSION);
+        assertTrue(GroupConversation.CURRENT_SCHEMA_VERSION >= 5, "the tie-break pause is a v5 shape; a v4 pod must refuse the document");
 
         var legacy = json.deserialize(json.serialize(new GroupConversation.PendingHumanInput("h", "H", 0, 0, 0, "OPINION", "p",
                 "SKIP_TURN", Instant.now())), GroupConversation.PendingHumanInput.class);
