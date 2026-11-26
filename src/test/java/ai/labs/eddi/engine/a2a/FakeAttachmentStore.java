@@ -7,8 +7,10 @@ package ai.labs.eddi.engine.a2a;
 import ai.labs.eddi.engine.attachments.Derivation;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
+import ai.labs.eddi.engine.attachments.QuotaMode;
 import ai.labs.eddi.engine.attachments.QuotaReservation;
 
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -203,6 +205,40 @@ final class FakeAttachmentStore implements IAttachmentStore {
 
     @Override
     public void convert(String reservationId, String storageRef) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    // --- not used by the inbound A2A tests: the streaming and tombstone methods
+    // (4.1b) ---
+
+    @Override
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl, QuotaMode mode) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public Attachment store(InputStream in, long declaredLength, String declaredMime, String filename, String conversationId, String tenantId,
+                            String userId, String reservationId, QuotaMode quotaMode) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public InputStream open(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public InputStream openRange(String storageRef, String requestingConversationId, long offset, long length) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public long pendingTombstones(String ownerKeyOrNull) {
+        throw new UnsupportedOperationException("not used by the inbound A2A tests");
+    }
+
+    @Override
+    public int sweepTombstones(int max) {
         throw new UnsupportedOperationException("not used by the inbound A2A tests");
     }
 }

@@ -14,7 +14,15 @@ import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.IAttachmentStore.OwnerRef;
+import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.PdfLikeStream;
+import ai.labs.eddi.engine.attachments.QuotaMode;
+import ai.labs.eddi.engine.attachments.QuotaReservation;
 import ai.labs.eddi.engine.attachments.QuotaReservationContract;
+import ai.labs.eddi.engine.attachments.StreamingAttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.blob.BlobBackendSelector;
+import ai.labs.eddi.engine.attachments.blob.FaultInjectingBlobBackend;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +30,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import org.postgresql.ds.PGSimpleDataSource;
+
 import javax.sql.DataSource;
+import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.sql.Array;
 import java.sql.Connection;
@@ -34,9 +48,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -44,7 +60,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the shared {@link AttachmentStoreContract}, plus the grant table's schema.
  */
 @DisplayName("Attachment store (PostgreSQL)")
-class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentStoreContract, QuotaReservationContract {
+class PostgresAttachmentStoreIT extends PostgresTestBase
+        implements
+            AttachmentStoreContract,
+            QuotaReservationContract,
+            StreamingAttachmentStoreContract {
 
     private static final DataSource DATA_SOURCE = createDataSource();
 
@@ -62,12 +82,47 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store.ensureGrantIndexes();
         migrationLog = new PostgresMigrationLogStore(createDataSourceInstance());
         migrationLog.readMigrationLog("schema");
-        truncateTables(DATA_SOURCE, "attachments", "attachment_grants", "attachment_grants_backfill", "attachment_reservations", "migration_log");
+        // The real pg-chunks backend, with 256 KiB chunks so a large test file spans
+        // several; its first call creates its table.
+        blobBackend = new FaultInjectingBlobBackend(new PgChunksBlobBackend(() -> DATA_SOURCE, 256 * 1024));
+        blobBackend.keyCount();
+        store.blobBackends = BlobBackendSelector.of(blobBackend);
+        truncateTables(DATA_SOURCE, "attachments", "attachment_grants", "attachment_grants_backfill", "attachment_reservations", "migration_log",
+                "attachment_blob_tombstones", "attachment_chunks");
         json = new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         groupConversations = new GroupConversationStore(new PostgresResourceStorageFactory(createDataSourceInstance(), json), null);
     }
 
     private PostgresMigrationLogStore migrationLog;
+    private FaultInjectingBlobBackend blobBackend;
+
+    @Override
+    public FaultInjectingBlobBackend blobBackend() {
+        return blobBackend;
+    }
+
+    @Override
+    public void setMaxSizeBytes(long maxSizeBytes) {
+        store.maxSizeBytes = maxSizeBytes;
+    }
+
+    @Override
+    public void makeTombstonesDue() {
+        execute("UPDATE attachment_blob_tombstones SET not_before = NOW() - INTERVAL '1 second'");
+    }
+
+    @Override
+    public void seedDueTombstone(String key, String ownerKey) {
+        execute("INSERT INTO attachment_blob_tombstones (backend, blob_key, owner_key, not_before) VALUES (?, ?, ?, NOW() - INTERVAL '1 second')",
+                PgChunksBlobBackend.NAME, key, ownerKey);
+    }
+
+    @Override
+    public List<String> heapProbeArgs() {
+        PGSimpleDataSource pg = (PGSimpleDataSource) DATA_SOURCE;
+        return List.of("postgres", pg.getUrl(), pg.getUser(), pg.getPassword());
+    }
+
     private JsonSerialization json;
     private GroupConversationStore groupConversations;
     private RecordingEvent<AttachmentRootDeleted> rootDeleted;
@@ -344,5 +399,68 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         }
         assertTrue(definitions.size() == 2 && definitions.stream().allMatch(d -> d.contains("WHERE (root_ref IS NOT NULL)")), definitions.toString());
         assertTrue(definitions.stream().anyMatch(d -> d.startsWith("CREATE UNIQUE INDEX idx_attach_dedup")), definitions.toString());
+    }
+
+    @Test
+    @DisplayName("a record whose commit applied but reported failure keeps its object")
+    void aCommitThatFailsAfterApplyingKeepsTheObject() throws Exception {
+        AtomicBoolean failNextCommit = new AtomicBoolean();
+        DataSource flaky = (DataSource) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{DataSource.class},
+                (proxy, method, args) -> {
+                    Object result = invoke(method, DATA_SOURCE, args);
+                    if (!(result instanceof Connection conn)) {
+                        return result;
+                    }
+                    return Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{Connection.class}, (p, m, a) -> {
+                        Object r = invoke(m, conn, a);
+                        if (m.getName().equals("commit") && failNextCommit.getAndSet(false)) {
+                            throw new SQLException("connection lost while committing");
+                        }
+                        return r;
+                    });
+                });
+        PostgresAttachmentStore original = store;
+        store = new PostgresAttachmentStore(instanceOf(flaky));
+        store.maxSizeBytes = original.maxSizeBytes;
+        store.blobBackends = original.blobBackends;
+        store.rootDeletedEvent = rootDeleted;
+        setQuotas(0, 0, 0, 0);
+        QuotaReservation reservation = store.reserve(
+                new OwnerRef(OwnerScope.CONVERSATION, StreamingAttachmentStoreContract.CONVERSATION, STREAM_USER),
+                StreamingAttachmentStoreContract.CONVERSATION,
+                STREAM_USER, LARGE, 1, Duration.ofMinutes(10), QuotaMode.LARGE_PER_USER);
+        failNextCommit.set(true);
+
+        assertThrows(IAttachmentStore.AttachmentStoreException.class, () -> store.store(new PdfLikeStream(SEED, LARGE), LARGE,
+                "application/pdf", "large.pdf", StreamingAttachmentStoreContract.CONVERSATION, "default", STREAM_USER, reservation.id(),
+                QuotaMode.LARGE_PER_USER));
+        assertFalse(failNextCommit.get(), "the record's commit was the one that failed");
+
+        String storageRef = storageRefOf(StreamingAttachmentStoreContract.CONVERSATION);
+        store.sweepTombstones(10);
+        assertEquals(1, blobBackend.keyCount(), "the row the commit applied still has its bytes");
+        assertEquals(0, store.pendingTombstones(null), "the sweep found the object referenced and dropped its tombstone");
+        try (InputStream in = store.open(storageRef, StreamingAttachmentStoreContract.CONVERSATION)) {
+            assertEquals(PdfLikeStream.sha256(SEED, LARGE), PdfLikeStream.sha256(in));
+        }
+    }
+
+    private static Object invoke(Method method, Object target, Object[] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        }
+    }
+
+    private static String storageRefOf(String conversationId) throws SQLException {
+        try (Connection conn = DATA_SOURCE.getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT storage_ref FROM attachments WHERE conversation_id = ?")) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "the commit applied: the row is there");
+                return rs.getString(1);
+            }
+        }
     }
 }

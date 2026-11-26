@@ -49,6 +49,7 @@ public class GridFsIndexInitializer {
             store.ensureIndexes();
             store.ensureLineageIndexes();
             store.ensureReservationIndexes();
+            store.ensureBlobIndexes();
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not prepare the attachment indexes; attachment lookups fall back to a scan: %s", sanitize(e.getMessage()));
         }
