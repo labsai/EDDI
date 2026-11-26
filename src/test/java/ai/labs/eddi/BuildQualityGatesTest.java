@@ -626,13 +626,20 @@ class BuildQualityGatesTest {
     @Test
     @DisplayName("the merged coverage gate is armed in CI, fed by both suites, and blocks publishing")
     void theCoverageGateIsArmedByCi() throws Exception {
-        List<String> checks = read(CI_WORKFLOW).lines()
-                .map(String::trim)
-                .filter(line -> line.contains("jacoco:check@merged-check"))
-                .toList();
-        assertEquals(1, checks.size(), CI_WORKFLOW + " must invoke jacoco:check@merged-check exactly once — that"
-                + " invocation is the 90/80 gate. Found: " + checks);
+        // Only executable `run:` content counts. A comment that still names the goal
+        // (`# ./mvnw … jacoco:check@merged-check -DskipITs=false`) or a step name does
+        // not run it, and the merged report alone still writes jacoco.csv, so a raw
+        // text search would stay green with the check commented out.
+        Map<String, List<String>> invocations = executableRunLines(read(CI_WORKFLOW), "jacoco:check@merged-check");
+        List<String> checks = invocations.values().stream().flatMap(List::stream).toList();
+        assertEquals(1, checks.size(), CI_WORKFLOW + " must invoke jacoco:check@merged-check exactly once, in"
+                + " executable run: content — that invocation is the 90/80 gate. Found: " + invocations);
+        String gateJob = invocations.keySet().iterator().next();
+        assertEquals("coverage-gate", gateJob, "the merged-check invocation must run in coverage-gate");
         String check = checks.get(0);
+        assertTrue(check.startsWith("./mvnw "),
+                "the merged-check goal must be an argument of ./mvnw in command position, not text an echo or"
+                        + " another command merely prints: " + check);
         assertTrue(check.contains(SKIP_ITS_DISABLED),
                 "the merged-check invocation must pass " + SKIP_ITS_DISABLED + ": the execution carries"
                         + " <skip>${skipITs}</skip>, so without it the gate skips itself. Found: " + check);
@@ -645,11 +652,6 @@ class BuildQualityGatesTest {
         }
 
         Map<String, String> jobs = ciJobBlocks();
-        String gateJob = jobs.entrySet().stream()
-                .filter(job -> job.getValue().contains("jacoco:check@merged-check"))
-                .map(Map.Entry::getKey)
-                .findFirst()
-                .orElseThrow();
         List<String> gateNeeds = ciJobNeeds(jobs.get(gateJob));
         assertTrue(gateNeeds.containsAll(List.of("build-and-test", "integration-test")),
                 gateJob + " must need build-and-test and integration-test, whose execution data it merges: "
@@ -687,6 +689,117 @@ class BuildQualityGatesTest {
                         + " (skipITs defaults to true). Found: " + verify);
         assertFalse(verify.replace(" ", "").matches(".*\\|\\|(true|:).*") || verify.contains("-DskipTests"),
                 "integration-test's `mvnw verify` must not swallow its exit code or pass -DskipTests: " + verify);
+    }
+
+    /**
+     * The regression case for {@link #executableRunLines}: the goal named only in a
+     * shell comment, a YAML comment or a step name is not an invocation, so the
+     * coverage-gate test above cannot be satisfied by a commented-out check.
+     */
+    @Test
+    @DisplayName("a merged-check goal that appears only in a comment is not counted as an invocation")
+    void aCommentedOutCoverageCheckIsNotAnInvocation() throws Exception {
+        String commentedOut = String.join(LINE_FEED,
+                "jobs:",
+                "  coverage-gate:",
+                "    steps:",
+                "      # ./mvnw jacoco:check@merged-check -DskipITs=false",
+                "      - name: Merge coverage and enforce the 90/80 gate (jacoco:check@merged-check)",
+                "        run: |",
+                "          # ./mvnw compile jacoco:check@merged-check -DskipITs=false -B",
+                "            # jacoco:check@merged-check",
+                "          ./mvnw compile jacoco:merge@merge jacoco:report@merged-report -DskipITs=false -B",
+                "");
+        assertEquals(Map.of(), executableRunLines(commentedOut, "jacoco:check@merged-check"),
+                "a goal named only in comments or a step name must not count as an invocation");
+
+        String armed = commentedOut.replace(
+                "jacoco:report@merged-report -DskipITs=false -B",
+                "jacoco:report@merged-report \\" + LINE_FEED + "            jacoco:check@merged-check -DskipITs=false -B");
+        assertEquals(
+                Map.of("coverage-gate", List.of("./mvnw compile jacoco:merge@merge jacoco:report@merged-report"
+                        + " jacoco:check@merged-check -DskipITs=false -B")),
+                executableRunLines(armed, "jacoco:check@merged-check"),
+                "a real invocation, backslash continuation included, must still be found as one command line");
+    }
+
+    /**
+     * Every command line of every job's {@code run:} steps that contains
+     * {@code needle}, keyed by job id. Only executable shell content is read: the
+     * workflow is parsed as YAML, so step names, keys and YAML comments are never
+     * seen; backslash continuations are joined into one command line; and lines
+     * that are shell comments are dropped.
+     */
+    private static Map<String, List<String>> executableRunLines(String workflow, String needle) throws IOException {
+        Map<String, List<String>> found = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> job : new YAMLMapper().readTree(workflow).path("jobs").properties()) {
+            for (JsonNode step : job.getValue().path("steps")) {
+                JsonNode run = step.get("run");
+                if (run == null || !run.isTextual()) {
+                    continue;
+                }
+                String joined = run.asText().replaceAll("[ \\t]*\\\\[ \\t]*\\r?\\n[ \\t]*", " ");
+                joined.lines()
+                        .map(String::strip)
+                        .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                        .filter(line -> line.contains(needle))
+                        .forEach(line -> found.computeIfAbsent(job.getKey(), key -> new ArrayList<>()).add(line));
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Trivy Filesystem Scan reads the checkout, not the packages in the image, and
+     * the scan step in docker runs on push events only — so a fixable HIGH or
+     * CRITICAL CVE in the image used to pass every pull request and the merge queue
+     * and fail only on main, after the merge. trivy-image scans the image
+     * build-image produced on every change that builds one, blocking, and both
+     * docker and CI Gate need it; CI Gate also requires it to have run whenever the
+     * code changed, because a skipped need otherwise counts as passed.
+     */
+    @Test
+    @DisplayName("the built image is CVE-scanned, blocking, before a merge and not only before publishing")
+    void theBuiltImageIsScannedBeforeMerge() throws Exception {
+        JsonNode workflowJobs = new YAMLMapper().readTree(read(CI_WORKFLOW)).path("jobs");
+        JsonNode scanJob = workflowJobs.path("trivy-image");
+        assertTrue(scanJob.isObject(), CI_WORKFLOW + " must declare the trivy-image job");
+        assertFalse(scanJob.has("continue-on-error"),
+                "trivy-image must not use continue-on-error: it turns a CVE finding into a green job");
+        String condition = scanJob.path("if").asText();
+        assertFalse(condition.contains("event_name") || condition.contains("github.ref"),
+                "trivy-image must run on pull requests and in the merge queue, not only on pushes: " + condition);
+
+        List<JsonNode> scans = new ArrayList<>();
+        scanJob.path("steps").forEach(step -> {
+            if (step.path("uses").asText().startsWith("aquasecurity/trivy-action@")) {
+                scans.add(step);
+            }
+        });
+        assertEquals(1, scans.size(), "trivy-image must run exactly one Trivy step");
+        JsonNode scan = scans.get(0);
+        JsonNode with = scan.path("with");
+        assertFalse(scan.has("continue-on-error"), "the Trivy step must not use continue-on-error");
+        assertEquals("image", with.path("scan-type").asText(), "trivy-image must scan the image, not the checkout");
+        assertTrue(with.path("image-ref").asText().endsWith(":ci"),
+                "trivy-image must scan the image build-image produced (tagged :ci): " + with.path("image-ref"));
+        assertEquals("1", with.path("exit-code").asText(), "a finding must fail trivy-image (exit-code 1)");
+        assertEquals("CRITICAL,HIGH", with.path("severity").asText(),
+                "trivy-image must grade the same severities as the publish-time scan");
+
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(ciJobNeeds(jobs.get("trivy-image")).contains("build-image"),
+                "trivy-image must need build-image, whose artifact it scans");
+        assertTrue(ciJobNeeds(jobs.get("docker")).contains("trivy-image"),
+                "docker must need trivy-image, and so (by the CI Gate test) must ci-gate");
+        List<String> requiredWithCode = jobs.get("ci-gate").lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("for job in ") && line.endsWith("do require \"$job\" \"$CODE\"; done"))
+                .toList();
+        assertEquals(1, requiredWithCode.size(), "ci-gate must have one loop of jobs required when the code changed");
+        assertTrue(List.of(requiredWithCode.get(0).split(" ")).contains("trivy-image"),
+                "ci-gate must require trivy-image to succeed when the code changed, or a skipped scan passes: "
+                        + requiredWithCode.get(0));
     }
 
     /**

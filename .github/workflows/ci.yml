@@ -2739,6 +2739,51 @@ jobs:
           # Not 1: re-running a Friday pipeline on Monday must still find it.
           retention-days: 7
 
+  # ─── Job 3a-trivy: Image CVE scan ───────────────────────────────
+  # Trivy Filesystem Scan reads the checkout, not the packages installed in the
+  # image, and the only other image scan is the step in Docker Build & Push, which
+  # runs on push events only. A fixable HIGH or CRITICAL CVE in the image (a base
+  # layer, an OS package) therefore passed every pull request and the merge queue
+  # and failed only on main, after the merge. This job scans the exact image
+  # build-image produced, publishes nothing, and is a need of both ci-gate and
+  # docker, so a rejected image can neither merge nor ship. docker keeps its own
+  # scan as well: it re-reads the same bytes with the vulnerability DB of
+  # publishing time.
+  trivy-image:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-image]
+    if: needs.detect-changes.outputs.code == 'true'
+    steps:
+      - name: Checkout
+        # For .trivyignore only.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Download the image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: eddi-ci-image
+
+      - name: Load the image
+        run: |
+          set -euo pipefail
+          gunzip -c eddi-ci.tar.gz | docker load
+          rm eddi-ci.tar.gz
+
+      - name: Scan the image for vulnerabilities
+        # The same inputs as the scan in Docker Build & Push: BLOCKING, and only
+        # CVEs with an available fix can fail it. Remediation is the same too (a
+        # newer base-image digest, or a justified .trivyignore entry).
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:ci
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: table
+          trivyignores: .trivyignore
+
   # ─── Job 3a-openapi: OpenAPI snapshot ───────────────────────────
   # The Manager's MSW handlers are checked against a committed snapshot of EDDI's
   # operations (openapi-contract.test.ts). This compares that snapshot with the
@@ -3255,7 +3300,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate, preflight-check]
+    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, trivy-image, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate, preflight-check]
     if: always()
     steps:
       - name: Require every job this change needed to pass
@@ -3329,7 +3374,7 @@ jobs:
           require build-and-test "$BUILD_AND_TEST"
           require integration-test "$INTEGRATION"
           require coverage-gate "$INTEGRATION"
-          for job in trivy-scan build-image openapi-snapshot e2e-fullstack e2e-auth e2e-operator; do require "$job" "$CODE"; done
+          for job in trivy-scan trivy-image build-image openapi-snapshot e2e-fullstack e2e-auth e2e-operator; do require "$job" "$CODE"; done
           require shell-lint "$SCRIPTS"
           require manifest-lint "$(either "$CODE" "$OPERATOR_DOCS")"
           require release-pointers "$RELEASE_POINTERS"
@@ -3352,6 +3397,8 @@ jobs:
     #                     coverage gate, so without it the threshold could never
     #                     block a ship
     #   trivy-scan        blocking filesystem CVE scan (exit-code 1)
+    #   trivy-image       blocking CVE scan of the built image, run on PRs and in
+    #                     the merge queue too (this job scans it again below)
     #   codeql            SAST build + analysis
     #   codeql-ui         SAST for ui/manager and ui/chat
     #   gitleaks          secret scanning
@@ -3369,7 +3416,7 @@ jobs:
     #                     names — so a job added to the gate cannot be forgotten
     #                     here
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, coverage-gate, trivy-scan, trivy-image, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged

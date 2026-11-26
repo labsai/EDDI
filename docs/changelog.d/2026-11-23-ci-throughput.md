@@ -301,3 +301,22 @@ code before it was changed.
   closes `AutoCloseable` store values, so the lock's store release is live.
 - **Not executed anywhere yet:** every `merge_group` path (until the queue is enabled). The speedups are estimates until this PR's own CI run; the
   first main push after merge is the first run where publishing depends on Coverage Gate.
+
+### Review round: image scan before merge, comment-proof coverage pin (2026-11-26)
+
+- **New `trivy-image` job (Trivy Image Scan).** Trivy Filesystem Scan reads the checkout, and the
+  only image scan was the step in Docker Build & Push, which runs on pushes only, so a fixable
+  HIGH/CRITICAL CVE in the image passed every PR and the merge queue and failed on `main` after
+  the merge. The new job downloads `eddi-ci-image`, scans `labsai/eddi:ci` with the same inputs
+  (`scan-type: image`, `exit-code: 1`, `ignore-unfixed`, `.trivyignore`) and publishes nothing.
+  `docker` and `ci-gate` both need it, and CI Gate requires it whenever the code changed. The
+  publish-time scan in `docker` stays, re-reading the same bytes with a fresher vulnerability DB.
+  `BuildQualityGatesTest.theBuiltImageIsScannedBeforeMerge` pins it.
+- **Coverage pin reads executable content only.** `theCoverageGateIsArmedByCi` used to count any
+  line naming `jacoco:check@merged-check`, a shell comment included, while the merged report alone
+  still writes `jacoco.csv`. It now parses the workflow and counts only non-comment `run:` lines
+  (continuations joined), requires the single invocation to be `./mvnw …` in `coverage-gate`, and
+  `aCommentedOutCoverageCheckIsNotAnInvocation` is the regression case.
+- `release-versioning.md` now states that `preflight-check` (PR-only) may show as skipped on a
+  merge-queue run and that CI Gate accepts that skip; the job lists in it, `CONTRIBUTING.md`,
+  `AGENTS.md` and the ship-pr skill name the new job.

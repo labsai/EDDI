@@ -256,7 +256,7 @@ Every PR runs through these automated gates:
 | **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests, three forks in CI) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
 | **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers), beside Build + Tests — on backend changes | Blocks publishing |
 | **Coverage Gate**     | Merges the unit and integration JaCoCo data and enforces the 90% instruction / 80% branch gate | Blocks publishing |
-| **Trivy Filesystem Scan** · **Secret Scanning** | Dependency CVE scan and Gitleaks | Blocks publishing |
+| **Trivy Filesystem Scan** · **Trivy Image Scan** · **Secret Scanning** | Dependency CVE scan, CVE scan of the built image, and Gitleaks | Blocks publishing |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
 | **UI Manager Checks** | Manager audit, lint, i18n, typecheck, build and bundle budget — when `ui/` changes | Blocks publishing |
 | **UI Manager Unit Tests** | The Manager's Vitest suite in three shards, then the coverage thresholds on the merged result — when `ui/` changes | Blocks publishing |

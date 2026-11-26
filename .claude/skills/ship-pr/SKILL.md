@@ -191,7 +191,7 @@ is advisory — which makes a red one *your* problem, not the button's. So:
   `operator_docs` is `docs/kubernetes.md`, `README.md`, `docs/security.md`. A PR touching any
   of those *must* run `Build & Test` — a skip there is a bug, not "fine". A PR touching only
   other `docs/*.md` legitimately skips `Build & Test`, `Integration Tests`, `Build Image`,
-  `Trivy Filesystem Scan`, `OpenAPI Snapshot`, `Preflight Dry-Run (PR)`, `Deployment
+  `Trivy Filesystem Scan`, `Trivy Image Scan`, `OpenAPI Snapshot`, `Preflight Dry-Run (PR)`, `Deployment
   Manifests`, `Shell Lint`, both E2E jobs and the UI jobs. `Docker Build & Push`, `Generate SBOM`, `Smoke Test`,
   `Preflight Verify (Pushed Image)`, `Red Hat Catalog Publish` and `GitHub Release` skip on
   every PR by design.
