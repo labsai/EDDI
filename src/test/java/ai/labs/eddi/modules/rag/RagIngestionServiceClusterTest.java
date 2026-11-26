@@ -248,7 +248,8 @@ class RagIngestionServiceClusterTest {
 
         String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
 
-        assertTrue(status.startsWith("failed") && status.contains("connection reset"), status);
+        // The store's own text stays in the log; the status carries the fixed sentence.
+        assertEquals("failed: " + RagFailures.GENERIC, status);
         verify(failing).removeAll(any(Filter.class));
         assertEquals(1, cluster.acquired.size());
         assertEquals(1, cluster.released.get());

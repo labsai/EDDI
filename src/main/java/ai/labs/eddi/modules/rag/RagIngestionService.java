@@ -389,7 +389,7 @@ public class RagIngestionService {
      */
     private static void requireHeld(LeaseHandle lease, String documentName, String step) {
         if (lease != null && lease.isLost()) {
-            throw new IllegalStateException("This instance lost the lease on document '" + sanitize(documentName) + "' before " + step
+            throw new OperatorFailureException("This instance lost the lease on document '" + sanitize(documentName) + "' before " + step
                     + ", so it stopped rather than overwrite what another instance may have done meanwhile. Retry the ingestion.");
         }
     }

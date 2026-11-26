@@ -191,3 +191,12 @@ answers of `reembed` carry a `code`.
   (`w:rPrChange`) are judged correctly; inline `visibility:hidden` is honoured in `VISIBLE` mode; the upload probe follows the
   source's `visibleTextOnly`.
 - **Save-time checks.** A store host is judged by the factory's own patterns, and a blank host is refused at save.
+
+**CI round (semantic conflicts with what `main` merged meanwhile):**
+
+- **Lease loss is said, not masked.** The document lease from #1455 refuses a replacement whose lease expired before it stored or
+  cleaned up, with a sentence EDDI wrote ("This instance lost the lease on document …. Retry the ingestion."). The safe-errors rule
+  of this branch turned that `IllegalStateException` into the generic "embedding model or vector store failed"; `requireHeld` now
+  throws an `OperatorFailureException`, which `RagFailures` passes through. A store exception thrown during a replacement still
+  reaches the status as the generic sentence, and `RagIngestionServiceClusterTest` asserts that now instead of the driver's text.
+- **`EDDI_TABLES`** lists `attachment_grants` and `attachment_grants_backfill`, the tables the attachment-grant migration creates.

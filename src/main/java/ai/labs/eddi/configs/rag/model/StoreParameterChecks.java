@@ -102,8 +102,9 @@ public final class StoreParameterChecks {
      * it has the columns EDDI's pgvector layout creates.
      */
     static final Set<String> EDDI_TABLES = Set.of(
-            "agent_triggers", "alert_events", "alert_rules", "alert_windows", "approval_decisions", "attachments", "audit_ledger",
-            "audit_samples", "autonomy_state", "branding", "branding_assets", "connection_grants", "connection_name_claims",
+            "agent_triggers", "alert_events", "alert_rules", "alert_windows", "approval_decisions", "attachment_grants",
+            "attachment_grants_backfill", "attachments", "audit_ledger", "audit_samples", "autonomy_state", "branding", "branding_assets",
+            "connection_grants", "connection_name_claims",
             "connection_oauth_states", "connection_settings", "conversation_checkpoints", "conversation_memories", "conversation_ratings",
             "database_logs", "deployments", "eddi_schedule_fire_logs", "eddi_schedules", "email_mailbox_notices", "email_mailbox_state",
             "email_message_ledger", "email_suppressions", "global_variables", "group_lesson_history", "group_outcomes",
