@@ -3297,8 +3297,10 @@ public class ConversationService implements IConversationService, UserErasurePar
      * hook and of {@code eddi.alerts.enabled}; never throws.
      *
      * @param committed
-     *            the turn's snapshot was stored; {@code false} records it unsettled
-     *            (see {@link HealthTurnRecorder#record})
+     *            the turn's snapshot was stored. {@code false} records a completed
+     *            turn unsettled (see {@link HealthTurnRecorder#record}); a failed
+     *            turn is still recorded, but marks no execution discarded — the
+     *            conversation keeps them. Other waits ignore it
      */
     void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs, boolean committed) {
         reportHealthTurn(memory, null, wait, durationMs, committed);
@@ -3321,7 +3323,15 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             // An abandoned wait: the turn may still run, and what it leaves is unknown.
             boolean abandoned = wait == ConversationStepRunner.TurnWait.TIMED_OUT || wait == ConversationStepRunner.TurnWait.INTERRUPTED;
-            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned, committed);
+            // A completed turn whose snapshot was not stored is unsettled. A failed one is
+            // recorded as failed either way — a failed resume or rerun keeps its step's
+            // execution id, and an insert-only row would leave the paused or earlier row
+            // standing — but discards nothing unless its snapshot was stored: the
+            // conversation still holds the executions its step lists.
+            boolean settledByStore = wait != ConversationStepRunner.TurnWait.COMPLETED || committed;
+            boolean discards = wait != ConversationStepRunner.TurnWait.FAILED || committed;
+            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned,
+                    settledByStore, discards);
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not hand a turn to Agent Health: %s", e.getMessage());
         }

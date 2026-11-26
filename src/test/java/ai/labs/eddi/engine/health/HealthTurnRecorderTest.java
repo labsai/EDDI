@@ -44,7 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -100,7 +99,7 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("a turn is written on the health worker as a replace-upsert of its row")
-    void writesTheRow() {
+    void writesTheRow() throws Exception {
         recorder.record(memory(), null, ErrorKind.TURN_ERROR, 42L, false);
 
         ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
@@ -108,7 +107,9 @@ class HealthTurnRecorderTest {
         assertEquals("conv-1", row.getValue().conversationId());
         assertEquals("TURN_ERROR", row.getValue().errorKind());
         assertEquals(42L, row.getValue().durationMs());
-        verify(store, after(300).never()).markDiscarded(any(), any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).markDiscarded(any(), any());
         verify(store, never()).insertIfAbsent(any());
     }
 
@@ -187,20 +188,22 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("an abandoned wait is inserted only if absent and discards nothing — it never replaces a row")
-    void abandonedIsInsertOnly() {
+    void abandonedIsInsertOnly() throws Exception {
         ConversationMemory memory = memory();
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
 
         recorder.record(memory, null, ErrorKind.TURN_DEADLINE, 60_000L, true);
 
         verify(store, timeout(5_000)).insertIfAbsent(any());
-        verify(store, after(300).never()).upsert(any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).upsert(any());
         verify(store, never()).markDiscarded(any(), any());
     }
 
     @Test
     @DisplayName("a cancelled say after an undo leaves the undone execution alone")
-    void cancelledDoesNotDiscard() {
+    void cancelledDoesNotDiscard() throws Exception {
         ConversationMemory memory = memory();
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
         memory.setCancelled(true);
@@ -208,7 +211,9 @@ class HealthTurnRecorderTest {
         recorder.record(memory, null, ErrorKind.TURN_INTERRUPTED, null, false);
 
         verify(store, timeout(5_000)).insertIfAbsent(any());
-        verify(store, after(300).never()).markDiscarded(any(), any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).markDiscarded(any(), any());
     }
 
     @Test
@@ -230,7 +235,7 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("a turn whose snapshot was not stored is inserted only if absent, never as paused, and discards nothing")
-    void uncommittedIsUnsettled() {
+    void uncommittedIsUnsettled() throws Exception {
         ConversationMemory memory = memory();
         memory.setConversationState(ConversationState.AWAITING_HUMAN);
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
@@ -240,7 +245,9 @@ class HealthTurnRecorderTest {
         ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
         verify(store, timeout(5_000)).insertIfAbsent(row.capture());
         assertFalse(row.getValue().paused());
-        verify(store, after(300).never()).upsert(any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).upsert(any());
         verify(store, never()).markDiscarded(any(), any());
     }
 
@@ -413,7 +420,7 @@ class HealthTurnRecorderTest {
 
         @Test
         @DisplayName("a turn captured after the user's erasure (a reused id) is stored")
-        void capturedAfterErasureIsStored() {
+        void capturedAfterErasureIsStored() throws Exception {
             // The tombstone is an hour older than the capture: beyond the clock skew.
             ErasureGuard earlier = new ErasureGuard(tombstones, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
                     Duration.ofSeconds(5), Duration.ofMinutes(5), Clock.offset(CLOCK, Duration.ofHours(-1)));
@@ -422,7 +429,9 @@ class HealthTurnRecorderTest {
             guarded.record(memory(), null, null, null, false);
 
             verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
-            verify(store, after(300).never()).deleteRow(any(), any());
+            // The write is complete, its erasure check included: nothing more can happen.
+            assertTrue(guarded.awaitDrained(Duration.ofSeconds(5)));
+            verify(store, never()).deleteRow(any(), any());
             assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
 
@@ -447,12 +456,14 @@ class HealthTurnRecorderTest {
 
         @Test
         @DisplayName("normal writes are unaffected: no tombstone, nothing deleted")
-        void normalWrites() {
+        void normalWrites() throws Exception {
             guarded.record(memory(), null, null, null, false);
             verify(store, timeout(5_000)).upsert(any());
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
 
-            verify(store, after(300).never()).deleteRow(any(), any());
+            // The write is complete, its erasure check included: nothing more can happen.
+            assertTrue(guarded.awaitDrained(Duration.ofSeconds(5)));
+            verify(store, never()).deleteRow(any(), any());
             assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
     }
@@ -460,7 +471,8 @@ class HealthTurnRecorderTest {
     private static void assertTrueEventually(BooleanSupplier condition) {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             while (!condition.getAsBoolean()) {
-                Thread.onSpinWait();
+                // Interruptible: the timeout's interrupt ends the loop.
+                Thread.sleep(1);
             }
         });
     }

@@ -1342,8 +1342,9 @@ class ConversationStepRunner {
      *            whether the turn's completion callback stored its snapshot (it
      *            runs before {@code Future.get} returns); a completed turn whose
      *            snapshot was not stored — a lost pause compare-and-store, a
-     *            conflict — is reported to Agent Health as unsettled. {@code null}:
-     *            not tracked, taken as stored
+     *            conflict — is reported to Agent Health as unsettled, and a failed
+     *            turn whose snapshot was not stored marks no execution discarded.
+     *            {@code null}: not tracked, taken as stored
      */
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future, BooleanSupplier committed) {
@@ -1352,7 +1353,7 @@ class ConversationStepRunner {
         reportTurnOutcome(memory, wait);
         // Agent Health records every turn, clean or not, on its own worker.
         conversationService.reportHealthTurn(memory, wait, (System.nanoTime() - waitStarted) / 1_000_000L,
-                committed == null || wait != TurnWait.COMPLETED || committed.getAsBoolean());
+                committed == null || committed.getAsBoolean());
         return wait == TurnWait.TIMED_OUT || wait == TurnWait.INTERRUPTED || wait == TurnWait.ABANDONED_WHILE_PAUSED;
     }
 

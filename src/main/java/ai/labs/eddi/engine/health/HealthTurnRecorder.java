@@ -144,12 +144,26 @@ public class HealthTurnRecorder {
      */
     public void record(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, boolean abandoned,
                        boolean committed) {
+        record(memory, conversationId, kind, durationMs, abandoned, committed, true);
+    }
+
+    /**
+     * As above.
+     *
+     * @param discards
+     *            {@code false} when the turn's snapshot was not stored although its
+     *            row is written (a turn that failed before its store): the
+     *            executions it lists as discarded are not marked (see
+     *            {@link HealthTurnFactory#capture})
+     */
+    public void record(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, boolean abandoned,
+                       boolean committed, boolean discards) {
         if (!settings.enabled() || memory == null) {
             return;
         }
         Capture capture;
         try {
-            capture = HealthTurnFactory.capture(memory, conversationId, kind, durationMs, clock.instant(), abandoned, committed);
+            capture = HealthTurnFactory.capture(memory, conversationId, kind, durationMs, clock.instant(), abandoned, committed, discards);
         } catch (RuntimeException e) {
             // The live step may still be changing (a watchdog-abandoned turn).
             LOGGER.debugf("Could not capture a turn for Agent Health: %s", e.getMessage());

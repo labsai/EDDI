@@ -20,8 +20,10 @@ import ai.labs.eddi.engine.internal.ConversationStepRunner.TurnWait;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
@@ -33,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -172,6 +175,34 @@ class ConversationStepRunnerHealthHookTest {
 
         assertNull(written().errorKind());
         verify(store, never()).insertIfAbsent(any());
+    }
+
+    private static ConversationMemory discardingMemory(ConversationState state) {
+        ConversationMemory memory = memory(state);
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        return memory;
+    }
+
+    @Test
+    @DisplayName("a turn that failed before its snapshot was stored is recorded as failed, but marks nothing discarded")
+    void failedBeforeStore() throws Exception {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), "conv-1", discardingMemory(ConversationState.ERROR),
+                CompletableFuture.failedFuture(new IllegalStateException("boom")), () -> false);
+
+        // Replaces the row: a failed resume or rerun keeps its step's execution id.
+        assertEquals(ErrorKind.TURN_ERROR.name(), written().errorKind());
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).markDiscarded(any(), any());
+    }
+
+    @Test
+    @DisplayName("a turn whose snapshot was stored before it failed still marks its discards")
+    void failedAfterStore() {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), "conv-1", discardingMemory(ConversationState.ERROR),
+                CompletableFuture.failedFuture(new IllegalStateException("boom")), () -> true);
+
+        assertEquals(ErrorKind.TURN_ERROR.name(), written().errorKind());
+        verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
     }
 
     @Test

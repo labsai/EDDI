@@ -46,14 +46,19 @@ executionId)`; an execution id belongs to one step — never by increment:
 - a **say after an undo** runs on a new step at the same index with a new id. The
   undone executions are listed on the new step (`health:discarded_executions`),
   and their rows are marked `discarded` — they really ran and really spent, but a
-  later execution replaced them. Spend therefore matches the conversation's own
-  total: the sum of `costUsd` over all rows equals the sum of
-  `costUsd + discardedCostUsd` over the rows that are not discarded;
-- **`day` and `timestamp` are first-recorded**: a turn paused on one day and
-  resumed on the next stays on the day it started, so it is never counted on two
-  days. The rest of the row is replaced by the resume — its cost, tokens,
-  `paused`, outcome — so a rollup of the day it started has to be recomputed
-  (H2b marks that day dirty). `updatedAt` is when the row was last **captured** (on the turn's thread, before it is queued), not when it reached the store;
+  later execution replaced them. When every turn is recorded and every discard
+  is tracked, spend matches the conversation's own total: the sum of `costUsd`
+  over all rows equals the sum of `costUsd + discardedCostUsd` over the rows that
+  are not discarded. A missing row breaks the equality — a dropped row (see
+  `eddi_health_dropped_total`) or a turn whose discards were withheld leaves
+  one side short;
+- **`day` and `timestamp` are first-recorded**: they are the time the turn was
+  first **captured**, when it finished — not when it started, so a turn that
+  starts before midnight and finishes after it is on the second day. A turn
+  paused on one day and resumed on the next stays on the day it was first
+  recorded, so it is never counted on two days. The rest of the row is replaced
+  by the resume — its cost, tokens, `paused`, outcome — so a rollup of that day
+  has to be recomputed (H2b marks that day dirty). `updatedAt` is when the row was last **captured** (on the turn's thread, before it is queued), not when it reached the store;
 - **the newest capture wins**: a write whose `updatedAt` is older than the stored
   row's is ignored, so a stale paused row delayed in one node's queue cannot
   overwrite the finished row another node wrote (ordering is by the writing
@@ -68,7 +73,13 @@ executionId)`; an execution id belongs to one step — never by increment:
   rerun or resume leaves the stored step as it was — and it discards nothing: a
   cancelled say after an undo leaves the undone step in the redo cache. A turn
   abandoned before its step was stamped gets a fresh id, so repeated timeouts at
-  the same step are separate rows.
+  the same step are separate rows;
+- **a turn that failed before its snapshot was stored marks nothing discarded**:
+  its row is written as failed, replacing the row of its execution (a failed
+  resume or rerun keeps the step's id, so the paused or earlier row does not
+  stand), but the conversation still holds the executions its step lists, so
+  none of them is marked. A turn that failed after its snapshot was stored
+  applies its discards as usual.
 
 Health is **derived and not billing-grade**: quotas and cost ceilings stay the
 authoritative counters, and a dropped row is a gap in a chart, nothing more.
@@ -117,7 +128,15 @@ sub-agent conversation started from a tool (which records its own) — and the
 circuit breaker's refusals (the model was never called). The streaming path's
 own retries of an empty timed-out or failed stream are recorded like any other
 same-model retry (`TIMEOUT` for a timeout, the provider error's class
-otherwise).
+otherwise). A stream whose last attempt timed out with no text is recorded as a
+`TIMEOUT` itself — `fallback` when `onError: fallback` or a `fallback`
+validation action served the answer, else `none`. In a cascade only the last
+step streams: when it times out with no earlier answer to serve, the steps
+the cascade escalated past take the same outcome, and when its timeout serves an
+earlier step's answer instead, it is recorded as `cascade`. A stream that timed out after some text keeps that
+text and records no failure (only `streamingTimeout` and the
+`streaming_timeout_partial` warning). A HITL revision whose model call fails
+records the failure with `none`: the rejection then applies as is.
 
 ### Origins
 

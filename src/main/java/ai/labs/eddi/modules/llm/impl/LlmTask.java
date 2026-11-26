@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -832,6 +833,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean usedToolMode = false;
         // Real model name of the cascade-selected step, for the audit ledger (#5).
         String cascadeAuditModel = null;
+        // The model of the cascade step that answered — what Agent Health records.
+        String cascadeStepModel = null;
 
         // Agent mode: the orchestrator adds the system message itself, so hand it the
         // system message the history builder actually emitted — WITH the rolling
@@ -916,6 +919,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
+                cascadeStepModel = cascadeResult.modelName();
 
                 // Propagate agent result's tool trace if agent mode was used
                 if (cascadeResult.agentResult() != null) {
@@ -1148,6 +1152,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // A task that may re-ask is buffered (R5): nothing has been emitted yet, so the
         // single emission below carries the final answer or the fallback, never both.
         boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent) && !bufferOutput;
+        // Agent Health: a stream that timed out with nothing returns normally, so no
+        // catch records it; it is recorded once validation has decided how it ends.
+        boolean streamTimedOutEmpty = fallbackServed == null && isNullOrEmpty(responseContent) && responseMetadata != null
+                && Boolean.TRUE.equals(responseMetadata.get("streamingTimeout"));
+        String timedOutModel = cascadeActive ? cascadeStepModel : resolveModelNameOf(processedParams, resolvedType);
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
@@ -1178,6 +1187,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // deliberate failure of the model phase: with onError=fallback it is
                 // absorbed like any other.
                 if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    if (streamTimedOutEmpty) {
+                        recordStreamingTimeout(currentStep, timedOutModel, HealthFailure.NONE, failureMark);
+                    }
                     // The model answered (and was paid) before its answer was rejected.
                     accumulateUsageAndCost(currentStep, responseMetadata, task);
                     recordFailedPhaseSpend(currentStep, validationFailure);
@@ -1187,6 +1199,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", validationFailure,
                         convertObject, memory.getConversationId(), memory.getAgentId(), null);
                 responseContent = fallbackServed.content();
+            }
+            if (streamTimedOutEmpty) {
+                // After markUncommitted: the record is what happened, not the attempt's data.
+                recordStreamingTimeout(currentStep, timedOutModel, fallbackServed != null ? HealthFailure.FALLBACK : HealthFailure.NONE,
+                        failureMark);
             }
         }
 
@@ -2680,6 +2697,27 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 + "Reply with the complete revised answer only, in the same format as your previous answer.";
     }
 
+    /**
+     * Agent Health: the model phase that began at {@code failureMark} ended in a
+     * stream that timed out with no text. The timeout is recorded with
+     * {@code recovery}, and so is every step a cascade escalated past in this
+     * phase: a cascade that ended in a failure recovered nothing.
+     */
+    private static void recordStreamingTimeout(IWritableConversationStep currentStep, String model, String recovery, int failureMark) {
+        LlmFailureRecords.record(currentStep, FailureClass.TIMEOUT, model, recovery);
+        LlmFailureRecords.settle(currentStep, null, null, recovery, failureMark);
+    }
+
+    /**
+     * The tool loop cannot re-ask a revision's final answer: a refusal of the
+     * request, not a model failure.
+     */
+    private static final class ReaskUnavailableException extends LifecycleException {
+        ReaskUnavailableException() {
+            super("The tool loop cannot re-ask its final answer");
+        }
+    }
+
     /** A revision that passed the task's checks, ready to be stored. */
     private record Revision(String content, Map<String, Object> metadata, Map<String, String> processedParams, String resolvedType,
             List<ChatMessage> request, boolean convertObject) {
@@ -2845,7 +2883,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 ? (msgs, maxTokens) -> {
                     var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
                     if (reply == null) {
-                        throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                        throw new ReaskUnavailableException();
                     }
                     return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
                 }
@@ -2864,7 +2902,19 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             priced.put(KEY_REPROMPT_COST, usage.get("cascadeCostUsd"));
             return new FormatRetryRunner.Attempt(reply.text(), priced);
         };
-        var attempt = asker.ask(request, null);
+        // Agent Health: a failed revision call is a model failure like any other; the
+        // rejection then applies as is, so nothing recovered it. Its same-model retries
+        // are written with it.
+        int failureMark = LlmFailureRecords.mark(currentStep);
+        FormatRetryRunner.Attempt attempt;
+        try {
+            attempt = asker.ask(request, null);
+        } catch (LifecycleException | RuntimeException e) {
+            if (!(e instanceof ReaskUnavailableException)) {
+                LlmFailureRecords.settle(currentStep, e, resolveModelNameOf(processedParams, resolvedType), HealthFailure.NONE, failureMark);
+            }
+            throw e;
+        }
         Map<String, Object> metadata = attempt.metadata() != null ? new HashMap<>(attempt.metadata()) : new HashMap<>();
         priceAtCascadeStep(metadata, revisionStep, task);
         String content = attempt.text();
