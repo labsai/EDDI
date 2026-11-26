@@ -380,11 +380,14 @@ class ConversationWatchdogAbandonTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
-        assertThrows(IllegalStateException.class, () -> captor.getValue().call());
+        // The failed state read no longer kills the dispatcher: the turn is still
+        // reported as abandoned, and the state it could not read is left unmarked.
+        assertDoesNotThrow(() -> captor.getValue().call());
         assertTrue(running.await(10, TimeUnit.SECONDS));
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.EXECUTION_INTERRUPTED));
 
         assertEquals(1, conversationService.stopInFlightWork(USER_ID),
-                "the dispatcher died in the abandon branch, but the body still runs: it must stay reachable");
+                "the watchdog gave up on the turn, but the body still runs: it must stay reachable");
         release.countDown();
         assertTrue(returned.await(10, TimeUnit.SECONDS));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
