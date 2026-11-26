@@ -587,8 +587,10 @@ public class ErasureGuard {
                 Instant now = clock.instant();
                 store.putTombstones(Kind.CONVERSATION, held, now, now.plus(retention));
             } catch (RuntimeException e) {
-                // The tombstones written at the start still hold for the full retention;
-                // only the extension from the completion is missing.
+                // Logged, not failed: the tombstones written at the start still hold for the
+                // full retention, and a conversation tombstone has no cutoff to move — only
+                // the extension from the completion is missing. (The user tombstone's
+                // renewal, in verifyNoPendingRemovals, fails the step: it moves a cutoff.)
                 LOGGER.warnf("GDPR: erasure tombstones could not be renewed at completion: %s", e.toString());
             }
         }

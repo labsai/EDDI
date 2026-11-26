@@ -94,9 +94,8 @@ public class AlertEngine {
         // The work may have waited in the queue while the rating was erased (GDPR) or
         // changed: evaluate only the rating as it still is, and re-check after the
         // event is written, because an erasure can fall between the two.
-        // A rating of an erased user or conversation (GDPR) is not evaluated at all;
-        // the
-        // admission goes on to the post-write check of every event written for it.
+        // A rating of an erased user or conversation (GDPR) is not evaluated at all.
+        // The admission goes on to the post-write check of every event written for it.
         Admission admission = admit(rating.userId(), rating.conversationId(), rating.updatedAt());
         if (!allowed(admission) || !stillCurrent(rating)) {
             return;

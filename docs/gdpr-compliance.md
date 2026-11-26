@@ -226,8 +226,10 @@ How it holds:
    still be valid (for a minute beyond), and is then written again. One that expired
    while its erasure ran fails that conversation (or the user's last check,
    `asyncWritePending`) for a re-run, because a write could have passed in between.
-   Writing the user's tombstone again moves its cutoff to the completion, so the
-   user's content captured while the erasure ran is refused too. A tombstone
+   Writing the user's tombstone again moves its cutoff to the completion, so a write
+   of the user's content captured while the erasure ran is refused when it is checked
+   after the erasure completed (a row already written by then is the erasure's own
+   delete's to remove). A tombstone
    that cannot be written fails the step `erasureTombstone`. On MongoDB every read
    and write of these collections goes to the primary with majority read and write
    concern, whatever the client's `nearest()` default: a lagging secondary must never

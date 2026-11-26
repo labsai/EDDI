@@ -66,8 +66,9 @@ class PostgresAlertStoresIT extends PostgresTestBase implements AlertStoreContra
         StringBuilder plan = new StringBuilder();
         try (Connection conn = DATA_SOURCE.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("SET enable_seqscan = off");
+            // The store's own predicate, so the check cannot drift from the real query.
             try (ResultSet rs = stmt.executeQuery("EXPLAIN SELECT COUNT(*) FROM alert_events WHERE conversation_id = 'conv-x' AND "
-                    + "((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL OR subject_user_id IS NOT NULL)")) {
+                    + PostgresAlertEventStore.CONVERSATION_CONTENT)) {
                 while (rs.next()) {
                     plan.append(rs.getString(1)).append('\n');
                 }

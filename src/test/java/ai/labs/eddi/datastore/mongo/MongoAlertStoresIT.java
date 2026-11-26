@@ -61,7 +61,9 @@ class MongoAlertStoresIT extends MongoTestBase implements AlertStoreContract {
     void theConversationContentLookupHasAnIndex() {
         Document plan = getDatabase().getCollection("alertevents").find(and(eq("conversationId", "conv-x"),
                 or(exists("match.value", true), ne("match.commentExcerpt", null), ne("subjectUserId", null)))).explain();
-        assertTrue(plan.toJson().contains("\"idx_alertevent_conversation\""), plan.toJson());
+        // The winning plan only: a rejected plan naming the index proves nothing.
+        String winning = plan.get("queryPlanner", Document.class).get("winningPlan", Document.class).toJson();
+        assertTrue(winning.contains("\"idx_alertevent_conversation\""), winning);
     }
 
     @Test

@@ -460,11 +460,16 @@ class ErasureGuardTest {
             assertEquals(Set.of("fast", "slow"), failed.keySet(), "both tombstones expired before the erasure ended");
             assertTrue(failed.get("slow").contains("expired during the erasure"), failed.get("slow"));
 
-            writer.onErase = null;
-            Instant completed = clockNow;
+            // "again" takes ten hours: within its retention, so it holds and is renewed.
+            Instant started = clockNow;
+            writer.onErase = conversation -> clockNow = clockNow.plus(Duration.ofHours(10));
             assertEquals(Map.of(), shortLived.eraseConversations(List.of("again")));
+            Instant completed = clockNow;
+            assertTrue(completed.isAfter(started.plus(Duration.ofHours(9))));
+            assertTrue(store.erasedAt(Kind.CONVERSATION, "again", started.plus(retention).plusSeconds(1)).isPresent(),
+                    "renewed: still there past the expiry the start would give");
             assertTrue(store.erasedAt(Kind.CONVERSATION, "again", completed.plus(retention).minusSeconds(1)).isPresent(),
-                    "renewed: the retention counts from the completion");
+                    "the retention counts from the completion");
         }
 
         @Test

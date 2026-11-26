@@ -480,13 +480,17 @@ public class GdprComplianceService {
         // listed later (3b) has its tombstone written after that barrier.
         List<String> tombstonedConversations = List.of();
         if (erasureGuard != null) {
+            List<String> listed = List.of();
             try {
-                tombstonedConversations = conversationMemoryStore.getConversationIdsByUserId(userId);
+                listed = conversationMemoryStore.getConversationIdsByUserId(userId);
             } catch (Exception e) {
                 recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
             }
             try {
-                erasureGuard.tombstoneUser(userId, tombstonedConversations);
+                erasureGuard.tombstoneUser(userId, listed);
+                // Only once written: a conversation whose tombstone failed counts as late
+                // in 3b, which drains again for it.
+                tombstonedConversations = listed;
             } catch (Exception e) {
                 recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
             }
