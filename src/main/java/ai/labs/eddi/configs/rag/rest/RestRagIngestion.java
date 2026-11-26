@@ -257,8 +257,8 @@ public class RestRagIngestion implements IRestRagIngestion {
                             + documentName + "' is still retrievable."))
                     .build();
             case BUSY -> Response.status(Response.Status.CONFLICT)
-                    .entity(Map.of("error", "A replacement of '" + documentName + "' is still in flight. Retry once it "
-                            + "has finished.", "documentName", documentName))
+                    .entity(Map.of("error", "'" + documentName + "' is busy: a replacement or delete of it is still in flight, "
+                            + "here or on another instance, or its cluster lease could not be taken. Retry shortly.", "documentName", documentName))
                     .build();
         };
     }

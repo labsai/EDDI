@@ -1,4 +1,5 @@
 import { formatUsd } from "@eddi/app-kit/lib/utils";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useState, useEffect, useCallback, useMemo, useId, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useOnboarding } from "@/hooks/use-onboarding";
@@ -702,7 +703,7 @@ function FailedFiresPanel({
                         })()}
                       </div>
                     ) : (
-                    <div className="flex items-center justify-end gap-1.5">
+                    <RowActions className="flex-nowrap">
                       <button
                         onClick={() => handleRetry(log.scheduleId)}
                         disabled={retryMutation.isPending}
@@ -721,7 +722,7 @@ function FailedFiresPanel({
                         <Ban className="h-3 w-3" />
                         {t("schedules.dismiss", "Dismiss")}
                       </button>
-                    </div>
+                    </RowActions>
                     )}
                   </td>
                 </tr>
@@ -2006,8 +2007,8 @@ export function SchedulesPage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center justify-end gap-1">
+                          <td className="px-5 py-3 w-px whitespace-nowrap">
+                            <RowActions className="flex-nowrap">
                               {/* Edit — hidden for every system-managed
                                   schedule (HITL timeouts, RAG ingestion, dream,
                                   team cadence): the form can only express a chat
@@ -2121,7 +2122,7 @@ export function SchedulesPage() {
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               )}
-                            </div>
+                            </RowActions>
                           </td>
                         </tr>
 

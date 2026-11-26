@@ -61,7 +61,7 @@ public class McpVaultTools {
             + "checksum. Reference a secret in a configuration as ${vault:<keyName>}. Storing or granting secrets is done in the "
             + "Manager (Secrets), never by a tool.")
     public String listVaultKeys(@ToolArg(description = "Tenant id (default: default)", required = false) String tenantId) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_vault_keys"));
         try {
             String tenant = tenantId == null || tenantId.isBlank() ? SecretReference.DEFAULT_TENANT : tenantId.trim();
             return responseJson(jsonSerialization, secretStore.listSecrets(tenant));

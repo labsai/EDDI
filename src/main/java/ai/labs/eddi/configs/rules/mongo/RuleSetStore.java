@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rules.mongo;
 
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -75,6 +76,10 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
      * validation, with the offending rule named. What changes is only <em>when</em>
      * the author hears about it: a 400 on save instead of a 201 followed by an
      * agent that cannot be deployed.
+     * <p>
+     * A save also refuses a <em>retired</em> condition config, which deploy only
+     * warns about — except inside {@link ExistingRuleSetWrite}, where an existing
+     * ruleset is being imported, synced or duplicated and gets deploy's treatment.
      */
     @Override
     protected void validate(RuleSetConfiguration behaviorConfiguration) {
@@ -90,7 +95,14 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
         }
 
         try {
-            ruleDeserialization.deserialize(json);
+            if (ExistingRuleSetWrite.isActive()) {
+                // An import, sync or duplicate of a ruleset that exists already: a
+                // retired condition config is accepted with a WARN, as on deploy.
+                ruleDeserialization.deserialize(json, "(being imported or copied)");
+            } else {
+                // An author's save: a retired condition config is refused too.
+                ruleDeserialization.validateForSave(json);
+            }
         } catch (DeserializationException e) {
             throw new IllegalArgumentException("Invalid ruleset: " + e.getMessage(), e);
         }
