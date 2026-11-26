@@ -708,6 +708,7 @@ class BuildQualityGatesTest {
                 "        run: |",
                 "          # ./mvnw compile jacoco:check@merged-check -DskipITs=false -B",
                 "            # jacoco:check@merged-check",
+                "          ./mvnw compile # jacoco:check@merged-check -DskipITs=false",
                 "          ./mvnw compile jacoco:merge@merge jacoco:report@merged-report -DskipITs=false -B",
                 "");
         assertEquals(Map.of(), executableRunLines(commentedOut, "jacoco:check@merged-check"),
@@ -728,7 +729,7 @@ class BuildQualityGatesTest {
      * {@code needle}, keyed by job id. Only executable shell content is read: the
      * workflow is parsed as YAML, so step names, keys and YAML comments are never
      * seen; backslash continuations are joined into one command line; and lines
-     * that are shell comments are dropped.
+     * that are shell comments, whole-line or trailing, are dropped.
      */
     private static Map<String, List<String>> executableRunLines(String workflow, String needle) throws IOException {
         Map<String, List<String>> found = new LinkedHashMap<>();
@@ -741,7 +742,10 @@ class BuildQualityGatesTest {
                 String joined = run.asText().replaceAll("[ \\t]*\\\\[ \\t]*\\r?\\n[ \\t]*", " ");
                 joined.lines()
                         .map(String::strip)
-                        .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                        .filter(line -> !line.startsWith("#"))
+                        // A trailing comment: `#` after whitespace starts one in the shell.
+                        .map(line -> line.replaceFirst("\\s+#.*$", ""))
+                        .filter(line -> !line.isEmpty())
                         .filter(line -> line.contains(needle))
                         .forEach(line -> found.computeIfAbsent(job.getKey(), key -> new ArrayList<>()).add(line));
             }
