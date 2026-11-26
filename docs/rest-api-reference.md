@@ -314,8 +314,10 @@ Rules for clients:
   `reason` one of `conversation_too_large`, `data_rejected`, `conflict`, `conversation_ended`, `outcome_unknown`,
   `fenced`, `store_failure` (see
   [When a turn is not stored](conversation-memory.md#when-a-turn-is-not-stored)).
-  The turn is not in the conversation: show the error in place of the streamed
-  answer. `done` is sent only after the turn was stored.
+  Show the error in place of the streamed answer. For `store_failure` and
+  `outcome_unknown` storage was not confirmed and the turn may already be in the
+  conversation: read the conversation before retrying. For the other reasons the
+  turn was refused and is not in it. `done` is sent only after the turn was stored.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
 - **`/resume/stream` does not cancel on disconnect by default.** A resume is a

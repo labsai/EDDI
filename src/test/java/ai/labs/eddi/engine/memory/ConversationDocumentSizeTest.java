@@ -197,6 +197,31 @@ class ConversationDocumentSizeTest {
         assertTrue(ConversationDocumentSize.estimate(snapshot) > 0);
     }
 
+    @Test
+    @DisplayName("a snapshot nested deeper than the walk follows is never reported as small")
+    void tooDeepIsReportedAsOverTheLimit() {
+        var snapshot = snapshotWithAnswer("x");
+        Object nested = "y".repeat(1_000_000);
+        for (int i = 0; i < 80; i++) {
+            nested = List.of(nested);
+        }
+        snapshot.getConversationOutputs().getFirst().put("deep", nested);
+        assertEquals(Long.MAX_VALUE, ConversationDocumentSize.estimate(snapshot));
+    }
+
+    @Test
+    @DisplayName("a value nested within the limit is measured in full")
+    void shallowNestingIsMeasured() {
+        var snapshot = snapshotWithAnswer("x");
+        Object nested = "y".repeat(1_000_000);
+        for (int i = 0; i < 10; i++) {
+            nested = List.of(nested);
+        }
+        snapshot.getConversationOutputs().getFirst().put("deep", nested);
+        long estimate = ConversationDocumentSize.estimate(snapshot);
+        assertTrue(estimate > 1_000_000 && estimate < 2_000_000, "estimate=" + estimate);
+    }
+
     private static ConversationMemorySnapshot snapshotWithAnswer(String answer) {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationId("conversation-1");

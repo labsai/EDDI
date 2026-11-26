@@ -628,6 +628,9 @@ class ConversationStepRunner {
         // Releasing as "abandoned" is always safe — a finished or never-started body
         // is unregistered straight away.
         boolean abandoned = true;
+        // Single node: the remembered fence this turn writes with; dropped only once
+        // the runtime has accepted the turn (see below).
+        Long usedRaisedFence = null;
         try {
             if (lease != null && lease.fence() != null) {
                 // Cluster mode (inside the try for the reason given below): every write of
@@ -655,7 +658,11 @@ class ConversationStepRunner {
                 // — so a write the watchdog abandoned can be refused once its caller was
                 // told it may not be stored (fenceAbandonedWrite). No extra round trip.
                 Long stored = conversationMemory.getStoredFence();
-                Long raised = raisedFences.remove(conversationId);
+                // Read, not removed: if the runtime refuses the turn below, a queued turn
+                // loaded before the raise still needs the entry (a raise does not change
+                // the revision, so reloadIfSuperseded would not reload it).
+                Long raised = raisedFences.get(conversationId);
+                usedRaisedFence = raised;
                 conversationMemory.setFenceToken(Math.max(stored != null ? stored : 0L, raised != null ? raised : 0L));
             }
             // Carry the agent-level tool-approval config onto memory BEFORE the
@@ -669,6 +676,11 @@ class ConversationStepRunner {
                 abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
                         registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn,
                         registration::dispatcherGaveUp);
+                if (usedRaisedFence != null) {
+                    // The runtime accepted the turn and it wrote with the remembered fence
+                    // (or abandoned): conditional, so a newer raise by this very turn stays.
+                    raisedFences.remove(conversationId, usedRaisedFence);
+                }
                 if (abandoned && lease == null && processingTurn != null && processingTurn.deferredDelivery.isPending()) {
                     // F2: the watchdog gave up while the turn's write may still be running;
                     // it must not land after its caller is told it may not have been stored
@@ -1097,6 +1109,15 @@ class ConversationStepRunner {
                                     // commit ran. Left there, the state endpoint advertised a pending
                                     // approval the store never held, and /resume then failed.
                                     refreshCachedState(conversationId);
+                                    // The turn is not stored, so its caller is told that — not a
+                                    // completed turn carrying the winner's state. The end won
+                                    // (410), or another writer rewrote the document (409).
+                                    conversationService.forgetUnpersistedTurn(conversationId);
+                                    notStored = reportTurnNotStored(loggingContext, conversationMemory,
+                                            committedStateOrError(conversationId) == ConversationState.ENDED
+                                                    ? TurnNotStored.Reason.CONVERSATION_ENDED
+                                                    : TurnNotStored.Reason.CONFLICT,
+                                            "pause commit refused by the conditional store");
                                     return;
                                 }
                                 written = true;

@@ -173,3 +173,22 @@ so the tests were rewritten, not the engine:
   [conversation-memory](../conversation-memory.md#when-a-turn-is-not-stored) now say so.
 - [hitl.md](../hitl.md) no longer says ordinary turns are answered before their write, and says what the caller of a
   paused turn that was not stored receives.
+
+### Review follow-ups (CodeRabbit)
+
+- A pause commit refused by the conditional store (a concurrent end, cancel or rewrite) is now reported as not stored
+  (`conversation_ended` when the stored state is `ENDED`, otherwise `conflict`) instead of a completed turn carrying
+  the winner's state; its idempotency entry is forgotten like any other unstored turn.
+- A turn the runtime refuses no longer consumes the remembered raised fence: a queued turn that was loaded before the
+  raise still writes with it. The entry is dropped only once the runtime accepted the turn, and only if it is still
+  the value that turn used.
+- `DeferredDelivery.runAfterDelivery` queues behind the whole claimed delivery, callback included, not only behind the
+  pending claim; a failure report can no longer overtake the terminal `turn_not_stored` event.
+- `ConversationDocumentSize` no longer counts a subtree below its depth cutoff as one scalar: a snapshot nested deeper
+  than 64 containers is estimated as `Long.MAX_VALUE`, so both backends refuse it while the limit is enabled.
+- Owed long-term writes are checked against a newer stored value in every recovery state (a paused or errored
+  conversation had an empty baseline, which made every owed key look changed in the current turn); the comparison uses
+  the decoded values, not their text, so `["a, b"]` and `["a", "b"]` differ.
+- The sub-agent tool no longer says an initial message "was not stored" when storage was not confirmed; the docs for
+  the not-stored reasons, the SSE error event and a paused turn say that `store_failure` and `outcome_unknown` may
+  have been stored and must be read before retrying.

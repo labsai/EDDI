@@ -82,6 +82,15 @@ public class Conversation implements IConversation {
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
 
+    /**
+     * The longTerm properties as they were when this turn started — whether or not
+     * the document they came from is trusted as persisted
+     * ({@link #longTermBaseline} stays empty after a pause or an error). It tells a
+     * key this turn changed from one it merely carries over, which only the first
+     * may overwrite a newer stored value with.
+     */
+    private final Map<String, Property> longTermAtTurnStart = new HashMap<>();
+
     /** Serialized properties at the start of this turn — the undo baseline. */
     private Map<String, Map<String, Object>> propertiesAtTurnStart;
 
@@ -218,18 +227,19 @@ public class Conversation implements IConversation {
      * pre-diff behaviour, which is safe because {@code upsert} is idempotent.
      */
     private void captureRestoredLongTermBaseline() {
-        longTermBaseline.clear();
+        captureLongTermBaseline();
         if (conversationMemory == null) {
             return;
         }
         ConversationState restoredState = conversationMemory.getConversationState();
         if (!priorTurnPersistedLongTermProperties(restoredState)) {
+            // Not trusted as persisted: only the turn-start values stay (see
+            // longTermAtTurnStart).
+            longTermBaseline.clear();
             LOGGER.debugf("[MEMORY] Conversation %s restored in state %s — the previous turn never ran "
                     + "storePropertiesPermanently(), so its longTerm properties are treated as unpersisted.",
                     sanitize(conversationMemory.getConversationId()), restoredState);
-            return;
         }
-        captureLongTermBaseline();
     }
 
     private static boolean priorTurnPersistedLongTermProperties(ConversationState restoredState) {
@@ -244,6 +254,7 @@ public class Conversation implements IConversation {
      */
     private void captureLongTermBaseline() {
         longTermBaseline.clear();
+        longTermAtTurnStart.clear();
         if (conversationMemory == null) {
             return;
         }
@@ -256,6 +267,7 @@ public class Conversation implements IConversation {
                 longTermBaseline.put(key, valueCopy(property));
             }
         });
+        longTermAtTurnStart.putAll(longTermBaseline);
     }
 
     /**
@@ -1070,7 +1082,7 @@ public class Conversation implements IConversation {
                 }
                 // Apply visibility at persistence boundary only
                 Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
-                if (writeOwed && property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                if (writeOwed && property.equals(longTermAtTurnStart.get(propertyEntry.getKey()))) {
                     // A make-up write: owed by an earlier turn (its write failed, or the node
                     // stopped before it), not changed in this one. The value may have been
                     // written since by another conversation of this user — then that newer
@@ -1137,8 +1149,8 @@ public class Conversation implements IConversation {
             if (!sameSlot) {
                 continue;
             }
-            // Compared as text: the stores decode numbers to whatever type they like.
-            if (String.valueOf(entry.value()).equals(String.valueOf(PropertyValues.valueOf(property)))) {
+            // Decoded values, not their text: a list ["a, b"] and ["a", "b"] print alike.
+            if (Objects.equals(entry.value(), PropertyValues.valueOf(property))) {
                 return true;
             }
             return entry.updatedAt() != null && entry.updatedAt().toEpochMilli() > since;
@@ -1180,8 +1192,14 @@ public class Conversation implements IConversation {
             if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
                 pending.add(key);
                 // When this conversation changed it: a later make-up write yields to a
-                // value another conversation wrote after this time (F4).
-                since.put(key, now);
+                // value another conversation wrote after this time (F4). A key this turn
+                // merely carries over (the baseline is empty after a pause or an error)
+                // keeps the time it was first owed.
+                if (property.equals(longTermAtTurnStart.get(key))) {
+                    since.putIfAbsent(key, now);
+                } else {
+                    since.put(key, now);
+                }
             }
         });
         since.keySet().retainAll(pending);

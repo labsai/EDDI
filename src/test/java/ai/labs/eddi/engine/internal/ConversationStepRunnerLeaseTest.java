@@ -391,6 +391,21 @@ class ConversationStepRunnerLeaseTest {
     }
 
     @Test
+    @DisplayName("F2: a turn the runtime refuses keeps the remembered fence for the queued turn that still needs it")
+    void refusedTurnDoesNotConsumeTheRaisedFence() throws Exception {
+        IConversationMemory abandoned = mock(IConversationMemory.class);
+        when(abandoned.getFenceToken()).thenReturn(4L);
+        runner.fenceAbandonedWrite(ID, abandoned);
+        when(memory.getStoredFence()).thenReturn(3L);
+        when(runtime.submitCallable(any(), any(), any())).thenThrow(new RejectedExecutionException("pool saturated"));
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, m -> {
+        }, null);
+
+        assertEquals(5L, runner.rememberedFence(ID), "the refused turn did not run, the entry stays for the next one");
+    }
+
+    @Test
     @DisplayName("A1/A3: a turn whose lease is already lost when it starts does not run and does not raise the fence")
     void lostBeforeStartAnswersBusy() throws Exception {
         TestLease lease = new TestLease(42L);

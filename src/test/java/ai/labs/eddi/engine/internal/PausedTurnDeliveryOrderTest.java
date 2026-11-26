@@ -262,7 +262,7 @@ class PausedTurnDeliveryOrderTest {
         }
 
         @Test
-        @DisplayName("pause commit lost (CAS miss): the response reports the stored state, never a phantom AWAITING_HUMAN; delivered once")
+        @DisplayName("pause commit lost (CAS miss, conversation ended): the caller is told 'not stored (conversation_ended)', never a completed turn or a phantom pause; delivered once")
         void pause_commitLost_reportsStoredState() throws Exception {
             var turn = new SayTurn(ConversationState.AWAITING_HUMAN);
             doReturn(false).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
@@ -282,8 +282,10 @@ class PausedTurnDeliveryOrderTest {
 
             ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
             verify(handler, times(1)).onComplete(delivered.capture());
-            assertEquals(ConversationState.ENDED, delivered.getValue().getConversationState());
+            assertTrue(TurnNotStored.isNotStored(delivered.getValue().getError()), "a turn whose pause commit missed is not stored");
+            assertEquals(TurnNotStored.Reason.CONVERSATION_ENDED.tag(), delivered.getValue().getError().errorType());
             assertNotEquals(ConversationState.AWAITING_HUMAN, delivered.getValue().getConversationState());
+            assertTrue(delivered.getValue().getConversationOutputs().isEmpty(), "a turn that is not stored carries no answer");
             verify(conversationStateCache, atLeastOnce()).put(CONVERSATION_ID, ConversationState.ENDED);
             verify(conversationStateCache, never()).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
         }
@@ -411,7 +413,7 @@ class PausedTurnDeliveryOrderTest {
         }
 
         @Test
-        @DisplayName("pause commit lost: done carries the stored state, not a phantom pause; terminates once")
+        @DisplayName("pause commit lost: the stream ends with one turn_not_stored error (conversation_ended), no done, no phantom pause")
         void pause_commitLost_doneReportsStoredState() throws Exception {
             var turn = new SayTurn(ConversationState.AWAITING_HUMAN);
             doReturn(false).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
@@ -428,9 +430,33 @@ class PausedTurnDeliveryOrderTest {
 
             turn.sayStreamingAndRun(handler);
 
-            ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
-            verify(handler, times(1)).onComplete(delivered.capture());
-            assertEquals(ConversationState.ENDED, delivered.getValue().getConversationState());
+            ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+            verify(handler, times(1)).onError(error.capture());
+            verify(handler, never()).onComplete(any());
+            TurnNotStored.TurnNotStoredException notStored = assertInstanceOf(TurnNotStored.TurnNotStoredException.class, error.getValue());
+            assertEquals(TurnNotStored.Reason.CONVERSATION_ENDED.tag(), notStored.getError().errorType());
+        }
+
+        @Test
+        @DisplayName("pause commit lost to another writer (state not ended): reported as not stored (conflict)")
+        void pause_commitLost_otherWriterReportsConflict() throws Exception {
+            var turn = new SayTurn(ConversationState.AWAITING_HUMAN);
+            doReturn(false).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doAnswer(inv -> {
+                turn.memory.get().setConversationState(ConversationState.AWAITING_HUMAN);
+                turn.renderer.get().renderOutput(turn.memory.get());
+                return null;
+            }).when(turn.conversation).say(anyString(), any());
+            StreamingResponseHandler handler = mock(StreamingResponseHandler.class);
+
+            turn.sayStreamingAndRun(handler);
+
+            ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+            verify(handler, times(1)).onError(error.capture());
+            verify(handler, never()).onComplete(any());
+            TurnNotStored.TurnNotStoredException notStored = assertInstanceOf(TurnNotStored.TurnNotStoredException.class, error.getValue());
+            assertEquals(TurnNotStored.Reason.CONFLICT.tag(), notStored.getError().errorType());
         }
 
         @Test

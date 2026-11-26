@@ -49,4 +49,31 @@ class DeferredDeliveryTest {
         assertEquals("conflict", delivery.notStored().errorType());
         assertEquals(List.of(ConversationState.ERROR), delivered);
     }
+
+    @Test
+    @DisplayName("work queued while the claimed callback is still running waits for the callback to return")
+    void workQueuedDuringTheCallbackRunsAfterIt() {
+        var delivery = new DeferredDelivery();
+        List<String> order = new ArrayList<>();
+        delivery.defer(state -> {
+            // The claim already cleared 'pending'; the callback has not returned.
+            delivery.runAfterDelivery(() -> order.add("failure report"));
+            order.add("terminal callback");
+        });
+
+        assertTrue(delivery.deliverNotStored(TurnNotStored.Reason.CONFLICT.error()));
+
+        assertEquals(List.of("terminal callback", "failure report"), order);
+    }
+
+    @Test
+    @DisplayName("work runs at once when no delivery is deferred or running")
+    void workRunsImmediatelyWithoutADelivery() {
+        var delivery = new DeferredDelivery();
+        List<String> order = new ArrayList<>();
+
+        delivery.runAfterDelivery(() -> order.add("now"));
+
+        assertEquals(List.of("now"), order);
+    }
 }

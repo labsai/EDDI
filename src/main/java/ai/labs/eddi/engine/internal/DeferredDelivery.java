@@ -45,6 +45,17 @@ final class DeferredDelivery {
     private final AtomicReference<Runnable> afterDelivery = new AtomicReference<>();
 
     /**
+     * Guards the claim of the delivery together with the "callback running" flag,
+     * so that no moment exists where the delivery is neither pending nor running
+     * yet not finished: a call to {@link #runAfterDelivery} in that gap would run
+     * its work before the terminal callback.
+     */
+    private final Object claimLock = new Object();
+
+    /** {@code true} from the claim of the delivery until its callback returned. */
+    private boolean delivering;
+
+    /**
      * Set by the persistence step when the turn's write failed; read by the
      * delivery (see {@link #notStored()}).
      */
@@ -73,9 +84,20 @@ final class DeferredDelivery {
      *            in-memory state the pipeline ended in
      */
     void deliver(ConversationState effectiveState) {
-        Consumer<ConversationState> delivery = pending.getAndSet(null);
+        Consumer<ConversationState> delivery = claim();
         if (delivery != null) {
             run(delivery, effectiveState);
+        }
+    }
+
+    /** Takes the pending delivery and marks it running, as one step. */
+    private Consumer<ConversationState> claim() {
+        synchronized (claimLock) {
+            Consumer<ConversationState> delivery = pending.getAndSet(null);
+            if (delivery != null) {
+                delivering = true;
+            }
+            return delivery;
         }
     }
 
@@ -88,7 +110,7 @@ final class DeferredDelivery {
      * @return whether this call made the delivery
      */
     boolean deliverNotStored(TurnError error) {
-        Consumer<ConversationState> delivery = pending.getAndSet(null);
+        Consumer<ConversationState> delivery = claim();
         if (delivery == null) {
             return false;
         }
@@ -104,7 +126,12 @@ final class DeferredDelivery {
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Deferred completion handler threw while delivering a turn outcome (state=%s)", effectiveState);
         } finally {
-            runAfter(afterDelivery.getAndSet(null));
+            Runnable queued;
+            synchronized (claimLock) {
+                delivering = false;
+                queued = afterDelivery.getAndSet(null);
+            }
+            runAfter(queued);
         }
     }
 
@@ -112,6 +139,7 @@ final class DeferredDelivery {
     boolean isPending() {
         return pending.get() != null;
     }
+
     /**
      * The error of a turn whose write failed, or {@code null} when it was stored
      * (or never reached its write).
@@ -121,26 +149,25 @@ final class DeferredDelivery {
     }
 
     /**
-     * Runs {@code work} after the deferred delivery, or now when nothing is
-     * deferred. A streamed turn whose pipeline failed reports the failure after its
-     * final snapshot; with the snapshot held back until the write, the failure
-     * report has to wait for it too, or the stream would end before the snapshot.
-     * Never throws.
+     * Runs {@code work} after the deferred delivery's callback has returned, or now
+     * when nothing is deferred or running. A streamed turn whose pipeline failed
+     * reports the failure after its final snapshot; with the snapshot held back
+     * until the write, the failure report has to wait for it too, or the stream
+     * would end before the snapshot. Never throws.
      */
     void runAfterDelivery(Runnable work) {
         if (work == null) {
             return;
         }
-        if (!isPending()) {
-            runAfter(work);
-            return;
+        synchronized (claimLock) {
+            // Pending, or claimed and its callback not yet returned: queue behind it.
+            // The callback's finally block takes the work under the same lock.
+            if (pending.get() != null || delivering) {
+                afterDelivery.set(work);
+                return;
+            }
         }
-        afterDelivery.set(work);
-        // The delivery may have run between the check and the set: take the work
-        // back and run it here (only one of the two sides gets it).
-        if (!isPending()) {
-            runAfter(afterDelivery.getAndSet(null));
-        }
+        runAfter(work);
     }
 
     private static void runAfter(Runnable work) {

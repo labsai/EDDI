@@ -105,7 +105,7 @@ class CreateSubAgentToolHitlTest {
 
         String result = tool.createSubAgent("helper", "You help.", null, null, "bootstrap context", false);
 
-        assertTrue(result.contains("Initial message not stored"), result);
+        assertTrue(result.contains("Initial message storage problem"), result);
     }
 
     @Test

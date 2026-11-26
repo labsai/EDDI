@@ -69,7 +69,12 @@ public final class ConversationDocumentSize {
     private static final int WORKFLOW_OVERHEAD = 32;
     /** Fixed fields of the document (ids, revisions, state, bookmarks). */
     private static final int DOCUMENT_OVERHEAD = 1024;
-    /** Container nesting the walk follows before it stops counting. */
+    /**
+     * Container nesting the walk follows. A snapshot nested deeper than this is not
+     * measured: its estimate is {@link Long#MAX_VALUE}, so the size guard refuses
+     * it (no conversation stores anything that deep, and an unmeasured subtree
+     * would let a large value slip under the limit).
+     */
     private static final int MAX_DEPTH = 64;
 
     private static final ObjectMapper MAPPER = JsonMapper.builder().findAndAddModules().build();
@@ -79,7 +84,9 @@ public final class ConversationDocumentSize {
 
     /**
      * The estimated stored size of {@code snapshot}, in bytes; {@code 0} when it
-     * cannot be estimated (the write is then left to the database's own limit).
+     * cannot be estimated (the write is then left to the database's own limit);
+     * {@link Long#MAX_VALUE} when it nests containers deeper than the walk follows,
+     * so that the same snapshot is refused on both backends.
      */
     public static long estimate(ConversationMemorySnapshot snapshot) {
         if (snapshot == null) {
@@ -113,7 +120,7 @@ public final class ConversationDocumentSize {
         }
         size += walk.steps(snapshot.getConversationSteps());
         size += walk.steps(snapshot.getRedoCache());
-        return size;
+        return walk.tooDeep ? Long.MAX_VALUE : size;
     }
 
     /** UTF-8 length of {@code text}, counted without encoding it. */
@@ -146,6 +153,9 @@ public final class ConversationDocumentSize {
      */
     private static final class Walk {
         private final Set<Object> onPath = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        /** Set when a container below {@link #MAX_DEPTH} was left unmeasured. */
+        boolean tooDeep;
 
         long steps(Collection<ConversationStepSnapshot> steps) {
             if (steps == null) {
@@ -202,9 +212,14 @@ public final class ConversationDocumentSize {
             if (value instanceof Enum<?> constant) {
                 return ENTRY_OVERHEAD + constant.name().length();
             }
-            if (depth > MAX_DEPTH || !onPath.add(value)) {
-                // Deeper than any stored structure, or a cycle: nothing the store could
-                // write either.
+            if (depth > MAX_DEPTH) {
+                // Not measured, so not known to fit: reported through estimate().
+                tooDeep = true;
+                return SCALAR_SIZE;
+            }
+            if (!onPath.add(value)) {
+                // A cycle: nothing the store could write either; the walk stops here
+                // (a repeated reference elsewhere is not on the path and is counted).
                 return SCALAR_SIZE;
             }
             try {

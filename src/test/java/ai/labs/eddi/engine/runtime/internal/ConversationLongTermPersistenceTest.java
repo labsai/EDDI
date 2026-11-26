@@ -127,6 +127,39 @@ class ConversationLongTermPersistenceTest {
     }
 
     @Test
+    @DisplayName("F4 — the make-up of a key carried over by an errored or paused turn also yields to a newer stored value")
+    void makeUpWriteAfterAnErroredTurnYieldsToANewerValue() throws Exception {
+        long changedAt = System.currentTimeMillis() - 60_000;
+        // Not trusted as persisted: the baseline is empty, yet K is unchanged in this
+        // turn.
+        memory.setConversationState(ConversationState.ERROR);
+        memory.getConversationProperties().put("K", new Property("K", "1", Scope.longTerm));
+        memory.setPendingLongTermWrites(Set.of("K"));
+        memory.setPendingLongTermWritesSince(Map.of("K", changedAt));
+        var newer = new UserMemoryEntry("e", "user-1", "K", "2", "fact", Visibility.global, "agent-2", List.of(), "conv-b", false, 0,
+                Instant.ofEpochMilli(changedAt + 1_000), Instant.ofEpochMilli(changedAt + 1_000));
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(newer));
+
+        nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
+
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+        verify(propertiesHandler).countLongTermWrite("skipped_newer");
+    }
+
+    @Test
+    @DisplayName("F4 — lists that print alike but differ are not 'already the same'")
+    void listsThatPrintAlikeAreDifferent() {
+        long changedAt = System.currentTimeMillis();
+        var stored = new UserMemoryEntry("e", "user-1", "K", List.of("a", "b"), "fact", Visibility.global, "agent-2", List.of(), "conv-b",
+                false, 0, Instant.ofEpochMilli(changedAt - 60_000), Instant.ofEpochMilli(changedAt - 60_000));
+        var owed = new Property("K", List.<Object>of("a, b"), Scope.longTerm);
+
+        assertFalse(Conversation.isNewerElsewhere(List.of(stored), "K", owed, Visibility.global, "agent-1", changedAt),
+                "an older, different stored value must not suppress the owed write");
+    }
+
+    @Test
     @DisplayName("F4 — an owed make-up write with nothing newer stored is still made")
     void makeUpWriteWithNothingNewerIsMade() throws Exception {
         long changedAt = System.currentTimeMillis() - 60_000;
