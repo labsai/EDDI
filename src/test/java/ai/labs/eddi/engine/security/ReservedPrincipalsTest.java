@@ -63,6 +63,8 @@ class ReservedPrincipalsTest {
             Map.entry("http:",
                     "tool-approval address of an httpcall tool (http:<toolName>, as ToolApprovalGate.addressesOf builds it; ApiAgentSyncService matches exemptions against it)"),
             Map.entry("openai:", "token-estimator cache key"),
+            Map.entry("mandatory:",
+                    "gateReason prefix of a call a mandatory-approval rule gated (MandatoryApprovals.GATE_REASON_PREFIX), never a principal"),
             Map.entry("s:", "hash input tag"),
             Map.entry("c:", "hash input tag"),
             Map.entry("h:", "hash input tag"),
