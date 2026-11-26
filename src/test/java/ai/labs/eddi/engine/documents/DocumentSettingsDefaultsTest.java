@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -105,6 +106,17 @@ class DocumentSettingsDefaultsTest {
         var expected = new DerivedCaps.Limits(200, 52_428_800L, 20, 52_428_800L, 209_715_200L);
         assertEquals(expected, DocumentSettings.none().derivedCaps());
         assertEquals(expected, new DocumentSettings().derivedCaps(), "no property set in the test configuration");
+    }
+
+    // --- WP-4.2 ---
+
+    @Test
+    @DisplayName("windowed reading: 50 pages per window, 90 seconds each, from the deployment's configuration")
+    void windows() {
+        assertEquals(50, DocumentSettings.none().windowPages());
+        assertEquals(Duration.ofSeconds(90), DocumentSettings.none().windowDeadline());
+        assertEquals(50, new DocumentSettings().windowPages(), "application.properties sets the default");
+        assertEquals(Duration.ofSeconds(90), new DocumentSettings().windowDeadline());
     }
 
     // --- WP-2b.2a ---

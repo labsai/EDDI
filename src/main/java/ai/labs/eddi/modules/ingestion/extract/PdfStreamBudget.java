@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -76,33 +77,51 @@ public final class PdfStreamBudget {
      *             outlives {@code deadline}
      */
     public static void requireWithin(byte[] pdf, long maxStreamBytes, Instant deadline) {
-        int from = 0;
-        int keyword;
+        try {
+            scan(new ArraySource(pdf), maxStreamBytes, deadline);
+        } catch (IOException e) {
+            // An array source never fails to read.
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * The scan itself, on any source: an array here, a file read through a bounded
+     * buffer in {@link PdfStreamBudgetFile}. Offsets are {@code long} so that a
+     * file larger than an array can be scanned.
+     *
+     * @throws IOException
+     *             when the source cannot be read
+     */
+    static void scan(Source pdf, long maxStreamBytes, Instant deadline) throws IOException {
+        long length = pdf.length();
+        long from = 0;
+        long keyword;
         // The first "endstream" at or after the last stream's data, remembered across
         // streams: -2 until searched, -1 once there are none left. Searching afresh
         // for every opening keyword scanned to the end of the file each time an
         // opening had no terminator, so a file of unterminated "stream"s cost the
         // square of its size.
-        int endstream = -2;
-        int lastObj = -1;
-        int objScannedTo = 0;
-        int lastDictionaryObj = -1;
-        while ((keyword = indexOf(pdf, STREAM_KEYWORD, from, pdf.length)) >= 0) {
+        long endstream = -2;
+        long lastObj = -1;
+        long objScannedTo = 0;
+        long lastDictionaryObj = -1;
+        while ((keyword = indexOf(pdf, STREAM_KEYWORD, from, length)) >= 0) {
             from = keyword + STREAM_KEYWORD.length;
             if (isEndstream(pdf, keyword)) {
                 continue;
             }
             requireBefore(deadline);
-            int start = dataStart(pdf, from);
+            long start = dataStart(pdf, from);
             if (endstream != -1 && endstream < start) {
-                endstream = indexOf(pdf, ENDSTREAM_KEYWORD, start, pdf.length);
+                endstream = indexOf(pdf, ENDSTREAM_KEYWORD, start, length);
             }
-            int end = endstream < 0 ? pdf.length : endstream;
+            long end = endstream < 0 ? length : endstream;
             // Likewise the latest "obj" in front of the keyword: only the bytes since
             // the previous keyword are new, so only they are searched. Searching up
             // to MAX_DICTIONARY_BYTES back for every keyword cost that much per
             // keyword in a file that has no object headers.
-            int found = lastIndexOf(pdf, OBJ_KEYWORD, Math.max(0, objScannedTo - OBJ_KEYWORD.length + 1), keyword);
+            long found = lastIndexOf(pdf, OBJ_KEYWORD, Math.max(0, objScannedTo - OBJ_KEYWORD.length + 1), keyword);
             if (found >= 0) {
                 lastObj = found;
             }
@@ -176,9 +195,10 @@ public final class PdfStreamBudget {
      * bytes between stages and none after the last, and returns how many bytes the
      * last stage produced — or the count of the first stage that passed the cap.
      */
-    private static long decodedSize(byte[] pdf, int start, int end, List<String> filters, long cap,
-                                    Instant deadline) {
-        InputStream input = new ByteArrayInputStream(pdf, start, Math.max(0, end - start));
+    private static long decodedSize(Source pdf, long start, long end, List<String> filters, long cap,
+                                    Instant deadline)
+            throws IOException {
+        InputStream input = pdf.range(start, Math.max(start, end));
         for (int i = 0; i < filters.size(); i++) {
             Filter filter;
             try {
@@ -214,8 +234,8 @@ public final class PdfStreamBudget {
     }
 
     /** "endstream" contains "stream"; only the opening keyword starts data. */
-    private static boolean isEndstream(byte[] pdf, int keyword) {
-        return keyword >= 3 && pdf[keyword - 3] == 'e' && pdf[keyword - 2] == 'n' && pdf[keyword - 1] == 'd';
+    private static boolean isEndstream(Source pdf, long keyword) throws IOException {
+        return keyword >= 3 && pdf.at(keyword - 3) == 'e' && pdf.at(keyword - 2) == 'n' && pdf.at(keyword - 1) == 'd';
     }
 
     /**
@@ -225,16 +245,25 @@ public final class PdfStreamBudget {
      * {@code stream \n} hide a stream from the scan while PDFBox decoded it.
      */
     static int dataStart(byte[] pdf, int afterKeyword) {
-        int position = afterKeyword;
-        while (position < pdf.length && pdf[position] == ' ') {
+        try {
+            return (int) dataStart(new ArraySource(pdf), afterKeyword);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static long dataStart(Source pdf, long afterKeyword) throws IOException {
+        long length = pdf.length();
+        long position = afterKeyword;
+        while (position < length && pdf.at(position) == ' ') {
             position++;
         }
-        if (position < pdf.length && pdf[position] == '\r') {
+        if (position < length && pdf.at(position) == '\r') {
             position++;
-            if (position < pdf.length && pdf[position] == '\n') {
+            if (position < length && pdf.at(position) == '\n') {
                 position++;
             }
-        } else if (position < pdf.length && pdf[position] == '\n') {
+        } else if (position < length && pdf.at(position) == '\n') {
             position++;
         }
         return position;
@@ -249,17 +278,21 @@ public final class PdfStreamBudget {
      *            where the latest {@code obj} keyword before the stream starts, or
      *            -1 when there is none
      */
-    private static String dictionaryBefore(byte[] pdf, int obj, int keyword) {
+    private static String dictionaryBefore(Source pdf, long obj, long keyword) throws IOException {
         if (obj < 0 || obj < keyword - MAX_DICTIONARY_BYTES) {
             return null;
         }
-        return new String(pdf, obj, keyword - obj, StandardCharsets.ISO_8859_1);
+        byte[] text = new byte[(int) (keyword - obj)];
+        for (int i = 0; i < text.length; i++) {
+            text[i] = pdf.at(obj + i);
+        }
+        return new String(text, StandardCharsets.ISO_8859_1);
     }
 
-    private static int indexOf(byte[] haystack, byte[] needle, int from, int to) {
-        outer : for (int i = Math.max(0, from); i <= to - needle.length; i++) {
+    private static long indexOf(Source haystack, byte[] needle, long from, long to) throws IOException {
+        outer : for (long i = Math.max(0, from); i <= to - needle.length; i++) {
             for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) {
+                if (haystack.at(i + j) != needle[j]) {
                     continue outer;
                 }
             }
@@ -268,10 +301,10 @@ public final class PdfStreamBudget {
         return -1;
     }
 
-    private static int lastIndexOf(byte[] haystack, byte[] needle, int floor, int before) {
-        outer : for (int i = before - needle.length; i >= floor; i--) {
+    private static long lastIndexOf(Source haystack, byte[] needle, long floor, long before) throws IOException {
+        outer : for (long i = before - needle.length; i >= floor; i--) {
             for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) {
+                if (haystack.at(i + j) != needle[j]) {
                     continue outer;
                 }
             }
@@ -282,6 +315,38 @@ public final class PdfStreamBudget {
 
     private static long megabytes(long bytes) {
         return Math.max(1, bytes / (1024 * 1024));
+    }
+
+    /**
+     * The bytes the scan reads: random access by {@code long} offset, and a range
+     * as a stream for the filters to decode.
+     */
+    interface Source {
+        long length() throws IOException;
+
+        /** The byte at {@code position}, which lies in {@code 0..length()-1}. */
+        byte at(long position) throws IOException;
+
+        /** The bytes {@code start..end-1}, read when the stream is read. */
+        InputStream range(long start, long end) throws IOException;
+    }
+
+    /** A whole file in an array: the upload path, which already holds it. */
+    private record ArraySource(byte[] bytes) implements Source {
+        @Override
+        public long length() {
+            return bytes.length;
+        }
+
+        @Override
+        public byte at(long position) {
+            return bytes[(int) position];
+        }
+
+        @Override
+        public InputStream range(long start, long end) {
+            return new ByteArrayInputStream(bytes, (int) start, (int) (end - start));
+        }
     }
 
     /**
