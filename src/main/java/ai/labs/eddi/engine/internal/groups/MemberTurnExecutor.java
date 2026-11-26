@@ -855,16 +855,22 @@ public class MemberTurnExecutor {
                     new ConversationResponseHandler() {
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                            book(snapshot);
-                            resumeFuture.complete(snapshot);
+                            try {
+                                book(snapshot);
+                            } finally {
+                                resumeFuture.complete(snapshot);
+                            }
                         }
 
                         @Override
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                            book(snapshot);
-                            // Dropped without producing a fresh answer — treat as
-                            // "could not complete" so the caller falls back.
-                            resumeFuture.complete(null);
+                            try {
+                                book(snapshot);
+                            } finally {
+                                // Dropped without producing a fresh answer — treat as
+                                // "could not complete" so the caller falls back.
+                                resumeFuture.complete(null);
+                            }
                         }
 
                         // Whatever the resumed run did, it created what it created and

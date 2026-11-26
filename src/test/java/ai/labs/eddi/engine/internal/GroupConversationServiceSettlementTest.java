@@ -30,12 +30,14 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -157,6 +159,29 @@ class GroupConversationServiceSettlementTest {
         assertEquals(0, gc.getAnsweredRounds(), "the first round's answer never committed");
         assertEquals(GroupConversationState.FAILED, gc.getState(), "no round of this discussion answered");
         assertEquals(DiscussionOutcome.FAILED, gc.getOutcome());
+    }
+
+    @Test
+    void aCancelAfterAFailedCompletionWrite_leavesNoOutcome() throws Exception {
+        var gc = running();
+        gc.getTranscript().add(synthesis("the answer"));
+        var token = new DiscussionControlToken();
+        tokens().put(gc.getId(), token);
+        // The cancel lands while the completion write runs, and that write fails.
+        var first = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            if (first.getAndSet(false)) {
+                token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+                throw new IResourceStore.ResourceStoreException("store down");
+            }
+            return null;
+        }).when(conversationStore).updateIfState(any(), any());
+
+        var result = service.executeDiscussion(gc, new AgentGroupConfiguration(), List.of(), "Q?", null, 0);
+
+        assertEquals(GroupConversationState.CANCELLED, result.getState());
+        assertNull(result.getOutcome(), "settle had classified the round, but a cancelled round has no outcome");
+        assertNull(result.getOutcomeReason());
     }
 
     @Test

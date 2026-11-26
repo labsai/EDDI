@@ -9310,7 +9310,7 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
               "showLegend": true,
               "calcs": []

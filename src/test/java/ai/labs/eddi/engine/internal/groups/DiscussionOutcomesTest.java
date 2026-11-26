@@ -293,6 +293,10 @@ class DiscussionOutcomesTest {
         opinionsOnly.setRound(2);
         assertTrue(opinionsOnly.hasAnsweredRound(), "a continued round-1 record with contributions counts as answered");
 
+        var abstained = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.ABSTAINED, Instant.now(), null, null));
+        abstained.establishAnswerHistory();
+        assertNull(abstained.getAnsweredRounds(), "an abstention counts as a contribution, as settle counts it");
+
         var blankOnly = gc(new TranscriptEntry("a", "a", "  ", 0, "Opinions", TranscriptEntryType.OPINION, Instant.now(), null, null));
         blankOnly.establishAnswerHistory();
         assertEquals(0, blankOnly.getAnsweredRounds(), "a round with no usable contribution keeps its explicit zero");

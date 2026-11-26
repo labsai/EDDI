@@ -1981,6 +1981,9 @@ public class GroupConversationService implements IGroupConversationService, User
     private GroupConversation persistCancelled(GroupConversation gc, GroupDiscussionEventListener listener)
             throws IResourceStore.ResourceStoreException {
         gc.setState(GroupConversationState.CANCELLED);
+        // A cancelled round has no outcome, also when settle had already classified it
+        // and the completion write then failed.
+        DiscussionOutcomes.clear(gc);
         gc.setLastModified(Instant.now());
         try {
             // H14a: conditional like every other leg write — a terminal state another

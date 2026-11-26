@@ -1501,7 +1501,10 @@ public class GroupConversation {
         }
     }
 
-    /** The entry types a member's own answer is recorded as. */
+    /**
+     * The entry types a member's own answer is recorded as; with {@code ABSTAINED},
+     * the same set {@code DiscussionOutcomes} counts.
+     */
     private static final Set<TranscriptEntryType> CONTRIBUTION_TYPES = Set.of(TranscriptEntryType.OPINION,
             TranscriptEntryType.CRITIQUE, TranscriptEntryType.REVISION, TranscriptEntryType.CHALLENGE, TranscriptEntryType.DEFENSE,
             TranscriptEntryType.ARGUMENT, TranscriptEntryType.REBUTTAL, TranscriptEntryType.PLAN, TranscriptEntryType.TASK_RESULT,
@@ -1510,8 +1513,10 @@ public class GroupConversation {
 
     private boolean hasMemberContribution() {
         synchronized (transcript) {
-            return transcript.stream().anyMatch(e -> e != null && e.speakerAgentId() != null && CONTRIBUTION_TYPES.contains(e.type())
-                    && e.answered() && !e.content().isBlank());
+            // An abstention is a deliberate pass and carries no content.
+            return transcript.stream().anyMatch(e -> e != null && e.speakerAgentId() != null
+                    && ((e.type() == TranscriptEntryType.ABSTAINED && e.outcome() == TurnOutcome.ANSWERED)
+                            || (CONTRIBUTION_TYPES.contains(e.type()) && e.answered() && !e.content().isBlank())));
         }
     }
 
