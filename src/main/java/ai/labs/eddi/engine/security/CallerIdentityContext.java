@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.security.spaces.CallerSpaces;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import io.quarkus.security.credential.TokenCredential;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
@@ -68,11 +70,21 @@ public class CallerIdentityContext {
 
     private final SecurityIdentity securityIdentity;
     private final CurrentVertxRequest currentVertxRequest;
+    private final SpaceContext spaceContext;
 
     @Inject
-    public CallerIdentityContext(SecurityIdentity securityIdentity, CurrentVertxRequest currentVertxRequest) {
+    public CallerIdentityContext(SecurityIdentity securityIdentity, CurrentVertxRequest currentVertxRequest, SpaceContext spaceContext) {
         this.securityIdentity = securityIdentity;
         this.currentVertxRequest = currentVertxRequest;
+        this.spaceContext = spaceContext;
+    }
+
+    /**
+     * Without a {@link SpaceContext}: every captured identity belongs to no team.
+     * Test seam.
+     */
+    public CallerIdentityContext(SecurityIdentity securityIdentity, CurrentVertxRequest currentVertxRequest) {
+        this(securityIdentity, currentVertxRequest, null);
     }
 
     /**
@@ -116,11 +128,39 @@ public class CallerIdentityContext {
                 return null;
             }
             return new CallerIdentity(token, userId, currentRequestOrigin(), captureConnectionCredentials(),
-                    securityIdentity.hasRole(ADMIN_ROLE));
+                    securityIdentity.hasRole(ADMIN_ROLE), captureTeamSubjects());
         } catch (Exception e) {
             // No active request context — nothing to capture. Not an error.
             LOGGER.debugf("No caller identity to capture: %s", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * The team subjects on the request's token, by the one shared derivation
+     * ({@link CallerSpaces#teamSubjectsOf(CallerSpaces)} over
+     * {@link SpaceContext#current()}) that {@code ResourceAccessGuard} also uses.
+     * <p>
+     * Taken here, at the request boundary, because nowhere later can: a tool runs
+     * on a worker or virtual thread with no request context, where
+     * {@code SpaceContext} has no token to read. The snapshot is never refreshed
+     * during the turn, and nothing falls back to the user directory's last-seen
+     * memberships when it is empty — empty means "no team" and team features fail
+     * closed.
+     * <p>
+     * Its own boundary, for the same reason as
+     * {@link #captureConnectionCredentials()}: a groups claim that cannot be read
+     * must cost the caller their teams, not their token.
+     */
+    private List<String> captureTeamSubjects() {
+        if (spaceContext == null) {
+            return List.of();
+        }
+        try {
+            return CallerSpaces.teamSubjectsOf(spaceContext.current());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the caller's team subjects: %s", e.getMessage());
+            return List.of();
         }
     }
 
@@ -384,11 +424,19 @@ public class CallerIdentityContext {
                 && identity.userId().equals(userId);
     }
 
+    /**
+     * Binds the approver <em>without their teams</em>
+     * ({@link CallerIdentity#withoutTeamSubjects()}). The approver acts with their
+     * own token on the calls they approved, but the turn is the owner's: a team the
+     * approver belongs to must not admit the owner's turn to anything, so their
+     * memberships never reach {@link #callAsApprover} — the one place this binding
+     * becomes the caller.
+     */
     private static void bindApprover(CallerIdentity approver) {
         if (approver == null) {
             APPROVER.remove();
         } else {
-            APPROVER.set(approver);
+            APPROVER.set(approver.withoutTeamSubjects());
         }
     }
 

@@ -68,9 +68,12 @@ class ConversationStepRunnerLeaseTest {
 
     /** A lease whose lost-callbacks the test can fire. */
     private static final class TestLease implements LeaseHandle {
-        private final Long fence;
+        private volatile Long fence;
         final List<Runnable> lostCallbacks = new CopyOnWriteArrayList<>();
         volatile boolean lost;
+        /** What the lease bucket answers when asked whether the lease is current. */
+        volatile boolean confirmed = true;
+        final AtomicInteger confirmations = new AtomicInteger();
 
         TestLease(Long fence) {
             this.fence = fence;
@@ -99,6 +102,31 @@ class ConversationStepRunnerLeaseTest {
         @Override
         public void onLost(Runnable callback) {
             lostCallbacks.add(callback);
+        }
+
+        @Override
+        public boolean confirmHeld() {
+            confirmations.incrementAndGet();
+            return confirmed;
+        }
+
+        @Override
+        public void liftFence(long lifted) {
+            if (lifted > fence) {
+                fence = lifted;
+            }
+        }
+
+        private volatile Long established;
+
+        @Override
+        public boolean fenceEstablished() {
+            return established != null && established.equals(fence);
+        }
+
+        @Override
+        public void establishFence() {
+            established = fence;
         }
     }
 
@@ -139,6 +167,150 @@ class ConversationStepRunnerLeaseTest {
         runTurn(new TestLease(42L));
         verify(memory).setFenceToken(42L);
         verify(store).raiseFence(ID, 42L);
+    }
+
+    // Stream-leader failover (CI run 43971937053): the old KV_EDDI_LEASES leader
+    // acknowledged lease writes at sequences its successor never had, and the
+    // successor handed them out again. A lease from the lost range raised the
+    // conversation's fence to 278765; every lease after it got a lower revision
+    // (278348, 278352, ...), its raise was a silent no-op, the turn ran, and its
+    // write was refused after the reply had gone out as 200 — 118 turns lost.
+    @Test
+    @DisplayName("failover: a current lease whose revision is below a fence from a lost revision range lifts it and runs")
+    void leaseBelowALostRangeLiftsTheFence() throws Exception {
+        when(store.raiseFence(ID, 278352L)).thenReturn(278765L);
+        when(store.liftFence(ID, 278765L, 278766L)).thenReturn(true);
+        TestLease lease = new TestLease(278352L);
+
+        runTurn(lease);
+
+        assertEquals(1, lease.confirmations.get(), "the lease bucket is asked whether this lease is still current");
+        InOrder order = inOrder(store);
+        order.verify(store).raiseFence(ID, 278352L);
+        order.verify(store).liftFence(ID, 278765L, 278766L);
+        order.verify(store).getStateAndRevision(ID);
+        assertEquals(278766L, lease.fence(), "every later write under the lease carries the lifted fence");
+        verify(memory).setFenceToken(278766L);
+        verify(runtime).submitCallable(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("failover: the next lease of the same range lifts again, one above the last lift")
+    void successiveLeasesInTheLostRangeEachLift() throws Exception {
+        when(store.raiseFence(ID, 278359L)).thenReturn(278766L);
+        when(store.liftFence(ID, 278766L, 278767L)).thenReturn(true);
+        TestLease lease = new TestLease(278359L);
+
+        runTurn(lease);
+
+        verify(memory).setFenceToken(278767L);
+        verify(runtime).submitCallable(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a raise that did not take, on a lease the bucket no longer confirms, is answered busy and never run")
+    void higherFenceOnAnUnconfirmedLeaseAnswersBusy() throws Exception {
+        when(store.raiseFence(ID, 42L)).thenReturn(57L); // a newer holder started
+        TestLease lease = new TestLease(42L);
+        lease.confirmed = false;
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
+
+        assertEquals(List.of(memory), skipped, "answered busy (409 + Retry-After), never a 200 for a write that cannot land");
+        verify(memory).setConversationState(ConversationState.IN_PROGRESS);
+        verify(store, never()).liftFence(anyString(), anyLong(), anyLong());
+        verify(runtime, never()).submitCallable(any(), any(), any());
+        verify(memory, never()).setFenceToken(any());
+        assertEquals(42L, lease.fence());
+    }
+
+    @Test
+    @DisplayName("a lift that loses its compare-and-set (another holder moved the fence) is answered busy")
+    void liftThatLosesItsCasAnswersBusy() throws Exception {
+        when(store.raiseFence(ID, 42L)).thenReturn(57L);
+        when(store.liftFence(ID, 57L, 58L)).thenReturn(false);
+        TestLease lease = new TestLease(42L);
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
+
+        assertEquals(List.of(memory), skipped);
+        verify(runtime, never()).submitCallable(any(), any(), any());
+        assertEquals(42L, lease.fence(), "the lease keeps its own fence when the lift did not land");
+    }
+
+    @Test
+    @DisplayName("a raise that moved the fence asks nobody and lifts nothing")
+    void raiseThatMovedTheFenceNeedsNoConfirmation() throws Exception {
+        when(store.raiseFence(ID, 42L)).thenReturn(7L);
+        TestLease lease = new TestLease(42L);
+
+        runTurn(lease);
+
+        assertEquals(0, lease.confirmations.get());
+        verify(store, never()).liftFence(anyString(), anyLong(), anyLong());
+        verify(memory).setFenceToken(42L);
+        assertTrue(lease.fenceEstablished());
+    }
+
+    @Test
+    @DisplayName("a turn handed the same lease raises its own fence again: equal, established, no confirmation")
+    void handedOverTurnReusesItsOwnFence() throws Exception {
+        TestLease lease = new TestLease(42L);
+        when(store.raiseFence(ID, 42L)).thenReturn(7L, 42L); // the first turn moved it; the second meets its own
+
+        runTurn(lease);
+        runTurn(lease);
+
+        assertEquals(0, lease.confirmations.get());
+        verify(store, never()).liftFence(anyString(), anyLong(), anyLong());
+        verify(runtime, times(2)).submitCallable(any(), any(), any());
+    }
+
+    // CodeRabbit on #1449: fences are numbers, not identities. Lease A lifts the
+    // fence to 58; the bucket's sequence later reaches 58 and hands it to lease B.
+    // Before this, B's raise met an equal fence and "took", and both A and B could
+    // write with 58 (the stores admit any token at or above the stored fence).
+    @Test
+    @DisplayName("a lease whose revision equals a fence another holder put there lifts it, fencing that holder out")
+    void equalFenceFromAnotherHolderIsLifted() throws Exception {
+        when(store.raiseFence(ID, 57L)).thenReturn(57L + 9); // A meets a fence from the lost range ...
+        when(store.liftFence(ID, 66L, 67L)).thenReturn(true);
+        TestLease a = new TestLease(57L);
+        runTurn(a);
+        assertEquals(67L, a.fence());
+
+        when(store.raiseFence(ID, 67L)).thenReturn(67L); // ... and B's revision is A's lifted value
+        when(store.liftFence(ID, 67L, 68L)).thenReturn(true);
+        TestLease b = new TestLease(67L);
+        runTurn(b);
+
+        assertEquals(1, b.confirmations.get(), "an equal fence B did not put there is not B's");
+        verify(store).liftFence(ID, 67L, 68L);
+        assertEquals(68L, b.fence(), "B writes with a value A does not carry");
+        verify(memory).setFenceToken(68L);
+
+        // A's next turn (handed the lease) now meets 68 and is no longer the holder
+        when(store.raiseFence(ID, 67L)).thenReturn(68L);
+        a.confirmed = false;
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, a);
+        assertEquals(List.of(memory), skipped, "A is answered busy instead of writing with 67");
+    }
+
+    @Test
+    @DisplayName("an equal fence on a lease the bucket no longer confirms is answered busy")
+    void equalFenceOnAnUnconfirmedLeaseAnswersBusy() throws Exception {
+        when(store.raiseFence(ID, 42L)).thenReturn(42L);
+        TestLease lease = new TestLease(42L);
+        lease.confirmed = false;
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
+
+        assertEquals(List.of(memory), skipped);
+        verify(runtime, never()).submitCallable(any(), any(), any());
     }
 
     @Test
@@ -236,7 +408,7 @@ class ConversationStepRunnerLeaseTest {
         TestLease lease = new TestLease(42L);
         doAnswer(inv -> {
             lease.lost = true;
-            return null;
+            return 0L;
         }).when(store).raiseFence(ID, 42L);
         List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
         runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
