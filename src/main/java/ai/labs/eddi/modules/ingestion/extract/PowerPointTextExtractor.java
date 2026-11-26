@@ -161,7 +161,7 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
                     switch (xml.getLocalName()) {
                         case "sld" -> {
                             // A slide marked "hide slide" is not shown in the presentation.
-                            if (visibleOnly && "0".equals(OpenXmlPackage.attribute(xml, "show"))) {
+                            if (visibleOnly && isFalse(OpenXmlPackage.attribute(xml, "show"))) {
                                 return "";
                             }
                         }
@@ -201,8 +201,20 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
         return text.toString().strip();
     }
 
+    /**
+     * An XML Schema boolean that is true: {@code 1} or {@code true}, whitespace
+     * collapsed.
+     */
     private static boolean isHidden(String value) {
-        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
+        return value != null && (value.trim().equals("1") || value.trim().equalsIgnoreCase("true"));
+    }
+
+    /**
+     * An XML Schema boolean that is false: {@code 0} or {@code false}, whitespace
+     * collapsed. {@code show="false"} hides a slide as much as {@code show="0"}.
+     */
+    private static boolean isFalse(String value) {
+        return value != null && (value.trim().equals("0") || value.trim().equalsIgnoreCase("false"));
     }
 
     private static void appendLine(StringBuilder text, String line) {

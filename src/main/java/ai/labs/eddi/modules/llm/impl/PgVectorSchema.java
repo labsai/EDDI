@@ -511,18 +511,23 @@ final class PgVectorSchema {
     /**
      * Whether {@code table} has the four columns EDDI's pgvector layout creates
      * ({@code embedding_id}, {@code embedding} of type vector, {@code text},
-     * {@code metadata}). Anything else is not a table to delete from or drop: it is
-     * somebody else's.
+     * {@code metadata}) and no other live column. Anything else is not a table to
+     * delete from or drop: it is somebody else's.
      */
     static boolean layoutMatches(Connection connection, String table) throws SQLException {
         String trimmed = table.trim();
-        String sql = "SELECT count(*) FROM pg_attribute a WHERE a.attrelid = " + regclass(isQualified(trimmed))
-                + " AND a.attnum > 0 AND NOT a.attisdropped AND ((a.attname = 'embedding' AND format_type(a.atttypid, NULL) = 'vector') "
-                + "OR a.attname IN ('embedding_id', 'text', 'metadata'))";
+        // Two counts over the table's live columns: how many are the four EDDI columns,
+        // and how many there are at all. An extra column (somebody's business data)
+        // makes
+        // it not an EDDI table, whatever else it has: a delete by metadata would take
+        // that column's values with the rows.
+        String sql = "SELECT count(*) FILTER (WHERE (a.attname = 'embedding' AND format_type(a.atttypid, NULL) = 'vector') "
+                + "OR a.attname IN ('embedding_id', 'text', 'metadata')), count(*) FROM pg_attribute a WHERE a.attrelid = "
+                + regclass(isQualified(trimmed)) + " AND a.attnum > 0 AND NOT a.attisdropped";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, trimmed);
             try (ResultSet rs = statement.executeQuery()) {
-                return rs.next() && rs.getInt(1) == 4;
+                return rs.next() && rs.getInt(1) == 4 && rs.getInt(2) == 4;
             }
         }
     }

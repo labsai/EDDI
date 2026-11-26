@@ -45,6 +45,9 @@ public class WordTextExtractor implements DocumentTextExtractor {
         // reader never sees, and what a prompt-injection carrier is made of.
         boolean runHidden = false;
         boolean inParagraphProperties = false;
+        // Inside w:rPrChange the run properties are the ones from BEFORE a tracked
+        // revision, not the formatting the reader sees now.
+        boolean inRevisionHistory = false;
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(archive.part(DOCUMENT_PART))) {
             XMLStreamReader xml = reader.reader();
@@ -61,18 +64,19 @@ public class WordTextExtractor implements DocumentTextExtractor {
                         }
                         case "r" -> runHidden = false;
                         case "pPr" -> inParagraphProperties = true;
+                        case "rPrChange" -> inRevisionHistory = true;
                         // vanish: hidden text; specVanish: a paragraph mark that joins the
                         // paragraph to the next, hidden; webHidden: hidden in the web layout,
                         // which is what a text extractor is closest to.
                         case "vanish", "specVanish", "webHidden" -> {
                             // In a paragraph's own properties it hides the paragraph mark, not
                             // text.
-                            if (visibleOnly && !inParagraphProperties && !isOff(OpenXmlPackage.attribute(xml, "val"))) {
+                            if (visibleOnly && !inParagraphProperties && !inRevisionHistory && !isOff(OpenXmlPackage.attribute(xml, "val"))) {
                                 runHidden = true;
                             }
                         }
                         case "sz" -> {
-                            if (visibleOnly && !inParagraphProperties && isTiny(OpenXmlPackage.attribute(xml, "val"))) {
+                            if (visibleOnly && !inParagraphProperties && !inRevisionHistory && isTiny(OpenXmlPackage.attribute(xml, "val"))) {
                                 runHidden = true;
                             }
                         }
@@ -86,6 +90,8 @@ public class WordTextExtractor implements DocumentTextExtractor {
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT && "pPr".equals(xml.getLocalName())) {
                     inParagraphProperties = false;
+                } else if (event == XMLStreamConstants.END_ELEMENT && "rPrChange".equals(xml.getLocalName())) {
+                    inRevisionHistory = false;
                 } else if (event == XMLStreamConstants.END_ELEMENT && "r".equals(xml.getLocalName())) {
                     runHidden = false;
                 } else if (event == XMLStreamConstants.END_ELEMENT && "p".equals(xml.getLocalName())) {
@@ -107,7 +113,11 @@ public class WordTextExtractor implements DocumentTextExtractor {
      * it is off.
      */
     private static boolean isOff(String value) {
-        return value != null && (value.equals("0") || value.equalsIgnoreCase("false") || value.equalsIgnoreCase("off"));
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return trimmed.equals("0") || trimmed.equalsIgnoreCase("false") || trimmed.equalsIgnoreCase("off");
     }
 
     /**

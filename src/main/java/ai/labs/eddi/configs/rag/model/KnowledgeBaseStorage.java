@@ -260,9 +260,27 @@ public final class KnowledgeBaseStorage {
         StringBuilder location = new StringBuilder(config.getStoreType());
         new TreeMap<>(SERVER_PARAMETERS.getOrDefault(config.getStoreType(), Map.of())).forEach((key, fallback) -> {
             String value = given.get(key);
-            location.append('|').append(key).append('=').append(value == null || value.isBlank() ? fallback : value.trim());
+            location.append('|').append(key).append('=')
+                    .append(normalizedServerValue(key, value == null || value.isBlank() ? fallback : value.trim()));
         });
         return location.append('|').append(canonicalLocation(config.getStoreType(), physical)).toString();
+    }
+
+    /**
+     * A server parameter as the factory reads it: a numeric {@code port} is parsed,
+     * so {@code 5432} and {@code 05432}, which open the same server, are one
+     * location. Anything else is kept as written; a port that does not parse is
+     * left alone, and the factory refuses it when the store is built.
+     */
+    private static String normalizedServerValue(String key, String value) {
+        if ("port".equals(key)) {
+            try {
+                return Integer.toString(Integer.parseInt(value));
+            } catch (NumberFormatException e) {
+                return value;
+            }
+        }
+        return value;
     }
 
     private static String physicalNameOrNull(String ragConfigId, RagConfiguration config) {

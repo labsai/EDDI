@@ -86,7 +86,9 @@ public final class HiddenContentFilter {
          * An HTML file read without running its script — an upload with
          * {@code visibleTextOnly}: page mode, plus the elements the markup hides
          * outright ({@code display:none}, {@code hidden}, zero opacity, off-screen,
-         * zero-size). Stylesheet rules are not read, and no background is assumed.
+         * zero-size) and, as the script that could toggle it does not run, inline
+         * {@code visibility:hidden}. Stylesheet rules are not read, and no background
+         * is assumed.
          */
         VISIBLE
     }
@@ -233,11 +235,15 @@ public final class HiddenContentFilter {
     private static int removeInvisibleText(Document doc, Mode mode) {
         Map<Element, Effective> cache = new IdentityHashMap<>();
         boolean mail = mode == Mode.MAIL;
+        // Mail, and a file read without its script, are shown as the markup says; a
+        // page
+        // is not, because script toggles visibility the way it toggles display.
+        boolean honourVisibility = mail || mode == Mode.VISIBLE;
         Effective root = new Effective(mail ? BLACK : null, false, mail ? WHITE : null, null, false);
         List<TextNode> invisible = new ArrayList<>();
         NodeTraversor.traverse((NodeVisitor) (node, depth) -> {
             if (node instanceof TextNode text && !text.isBlank() && text.parent() instanceof Element parent) {
-                if (isInvisible(effective(parent, cache, root, mail))) {
+                if (isInvisible(effective(parent, cache, root, honourVisibility))) {
                     invisible.add(text);
                 }
             }
@@ -262,7 +268,7 @@ public final class HiddenContentFilter {
      * before its children, so the walk up stops at the first cached ancestor —
      * linear overall, and iterative, so deep documents cannot overflow the stack.
      */
-    private static Effective effective(Element element, Map<Element, Effective> cache, Effective root, boolean mail) {
+    private static Effective effective(Element element, Map<Element, Effective> cache, Effective root, boolean honourVisibility) {
         Deque<Element> chain = new ArrayDeque<>();
         Element current = element;
         while (current != null && !cache.containsKey(current)) {
@@ -272,13 +278,13 @@ public final class HiddenContentFilter {
         Effective inherited = current == null ? root : cache.get(current);
         while (!chain.isEmpty()) {
             Element next = chain.pop();
-            inherited = apply(next, inherited, mail);
+            inherited = apply(next, inherited, honourVisibility);
             cache.put(next, inherited);
         }
         return inherited;
     }
 
-    private static Effective apply(Element element, Effective inherited, boolean mail) {
+    private static Effective apply(Element element, Effective inherited, boolean honourVisibility) {
         Rgb colour = inherited.colour();
         boolean transparentText = inherited.transparentText();
         Rgb background = inherited.background();
@@ -321,8 +327,9 @@ public final class HiddenContentFilter {
                 fontSize = fontSizePx(size, fontSize);
             }
             String visibility = style.get("visibility");
-            if (mail && visibility != null) {
-                // Page mode leaves visibility alone: script toggles it like display.
+            if (honourVisibility && visibility != null) {
+                // Page mode leaves visibility alone: script toggles it like display. A
+                // descendant that says visibility:visible is visible again, as in CSS.
                 invisible = "hidden".equals(visibility) || "collapse".equals(visibility);
             }
         }

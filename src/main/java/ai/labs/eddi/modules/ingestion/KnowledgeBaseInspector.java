@@ -170,7 +170,11 @@ public class KnowledgeBaseInspector {
      *
      * @param truncated
      *            the document has more chunks than {@code limit} (at most
-     *            {@link #MAX_CHUNKS}) allowed; the rest are not listed
+     *            {@link #MAX_CHUNKS}) allowed; the rest are not listed.
+     *            {@code true} is reliable; {@code false} means the search found no
+     *            more, which on a store that filters after an approximate index
+     *            scan (pgvector with an HNSW index) is not a count: no supported
+     *            store offers an exact, store-independent one
      */
     public record ChunkPage(List<Chunk> chunks, boolean truncated) {
     }

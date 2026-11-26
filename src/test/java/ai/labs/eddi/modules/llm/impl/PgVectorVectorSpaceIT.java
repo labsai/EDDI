@@ -282,6 +282,25 @@ class PgVectorVectorSpaceIT {
     }
 
     @Test
+    @DisplayName("an EDDI table with a column of somebody's own added is not an EDDI table: never deleted from or dropped")
+    void tableWithAnExtraColumnIsLeftAlone() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee20";
+        RagConfiguration config = kb("extra", "m", 3, "extra_column_table");
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+        try (Connection c = admin(); Statement s = c.createStatement()) {
+            s.execute("ALTER TABLE extra_column_table ADD COLUMN business_data text DEFAULT 'precious'");
+        }
+        factory.clearCache();
+
+        assertFalse(factory.inspectPgVectorTable(id, config, id).layoutMatches());
+        assertThrows(IllegalArgumentException.class, () -> factory.removeKnowledgeBaseVectors(id, config));
+        assertThrows(IllegalArgumentException.class, () -> factory.dropKnowledgeBaseTable(id, config));
+
+        assertTrue(tableExists("extra_column_table"));
+        assertEquals(1, rowCount("extra_column_table"));
+    }
+
+    @Test
     @DisplayName("a node whose cached store points at a table another node dropped reads it as empty, not as an error")
     void staleCachedStoreReadsAsEmpty() throws Exception {
         String id = "65f0aa11bb22cc33dd44ee11";

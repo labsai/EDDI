@@ -230,14 +230,21 @@ public class KnowledgeBaseReembedService {
 
         List<IngestionSource> claimed = new ArrayList<>();
         List<String> claims = new ArrayList<>();
-        for (IngestionSource source : all) {
-            Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
-            if (claim.isEmpty()) {
-                release(ragConfigId, claimed, claims);
-                return new Result(source.effectiveId(), List.of(), List.of());
+        try {
+            for (IngestionSource source : all) {
+                Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
+                if (claim.isEmpty()) {
+                    release(ragConfigId, claimed, claims);
+                    return new Result(source.effectiveId(), List.of(), List.of());
+                }
+                claimed.add(source);
+                claims.add(claim.get());
             }
-            claimed.add(source);
-            claims.add(claim.get());
+        } catch (RuntimeException e) {
+            // A later claim failed (the state store, say): the earlier ones would stay
+            // RUNNING until they go stale, and refuse every run of those sources meanwhile.
+            release(ragConfigId, claimed, claims);
+            throw e;
         }
 
         // A direct /ingest on this instance is refused until the vectors are made
@@ -473,10 +480,31 @@ public class KnowledgeBaseReembedService {
                     + "this knowledge base a " + location + " of its own, or use a model of " + recorded + " dimensions.",
                     sharers.stream().map(KnowledgeBaseStorageGuard.Sharer::id).toList());
         }
+        // Alone in the location, and the record says another size: the collection may
+        // have been recreated at the new size since (which is what the refusal below
+        // tells the operator to do), and the record cannot know. Ask the collection.
+        // One that still rejects the new vector keeps the refusal.
+        if (acceptsSize(ragConfigId, knowledgeBase, probe)) {
+            return null;
+        }
         throw new ReembedRefusedException(CODE_STORE_CANNOT_RESIZE, "This store's " + location + " holds vectors of " + recorded
                 + " dimensions and keeps that size: EDDI can delete chunks from it but cannot recreate it. The new vectors have " + newSize
                 + ". Nothing was changed. Delete or recreate the " + location + " in the vector store with the new size, or point "
                 + "storeParameters." + location + " at a new one, then re-embed.", List.of());
+    }
+
+    /** Whether one search with the probe vector is accepted; never throws. */
+    private boolean acceptsSize(String ragConfigId, RagConfiguration knowledgeBase, Embedding probe) {
+        try {
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase);
+            store.search(EmbeddingSearchRequest.builder().queryEmbedding(probe).maxResults(1).minScore(0.0)
+                    .filter(EmbeddingStoreFactory.retrievalFilter(ragConfigId, knowledgeBase)).build());
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "The vector store of knowledge base %s still refuses vectors of %d dimensions",
+                    LogSanitizer.sanitize(ragConfigId), probe.dimension());
+            return false;
+        }
     }
 
     /**

@@ -290,7 +290,11 @@ public class VectorSpaceGuard {
     }
 
     private Integer readSize(Identity identity) {
-        String raw = read(identity.sizeKey());
+        return readSize(identity, false);
+    }
+
+    private Integer readSize(Identity identity, boolean fresh) {
+        String raw = read(identity.sizeKey(), fresh);
         if (raw == null || raw.isBlank()) {
             return null;
         }
@@ -341,28 +345,59 @@ public class VectorSpaceGuard {
         try {
             raw = read(identity.modelKey(), fresh);
         } catch (RuntimeException e) {
-            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
+            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s", LogSanitizer.sanitize(ragConfigId));
+            if (fresh) {
+                throw unreadable();
+            }
+            // A search is let through: an unavailable state store must not take
+            // retrieval down, and nothing was found to be wrong.
             return;
         }
         if (isRebuilding(raw)) {
             refused("maintenance");
             throw new VectorSpaceMismatchException(rebuildingMessage(ragConfigId));
         }
-        VectorSpace stored;
-        try {
-            stored = storedFrom(raw, identity);
-        } catch (RuntimeException e) {
-            LOGGER.warnf(e, "Could not read the vector size of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
-            return;
-        }
-        if (stored == null) {
+        VectorSpace model = VectorSpace.decode(raw);
+        if (model == null) {
             adopt(ragConfigId, config, identity, configured);
             return;
         }
+        // The model is judged before the size is even read: a known conflict is not
+        // let through because the size record happens to be unavailable.
+        if (!configured.sameModelAs(model)) {
+            VectorSpace known = model;
+            try {
+                known = model.withDimension(readSize(identity, fresh));
+            } catch (RuntimeException e) {
+                // The message is only less exact without it.
+            }
+            refused("space");
+            throw new VectorSpaceMismatchException(mismatchMessage(ragConfigId, known, configured));
+        }
+        VectorSpace stored;
+        try {
+            stored = model.withDimension(readSize(identity, fresh));
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not read the vector size of knowledge base %s", LogSanitizer.sanitize(ragConfigId));
+            if (fresh) {
+                throw unreadable();
+            }
+            return;
+        }
         if (configured.conflictsWith(stored)) {
-            refused(configured.sameModelAs(stored) ? "dimension" : "space");
+            refused("dimension");
             throw new VectorSpaceMismatchException(mismatchMessage(ragConfigId, stored, configured));
         }
+    }
+
+    /**
+     * A writer is refused while the record cannot be read: a vector written into a
+     * space that cannot be checked, or while another node is rebuilding, stays in
+     * the knowledge base. Retryable; a search is not refused for this.
+     */
+    private static OperatorFailureException unreadable() {
+        return new OperatorFailureException("This knowledge base's embedding space could not be read from the state store right now, "
+                + "so nothing was written: vectors are not stored into a space that cannot be checked. Nothing was changed; try again.");
     }
 
     /**
@@ -401,9 +436,15 @@ public class VectorSpaceGuard {
         }
         Integer size;
         try {
-            size = readSize(identity);
+            // A write that is about to record the size reads it from the store: a size
+            // another node recorded since this node cached its absence must be compared
+            // with, not overwritten. (A search keeps the bounded cache.)
+            size = readSize(identity, record);
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not read the vector size of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
+            if (record) {
+                throw unreadable();
+            }
             return;
         }
         if (size != null && size != actual) {
@@ -447,10 +488,13 @@ public class VectorSpaceGuard {
             return;
         }
         VectorSpace configured = configured(config);
-        write(identity.modelKey(), configured.withDimension(null).encode());
+        // The size first, the model last: the model write is what removes the rebuild
+        // mark, so a failure before it leaves the knowledge base refused until the
+        // re-embed is done, rather than published with the old size.
         if (clearSize) {
             write(identity.sizeKey(), "");
         }
+        write(identity.modelKey(), configured.withDimension(null).encode());
     }
 
     /**
@@ -463,8 +507,9 @@ public class VectorSpaceGuard {
      * {@link #unmarkRebuilding} puts back what was there when nothing was removed
      * after all.
      *
-     * @return what the record held before, for {@link #unmarkRebuilding}; null when
-     *         nothing is tracked for this configuration
+     * @return what the record held before, rebuild mark included, for
+     *         {@link #unmarkRebuilding}; null when nothing is tracked for this
+     *         configuration
      */
     public String markRebuilding(String ragConfigId, RagConfiguration config) {
         Identity identity = identityOf(variables, ragConfigId, config);
@@ -472,13 +517,14 @@ public class VectorSpaceGuard {
             return null;
         }
         String previous = read(identity.modelKey(), true);
-        if (isRebuilding(previous)) {
-            // A re-embed that did not finish: what it saw before is still the truth.
-            previous = previous.substring(REBUILDING_PREFIX.length());
-        }
-        String before = previous == null ? "" : previous;
+        // What the record held, mark included: a re-embed that did not finish left the
+        // mark behind, and a retry that is refused before it removes anything must put
+        // that mark back, not turn the knowledge base into one that looks whole.
+        String held = previous == null ? "" : previous;
+        // A re-embed that did not finish: what it saw before is still the truth.
+        String before = isRebuilding(held) ? held.substring(REBUILDING_PREFIX.length()) : held;
         write(identity.modelKey(), REBUILDING_PREFIX + before);
-        return before;
+        return held;
     }
 
     /**
@@ -521,6 +567,35 @@ public class VectorSpaceGuard {
     }
 
     private void adopt(String ragConfigId, RagConfiguration config, Identity identity, VectorSpace configured) {
+        // The record was seen absent a moment ago, possibly in this node's cache: read
+        // it
+        // again from the store right before writing, so a rebuild mark or a record
+        // another node wrote meanwhile is not replaced by an ordinary one. (The state
+        // store has no compare-and-set, so a write landing in the few milliseconds
+        // between this read and the write below is not excluded.)
+        String current = null;
+        boolean read = false;
+        try {
+            current = read(identity.modelKey(), true);
+            read = true;
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not record the vector space of knowledge base %s", LogSanitizer.sanitize(ragConfigId));
+        }
+        if (!read) {
+            return;
+        }
+        if (isRebuilding(current)) {
+            refused("maintenance");
+            throw new VectorSpaceMismatchException(rebuildingMessage(ragConfigId));
+        }
+        VectorSpace recordedNow = VectorSpace.decode(current);
+        if (recordedNow != null) {
+            if (!configured.sameModelAs(recordedNow)) {
+                refused("space");
+                throw new VectorSpaceMismatchException(mismatchMessage(ragConfigId, recordedNow, configured));
+            }
+            return;
+        }
         try {
             write(identity.modelKey(), configured.withDimension(null).encode());
         } catch (RuntimeException e) {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rag;
 
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -360,6 +361,88 @@ class VectorSpaceGuardTest {
         guard.requireCompatible(ID, pgvector("emb-8", Map.of()));
 
         verify(stateStore, never()).recordStoreFingerprint(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a writer is refused while the record cannot be read; a search is not")
+    void aWriterIsRefusedWhenTheRecordCannotBeRead() {
+        when(stateStore.storeFingerprint(anyString())).thenThrow(new IllegalStateException("db down"));
+        RagConfiguration config = pgvector("emb-8", Map.of());
+
+        assertThrows(OperatorFailureException.class, () -> guard.requireCompatibleForWrite(ID, config));
+        assertDoesNotThrow(() -> guard.requireCompatible(ID, config));
+    }
+
+    @Test
+    @DisplayName("a writer is refused when the model record reads but the size record does not; a known model conflict is refused either way")
+    void aSizeThatCannotBeReadDoesNotHideAModelConflict() {
+        guard.requireCompatible(ID, qdrant("emb-8"));
+        when(stateStore.storeFingerprint(startsWith(VectorSpaceGuard.SIZE_PREFIX))).thenThrow(new IllegalStateException("size down"));
+
+        assertThrows(OperatorFailureException.class, () -> guard.requireCompatibleForWrite(ID, qdrant("emb-8")));
+        assertDoesNotThrow(() -> guard.requireCompatible(ID, qdrant("emb-8")));
+        assertThrows(VectorSpaceMismatchException.class, () -> guard.requireCompatible(ID, qdrant("other-8")));
+        assertThrows(VectorSpaceMismatchException.class, () -> guard.requireCompatibleForWrite(ID, qdrant("other-8")));
+    }
+
+    @Test
+    @DisplayName("an adoption does not overwrite a rebuild mark that was written after the absence was seen")
+    void adoptionLeavesAMarkWrittenMeanwhile() {
+        RagConfiguration config = qdrant("emb-8");
+        // This node reads the record as absent, and caches that...
+        assertNull(guard.status(ID, config).stored());
+        // ...then another node writes the rebuild mark.
+        String modelKey = VectorSpaceGuard.MODEL_PREFIX + VectorSpaceGuard.digest(
+                KnowledgeBaseStorage.vectorSpaceLocation(ID, config) + "\n"
+                        + KnowledgeBaseStorage.chunkKbId(ID, config));
+        records.put(modelKey, "rebuilding|v1|openai|emb-8|||");
+
+        assertThrows(VectorSpaceMismatchException.class, () -> guard.requireCompatible(ID, config));
+        assertEquals("rebuilding|v1|openai|emb-8|||", records.get(modelKey), "the mark is still there");
+    }
+
+    @Test
+    @DisplayName("a write whose cached size is absent reads the size again, and compares with what another node recorded")
+    void aWriteReadsTheSizeFresh() {
+        RagConfiguration config = qdrant("emb-8");
+        guard.requireCompatible(ID, config);
+        guard.verifyDimension(ID, config, 8, false); // caches the absence
+        String sizeKey = VectorSpaceGuard.SIZE_PREFIX + VectorSpaceGuard.digest(
+                KnowledgeBaseStorage.vectorSpaceLocation(ID, config));
+        records.put(sizeKey, "16"); // another node recorded 16
+
+        assertThrows(VectorSpaceMismatchException.class, () -> guard.verifyDimension(ID, config, 8, true));
+        assertEquals("16", records.get(sizeKey), "the other node's size is not overwritten");
+    }
+
+    @Test
+    @DisplayName("reset clears the size before it publishes the model, so a failure leaves the rebuild mark in place")
+    void resetClearsTheSizeFirst() {
+        RagConfiguration config = qdrant("emb-8");
+        guard.requireCompatible(ID, config);
+        guard.verifyDimension(ID, config, 8, true);
+        guard.markRebuilding(ID, config);
+        doThrow(new IllegalStateException("size write failed")).when(stateStore).recordStoreFingerprint(startsWith(VectorSpaceGuard.SIZE_PREFIX),
+                anyString());
+
+        assertThrows(IllegalStateException.class, () -> guard.reset(ID, config, true));
+
+        assertTrue(guard.status(ID, config).rebuilding(), "the mark survived the failed reset");
+    }
+
+    @Test
+    @DisplayName("marking a knowledge base whose earlier re-embed did not finish returns the mark too, so a refused retry puts it back")
+    void markRebuildingKeepsAnInterruptedMark() {
+        RagConfiguration config = qdrant("emb-8");
+        guard.requireCompatible(ID, config);
+        String first = guard.markRebuilding(ID, config);
+        assertFalse(first.startsWith(VectorSpaceGuard.REBUILDING_PREFIX));
+
+        String second = guard.markRebuilding(ID, config);
+        assertTrue(second.startsWith(VectorSpaceGuard.REBUILDING_PREFIX), second);
+        guard.unmarkRebuilding(ID, config, second);
+
+        assertTrue(guard.status(ID, config).rebuilding(), "the interrupted re-embed is still marked");
     }
 
     @Test

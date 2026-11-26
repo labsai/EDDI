@@ -58,6 +58,11 @@ class StoreParameterChecksTest {
         assertTrue(refusal(pgvector(Map.of("host", "db.example.com/eddi?x=y"))).contains("storeParameters.host"));
         assertTrue(refusal(pgvector(Map.of("host", "a.com,b.com"))).contains("storeParameters.host"));
         assertTrue(refusal(pgvector(Map.of("host", "db:5432"))).contains("storeParameters.host"));
+        // What the factory refuses when it builds the store is refused when it is
+        // saved.
+        for (String bad : new String[]{"[::1", "::1]", "db..example", "-db.example", "db-.example", "", "  "}) {
+            assertTrue(refusal(pgvector(Map.of("host", bad))).contains("storeParameters.host"), "'" + bad + "'");
+        }
         for (String fine : new String[]{"localhost", "db.example.com", "10.0.0.5", "pg_vector-1", "[::1]", "::1"}) {
             assertDoesNotThrow(() -> pgvector(Map.of("host", fine)).validate(), fine);
         }

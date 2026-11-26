@@ -190,4 +190,21 @@ class KnowledgeBaseStorageTest {
             assertTrue(KnowledgeBaseStorage.filtersRetrieval(kb("alpha", "qdrant", "id")));
         }
     }
+
+    @Test
+    @DisplayName("5432 and 05432 open the same pgvector server, so they are one vector-space location; another port is not")
+    void spellingsOfOnePortAreOneLocation() {
+        var plain = kb("a", "pgvector", "id");
+        plain.setStoreParameters(Map.of("table", "shared", "port", "5432"));
+        var padded = kb("b", "pgvector", "id");
+        padded.setStoreParameters(Map.of("table", "shared", "port", "05432"));
+        var other = kb("c", "pgvector", "id");
+        other.setStoreParameters(Map.of("table", "shared", "port", "5433"));
+        var defaulted = kb("d", "pgvector", "id");
+        defaulted.setStoreParameters(Map.of("table", "shared"));
+
+        assertEquals(KnowledgeBaseStorage.vectorSpaceLocation(ID_A, plain), KnowledgeBaseStorage.vectorSpaceLocation(ID_A, padded));
+        assertEquals(KnowledgeBaseStorage.vectorSpaceLocation(ID_A, plain), KnowledgeBaseStorage.vectorSpaceLocation(ID_A, defaulted));
+        assertNotEquals(KnowledgeBaseStorage.vectorSpaceLocation(ID_A, plain), KnowledgeBaseStorage.vectorSpaceLocation(ID_A, other));
+    }
 }

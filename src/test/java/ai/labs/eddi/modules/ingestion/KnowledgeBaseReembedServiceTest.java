@@ -411,6 +411,7 @@ class KnowledgeBaseReembedServiceTest {
     void collectionCannotChangeSize() {
         knowledgeBase.setStoreType("qdrant");
         when(guard.recordedSize(eq(ID), any())).thenReturn(1536);
+        when(probedStore.search(any())).thenThrow(new RuntimeException("Vector dimension error: expected dim: 1536, got 768"));
 
         var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
 
@@ -418,6 +419,32 @@ class KnowledgeBaseReembedServiceTest {
         assertTrue(refused.getMessage().contains("collectionName") && refused.getMessage().contains("1536"), refused.getMessage());
         verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
         verify(stateStore, never()).invalidateContent(anyString());
+    }
+
+    @Test
+    @DisplayName("a claim that throws releases the claims already taken, then the failure propagates")
+    void aFailingClaimReleasesTheEarlierOnes() {
+        when(pipeline.claimForMaintenance(eq(ID), eq(upload))).thenThrow(new IllegalStateException("state store down"));
+
+        assertThrows(IllegalStateException.class, () -> service.reembed(ID, knowledgeBase));
+
+        verify(pipeline).releaseClaim(ID, web, "claim");
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("another store: a stale recorded size does not refuse a collection that was recreated at the new size")
+    void recreatedCollectionIsAccepted() {
+        knowledgeBase.setStoreType("qdrant");
+        when(guard.recordedSize(eq(ID), any())).thenReturn(1536);
+        // probedStore.search answers (the mock's default): the collection takes the new
+        // size.
+
+        var result = service.reembed(ID, knowledgeBase);
+
+        assertTrue(!result.refused());
+        verify(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
+        verify(guard).reset(eq(ID), eq(knowledgeBase), eq(true));
     }
 
     @Test

@@ -158,8 +158,12 @@ public class IngestedFileService {
                 // On the request thread, so on a short leash: the probe stops at the
                 // first characters of text, and a file that cannot show any within
                 // UPLOAD_PROBE_DURATION is refused rather than holding the worker.
-                extractors.requireText(content, mimeType,
-                        ExtractionLimits.defaults().withMaxDuration(UPLOAD_PROBE_DURATION));
+                //
+                // Under the source's own visibility setting, as a run applies it: a source
+                // that keeps hidden text (visibleTextOnly=false) must not have a file
+                // refused for having nothing but hidden text.
+                extractors.requireText(content, mimeType, ExtractionLimits.defaults().withMaxDuration(UPLOAD_PROBE_DURATION)
+                        .withVisibleTextOnly(source.settings().visibleTextOnlyOrDefault(source.isUpload())));
             } catch (UnreadableDocumentException e) {
                 rejected.add(new RejectedFile(fileName, e.getMessage()));
                 continue;

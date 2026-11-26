@@ -34,10 +34,17 @@ public final class StoreParameterChecks {
     /** pgvector's {@code vector} type holds at most this many dimensions. */
     static final int MAX_PGVECTOR_DIMENSION = 16_000;
 
-    private static final Pattern HOSTNAME = Pattern.compile("[A-Za-z0-9_](?:[A-Za-z0-9_.\\-]{0,251}[A-Za-z0-9_])?\\.?");
+    /**
+     * The same two patterns, and the same balanced-bracket rule, as
+     * {@code EmbeddingStoreFactory.requirePlainHost} applies when the store is
+     * built, so a host that is saved is a host that can be used.
+     */
+    private static final Pattern HOSTNAME = Pattern
+            .compile("(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?(?:\\.[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*\\.?");
     /**
      * At least two colons: {@code db:5432} is hex digits and one colon, and is a
-     * host with a port.
+     * host with a port (the factory's pattern is looser there; the port is refused
+     * at save time on purpose).
      */
     private static final Pattern IPV6 = Pattern.compile("\\[?(?=(?:[^:]*:){2})[0-9A-Fa-f:.]+\\]?");
 
@@ -135,11 +142,19 @@ public final class StoreParameterChecks {
     }
 
     private static String host(Map<String, String> params, String key) {
-        String value = literal(params.get(key));
+        String raw = params.get(key);
+        if (raw != null && raw.isBlank()) {
+            // The factory takes a present-but-empty host as it is (only an absent one gets
+            // the default), and refuses it when it builds the store.
+            return "storeParameters." + key + " must not be blank; leave it out to use the default (localhost)";
+        }
+        String value = literal(raw);
         if (value == null) {
             return null;
         }
-        if (HOSTNAME.matcher(value).matches() || IPV6.matcher(value).matches()) {
+        boolean bracketed = value.startsWith("[") || value.endsWith("]");
+        boolean ipv6 = IPV6.matcher(value).matches() && (!bracketed || (value.startsWith("[") && value.endsWith("]")));
+        if (HOSTNAME.matcher(value).matches() || ipv6) {
             return null;
         }
         return "storeParameters." + key + " must be one hostname or IP address, without a port, path or list; "

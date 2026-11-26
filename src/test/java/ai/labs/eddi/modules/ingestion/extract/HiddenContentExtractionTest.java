@@ -107,6 +107,23 @@ class HiddenContentExtractionTest {
         }
 
         @Test
+        @DisplayName("properties kept in a tracked-change history (w:rPrChange) are the old formatting: they hide nothing now")
+        void revisionHistoryPropertiesAreIgnored() {
+            byte[] file = docx(
+                    """
+                            <w:p><w:r><w:rPr><w:rPrChange w:id="1" w:author="a"><w:rPr><w:vanish/><w:sz w:val="2"/></w:rPr></w:rPrChange></w:rPr><w:t>REVISED-BUT-SHOWN</w:t></w:r></w:p>
+                            <w:p><w:r><w:rPr><w:vanish/><w:rPrChange w:id="2" w:author="a"><w:rPr/></w:rPrChange></w:rPr><w:t>CURRENTLY-HIDDEN</w:t></w:r></w:p>
+                            <w:p><w:r><w:rPr><w:vanish w:val=" 0 "/></w:rPr><w:t>PADDED-OFF-SHOWN</w:t></w:r></w:p>
+                            """);
+
+            String text = extractor.extract(file, VISIBLE_ONLY);
+
+            assertTrue(text.contains("REVISED-BUT-SHOWN"), text);
+            assertTrue(text.contains("PADDED-OFF-SHOWN"), text);
+            assertFalse(text.contains("CURRENTLY-HIDDEN"), text);
+        }
+
+        @Test
         @DisplayName("with visibleTextOnly off, everything is extracted")
         void everythingWhenAsked() {
             String text = extractor.extract(mixed, EVERYTHING);
@@ -230,6 +247,24 @@ class HiddenContentExtractionTest {
                     + "<si><t>SHOWN-ROW</t></si><si><t>FILTERED-OUT-ROW</t></si><si><t>GROUPED-ROW</t></si><si><t>HAND-HIDDEN-ROW</t></si></sst>");
             parts.put("xl/worksheets/sheet1.xml", sheetXmlBody);
             return OfficeFixtures.zip(parts);
+        }
+
+        @Test
+        @DisplayName("an XML boolean with padding (hidden=\" true \") is still hidden, for rows and columns")
+        void paddedBooleansAreStillHidden() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <cols><col min="2" max="2" width="9" hidden=" 1 "/></cols>
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+                        <row r="2" hidden=" true "><c r="A2" t="s"><v>3</v></c></row>
+                      </sheetData>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("SHOWN-ROW"), text);
+            assertFalse(text.contains("HAND-HIDDEN-ROW"), text);
+            assertFalse(text.contains("FILTERED-OUT-ROW"), text);
         }
 
         @Test
@@ -375,6 +410,18 @@ class HiddenContentExtractionTest {
         }
 
         @Test
+        @DisplayName("show=\"false\" hides a slide as much as show=\"0\" does, with or without padding")
+        void bothSpellingsOfFalseHideASlide() {
+            for (String show : new String[]{"show=\"false\"", "show=\" 0 \"", "show=\" false \""}) {
+                byte[] file = OfficeFixtures.zip(Map.of("ppt/slides/slide1.xml", slide(show, shape("", "SLIDE-HIDDEN-BY-" + show.hashCode()))));
+                String text = extractor.extract(file, VISIBLE_ONLY);
+                assertFalse(text.contains("SLIDE-HIDDEN-BY"), show + " -> " + text);
+            }
+            byte[] shown = OfficeFixtures.zip(Map.of("ppt/slides/slide1.xml", slide("show=\"true\"", shape("", "SHOWN-SLIDE"))));
+            assertTrue(extractor.extract(shown, VISIBLE_ONLY).contains("SHOWN-SLIDE"));
+        }
+
+        @Test
         @DisplayName("with visibleTextOnly off, hidden slides and shapes are extracted")
         void everythingWhenAsked() {
             String text = extractor.extract(deck(), EVERYTHING);
@@ -404,6 +451,21 @@ class HiddenContentExtractionTest {
             assertFalse(text.contains("HTML-HIDDEN"), text);
             assertFalse(text.contains("HIDDEN-ATTRIBUTE-TEXT"), text);
             assertFalse(text.contains("ZERO-OPACITY-TEXT"), text);
+        }
+
+        @Test
+        @DisplayName("inline visibility:hidden is left out, with its descendants, except one that says visibility:visible")
+        void inlineVisibilityIsHonoured() {
+            byte[] file = ("<html><body><main><p>Shown first.</p>"
+                    + "<div style=\"visibility:hidden\"><p>VISIBILITY-HIDDEN</p><p style=\"visibility:visible\">VISIBLE-AGAIN</p></div>"
+                    + "</main></body></html>").getBytes(StandardCharsets.UTF_8);
+
+            String text = extractor.extract(file, VISIBLE_ONLY);
+
+            assertTrue(text.contains("Shown first."), text);
+            assertFalse(text.contains("VISIBILITY-HIDDEN"), text);
+            assertTrue(text.contains("VISIBLE-AGAIN"), text);
+            assertTrue(extractor.extract(file, EVERYTHING).contains("VISIBILITY-HIDDEN"), "page mode leaves it alone");
         }
 
         @Test

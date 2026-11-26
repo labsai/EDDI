@@ -175,3 +175,19 @@ An independent review found the single-knowledge-base case sound and these gaps;
 **Behaviour changes in this round:** `reembed` answers `409 TABLE_BUSY` or `409 STORE_PROBE_FAILED` where it used to delete and
 warn or delete and fail later; a knowledge base whose re-embed failed part-way is refused until it is re-embedded again; `503`
 answers of `reembed` carry a `code`.
+
+**Review round (merge with `main` and the CodeRabbit threads):**
+
+- **Vector-space guard.** A writer is refused with a retryable error when the model or size record cannot be read (a search is still
+  let through); a recorded model that conflicts is refused before the size is read; an adoption re-reads the record from the store
+  and does not replace a rebuild mark or a record another node wrote meanwhile (the state store has no compare-and-set, so a
+  millisecond window remains); a write that records the size reads it fresh; `reset` clears the size before it publishes the model;
+  a retry of an interrupted re-embed that is refused puts its rebuild mark back.
+- **Re-embed.** A collection recreated at the new size is accepted although a stale size is recorded (the probe decides); a claim
+  that throws releases the claims already taken.
+- **pgvector.** The layout check requires exactly the four EDDI columns, and is repeated under the table lock before a drop. Location
+  keys treat `5432` and `05432` as one port.
+- **Hidden text.** Padded XML booleans (`hidden=" true "`), `show="false"`, and run properties kept in a Word revision history
+  (`w:rPrChange`) are judged correctly; inline `visibility:hidden` is honoured in `VISIBLE` mode; the upload probe follows the
+  source's `visibleTextOnly`.
+- **Save-time checks.** A store host is judged by the factory's own patterns, and a blank host is refused at save.

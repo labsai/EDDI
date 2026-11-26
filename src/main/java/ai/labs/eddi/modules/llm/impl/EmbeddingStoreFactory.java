@@ -400,11 +400,15 @@ public class EmbeddingStoreFactory {
 
     /**
      * @param forWrite
-     *            whether the caller is about to write. A read never creates
-     *            anything in the vector database: for pgvector, a knowledge base
-     *            whose table does not exist yet reads as empty
+     *            whether the caller is about to write. A read never creates a
+     *            <em>table</em> in the vector database: for pgvector, a knowledge
+     *            base whose table does not exist yet reads as empty
      *            ({@link #ABSENT_TABLE}) instead of the table being created by a
-     *            search.
+     *            search. A read that has to build the store of an existing,
+     *            uncached table (after a restart, say) opens it through the same
+     *            build a write does, which still issues {@code IF NOT EXISTS} DDL —
+     *            a no-op on a table that is complete, and the missing-index repair
+     *            otherwise.
      */
     private EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config, boolean forWrite) {
         requireId(ragConfigId);
@@ -1274,6 +1278,13 @@ public class EmbeddingStoreFactory {
                         return RemovalOutcome.TABLE_BUSY;
                     }
                     throw lock;
+                }
+                // The layout was checked before the lock was taken. A migration may have
+                // replaced the table under this name in between; the lock now protects the
+                // replacement, so what is dropped must be judged again, under it.
+                if (!PgVectorSchema.layoutMatches(connection, target.table())) {
+                    connection.rollback();
+                    throw notAPgVectorTable(target.table());
                 }
                 if (holdsRows(connection, quoted, ownChunkKbId)) {
                     connection.rollback();

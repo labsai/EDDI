@@ -295,8 +295,16 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         }
     }
 
+    /**
+     * An XML Schema boolean: {@code 1} or {@code true}, with the surrounding
+     * whitespace the schema collapses ({@code hidden=" true "} is hidden).
+     */
     private static boolean isOn(String value) {
-        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return trimmed.equals("1") || trimmed.equalsIgnoreCase("true");
     }
 
     /**
