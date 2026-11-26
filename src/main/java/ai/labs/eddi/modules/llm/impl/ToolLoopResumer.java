@@ -324,6 +324,11 @@ class ToolLoopResumer {
             String mandatoryRefusal = null;
             if (c.isMandatory() && attribution == null) {
                 mandatoryRefusal = "this call needs an approval its approver could not give";
+            } else if (amended != null && c.isMandatory()) {
+                // The resume path refuses this before it consumes the pause; asked again
+                // here so a replacement pause that reused the callId cannot run amended
+                // arguments the approver's rule never saw.
+                mandatoryRefusal = "a call that needs a mandatory approval cannot run with amended arguments";
             } else if (amended != null && !c.isMandatory()
                     && MandatoryApprovals.evaluate(setup.mandatoryApprovalRules(), rebuiltRequest(c, amended)) != null) {
                 mandatoryRefusal = "the amended call needs a mandatory approval it was not given";

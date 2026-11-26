@@ -35,7 +35,9 @@ unchanged.
   pause is consumed. `ANY_PERMITTED_APPROVER`: whoever may decide the pause today.
 - **Execution side.** `ToolLoopResumer` runs a mandatory call only when the resume path attached a
   checked `MandatoryApprovalAttribution` for that call to the decision (per call: a batch may mix
-  approver rules, and each call runs and is recorded with its own), re-asks the rules about amended arguments,
+  approver rules, and each call runs and is recorded with its own), refuses amended arguments on a mandatory call again
+  (so a replacement pause that reused the callId after the pre-consume check cannot run them), re-asks the rules about
+  amended arguments of any other call,
   records `actingAs`/`approvedBy`/`onBehalfOf` on the `hitl_approved` trace entry, and binds the
   attribution around the call (`ApprovedCallScope.attribution()`) so a record the call creates can
   store it.

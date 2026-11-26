@@ -359,6 +359,17 @@ class ToolLoopMandatoryApprovalTest {
             assertEquals(List.of(CONSENT), AgentOrchestrator.withAnswerTool(setup, task).mandatoryApprovalRules());
             assertEquals(List.of(CONSENT), orchestrator.buildToolSetup(calculatorTask(), memory).mandatoryApprovalRules());
         }
+
+        @Test
+        @DisplayName("LAZY with an external lazy source: the completed setup still carries the rules")
+        void rulesSurviveLazyCompletion() {
+            var task = calculatorTask();
+            task.setToolLoadingStrategy(LlmConfiguration.ToolLoadingStrategy.LAZY);
+            task.setLazySources(List.of("http"));
+            assertTrue(LazyToolCatalog.externalLazy(task), "the case must take the external-LAZY branch");
+
+            assertEquals(List.of(CONSENT), orchestrator.buildToolSetup(task, memory).mandatoryApprovalRules());
+        }
     }
 
     @Nested
@@ -499,6 +510,27 @@ class ToolLoopMandatoryApprovalTest {
             verify(calculatorTool, never()).calculate(anyString());
             assertTrue(result.trace().stream().anyMatch(t -> "hitl_mandatory_unapproved".equals(t.get("type"))));
             assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("amended arguments on a mandatory call that carries a checked approval: NOT_EXECUTED, the tool never runs")
+        void mandatoryCallWithAmendedArgumentsNotExecuted() throws Exception {
+            ChatModel chatModel = mock(ChatModel.class);
+            when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("done"));
+            var attribution = new MandatoryApprovalAttribution(USER_ID, null, ActingAs.USER);
+            var decision = approval(attribution);
+            decision.setMandatoryApprovalsByCallId(Map.of("c1", attribution));
+            var cd = new ToolCallDecision();
+            cd.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+            cd.setAmendedArguments("{\"expression\":\"6*7\"}");
+            decision.setToolDecisions(Map.of("c1", cd));
+
+            var result = orchestrator.resumeToolLoop(chatModel, calculatorTask(), memory, batch(pendingCall("{\"expression\":\"file\"}", true)),
+                    decision, true);
+
+            verify(calculatorTool, never()).calculate(anyString());
+            verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+            assertTrue(result.trace().stream().anyMatch(t -> "hitl_mandatory_unapproved".equals(t.get("type"))));
         }
     }
 }

@@ -473,6 +473,11 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 
 ### Egress needs an approval the designer cannot switch off
 
+> **Status: the mechanism ships, the rules do not yet.** No tool source registers a mandatory rule in this revision, so
+> the hook currently gates no tool: an `exempt` tool, or one with no approvals configured, runs without a human check.
+> The rules for file egress and team-library additions arrive with the tool sources that carry those arguments. Until
+> then, control outbound file tools with the ordinary tool approvals and by choosing which tools an agent gets.
+> What follows describes the behaviour once a rule is registered.
 A tool call that carries a file out of the deployment, or adds a document to a team library, must pause for a human even when the agent designer marked the tool `exempt` or configured no approvals at all. The tool approval gate cannot express that — it matches a call by name, never by its arguments — so the engine has a separate, server-side hook: **mandatory, argument-aware approvals** ([HITL — Mandatory approvals](hitl.md#mandatory-approvals)). Design points for a security review:
 
 - **Server code decides, not configuration.** A rule is attached by the tool source that built the tool and sees the call's arguments; no agent config can remove it. A rule that throws gates the call for the conversation user's confirmation, and a source whose rules cannot be built loses its tools for the turn.
