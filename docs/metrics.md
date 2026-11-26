@@ -960,7 +960,9 @@ No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for 
 that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
 or removed because their user was erased or their conversation deleted — `erased` by the
 [erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) on the health worker, `orphaned` by
-the daily orphan sweep (rows of purged agent-test conversations, the one delete outside the guarantee). A dropped row is a gap in
+the daily orphan sweep (rows of purged agent-test conversations, the one delete outside the guarantee). `erased` also counts
+writes the guard refused because the erasure tombstones could not be read (fail closed): a rising `erased` together with
+`eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}` is a tombstone-store fault, not erasures. A dropped row is a gap in
 the health views, never a slower or failed turn. See [Agent Health](agent-health.md).
 
 ### GDPR Erasure Guarantee Metrics

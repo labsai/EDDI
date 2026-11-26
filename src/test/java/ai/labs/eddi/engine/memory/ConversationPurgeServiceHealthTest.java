@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
@@ -79,7 +80,7 @@ class ConversationPurgeServiceHealthTest {
         when(healthStore.countByConversationId("conv")).thenReturn(1L);
         ConversationPurgeService service = service(memoryStore, healthStore);
 
-        assertThrows(Exception.class, () -> service.purge("conv"));
+        assertThrows(ResourceStoreException.class, () -> service.purge("conv"));
 
         verify(memoryStore, never()).deleteConversationMemorySnapshot("conv");
     }

@@ -412,6 +412,21 @@ class HealthTurnRecorderTest {
         }
 
         @Test
+        @DisplayName("a turn captured after the user's erasure (a reused id) is stored")
+        void capturedAfterErasureIsStored() {
+            // The tombstone is an hour older than the capture: beyond the clock skew.
+            ErasureGuard earlier = new ErasureGuard(tombstones, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(5), Duration.ofMinutes(5), Clock.offset(CLOCK, Duration.ofHours(-1)));
+            earlier.tombstoneUser("user-1", List.of());
+
+            guarded.record(memory(), null, null, null, false);
+
+            verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
+            verify(store, after(300).never()).deleteRow(any(), any());
+            assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
+        }
+
+        @Test
         @DisplayName("tombstones that cannot be read refuse the write (fail closed)")
         void unreadableTombstonesRefuse() {
             tombstones.failReads = true;
@@ -422,7 +437,7 @@ class HealthTurnRecorderTest {
         }
 
         @Test
-        @DisplayName("the drain barrier waits for a write in progress, not for one queued after it")
+        @DisplayName("the drain barrier waits for a write in progress")
         void drainBarrier() throws Exception {
             assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
             assertFalse(writer.awaitDrained(Duration.ofMillis(100)), "the blocked write is outstanding");

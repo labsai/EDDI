@@ -116,7 +116,7 @@ public class ConversationPurgeService {
     }
 
     static final String NO_GUARD = "This conversation purge service was built without the erasure guard, so it cannot guarantee that "
-            + "asynchronously written data (alerts) of the conversation is gone and cannot be written later.";
+            + "asynchronously written data (alerts, Agent Health rows) of the conversation is gone and cannot be written later.";
 
     /**
      * The erasure guarantee for many conversations about to be deleted permanently
@@ -258,8 +258,10 @@ public class ConversationPurgeService {
             } catch (ErasureIncompleteException e) {
                 LOGGER.errorf("GDPR: the asynchronously written data of conversation %s could not be erased with a guarantee: %s",
                         sanitize(conversationId), sanitize(e.getMessage()));
-                throw new ResourceStoreException("Could not erase the asynchronously written data (alerts) of conversation " + conversationId
-                        + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.", e);
+                throw new ResourceStoreException(
+                        "Could not erase the asynchronously written data (alerts, Agent Health rows) of conversation " + conversationId
+                                + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.",
+                        e);
             }
         }
 

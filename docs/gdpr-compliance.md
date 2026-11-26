@@ -456,8 +456,8 @@ consequence of a deployment condition the guarantee states it relies on:
    **Upgrade every node before relying on the guarantee**, and re-run erasures made
    during the rollout.
 
-**For a new async writer** (an `AsyncErasureWriter` bean — Agent Health's recorders
-are the next), the contract is:
+**For a new async writer** (an `AsyncErasureWriter` bean — alerts and Agent Health
+turn rows are the two so far), the contract is:
 
 - **Queue through a `DrainBarrier`** (`barrier.execute(executor, task)`) and answer
   `awaitDrained` with `barrier.awaitDrained(timeout)`. Any executor that runs every

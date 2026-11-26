@@ -221,8 +221,15 @@ Turn rows are personal data about a user's use of an agent:
   user's turn captured before the erasure; and right after a write (also a
   failed one) it asks again and deletes each row it wrote, or records a durable
   pending removal that keeps the erasure failing until a retry removes it.
-  Withheld and removed rows count as `eddi_health_dropped_total{reason="erased"}`.
-  The checks run on the worker, never on the turn's thread. The limits are the
+  Withheld and removed rows count as `eddi_health_dropped_total{reason="erased"}`
+  — also rows refused because the tombstones could not be read (fail closed; see
+  `eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}`). The checks run
+  on the worker, never on the turn's thread: a few point reads of the tombstone
+  store per turn, which bound the worker's throughput. Two consequences: an
+  erasure or a permanent delete waits for every node's health queue (up to
+  `eddi.gdpr.drain-timeout`; a backlog longer than that fails it, retryably),
+  and a health store that cannot delete or count fails a permanent conversation
+  delete — also with `eddi.health.enabled=false` — until it recovers. The limits are the
   guarantee's own, listed in the
   [GDPR guide](gdpr-compliance.md#residual-limits-of-the-erasure-guarantee). The
   one delete outside it is the purge of an agent-test conversation (its user is
