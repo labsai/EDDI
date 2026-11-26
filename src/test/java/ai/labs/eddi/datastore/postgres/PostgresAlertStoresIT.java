@@ -75,6 +75,8 @@ class PostgresAlertStoresIT extends PostgresTestBase implements AlertStoreContra
             }
         }
         assertTrue(Pattern.compile("idx_alert_events_conversation\\b(?!_)").matcher(plan).find(), plan.toString());
+        // Used as an index on the conversation, not scanned whole with a filter.
+        assertTrue(plan.toString().contains("Index Cond: ((conversation_id)"), plan.toString());
     }
 
     @Test
