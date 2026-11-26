@@ -1195,13 +1195,17 @@ public class Conversation implements IConversation {
         long now = System.currentTimeMillis();
         properties.forEach((key, property) -> {
             if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
-                pending.add(key);
+                boolean newlyOwed = pending.add(key);
                 // When this conversation changed it: a later make-up write yields to a
                 // value another conversation wrote after this time (F4). A key this turn
                 // merely carries over (the baseline is empty after a pause or an error)
                 // keeps the time it was first owed.
                 if (property.equals(longTermAtTurnStart.get(key))) {
-                    since.putIfAbsent(key, now);
+                    // An older marker without a time (saved before the times were kept)
+                    // stays without one, which counts as old.
+                    if (newlyOwed) {
+                        since.putIfAbsent(key, now);
+                    }
                 } else {
                     since.put(key, now);
                 }

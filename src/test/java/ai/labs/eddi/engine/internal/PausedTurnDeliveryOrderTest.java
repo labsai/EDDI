@@ -319,6 +319,28 @@ class PausedTurnDeliveryOrderTest {
         }
 
         @Test
+        @DisplayName("a cancelled turn whose state update did not land is told 'not stored', never answered as a finished READY turn")
+        void cancelled_unwrittenTurn_isNotAnsweredAsDone() throws Exception {
+            var turn = new SayTurn(ConversationState.READY);
+            doAnswer(inv -> {
+                turn.memory.get().setCancelled(true);
+                turn.renderer.get().renderOutput(turn.memory.get());
+                return null;
+            }).when(turn.conversation).say(anyString(), any());
+            // The interrupt state never lands (compareAndSetState misses): the store still
+            // says READY.
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+
+            turn.sayAndRun(handler);
+
+            ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+            verify(handler, times(1)).onComplete(delivered.capture());
+            assertTrue(TurnNotStored.isNotStored(delivered.getValue().getError()));
+            assertEquals(TurnNotStored.Reason.OUTCOME_UNKNOWN.tag(), delivered.getValue().getError().errorType());
+        }
+
+        @Test
         @DisplayName("store failure while persisting the pause: the handler still terminates exactly once, not as AWAITING_HUMAN")
         void pause_storeFails_stillTerminatesOnce() throws Exception {
             var turn = new SayTurn(ConversationState.AWAITING_HUMAN);

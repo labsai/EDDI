@@ -61,7 +61,7 @@ class ConversationDocumentSizeTest {
         nested.put("list", List.of(1, 2, 3, "x".repeat(500)));
         snapshot.getConversationProperties().put("data", new Property("data", nested, Property.Scope.conversation));
         long json = new ObjectMapper().findAndRegisterModules().writeValueAsBytes(snapshot).length;
-        assertTrue(ConversationDocumentSize.estimate(snapshot) >= json * 0.9,
+        assertTrue(ConversationDocumentSize.estimate(snapshot) >= json,
                 "estimate " + ConversationDocumentSize.estimate(snapshot) + " vs JSON " + json);
     }
 
@@ -206,6 +206,20 @@ class ConversationDocumentSizeTest {
             nested = List.of(nested);
         }
         snapshot.getConversationOutputs().getFirst().put("deep", nested);
+        assertEquals(Long.MAX_VALUE, ConversationDocumentSize.estimate(snapshot));
+    }
+
+    @Test
+    @DisplayName("a chain of properties nested through their value maps counts toward the depth limit")
+    void nestedPropertiesCountTowardsDepth() {
+        var snapshot = snapshotWithAnswer("x");
+        Property inner = new Property("p", "y".repeat(1_000_000), Property.Scope.conversation);
+        for (int i = 0; i < 80; i++) {
+            Map<String, Object> holder = new HashMap<>();
+            holder.put("next", inner);
+            inner = new Property("p" + i, holder, Property.Scope.conversation);
+        }
+        snapshot.getConversationProperties().put("root", inner);
         assertEquals(Long.MAX_VALUE, ConversationDocumentSize.estimate(snapshot));
     }
 

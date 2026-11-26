@@ -464,8 +464,8 @@ class ConversationStepRunnerLeaseTest {
     }
 
     @Test
-    @DisplayName("F2: a fence raised over an abandoned write is kept (highest wins) and consumed by the conversation's next turn")
-    void raisedFenceIsConsumedByTheNextTurn() throws Exception {
+    @DisplayName("F2: a fence raised over an abandoned write is kept (highest wins) and used by every queued turn until it expires")
+    void raisedFenceIsUsedByQueuedTurns() throws Exception {
         IConversationMemory abandoned = mock(IConversationMemory.class);
         when(abandoned.getFenceToken()).thenReturn(4L);
         runner.fenceAbandonedWrite(ID, abandoned);
@@ -478,8 +478,14 @@ class ConversationStepRunnerLeaseTest {
         when(memory.getStoredFence()).thenReturn(3L);
         runTurn(null);
 
-        verify(memory).setFenceToken(5L);
-        assertNull(runner.rememberedFence(ID), "consumed: later turns load the raised fence from the store");
+        // A second turn queued before the raise: the first one wrote nothing (the
+        // revision
+        // is unchanged), so this one is not reloaded and still needs the remembered
+        // fence.
+        runTurn(null);
+
+        verify(memory, times(2)).setFenceToken(5L);
+        assertEquals(5L, runner.rememberedFence(ID), "kept until retention expires it");
     }
 
     @Test

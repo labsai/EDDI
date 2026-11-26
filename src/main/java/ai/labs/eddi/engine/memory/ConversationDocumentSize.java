@@ -115,7 +115,7 @@ public final class ConversationDocumentSize {
         Map<String, Property> properties = snapshot.getConversationProperties();
         if (properties != null) {
             for (Map.Entry<String, Property> entry : properties.entrySet()) {
-                size += ENTRY_OVERHEAD + utf8Length(entry.getKey()) + walk.property(entry.getValue());
+                size += ENTRY_OVERHEAD + utf8Length(entry.getKey()) + walk.property(entry.getValue(), 0);
             }
         }
         size += walk.steps(snapshot.getConversationSteps());
@@ -187,13 +187,13 @@ public final class ConversationDocumentSize {
             return size;
         }
 
-        long property(Property property) {
+        long property(Property property, int depth) {
             if (property == null) {
                 return SCALAR_SIZE;
             }
             // field names (name, valueString, scope, visibility, …), headers, scalar slots
-            return 6 * ENTRY_OVERHEAD + 6 * SCALAR_SIZE + utf8Length(property.getName()) + value(property.getValueString(), 1)
-                    + value(property.getValueObject(), 1) + value(property.getValueList(), 1);
+            return 6 * ENTRY_OVERHEAD + 6 * SCALAR_SIZE + utf8Length(property.getName()) + value(property.getValueString(), depth + 1)
+                    + value(property.getValueObject(), depth + 1) + value(property.getValueList(), depth + 1);
         }
 
         long value(Object value, int depth) {
@@ -247,7 +247,7 @@ public final class ConversationDocumentSize {
                 return size;
             }
             if (value instanceof Property property) {
-                return property(property);
+                return property(property, depth);
             }
             if (value instanceof Object[] array) {
                 long size = ENTRY_OVERHEAD;

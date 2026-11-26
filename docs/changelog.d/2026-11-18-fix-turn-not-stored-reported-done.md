@@ -192,3 +192,17 @@ so the tests were rewritten, not the engine:
 - The sub-agent tool no longer says an initial message "was not stored" when storage was not confirmed; the docs for
   the not-stored reasons, the SSE error event and a paused turn say that `store_failure` and `outcome_unknown` may
   have been stored and must be read before retrying.
+
+### Second review round
+
+- The remembered raised fence is no longer dropped when the runtime accepts a turn; it expires by retention, so a
+  queued turn behind a turn that wrote nothing still writes with it.
+- A turn abandoned by the watchdog is reported as abandoned even when the state read after the cancel throws, so the
+  late-write fence still runs.
+- A cancelled or abandoned turn whose interrupt state did not land (the store still shows `READY`) is answered
+  `turn_not_stored` / `outcome_unknown`, not as a finished turn. A turn that was not stored no longer feeds the
+  `OUTPUT_MATCH` clean-turn hook.
+- The size estimate counts depth through nested properties; an owed marker saved without a time stays "old".
+- Docs: the size estimate is calibrated on fixtures, the single-node fence holds only when the store confirms it, a
+  cancel racing the write does not remove a committed turn, and a resume that does not re-pause is answered before its
+  write.

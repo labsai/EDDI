@@ -148,6 +148,22 @@ class ConversationLongTermPersistenceTest {
     }
 
     @Test
+    @DisplayName("F4 — an owed marker saved without a time (older conversation) still counts as old and yields to a stored value")
+    void markerWithoutATimeStaysOld() throws Exception {
+        memory.setConversationState(ConversationState.ERROR);
+        memory.getConversationProperties().put("K", new Property("K", "1", Scope.longTerm));
+        memory.setPendingLongTermWrites(Set.of("K"));
+        var stored = new UserMemoryEntry("e", "user-1", "K", "2", "fact", Visibility.global, "agent-2", List.of(), "conv-b", false, 0,
+                Instant.now().minusSeconds(60), Instant.now().minusSeconds(60));
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(stored));
+
+        nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
+
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+    }
+
+    @Test
     @DisplayName("F4 — lists that print alike but differ are not 'already the same'")
     void listsThatPrintAlikeAreDifferent() {
         long changedAt = System.currentTimeMillis();

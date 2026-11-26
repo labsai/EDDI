@@ -152,6 +152,18 @@ class ConversationStepRunnerTurnOutcomeTest {
     }
 
     @Test
+    @DisplayName("a timed-out turn is still reported abandoned when the state read that follows the cancel throws")
+    void abandonmentSurvivesAFailingStateRead() throws Exception {
+        IConversationMemoryStore failingStore = mock(IConversationMemoryStore.class);
+        when(failingStore.getConversationState(ID)).thenThrow(new IllegalStateException("db down"));
+        ConversationStepRunner timeoutRunner = new ConversationStepRunner(mock(ConversationService.class), failingStore,
+                mock(IConversationDescriptorStore.class), mock(IRuntime.class), null, new ConcurrentHashMap<>(), 0);
+
+        assertTrue(timeoutRunner.waitForExecutionFinishOrTimeout(Map.of(), ID, memory(ConversationState.READY, false, null),
+                new CompletableFuture<>()), "the caller must learn of the abandonment so it can fence the late write");
+    }
+
+    @Test
     @DisplayName("with the alert worker stuck and its queue full, 2,000 failing turns still finish without waiting on alerting")
     void turnsNeverWaitForAlerting() throws Exception {
         AlertEngine engine = mock(AlertEngine.class);

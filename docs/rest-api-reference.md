@@ -317,7 +317,7 @@ Rules for clients:
   Show the error in place of the streamed answer. For `store_failure` and
   `outcome_unknown` storage was not confirmed and the turn may already be in the
   conversation: read the conversation before retrying. For the other reasons the
-  turn was refused and is not in it. `done` is sent only after the turn was stored.
+  turn was refused and is not in it. For ordinary turns and committed pauses `done` is sent only after the turn was stored; the exception is a `/resume` that does not re-pause, whose answer is still sent before its own write (see [hitl](hitl.md)).
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
 - **`/resume/stream` does not cancel on disconnect by default.** A resume is a
