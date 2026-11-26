@@ -47,6 +47,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetContext;
@@ -225,6 +226,11 @@ public class GroupConversationService implements IGroupConversationService, User
     // materialize and share discussion attachments with member conversations.
     @Inject
     IAttachmentStore attachmentStore;
+
+    // Same reason: null in the direct-construction unit tests, where the binder
+    // then builds the shared capability check over attachmentStore itself.
+    @Inject
+    AttachmentShareService attachmentShareService;
 
     // Same reason. Ephemeral cleanup deletes the Agent directly, not via
     // RestAgentStore, so it has to retire the deployment record itself.
@@ -832,7 +838,9 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     private GroupAttachmentBinder attachmentBinder() {
-        return new GroupAttachmentBinder(attachmentStore, defaultTenantId);
+        return attachmentShareService != null
+                ? new GroupAttachmentBinder(attachmentStore, defaultTenantId, attachmentShareService)
+                : new GroupAttachmentBinder(attachmentStore, defaultTenantId);
     }
 
     /**

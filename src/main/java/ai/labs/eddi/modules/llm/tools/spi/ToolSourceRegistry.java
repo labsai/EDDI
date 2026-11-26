@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.spi;
 
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
@@ -139,6 +140,7 @@ public final class ToolSourceRegistry {
         private final Map<String, ToolRequestResolver> toolRequestResolvers = new LinkedHashMap<>();
         private final List<ProviderFailure> failures = new ArrayList<>();
         private final Map<String, ToolGroup> toolGroups = new LinkedHashMap<>();
+        private final List<MandatoryApprovalRule> mandatoryApprovalRules = new ArrayList<>();
 
         private Merger() {
         }
@@ -148,7 +150,9 @@ public final class ToolSourceRegistry {
             if (provider == null) {
                 return this;
             }
-            merge(provider.source(), contributeSafely(provider, ctx));
+            Contributed contributed = contributeSafely(provider, ctx);
+            merge(provider.source(), contributed.contribution());
+            mandatoryApprovalRules.addAll(contributed.rules());
             return this;
         }
 
@@ -178,6 +182,14 @@ public final class ToolSourceRegistry {
          */
         public List<ToolSpecification> specsSoFar() {
             return List.copyOf(specs);
+        }
+
+        /**
+         * The mandatory-approval rules of every provider merged so far
+         * ({@link ToolSourceProvider#mandatoryApprovals}), in provider order.
+         */
+        public List<MandatoryApprovalRule> mandatoryApprovalRules() {
+            return List.copyOf(mandatoryApprovalRules);
         }
 
         public Assembled build() {
@@ -254,10 +266,21 @@ public final class ToolSourceRegistry {
      * ({@code OutOfMemoryError}, {@code StackOverflowError}) will resurface at the
      * next allocation regardless, so swallowing them here delays nothing.
      */
-    private static ToolContribution contributeSafely(ToolSourceProvider provider, ToolAssemblyContext ctx) {
+    private static Contributed contributeSafely(ToolSourceProvider provider, ToolAssemblyContext ctx) {
         try {
             ToolContribution contribution = provider.contribute(ctx);
-            return contribution != null ? contribution : ToolContribution.empty();
+            // Asked inside the same try: a provider whose rules cannot be built loses its
+            // tools as well, so no tool is ever offered without the rules governing it.
+            List<MandatoryApprovalRule> rules = provider.mandatoryApprovals(ctx);
+            List<MandatoryApprovalRule> kept = new ArrayList<>();
+            if (rules != null) {
+                for (MandatoryApprovalRule rule : rules) {
+                    if (rule != null) {
+                        kept.add(rule);
+                    }
+                }
+            }
+            return new Contributed(contribution != null ? contribution : ToolContribution.empty(), List.copyOf(kept));
         } catch (Throwable t) {
             // Restore the interrupt before swallowing: a provider that was interrupted
             // mid-discovery clears the flag on the way out, and this catch is broad
@@ -274,8 +297,12 @@ public final class ToolSourceRegistry {
             // near-undiagnosable without the stack trace naming the missing class.
             LOGGER.warnf(t, "Tool source '%s' failed to contribute and was skipped — the remaining sources still assemble",
                     provider.source());
-            return ToolContribution.empty();
+            return new Contributed(ToolContribution.empty(), List.of());
         }
+    }
+
+    /** One provider's contribution and its mandatory-approval rules. */
+    private record Contributed(ToolContribution contribution, List<MandatoryApprovalRule> rules) {
     }
 
     /**

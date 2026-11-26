@@ -40,6 +40,8 @@ class AlertMetricsTest {
         metrics.dropped(AlertDispatcher.REASON_QUEUE_FULL);
 
         assertEquals(1.0, registry.get(AlertMetrics.DELIVERIES).tag("type", "webhook").tag("outcome", "failure").counter().count());
-        assertEquals(1.0, registry.get(AlertMetrics.DROPPED).counter().count());
+        assertEquals(1.0, registry.get(AlertMetrics.DROPPED).tag("reason", AlertDispatcher.REASON_QUEUE_FULL).counter().count());
+        // The delivery stage's reason is pre-registered too, at zero.
+        assertEquals(0.0, registry.get(AlertMetrics.DROPPED).tag("reason", AlertDeliveryStage.REASON_DELIVERY_QUEUE_FULL).counter().count());
     }
 }
