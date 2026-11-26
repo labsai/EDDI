@@ -77,6 +77,7 @@
 - [Slack Integration](slack-integration.md)
 - [Webhook Triggers (CloudEvents)](webhook-triggers.md)
 - [Email Integration](email-integration.md)
+  - [Email Providers](email-providers.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
 - [Workforce for End Users](workforce-guide.md)
