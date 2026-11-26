@@ -327,11 +327,16 @@ public final class HiddenContentFilter {
                 fontSize = fontSizePx(size, fontSize);
             }
             String visibility = style.get("visibility");
-            // inherit and unset (visibility is inherited) keep the parent's state.
-            if (honourVisibility && visibility != null && !"inherit".equals(visibility) && !"unset".equals(visibility)) {
+            if (honourVisibility && visibility != null) {
                 // Page mode leaves visibility alone: script toggles it like display. A
-                // descendant that says visibility:visible is visible again, as in CSS.
-                invisible = "hidden".equals(visibility) || "collapse".equals(visibility);
+                // descendant that says visibility:visible (or initial) is visible again,
+                // as in CSS. Every other value — inherit, unset, revert, one the browser
+                // drops as invalid — keeps the inherited state: visibility is inherited.
+                if ("hidden".equals(visibility) || "collapse".equals(visibility)) {
+                    invisible = true;
+                } else if ("visible".equals(visibility) || "initial".equals(visibility)) {
+                    invisible = false;
+                }
             }
         }
         return new Effective(colour, transparentText, background, fontSize, invisible);

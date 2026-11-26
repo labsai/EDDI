@@ -104,8 +104,9 @@ An independent review found the single-knowledge-base case sound and these gaps;
   keeps the same chunks in the same store (`SHARED_CHUNKS`, 6.5.0 name layout) or when a shared pgvector table would have to
   change its column size (`SHARED_TABLE_SIZE`); a store failure ends a run early (`SQLException`).
 - **Crash safety (M3).** `reembed` forgets every source's content hashes before it deletes anything, so after a crash at any
-  later point no source is left empty with state "unchanged". The "rebuilding" mark (third round, below) stays set, and it
-  refuses source runs too: the recovery is to run `reembed` again, which refills every source.
+  later point no source is left empty with state "unchanged". A crash before the new space is recorded leaves the "rebuilding"
+  mark (third round, below) set, and it refuses source runs too: the recovery is then to run `reembed` again, which refills
+  every source. After the new space is recorded, the next source runs refill.
 - **Older configs (M4).** Imports, syncs and upgrades are lenient: retrieval settings out of range are clamped, the rest
   (unknown `storeType`, host with a port, blank name …) is kept and logged at WARN; only an interactive save refuses. The check
   now also runs for an archive's knowledge base that has no sources.
@@ -208,7 +209,8 @@ answers of `reembed` carry a `code`.
   missing table, so three of its tests failed.
 - **Save-time checks.** A store URL given but blank (`baseUrl: ""` for Chroma, `serverUrl` for Elasticsearch) is refused at save;
   the factory kept the empty value instead of its default. An omitted key or a `${…}` reference is still accepted.
-- **Hidden text.** `visibility: inherit` and `unset` keep a hidden parent's state. In a workbook, a cell without a reference is
+- **Hidden text.** A `visibility` other than `visible`, `initial`, `hidden` or `collapse` (`inherit`, `unset`, `revert`, an
+  invalid value) keeps a hidden parent's state. In a workbook, a cell without a reference is
   checked against the column it is placed in, a row without a row number takes the one after the previous row (so a hidden one is
   dropped), and a sheet that reaches the row limit is still read to its `autoFilter`, so the filter's hidden rows are kept.
 - **Docs.** `docs/rag.md` states the window a direct `POST /ingest` still has against a re-embed on another node, and a recovery for a
