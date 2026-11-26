@@ -2157,8 +2157,9 @@ jobs:
     # Any finding fails this job, on every event, and nothing downstream tolerates
     # that: CI Gate and docker both require it to succeed. On a pull request and in
     # the merge queue the scan uses main's config, so a change cannot allowlist its
-    # own finding; a fingerprint it adds to .gitleaksignore takes effect only once it
-    # is on main.
+    # own finding. A fingerprint names a commit, and a squash merge or the queue
+    # rewrites the PR's commits, so fingerprints only ever cover findings in commits
+    # already on main; a new secret-shaped fixture has to be rewritten instead.
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -3248,9 +3249,9 @@ jobs:
   #      skipped) fails here instead of merging untested code.
   # Secret Scanning gets no tolerance either: it scans a pull request with main's
   # gitleaks config, so a PR that adds a finding stays red here even when it also
-  # adds that finding's fingerprint to .gitleaksignore. The fingerprint takes
-  # effect only once it is on main; until then the fixture has to be rewritten so
-  # it is not secret-shaped.
+  # adds that finding's fingerprint to .gitleaksignore. That fingerprint names the
+  # PR's commit, which a squash merge or the queue rewrites, so it would not match
+  # on main either: the fixture has to be rewritten so it is not secret-shaped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest

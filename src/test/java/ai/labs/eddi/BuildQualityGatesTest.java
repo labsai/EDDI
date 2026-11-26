@@ -616,10 +616,12 @@ class BuildQualityGatesTest {
      * pin is the explicit {@code jacoco:check@merged-check} invocation there. The
      * integration-test job still runs {@code verify -DskipITs=false}, but with
      * {@code -Djacoco.haltOnFailure=false} (it has no unit-test data), so a search
-     * for that pair — what this test used to do — would stay green with the gate
-     * disarmed. What is graded instead: exactly one invocation of the check, armed
-     * and not relaxed, in a job that waits for both suites, refuses to run on
-     * missing data, and that docker cannot publish without.
+     * for that pair alone — what this test used to do — would stay green with the
+     * gate disarmed. What is graded: exactly one invocation of the check, armed and
+     * not relaxed, in a job that waits for both suites, refuses to run on missing
+     * data, and that docker cannot publish without. And, as a second pin, the
+     * integration job's own {@code verify} still passes {@code -DskipITs=false}:
+     * without it that job runs no integration test and produces no IT data.
      */
     @Test
     @DisplayName("the merged coverage gate is armed in CI, fed by both suites, and blocks publishing")
@@ -669,8 +671,12 @@ class BuildQualityGatesTest {
         // Testcontainers suite at all: skipITs defaults to true, so without
         // -DskipITs=false its verify runs no integration test, the coverage gate
         // above would grade unit-test data only, and docker would publish untested.
-        List<String> integrationVerify = jobs.get("integration-test").lines()
+        String integrationJob = jobs.get("integration-test");
+        assertFalse(integrationJob.contains("continue-on-error"),
+                "integration-test must not use continue-on-error: it turns failing integration tests into a green job");
+        List<String> integrationVerify = integrationJob.lines()
                 .map(String::trim)
+                .filter(line -> !line.startsWith("#"))
                 .filter(line -> line.contains("mvnw verify"))
                 .toList();
         assertEquals(1, integrationVerify.size(),
@@ -1615,8 +1621,9 @@ class BuildQualityGatesTest {
      * when the PR added fingerprints covering its own findings (and, on main and in
      * the queue, let such fingerprints approve findings), so a PR adding a secret
      * plus its own ignore entry could get a green gate and publish. On a pull
-     * request the scan uses main's config, so an entry takes effect only after it
-     * merges; this test keeps it that way.
+     * request the scan uses main's config, so a PR cannot allowlist its own finding
+     * (and its commit-scoped fingerprint would not match the rewritten commit on
+     * main either); this test keeps it that way.
      */
     @Test
     @DisplayName("CI Gate needs everything docker needs plus the lints, always runs, and is strict in the merge queue")
@@ -1680,8 +1687,18 @@ class BuildQualityGatesTest {
                 && gitleaksCode.contains("[ \"$rc\" -le 1 ] || return \"$rc\""),
                 "the fingerprint validator must run grep as LC_ALL=C grep -a (in a UTF-8 locale grep drops a line with"
                         + " an invalid byte) and fail on a grep error instead of reading it as `no line left`");
-        assertFalse(gitleaksCode.contains("|| true"),
-                "the gitleaks job must fail closed: `|| true` turns a failed read or grep into an empty result");
+        assertFalse(gitleaksCode.replace(" ", "").matches("(?s).*\\|\\|(true|:)(\\s|$).*"),
+                "the gitleaks job must fail closed: `|| true` / `|| :` turns a failed read, grep or scan into success");
+        assertFalse(gitleaksCode.contains("continue-on-error"),
+                "the gitleaks job must not use continue-on-error: it turns a finding into a green job");
+        List<String> stepConditions = gitleaksCode.lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("if:"))
+                .toList();
+        assertEquals(List.of("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'"),
+                stepConditions,
+                "only the base-config restore may be conditional in the gitleaks job: a condition on the job, the"
+                        + " validation or the scan step lets an event pass unscanned");
         assertTrue(gitleaksCode.contains("is a symbolic link; it must be a regular file")
                 && gitleaksCode.contains("is not a regular file"),
                 "the validator must refuse a symlinked (or otherwise non-regular) .gitleaksignore, which cat-file reads"

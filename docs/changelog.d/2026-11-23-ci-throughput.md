@@ -83,6 +83,9 @@ data.
 
 ### Second review round (before CodeRabbit's first review)
 
+> Superseded for Secret Scanning: every gitleaks tolerance and approval path this section
+> describes was removed before merge (see "Quality review: Secret Scanning strict again").
+
 An independent read-only review from the PR-triage session found the gitleaks tolerance still let a
 PR allowlist its own secret: a `.gitleaks.toml` with `paths = ['.*']` (or `useDefault = false`)
 passed the PR re-scan, and the merge-queue scan then read that same config. Fixed:
@@ -112,6 +115,9 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   The merged-check warning in the Integration Tests log is now labelled as expected in the step.
 
 ### CodeRabbit review (full review of `a3f2304`)
+
+> Superseded for Secret Scanning: every gitleaks tolerance and approval path this section
+> describes was removed before merge (see "Quality review: Secret Scanning strict again").
 
 - **Fingerprints could never match in the queue (Major).** A squash queue rewrites every commit, so
   a commit-scoped `.gitleaksignore` fingerprint naming the PR's commit cannot match the group's
@@ -143,6 +149,9 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
 
 ### CodeRabbit re-review (of `29efd41`)
 
+> Superseded for Secret Scanning: every gitleaks tolerance and approval path this section
+> describes was removed before merge (see "Quality review: Secret Scanning strict again").
+
 - **Approval is content-verified, one fingerprint per finding.** Matching on `file:rule:line` broke
   when lines shifted between PR commits before the squash, and let one fingerprint approve two
   different findings at the same spot. A queue or push finding is now approved only when an added
@@ -162,6 +171,9 @@ passed the PR re-scan, and the merge-queue scan then read that same config. Fixe
   entry, a `++` entry, `.gitleaks.toml` only).
 
 ### CodeRabbit re-review (of `18aeae6`)
+
+> The `.gitattributes` override, the blob reads, `LC_ALL=C grep -a` and the symlink refusal below
+> remain; the finding-line comparison and the PR re-scan they also fed were removed before merge.
 
 - **`.gitattributes` could blind the scanner (Major, security).** gitleaks reads history through
   `git log -p`, which honours the change's own `.gitattributes`: `leak.txt -diff` (or `binary`, or a
@@ -201,10 +213,12 @@ code before it was changed.
   Both are gone, with everything that only served them: the approval mapping, the re-scan step, the
   job's `base_leaks`/`pr_config_scan` outputs, CI Gate's two gitleaks exemptions (one in the
   failed/cancelled loop, one in `require()`) and detect-changes' `gitleaks_config` filter. A PR that
-  adds a secret plus its own ignore entry stays red and cannot pass CI Gate or publish; as on
-  `main`, the entry only takes effect once it is on `main`. Once CI Gate is a required check, that
-  means a PR with a finding cannot merge by fingerprinting it: rewrite the fixture so it is not
-  secret-shaped. Kept: the `.gitattributes` override, the base-config restore on `pull_request` and
+  adds a secret plus its own ignore entry stays red and cannot pass CI Gate, and the push run on
+  `main` fails too (the fingerprint names the PR's commit, which the squash rewrites), so nothing
+  publishes. As on `main`, fingerprints only cover findings in commits already on `main`. CI Gate
+  blocks the merge itself only once it is a required check (today only Build & Test and CodeQL
+  are); from then on a PR with a finding cannot merge by fingerprinting it: rewrite the fixture so
+  it is not secret-shaped. Kept: the `.gitattributes` override, the base-config restore on `pull_request` and
   `merge_group`, the `merge_group` range scan, and a validation-only step that fails on a symlinked
   or non-regular `.gitleaksignore` and on any added line that is not a commit-scoped fingerprint.
   That step now fails closed: `ls-tree` and blob reads are checked instead of hidden behind
@@ -224,8 +238,8 @@ code before it was changed.
   nested tests ran twice, the console counted them twice (41,178 on CI against `main`'s 37,823), and
   the outer and inner runs overwrote each other's `TEST-*.xml`, leaving duplicated testcases and
   missing classes in the `test-results` artifact and the Step Summary. `pom.xml` adds the
-  `**/*$*` exclude back; no non-`@Nested` inner class carries tests (checked by a source scan:
-  3,214 `@Nested` classes, none plain). Measured on the crypto, `engine/hitl`, `modules/llm/impl`
+  `**/*$*` exclude back; no non-`@Nested` inner class carries tests (checked by a source scan of
+  `src/test/java`). Measured on the crypto, `engine/hitl`, `modules/llm/impl`
   and `backup/impl` packages through `-Dsurefire.includesFile` (not `-Dtest`, which overrides
   `<excludes>`), 5,938 tests in 1,044 classes with one fork. Before the fix three forks reported
   6,773 on the console, 6,148 testcases in the XML (276 duplicated, 66 lost, 16 classes missing);
@@ -280,8 +294,8 @@ code before it was changed.
   the gate in Integration Tests. Fixed.
 - **Verification:** full local unit suite with three forks, 0 failures. Its reported "40,817 tests,
   1,959 classes" was inflated: those forked runs executed matching `@Nested` classes twice (see
-  "Quality review" below).
-  The new re-scan step was executed in scratch repositories with the pinned gitleaks image: config
+  "Quality review" above).
+  The re-scan step (since removed) was executed in scratch repositories with the pinned gitleaks image: config
   untouched → exit 0, no output; allowlisted fixture → pass, `passed=true`; allowlisted fixture
   plus an un-allowlisted key → 1 leak found, exit 1. JUnit on the test classpath is 6.1.3, which
   closes `AutoCloseable` store values, so the lock's store release is live.

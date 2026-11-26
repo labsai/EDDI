@@ -211,8 +211,10 @@ is advisory — which makes a red one *your* problem, not the button's. So:
 Known traps:
 
 - **Secret Scanning (gitleaks)** restores `.gitleaksignore` from the base branch, so a PR
-  cannot allowlist its own finding — the check stays red until merge. If it is a genuine
-  false positive, say so and let a human decide; do not chase it with commits.
+  cannot allowlist its own finding — the check, and with it `CI Gate`, stays red. A
+  fingerprint would not help after merge either: it names the PR's commit, which the squash
+  rewrites. Rewrite a secret-shaped fixture so it no longer matches; if it is a genuine false
+  positive that cannot be rewritten, say so and let a human decide; do not chase it with commits.
 - **Trivy** on a base-image CVE: find a newer digest for the same tag and update the
   `@sha256:` pin in `src/main/docker/Dockerfile`. `microdnf update` is the escape hatch;
   never remove the pin. **Both `FROM` lines carry the same pin** — move them together or
