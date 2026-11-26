@@ -243,7 +243,10 @@ How it holds:
    `eddi.gdpr.drain-timeout`, default `30s`, for all writers together). Work queued
    later sees the tombstones. Only the guarded **write** is waited for: an alert's
    Slack or webhook delivery runs on a separate stage, so a slow webhook or an alert
-   storm cannot fail an erasure. On the node running the erasure a writer that does
+   storm does not occupy the drain barrier and cannot make it time out. A send already
+   in progress can still delay the later redaction, which waits until that send's
+   short claim on the event is released or expires (bounded; see
+   [Alerts](alerts.md)). On the node running the erasure a writer that does
    not drain in time fails the step `asyncWriteDrain`; every other node drains while
    answering the cluster stop (`gdpr-stop`) and confirms it with `drained: true` — a
    node that does not answer, reports a timeout, or answers without that
@@ -324,9 +327,12 @@ make every existing tombstone silently stop matching. Instead the guard **fails
 closed**: guarded writes are skipped (alerts fire without values or excerpts),
 erasures and permanent conversation deletes fail, an ERROR names the cause, and
 `eddi_gdpr_guard_key_mismatch_total` rises. A running node re-checks the key it
-holds against the stored check value on every use (a plain read, never a write), so
-a node that started with the old key stops using it as soon as the stored value
-names another one, and fails closed with the rest.
+holds against the stored check value on every use, so a node that started with the
+old key stops using it as soon as the stored value names another one, and fails
+closed with the rest. That re-check only reads while a check value is stored. When
+the row is **absent** — deleted while the node runs — the node resolves its key
+again and writes its own (old) check value back; that is why the reset below stops
+every node before the row is deleted.
 
 **The operator action.** Restore the vault master key and metadata, or the salt row,
 that were in use; the guard recovers on its own. A replaced vault checksum key —
@@ -405,8 +411,13 @@ consequence of a deployment condition the guarantee states it relies on:
 are the next), the contract is:
 
 - **Queue through a `DrainBarrier`** (`barrier.execute(executor, task)`) and answer
-  `awaitDrained` with `barrier.awaitDrained(timeout)`. Any executor works, a bounded
-  one that rejects included (a rejected task is never waited for). Work that does not
+  `awaitDrained` with `barrier.awaitDrained(timeout)`. Any executor that runs every
+  task it accepts or throws `RejectedExecutionException` works, a bounded one that
+  rejects included (a rejected task is never waited for). An executor that **discards
+  a task silently** — a `ThreadPoolExecutor` with `DiscardPolicy` or
+  `DiscardOldestPolicy` — is not supported: the dropped task stays outstanding and
+  every later barrier on that node times out (a failed erasure, never a false
+  "drained"). Keep the default `AbortPolicy`. Work that does not
   run on a queue — a scheduled job that writes rows derived from earlier ones — runs
   through the same barrier with a direct executor, `barrier.execute(Runnable::run,
   job)`, so a barrier waits for a job in progress. Keep anything slow (network

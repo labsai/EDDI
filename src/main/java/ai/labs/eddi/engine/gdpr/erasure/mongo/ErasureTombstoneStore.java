@@ -24,6 +24,7 @@ import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,7 +36,6 @@ import java.util.concurrent.TimeUnit;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
-import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
@@ -56,6 +56,18 @@ import static com.mongodb.client.model.Updates.setOnInsert;
  * ({@code PersistenceModule}): a lagging secondary would answer "no tombstone"
  * for one the erasure has already committed, and the guarantee would rest on
  * replication lag.
+ * <p>
+ * <b>The point reads the guard decides on — a tombstone by {@code _id}, a meta
+ * value by {@code _id} — use linearizable read concern</b> on a replica set or
+ * a sharded cluster. Majority alone does not make the answering node confirm it
+ * is still the primary: a primary that has been replaced but not yet noticed
+ * can answer from before an acknowledged tombstone, and neither read would
+ * throw. Each such read is bounded by {@link #POINT_READ_MAX_TIME}; a timeout
+ * throws, and the guard fails closed on it. A standalone server rejects
+ * linearizable reads ("node needs to be a replica set member") and has no
+ * second primary, so there they stay majority reads. The multi-document
+ * pending-removal queries stay majority reads everywhere: linearizability is
+ * defined for single-document reads only.
  */
 @ApplicationScoped
 @DefaultBean
@@ -65,15 +77,24 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     static final String COLLECTION_PENDING = "erasurependingremovals";
     static final String COLLECTION_META = "erasuremeta";
 
+    /** The bound of one linearizable point read; past it the read throws. */
+    static final Duration POINT_READ_MAX_TIME = Duration.ofSeconds(5);
+
     private final MongoCollection<Document> tombstones;
     private final MongoCollection<Document> pending;
     private final MongoCollection<Document> meta;
+    /** {@link #tombstones} and {@link #meta} for the single-document reads. */
+    private final MongoCollection<Document> tombstoneReads;
+    private final MongoCollection<Document> metaReads;
 
     @Inject
     public ErasureTombstoneStore(MongoDatabase database) {
-        this.tombstones = linearizable(database.getCollection(COLLECTION_TOMBSTONES));
-        this.pending = linearizable(database.getCollection(COLLECTION_PENDING));
-        this.meta = linearizable(database.getCollection(COLLECTION_META));
+        this.tombstones = primaryMajority(database.getCollection(COLLECTION_TOMBSTONES));
+        this.pending = primaryMajority(database.getCollection(COLLECTION_PENDING));
+        this.meta = primaryMajority(database.getCollection(COLLECTION_META));
+        ReadConcern pointReads = pointReadConcern(database);
+        this.tombstoneReads = tombstones.withReadConcern(pointReads);
+        this.metaReads = meta.withReadConcern(pointReads);
         tombstones.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_erasuretombstone_ttl").expireAfter(0L, TimeUnit.SECONDS));
         pending.createIndex(Indexes.ascending("userKey"),
                 new IndexOptions().name("idx_erasurepending_user").partialFilterExpression(exists("userKey", true)));
@@ -84,12 +105,27 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     /**
-     * Primary reads, majority read and write concern: a read sees every write the
-     * erasure got acknowledged.
+     * Primary reads, majority read and write concern: a read from the current
+     * primary sees every write the erasure got acknowledged.
      */
-    static MongoCollection<Document> linearizable(MongoCollection<Document> collection) {
+    static MongoCollection<Document> primaryMajority(MongoCollection<Document> collection) {
         return collection.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY)
                 .withWriteConcern(WriteConcern.MAJORITY);
+    }
+
+    /**
+     * Linearizable on a replica set member or a mongos, majority on a standalone
+     * server (which refuses linearizable reads).
+     */
+    static ReadConcern pointReadConcern(MongoDatabase database) {
+        Document hello = database.runCommand(new Document("hello", 1));
+        boolean replicated = hello != null && (hello.get("setName") != null || "isdbgrid".equals(hello.get("msg")));
+        return replicated ? ReadConcern.LINEARIZABLE : ReadConcern.MAJORITY;
+    }
+
+    /** One document by {@code _id}, through a bounded point read. */
+    private static Document byId(MongoCollection<Document> collection, String id) {
+        return collection.find(eq("_id", id)).maxTime(POINT_READ_MAX_TIME.toMillis(), TimeUnit.MILLISECONDS).first();
     }
 
     private static String id(Kind kind, String key) {
@@ -113,8 +149,11 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Override
     public Optional<Instant> erasedAt(Kind kind, String key, Instant now) {
-        Document found = tombstones.find(and(eq("_id", id(kind, key)), gt("expiresAt", Date.from(now)))).first();
-        if (found == null) {
+        // By _id alone, the shape a linearizable read is defined for; expiry is checked
+        // here (the TTL monitor removes expired tombstones only eventually).
+        Document found = byId(tombstoneReads, id(kind, key));
+        Date expiresAt = found == null ? null : found.getDate("expiresAt");
+        if (expiresAt == null || !expiresAt.after(Date.from(now))) {
             return Optional.empty();
         }
         Date erased = found.getDate("erasedAt");
@@ -130,7 +169,7 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Override
     public String putMetaIfAbsent(String name, String value) {
-        Document existing = meta.find(eq("_id", name)).first();
+        Document existing = byId(metaReads, name);
         if (existing != null) {
             return existing.getString("value");
         }
@@ -143,7 +182,7 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
             }
             // Another node wrote it first: adopt that one. A primary, majority read sees
             // the winner's acknowledged insert, so this is never null in practice.
-            Document winner = meta.find(eq("_id", name)).first();
+            Document winner = byId(metaReads, name);
             if (winner == null) {
                 throw new IllegalStateException("The erasure meta value '" + name + "' was neither inserted nor found");
             }
@@ -153,7 +192,7 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Override
     public Optional<String> meta(String name) {
-        Document found = meta.find(eq("_id", name)).first();
+        Document found = byId(metaReads, name);
         return found == null ? Optional.empty() : Optional.ofNullable(found.getString("value"));
     }
 

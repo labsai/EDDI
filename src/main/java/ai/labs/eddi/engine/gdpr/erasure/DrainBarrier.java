@@ -19,11 +19,17 @@ import java.util.concurrent.atomic.AtomicLong;
  * Every task gets a sequence number when it is submitted and stays in the
  * outstanding set until it has run. A barrier reads the highest number handed
  * out so far and waits until no outstanding task carries that number or a lower
- * one. That holds for any executor — one thread or many, any order — and a task
- * the executor rejects is removed at once. A task that never finishes (an
- * executor shut down with {@code shutdownNow}) keeps every later barrier
- * waiting until its timeout, which the erasure reports as a failure rather than
- * a guarantee it could not give.
+ * one. That holds for any executor that either runs every task it accepts or
+ * throws {@link RejectedExecutionException} for one it does not — one thread or
+ * many, any order — and a task the executor rejects that way is removed at
+ * once. <b>An executor must not discard a task silently</b>: a
+ * {@code ThreadPoolExecutor} with {@code DiscardPolicy} or
+ * {@code DiscardOldestPolicy} (or a handler that drops the task without
+ * throwing) leaves it outstanding, and every later barrier then times out. That
+ * is reported as a failed erasure, never as a false "drained", but it fails
+ * every erasure on that node until restart; use {@code AbortPolicy} (the
+ * default). A task that never finishes (an executor shut down with
+ * {@code shutdownNow}) has the same effect.
  *
  * <h3>Why the gap between numbering and tracking is safe</h3> A task is
  * numbered an instant before it is added to the outstanding set, so a barrier
@@ -51,6 +57,8 @@ public final class DrainBarrier {
 
     /**
      * Submits {@code task} to {@code executor}, tracked by this barrier.
+     * {@code executor} must run the task or throw; one that discards it silently
+     * keeps every later barrier waiting until its timeout (see the class comment).
      *
      * @throws RejectedExecutionException
      *             as the executor does; the task is then not tracked

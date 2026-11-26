@@ -123,6 +123,43 @@ closed what the PR and its review still listed:
   store, a full queue. The tombstone store contract also runs on the in-memory double.
   Every new check was mutation-tested.
 
+### Review round (2026-11-26)
+
+CodeRabbit's full review of the merge-ready round:
+
+- **The drain is confirmed node by node.** `IClusterRpc.expectedPeerIds()` and
+  `callAllAwaiting(op, request, wait, nodes)`: the conversation-delete drain
+  (`ErasureGuard.clusterVerdict`) and the user erasure's `gdpr-stop` require every
+  node read before the scatter to answer, and wait for those nodes, not for a count.
+  A node that joined meanwhile used to fill a missing node's slot and end the wait,
+  so an erasure could go on while that node still had a write queued.
+- **An unconfirmed drain keeps the snapshots.** When the local drain times out or a
+  node does not confirm it, the user erasure keeps the conversation snapshots
+  (`conversations` fails). A late write that names only a conversation and cannot
+  remove itself leaves a pending removal the user's last check does not count; the
+  re-run finds it through those conversations.
+- **Conversation deletes clear a subject left without an excerpt.** A rating alert
+  whose excerpt was blanked when its rating was deleted kept the keyed rater
+  subject, which neither store's conversation delete matched or counted.
+- **The tombstone write time only moves later** (PostgreSQL): `written_at` keeps the
+  later of the stored value and `now()`. `now()` is the transaction start, so an
+  earlier write that committed last could move the cutoff back.
+- **Linearizable point reads** (MongoDB, replica set or mongos): the tombstone and
+  key-check reads by `_id` use linearizable read concern with a 5 s `maxTime`, so a
+  replaced primary that has not noticed cannot answer from before a tombstone. A
+  standalone server refuses linearizable reads and has no second primary; it keeps
+  majority reads. Each such read now waits for a majority acknowledgement.
+- **A too-short tombstone retention fails the start.** `eddi.gdpr.tombstone-retention`
+  must be at least one day plus twice `eddi.gdpr.drain-timeout` plus
+  `eddi.gdpr.tombstone-clock-skew`. A tombstone that expired while its erasure was
+  still running let a late write through.
+- Docs: alert delivery does not occupy the drain barrier, but the redaction still
+  waits for a send that holds a claim; executors that drop tasks without throwing
+  (`DiscardPolicy`, `DiscardOldestPolicy`) are unsupported by `DrainBarrier`; a
+  running node whose key-check row was deleted writes its own check back, which is
+  why the reset stops every node first. `DrainBarrierTest` no longer leaves a worker
+  blocked when an assertion fails.
+
 ### Still open
 
 - The residual limits (clock assumption, rows written by a node cut off from NATS)
@@ -149,5 +186,8 @@ row kind, as the GDPR guide's "For a new async writer" list says and
 | 2026-11-17 | Agent-test purges skip the tombstone and the cluster drain | Their user is synthetic; a drain per test conversation would tie every test run to the slowest node | Batching the drains |
 | 2026-11-25 | The retention sweep gives the guarantee in one batched pass (one tombstone write, one drain) and keeps what it could not erase (superseding "runs no barrier") | Orphaned snapshots have no age, so "nothing can be queued" did not cover them; a batch costs one drain per sweep | One guarded erasure per conversation (a cluster scatter each); keeping the exemption |
 | 2026-11-25 | A running node re-checks its cached tombstone key against the stored check value on every use, with a plain read | A node that kept an old key would hash users the others no longer match; an insert-if-absent there would undo an operator's reset | Caching for a TTL; requiring a restart only |
+| 2026-11-26 | Cluster drains and `gdpr-stop` are confirmed by node id: every node read before the scatter must answer `drained=true` | A count let a node that joined meanwhile stand in for one that never answered, which may still hold a queued write | Comparing counts; ignoring late joiners entirely |
+| 2026-11-26 | MongoDB tombstone and key-check point reads are linearizable on a replica set or mongos, majority on a standalone server | Majority reads do not make a deposed primary confirm it is still primary; a standalone server refuses linearizable reads and has only one primary | Majority everywhere; linearizable everywhere (every guarded write would fail closed on a standalone server) |
+| 2026-11-26 | `eddi.gdpr.tombstone-retention` below 1 day + 2 × drain timeout + clock skew fails the start | A tombstone must outlive the erasure that writes it; the delete phase has no fixed bound, so the day is a margin | Keeping the tombstone alive until the erasure returns; no check |
 | 2026-11-25 | Pending removals are checked across every writer, and a failed one is deferred rather than retried first | A removal of a writer no longer deployed must not be overlooked; a stuck batch must not starve the rest | Per-writer counts only; a larger batch |
 ```

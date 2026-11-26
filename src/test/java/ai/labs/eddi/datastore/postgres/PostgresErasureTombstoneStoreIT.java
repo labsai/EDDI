@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.engine.gdpr.erasure.ErasureTombstoneStoreContract;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore;
+import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.Kind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,9 +15,12 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("Erasure tombstone store (PostgreSQL)")
@@ -37,6 +41,28 @@ class PostgresErasureTombstoneStoreIT extends PostgresTestBase implements Erasur
     @Override
     public IErasureTombstoneStore tombstoneStore() {
         return store;
+    }
+
+    /**
+     * {@code now()} is the start of the writing transaction: of two overlapping
+     * writes, the one that started first can commit last. Its {@code written_at}
+     * must not move the cutoff back. The later commit is simulated by a stored
+     * {@code written_at} ahead of this transaction's {@code now()}.
+     */
+    @Test
+    void anOverlappingEarlierWriteNeverMovesTheWriteTimeBack() throws Exception {
+        Instant past = Instant.now().minus(Duration.ofDays(1));
+        Instant expires = Instant.now().plus(Duration.ofDays(400));
+        store.putTombstones(Kind.USER, List.of("overlap"), past, expires);
+        try (Connection conn = DATA_SOURCE.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("UPDATE erasure_tombstones SET written_at = now() + interval '1 hour' WHERE tkey = 'overlap'");
+        }
+        Instant later = store.erasedAt(Kind.USER, "overlap", Instant.now()).orElseThrow();
+
+        store.putTombstones(Kind.USER, List.of("overlap"), past, expires);
+
+        Instant after = store.erasedAt(Kind.USER, "overlap", Instant.now()).orElseThrow();
+        assertFalse(after.isBefore(later), "the cutoff moved back from " + later + " to " + after);
     }
 
     @Test

@@ -61,9 +61,9 @@ class DrainBarrierTest {
     void ignoresLaterWork() throws Exception {
         DrainBarrier barrier = new DrainBarrier();
         ExecutorService other = Executors.newFixedThreadPool(2);
+        CountDownLatch releaseBefore = new CountDownLatch(1);
+        CountDownLatch releaseAfter = new CountDownLatch(1);
         try {
-            CountDownLatch releaseBefore = new CountDownLatch(1);
-            CountDownLatch releaseAfter = new CountDownLatch(1);
             barrier.execute(single, () -> await(releaseBefore));
             CountDownLatch snapshotTaken = new CountDownLatch(1);
             barrier.afterSnapshot = snapshotTaken::countDown;
@@ -75,10 +75,13 @@ class DrainBarrierTest {
             releaseBefore.countDown();
             assertTrue(waiting.get(5, TimeUnit.SECONDS));
             assertEquals(1, barrier.outstanding());
-            releaseAfter.countDown();
         } finally {
-            other.shutdown();
-            assertTrue(other.awaitTermination(5, TimeUnit.SECONDS));
+            // Released here, not in the body: an assertion that failed above must not
+            // leave the worker blocked, or mask its own failure with a cleanup one.
+            releaseBefore.countDown();
+            releaseAfter.countDown();
+            other.shutdownNow();
+            other.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 
@@ -176,18 +179,41 @@ class DrainBarrierTest {
         DrainBarrier barrier = new DrainBarrier();
         ExecutorService executor = Executors.newSingleThreadExecutor();
         CountDownLatch started = new CountDownLatch(1);
-        barrier.execute(executor, () -> {
-            started.countDown();
-            try {
-                Thread.sleep(10_000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        });
-        barrier.execute(executor, () -> {
-        });
-        started.await();
-        executor.shutdownNow();
-        assertFalse(barrier.awaitDrained(Duration.ofMillis(200)));
+        // Never counted down: the worker stays blocked until shutdownNow interrupts it,
+        // however long the test thread is paused, so the queued task cannot run.
+        CountDownLatch never = new CountDownLatch(1);
+        try {
+            barrier.execute(executor, () -> {
+                started.countDown();
+                await(never);
+            });
+            barrier.execute(executor, () -> {
+            });
+            assertTrue(started.await(5, TimeUnit.SECONDS), "the worker never started");
+            executor.shutdownNow();
+            assertFalse(barrier.awaitDrained(Duration.ofMillis(200)));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("an executor that discards silently (DiscardPolicy) is unsupported: later barriers time out, never a false 'drained'")
+    void silentlyDiscardingExecutor() throws Exception {
+        DrainBarrier barrier = new DrainBarrier();
+        ThreadPoolExecutor discarding = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
+                new ThreadPoolExecutor.DiscardPolicy());
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            barrier.execute(discarding, () -> await(release));
+            barrier.execute(discarding, () -> await(release));
+            barrier.execute(discarding, () -> await(release)); // dropped without a word
+            release.countDown();
+            assertFalse(barrier.awaitDrained(Duration.ofMillis(300)), "the dropped task stays outstanding");
+            assertEquals(1, barrier.outstanding());
+        } finally {
+            release.countDown();
+            discarding.shutdownNow();
+        }
     }
 }

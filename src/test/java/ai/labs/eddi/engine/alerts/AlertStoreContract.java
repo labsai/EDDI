@@ -218,6 +218,31 @@ public interface AlertStoreContract {
     }
 
     /**
+     * A rating deleted first blanks its excerpt and leaves the rater subject; the
+     * later conversation delete must still find, clear and count that subject — or
+     * it reports a clean delete over a stored user identifier.
+     */
+    @Test
+    default void aConversationDeleteClearsASubjectLeftAfterTheExcerptWasBlanked() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore()
+                .insert(new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.RATING, t.kind(), t.agentId(), t.agentVersion(), "conv-s",
+                        t.firedAt(), "Unhappy users", t.match(), t.deliveries(), t.state(), t.nextAttemptAt(), "s1", 0, null, null, null, null, 0,
+                        "k1:rater", null))
+                .orElseThrow();
+        assertEquals(1, eventStore().redactRatingComment(rated.id(), Instant.now()));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertTrue(eventStore().holdsPersonalContent(rated.id()), "the subject is still stored");
+        assertEquals(1, eventStore().countConversationContent("conv-s"), "the subject counts as the conversation's content");
+
+        assertEquals(1, eventStore().redactConversationContent("conv-s", Instant.now()));
+
+        assertEquals(0, eventStore().countConversationContent("conv-s"));
+        assertFalse(eventStore().holdsPersonalContent(rated.id()), "no subject is left");
+        assertEquals(0, eventStore().countOutputValues("k1:rater"));
+    }
+
+    /**
      * The erasure guarantee's removals: a conversation's values, and one event's
      * personal content.
      */

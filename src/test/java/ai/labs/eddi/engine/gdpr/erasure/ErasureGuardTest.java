@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -305,14 +306,43 @@ class ErasureGuardTest {
         void broadcast() throws Exception {
             IClusterRpc rpc = mock(IClusterRpc.class);
             when(rpc.isClustered()).thenReturn(true);
-            when(rpc.expectedPeers()).thenReturn(2);
-            when(rpc.callAll(eq(IClusterRpc.ERASURE_DRAIN), anyMap(), eq(Duration.ofSeconds(40)), eq(2)))
+            when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3"));
+            when(rpc.callAllAwaiting(eq(IClusterRpc.ERASURE_DRAIN), anyMap(), eq(Duration.ofSeconds(40)), eq(Set.of("n2", "n3"))))
                     .thenReturn(Map.of("n2", Map.of("drained", true), "n3", Map.of("drained", true)));
             guard.clusterRpc = rpc;
+            writer.rows.put("r1", CONVERSATION);
             guard.eraseConversation(CONVERSATION);
+            assertEquals(Map.of(), writer.rows, "every sampled node confirmed, so the rows were deleted");
             // The peers drain everything; the request names no conversation id, which
             // would only end up in their logs.
-            verify(rpc).callAll(eq(IClusterRpc.ERASURE_DRAIN), eq(Map.of("conversations", 1)), eq(Duration.ofSeconds(40)), eq(2));
+            verify(rpc).callAllAwaiting(eq(IClusterRpc.ERASURE_DRAIN), eq(Map.of("conversations", 1)), eq(Duration.ofSeconds(40)),
+                    eq(Set.of("n2", "n3")));
+        }
+
+        @Test
+        @DisplayName("cluster mode: a node that joined after the peers were read cannot confirm in place of one that did not answer")
+        void substituteReplyDoesNotCount() {
+            IClusterRpc rpc = mock(IClusterRpc.class);
+            when(rpc.isClustered()).thenReturn(true);
+            when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3"));
+            when(rpc.callAllAwaiting(eq(IClusterRpc.ERASURE_DRAIN), anyMap(), eq(Duration.ofSeconds(40)), eq(Set.of("n2", "n3"))))
+                    .thenReturn(Map.of("n2", Map.of("drained", true), "n4", Map.of("drained", true)));
+            guard.clusterRpc = rpc;
+            writer.rows.put("r1", CONVERSATION);
+            ErasureIncompleteException missing = assertThrows(ErasureIncompleteException.class, () -> guard.eraseConversation(CONVERSATION));
+            assertTrue(missing.getMessage().contains("1 of 2 node(s) did not confirm the drain: n3"), missing.getMessage());
+            assertEquals(0, writer.erasedConversations, "nothing is deleted while n3 may still have a write queued");
+        }
+
+        @Test
+        @DisplayName("the verdict: every sampled node must confirm; a reply from outside the sample confirms nothing but can still fail")
+        void verdict() {
+            assertEquals(List.of(), ErasureGuard.clusterVerdict(Map.of("a", Map.of("drained", true)), Set.of("a")));
+            assertEquals(List.of("1 of 1 node(s) did not confirm the drain: a"),
+                    ErasureGuard.clusterVerdict(Map.of("b", Map.of("drained", true)), Set.of("a")));
+            assertEquals(List.of("node b: async writer(s) not drained"),
+                    ErasureGuard.clusterVerdict(Map.of("a", Map.of("drained", true), "b", Map.of("drained", false, "error",
+                            "async writer(s) not drained")), Set.of("a")));
         }
 
         @Test
@@ -320,10 +350,12 @@ class ErasureGuardTest {
         void broadcastIncomplete() {
             IClusterRpc rpc = mock(IClusterRpc.class);
             when(rpc.isClustered()).thenReturn(true);
-            when(rpc.expectedPeers()).thenReturn(2);
+            when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3"));
             AtomicInteger calls = new AtomicInteger();
-            when(rpc.callAll(eq(IClusterRpc.ERASURE_DRAIN), anyMap(), eq(Duration.ofSeconds(40)), eq(2))).thenAnswer(inv -> calls
-                    .incrementAndGet() == 1 ? Map.of("n2", Map.of("drained", true)) : Map.of("n2", Map.of("drained", true), "n3", Map.of()));
+            when(rpc.callAllAwaiting(eq(IClusterRpc.ERASURE_DRAIN), anyMap(), eq(Duration.ofSeconds(40)), eq(Set.of("n2", "n3"))))
+                    .thenAnswer(inv -> calls.incrementAndGet() == 1
+                            ? Map.of("n2", Map.of("drained", true))
+                            : Map.of("n2", Map.of("drained", true), "n3", Map.of()));
             guard.clusterRpc = rpc;
             writer.rows.put("r1", CONVERSATION);
             ErasureIncompleteException missing = assertThrows(ErasureIncompleteException.class, () -> guard.eraseConversation(CONVERSATION));
@@ -331,6 +363,32 @@ class ErasureGuardTest {
             ErasureIncompleteException old = assertThrows(ErasureIncompleteException.class, () -> guard.eraseConversation(CONVERSATION));
             assertTrue(old.getMessage().contains("older release"), old.getMessage());
             assertEquals(0, writer.erasedConversations);
+        }
+    }
+
+    @Nested
+    @DisplayName("tombstone retention")
+    class Retention {
+
+        @Test
+        @DisplayName("a retention shorter than the erasure that writes the tombstone is refused, whichever constructor builds the guard")
+        void tooShortIsRefused() {
+            ErasureMetrics metrics = new ErasureMetrics(new SimpleMeterRegistry());
+            Duration minimum = Duration.ofDays(1).plus(Duration.ofSeconds(60)).plus(Duration.ofMinutes(5));
+            assertEquals(minimum, ErasureGuard.minimumRetention(Duration.ofSeconds(30), Duration.ofMinutes(5)));
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                    () -> new ErasureGuard(store, List.of(writer), metrics, Duration.ofMinutes(1), Duration.ofSeconds(30), Duration.ofMinutes(5),
+                            Clock.systemUTC()));
+            assertTrue(refused.getMessage().contains("eddi.gdpr.tombstone-retention"), refused.getMessage());
+            assertThrows(IllegalArgumentException.class, () -> new ErasureGuard(store, null, metrics, minimum.minusSeconds(1),
+                    Duration.ofSeconds(30), Duration.ofMinutes(5)));
+            new ErasureGuard(store, List.of(writer), metrics, minimum, Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.systemUTC());
+        }
+
+        @Test
+        @DisplayName("a long drain timeout raises the minimum with it")
+        void scalesWithTheDrainTimeout() {
+            assertEquals(Duration.ofDays(5).plus(Duration.ofMinutes(5)), ErasureGuard.minimumRetention(Duration.ofDays(2), Duration.ofMinutes(5)));
         }
     }
 

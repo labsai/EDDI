@@ -9,7 +9,9 @@ import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.Kind;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.PendingRemoval;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -83,6 +85,12 @@ public class ErasureGuard {
     static final String DRAIN_TIMEOUT_PROPERTY = "eddi.gdpr.drain-timeout";
     static final String CLOCK_SKEW_PROPERTY = "eddi.gdpr.tombstone-clock-skew";
 
+    /**
+     * The shortest {@code eddi.gdpr.tombstone-retention} accepted, before the drain
+     * waits and the clock skew are added ({@link #minimumRetention}).
+     */
+    static final Duration MIN_RETENTION_BASE = Duration.ofDays(1);
+
     /** How many pending removals one retry pass handles. */
     static final int RETRY_BATCH = 500;
 
@@ -155,6 +163,12 @@ public class ErasureGuard {
 
     private ErasureGuard(IErasureTombstoneStore store, Instance<AsyncErasureWriter> writers, ErasureMetrics metrics, Duration retention,
             Duration drainTimeout, Duration clockSkew, Clock clock) {
+        Duration minimum = minimumRetention(drainTimeout, clockSkew);
+        if (retention.compareTo(minimum) < 0) {
+            throw new IllegalArgumentException(TOMBSTONE_RETENTION_PROPERTY + " is " + retention + ", shorter than the minimum " + minimum
+                    + " (1 day plus twice " + DRAIN_TIMEOUT_PROPERTY + " plus " + CLOCK_SKEW_PROPERTY + "): a tombstone that expires "
+                    + "while its erasure is still draining or deleting lets a late write through after the erasure reported success");
+        }
         this.store = store;
         this.writers = writers;
         this.metrics = metrics;
@@ -162,6 +176,25 @@ public class ErasureGuard {
         this.drainTimeout = drainTimeout;
         this.clockSkew = clockSkew;
         this.clock = clock;
+    }
+
+    /**
+     * The shortest tombstone retention accepted: a tombstone must outlive the
+     * erasure that wrote it — its local and cluster drain waits (each up to
+     * {@code drainTimeout}), the deletes and the verification — and the clock skew
+     * its user tombstone is compared with. The delete and verification phase has no
+     * fixed bound, so the one-day base is a conservative margin, not an exact one.
+     */
+    static Duration minimumRetention(Duration drainTimeout, Duration clockSkew) {
+        return MIN_RETENTION_BASE.plus(drainTimeout.multipliedBy(2)).plus(clockSkew);
+    }
+
+    /**
+     * Builds the bean at startup, so a tombstone retention the constructor refuses
+     * fails the start instead of every later guarded write and erasure.
+     */
+    void onStart(@Observes StartupEvent event) {
+        LOGGER.debugf("Erasure guard ready (tombstone retention %s)", retention);
     }
 
     // ------------------------------------------------------------ write side
@@ -486,10 +519,12 @@ public class ErasureGuard {
             return List.of();
         }
         try {
-            int expected = clusterRpc.expectedPeers();
+            // The nodes by id, read before the scatter: each of them must confirm. A node
+            // that joins meanwhile answers too, but cannot stand in for one of these.
+            Set<String> expected = clusterRpc.expectedPeerIds();
             // Every peer drains everything; the request names no conversation, which
             // would only end up in their logs.
-            var replies = clusterRpc.callAll(IClusterRpc.ERASURE_DRAIN, Map.of("conversations", conversations),
+            var replies = clusterRpc.callAllAwaiting(IClusterRpc.ERASURE_DRAIN, Map.of("conversations", conversations),
                     clusterTimeout.plus(drainTimeout), expected);
             return clusterVerdict(replies, expected);
         } catch (RuntimeException e) {
@@ -498,14 +533,18 @@ public class ErasureGuard {
     }
 
     /**
-     * What a scatter of drain requests leaves unconfirmed: nodes that did not
-     * answer, and answers without {@code drained=true} — including a node of an
-     * older release, which does not drain at all.
+     * What a scatter of drain requests leaves unconfirmed: each node of
+     * {@code expected} (the peers read before the scatter) that did not answer, and
+     * every answer without {@code drained=true} — including a node of an older
+     * release, which does not drain at all. A reply from a node outside
+     * {@code expected} never counts as a confirmation in place of one inside it; if
+     * it reports a failure, that is a problem too.
      */
-    public static List<String> clusterVerdict(Map<String, Map<String, Object>> replies, int expected) {
+    public static List<String> clusterVerdict(Map<String, Map<String, Object>> replies, Set<String> expected) {
         List<String> problems = new ArrayList<>();
-        if (replies.size() < expected) {
-            problems.add((expected - replies.size()) + " of " + expected + " node(s) did not confirm the drain");
+        List<String> missing = expected.stream().filter(node -> !replies.containsKey(node)).sorted().toList();
+        if (!missing.isEmpty()) {
+            problems.add(missing.size() + " of " + expected.size() + " node(s) did not confirm the drain: " + String.join(", ", missing));
         }
         for (var reply : replies.entrySet()) {
             if (!Boolean.TRUE.equals(reply.getValue().get("drained"))) {
@@ -641,8 +680,12 @@ public class ErasureGuard {
      * matches it — an operator replaced or deleted the row to adopt a new key —
      * this node drops it and resolves again, which fails closed unless its own key
      * is the stored one. So a running node never keeps hashing users with a key the
-     * stored check value no longer names. The re-check is a plain read: inserting
-     * the old check value again would undo the operator's reset.
+     * stored check value no longer names. The re-check itself only reads; but when
+     * the stored check value is <b>absent</b> (the row was deleted while this node
+     * ran), the node resolves its key again, and {@link #resolveKey} inserts this
+     * node's own check value — the old one — through {@code putMetaIfAbsent}. That
+     * would undo an operator's reset, which is why the documented reset stops every
+     * node before it deletes the row.
      */
     private TombstoneKey key() {
         TombstoneKey current = tombstoneKey;

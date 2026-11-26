@@ -343,9 +343,13 @@ public class AlertEventStore implements IAlertEventStore {
                 combine(unset("match.value"), unset("match.commentExcerpt"), unset("subjectUserId"))).getModifiedCount();
     }
 
-    /** An output value or a rating comment excerpt (stored as null when absent). */
+    /**
+     * An output value, a rating comment excerpt (stored as null when absent), or a
+     * subject — a keyed rating alert keeps its subject after its excerpt was
+     * blanked (the rating was deleted), and a conversation delete removes it too.
+     */
     private static Bson conversationContent() {
-        return or(exists("match.value", true), ne("match.commentExcerpt", null));
+        return or(exists("match.value", true), ne("match.commentExcerpt", null), ne("subjectUserId", null));
     }
 
     @Override

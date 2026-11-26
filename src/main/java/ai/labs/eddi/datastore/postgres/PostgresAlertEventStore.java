@@ -453,8 +453,13 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         return update("SELECT COUNT(*) FROM alert_events WHERE conversation_id = ? AND " + CONVERSATION_CONTENT, List.of(conversationId), true);
     }
 
-    /** An output value or a rating comment excerpt. */
-    private static final String CONVERSATION_CONTENT = "((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL)";
+    /**
+     * An output value, a rating comment excerpt, or a subject — a keyed rating
+     * alert keeps its subject after its excerpt was blanked (the rating was
+     * deleted), and a conversation delete removes it too.
+     */
+    private static final String CONVERSATION_CONTENT = "((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL "
+            + "OR subject_user_id IS NOT NULL)";
 
     @Override
     public boolean holdsPersonalContent(String eventId) {

@@ -43,13 +43,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
@@ -198,10 +200,50 @@ class GdprErasureGuaranteeTest {
 
     @Test
     @DisplayName("single node: a writer that does not drain in time fails the erasure (asyncWriteDrain)")
-    void localDrainTimeout() {
+    void localDrainTimeout() throws Exception {
         writer.drains = false;
         var result = service.deleteUserData(USER_ID);
-        assertEquals(List.of("asyncWriteDrain"), result.failedSteps());
+        // The snapshots are kept: they are how a re-run finds the conversations of a
+        // late write that could only record a conversation-scoped pending removal.
+        assertEquals(List.of("asyncWriteDrain", "conversations"), result.failedSteps());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
+    @DisplayName("after a drain that timed out, a late conversation-only pending removal keeps the re-run failed until it is cleared")
+    void lateConversationOnlyRemovalAfterADrainTimeout() throws Exception {
+        registerParticipant();
+        // The store as it behaves: once the snapshots are deleted, the user lists no
+        // conversation any more.
+        AtomicBoolean snapshotsDeleted = new AtomicBoolean();
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenAnswer(inv -> snapshotsDeleted.get() ? List.of() : List.of("conv-1", "conv-2"));
+        doAnswer(inv -> {
+            snapshotsDeleted.set(true);
+            return 2L;
+        }).when(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+        writer.drains = false;
+        var first = service.deleteUserData(USER_ID);
+        assertTrue(first.failedSteps().contains("conversations"), first.failedSteps().toString());
+
+        // A write that was still queued lands now, carries only conv-2, and cannot
+        // remove itself: the user's own last check never counts that record.
+        writer.conversationRows.put("late", "conv-2");
+        writer.failRemoval = true;
+        assertTrue(guard.afterWrite("fake", "late", null, "conv-2", NOW.minusSeconds(1), () -> {
+            throw new IllegalStateException("row store down");
+        }));
+        writer.drains = true;
+
+        var second = service.deleteUserData(USER_ID);
+        assertFalse(second.complete(), "the conversation's pending removal is found through the kept snapshots");
+        assertTrue(second.failedSteps().contains("asyncWriteConversations"), second.failedSteps().toString());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+
+        writer.failRemoval = false;
+        var third = service.deleteUserData(USER_ID);
+        assertTrue(third.complete(), third.failedSteps().toString());
+        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
     }
 
     @Test
@@ -209,12 +251,26 @@ class GdprErasureGuaranteeTest {
     void clusterDrainTimeout() {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.expectedPeers()).thenReturn(1);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet())).thenReturn(
                 Map.of("n2", Map.of("stopped", 0, "drained", false, "error", "async writer(s) not drained within PT30S: alerts")));
         service.clusterRpc = rpc;
 
-        assertEquals(List.of("clusterStop"), service.deleteUserData(USER_ID).failedSteps());
+        assertEquals(List.of("clusterStop", "conversations"), service.deleteUserData(USER_ID).failedSteps());
+    }
+
+    @Test
+    @DisplayName("cluster: a node that joined after the peers were read cannot confirm the stop in place of one that did not answer")
+    void clusterSubstituteReplyDoesNotCount() throws Exception {
+        IClusterRpc rpc = mock(IClusterRpc.class);
+        when(rpc.isClustered()).thenReturn(true);
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), eq(Set.of("n2", "n3"))))
+                .thenReturn(Map.of("n2", Map.of("stopped", 0, "drained", true), "n4", Map.of("stopped", 0, "drained", true)));
+        service.clusterRpc = rpc;
+
+        assertEquals(List.of("clusterStop", "conversations"), service.deleteUserData(USER_ID).failedSteps());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
     }
 
     @Test
@@ -222,11 +278,11 @@ class GdprErasureGuaranteeTest {
     void clusterNoDrainConfirmation() {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.expectedPeers()).thenReturn(1);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
         service.clusterRpc = rpc;
 
-        assertEquals(List.of("clusterStop"), service.deleteUserData(USER_ID).failedSteps());
+        assertEquals(List.of("clusterStop", "conversations"), service.deleteUserData(USER_ID).failedSteps());
     }
 
     @Test
@@ -234,16 +290,16 @@ class GdprErasureGuaranteeTest {
     void clusterDrained() {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.expectedPeers()).thenReturn(1);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt()))
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet()))
                 .thenReturn(Map.of("n2", Map.of("stopped", 0, "drained", true)));
         service.clusterRpc = rpc;
 
         assertTrue(service.deleteUserData(USER_ID).complete());
         // The request says the erasure wrote tombstones, so a peer can flag one that
         // did not.
-        verify(rpc).callAll(eq(IClusterRpc.GDPR_STOP), argThat(request -> Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED))),
-                eq(Duration.ofSeconds(40)), eq(1));
+        verify(rpc).callAllAwaiting(eq(IClusterRpc.GDPR_STOP), argThat(request -> Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED))),
+                eq(Duration.ofSeconds(40)), eq(Set.of("n2")));
     }
 
     @Test

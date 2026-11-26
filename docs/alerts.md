@@ -364,7 +364,9 @@ then waits, on every node, until the alert work queued before them has been
 written (the alert worker's queue is the drain barrier). Only the write is waited
 for: the first delivery of a fresh alert runs on a separate delivery stage
 (`eddi-alerts-delivery-*` threads), which checks the guard again right before the
-send, so a slow Slack or webhook call never holds an erasure back. When that stage's
+send, so a slow Slack or webhook call does not occupy the drain barrier. It can still
+delay the erasure's redaction step, which waits for a send that already claimed the
+event to finish or for its claim to expire (bounded, see below). When that stage's
 queue is full the send is left to the maintenance pass (the event was stored with
 its retry time a claim lease ahead), counted as
 `eddi_alerts_dropped_total{reason="delivery_queue_full"}`. An `OUTPUT_MATCH` value of an erased
