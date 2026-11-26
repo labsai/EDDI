@@ -34,10 +34,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -368,32 +373,159 @@ class DiscussionCancellationTest {
         verify(conversationService, Mockito.times(1)).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
     }
 
+    private static MemberTurnExecutor executorOver(IConversationService conversationService) {
+        return new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class), new GroupSigningGuard(null, null, "default"),
+                new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+    }
+
+    /**
+     * Runs the resume on its own thread and returns once that thread is blocked in
+     * the resume wait, which it registers before blocking.
+     */
+    private static Thread startResumeAndAwaitTheWait(Runnable resume, CountDownLatch resumeStarted, List<Throwable> thrown)
+            throws InterruptedException {
+        var worker = new Thread(() -> {
+            try {
+                resume.run();
+            } catch (Throwable t) {
+                thrown.add(t);
+            }
+        });
+        worker.start();
+        assertTrue(resumeStarted.await(10, TimeUnit.SECONDS), "the resume was started");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (worker.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertEquals(Thread.State.TIMED_WAITING, worker.getState(), "the worker is blocked in the resume wait");
+        return worker;
+    }
+
     @Test
     void toolPauseResumeWait_isReleasedByAnImmediateCancel() throws Exception {
         var conversationService = Mockito.mock(IConversationService.class);
+        var resumeStarted = new CountDownLatch(1);
         // The resumed run never answers.
-        doAnswer(inv -> null).when(conversationService).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
+        doAnswer(inv -> {
+            resumeStarted.countDown();
+            return null;
+        }).when(conversationService).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
         var token = new DiscussionControlToken();
         var link = DiscussionCancellation.link(token);
-        var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class), new GroupSigningGuard(null, null, "default"),
+        var executor = executorOver(conversationService);
+        List<Throwable> thrown = new CopyOnWriteArrayList<>();
+        long start = System.nanoTime();
+
+        var worker = startResumeAndAwaitTheWait(() -> executor.tryResolveMemberToolPause(AGENT, parent(), "conv-a", 60, 0, opinion(),
+                TranscriptEntryType.OPINION, null, "agent-a", link.cancellation()), resumeStarted, thrown);
+        // Signalled while the response is still pending.
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+        worker.join(TimeUnit.SECONDS.toMillis(20));
+
+        assertFalse(worker.isAlive(), "released at once, not at the 60 s member timeout");
+        assertTrue((System.nanoTime() - start) / 1_000_000_000L < 20);
+        assertEquals(1, thrown.size());
+        assertInstanceOf(MemberTurnCancelledException.class, thrown.getFirst());
+        verify(conversationService).cancelConversation("conv-a", ControlSignal.CANCEL_IMMEDIATE, "system:group");
+        link.close();
+    }
+
+    /**
+     * Under RETRY a timed-out attempt is drained before the retry; an immediate
+     * cancel during that drain releases it instead of waiting the drain out.
+     */
+    @Test
+    void retryDrain_isReleasedByAnImmediateCancel() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq("agent-a"))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq("agent-a"), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-a", null));
+        // The member never answers: the first attempt times out.
+        var drainStarted = new CountDownLatch(1);
+        doAnswer(inv -> {
+            drainStarted.countDown();
+            return null;
+        }).when(conversationService).cancelConversation("conv-a", ControlSignal.CANCEL_GRACEFUL, "system:group");
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
                 new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
-        var canceller = new Thread(() -> {
+        var token = new DiscussionControlToken();
+        var link = DiscussionCancellation.link(token);
+        var retryTwice = new ProtocolConfig(4, MemberFailurePolicy.RETRY, 1, MemberUnavailablePolicy.SKIP);
+        List<Object> outcome = new CopyOnWriteArrayList<>();
+
+        var worker = new Thread(() -> {
             try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                outcome.add(executor.executeAgentTurn(AGENT, parent(), "input", retryTwice, 0, opinion(), null, null, link.cancellation()));
+            } catch (Throwable t) {
+                outcome.add(t);
             }
-            token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
         });
-        long start = System.nanoTime();
-        canceller.start();
+        worker.start();
+        assertTrue(drainStarted.await(20, TimeUnit.SECONDS), "the first attempt timed out and its drain began");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (worker.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        long cancelledAt = System.nanoTime();
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+        worker.join(TimeUnit.SECONDS.toMillis(20));
 
-        assertThrows(MemberTurnCancelledException.class, () -> executor.tryResolveMemberToolPause(AGENT, parent(), "conv-a", 60, 0, opinion(),
-                TranscriptEntryType.OPINION, null, "agent-a", link.cancellation()));
+        assertFalse(worker.isAlive());
+        assertTrue((System.nanoTime() - cancelledAt) / 1_000_000L < 2_000, "released by the cancel, not at the end of the 4 s drain");
+        assertEquals(1, outcome.size());
+        assertInstanceOf(MemberTurnCancelledException.class, outcome.getFirst(), "a cancel is not a timeout: " + outcome);
+        link.close();
+    }
 
-        assertTrue((System.nanoTime() - start) / 1_000_000_000L < 20, "released at once, not at the 60 s member timeout");
-        verify(conversationService).cancelConversation("conv-a", ControlSignal.CANCEL_IMMEDIATE, "system:group");
+    @Test
+    void toolPauseResume_cancelledBeforeItStarted_startsNoNewTurn() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var token = new DiscussionControlToken();
+        var link = DiscussionCancellation.link(token);
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+
+        assertThrows(MemberTurnCancelledException.class, () -> executorOver(conversationService).tryResolveMemberToolPause(AGENT, parent(),
+                "conv-a", 60, 0, opinion(), TranscriptEntryType.OPINION, null, "agent-a", link.cancellation()));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any(), any(), any(), any());
+        // The committed pause is not left behind.
+        verify(conversationService).cancelConversation("conv-a", ControlSignal.CANCEL_GRACEFUL, "system:group");
+        link.close();
+    }
+
+    @Test
+    void toolPauseResume_cancelledWhileItRan_stillBooksItsSpendAndAgents() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var resumeStarted = new CountDownLatch(1);
+        var handler = new AtomicReference<IConversationService.ConversationResponseHandler>();
+        doAnswer(inv -> {
+            handler.set(inv.getArgument(2, IConversationService.ConversationResponseHandler.class));
+            resumeStarted.countDown();
+            return null;
+        }).when(conversationService).resumeConversation(eq("conv-a"), any(), any(), any(), any(), any());
+        var token = new DiscussionControlToken();
+        var link = DiscussionCancellation.link(token);
+        var gc = parent();
+        List<Throwable> thrown = new CopyOnWriteArrayList<>();
+
+        var worker = startResumeAndAwaitTheWait(() -> executorOver(conversationService).tryResolveMemberToolPause(AGENT, gc, "conv-a", 60,
+                0, opinion(), TranscriptEntryType.OPINION, null, "agent-a", link.cancellation()), resumeStarted, thrown);
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+        worker.join(TimeUnit.SECONDS.toMillis(20));
+        assertFalse(worker.isAlive());
+        assertInstanceOf(MemberTurnCancelledException.class, thrown.getFirst());
+
+        // The resumed run finishes after the cancel released the wait.
+        var late = new SimpleConversationMemorySnapshot();
+        late.setConversationId("conv-a");
+        late.setConversationState(ConversationState.READY);
+        late.setConversationCost(0.25);
+        handler.get().onComplete(late);
+
+        assertEquals(0.25, gc.getTotalCost(), 1e-12, "the resumed run's spend is on the group's books");
         link.close();
     }
 

@@ -284,6 +284,32 @@ class DiscussionOutcomesTest {
     }
 
     @Test
+    void establishAnswerHistory_aLegacyRoundWithContributions_staysUnknownWithoutASynthesis() {
+        // A legacy opinion-only round: no synthesis phase, so no synthesized answer on
+        // record, yet its members answered.
+        var opinionsOnly = gc(opinion("a"), opinion("b"));
+        opinionsOnly.establishAnswerHistory();
+        assertNull(opinionsOnly.getAnsweredRounds(), "missing synthesis is no proof the round did not answer");
+        opinionsOnly.setRound(2);
+        assertTrue(opinionsOnly.hasAnsweredRound(), "a continued round-1 record with contributions counts as answered");
+
+        var blankOnly = gc(new TranscriptEntry("a", "a", "  ", 0, "Opinions", TranscriptEntryType.OPINION, Instant.now(), null, null));
+        blankOnly.establishAnswerHistory();
+        assertEquals(0, blankOnly.getAnsweredRounds(), "a round with no usable contribution keeps its explicit zero");
+    }
+
+    @Test
+    void blankSynthesizedAnswer_isNoAnswer() {
+        var gc = gc(opinion("a"));
+        gc.setSynthesizedAnswer("   ");
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertNull(gc.getAnsweredRounds());
+    }
+
+    @Test
     void everyMemberSkipped_isNoAnswerNotAFailure() {
         var gc = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.SKIPPED, Instant.now(),
                 MemberTurnExecutor.REASON_NOT_DEPLOYED, null));

@@ -45,6 +45,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -81,7 +82,7 @@ class GroupFaultInjectionTest {
     /**
      * The data model of every rendered template — what a prompt could interpolate.
      */
-    private final List<Object> renderedModels = new ArrayList<>();
+    private final List<Object> renderedModels = new CopyOnWriteArrayList<>();
     private GroupConversationService service;
 
     @BeforeEach

@@ -534,23 +534,32 @@ class GroupLifecycleOpsTest {
         snapshot.setConversationId("member-conv");
         snapshot.setConversationState(ConversationState.ERROR);
         snapshot.setConversationCost(0.25);
+        var step = new SimpleConversationStep();
+        step.getConversationStep().add(new ConversationStepData(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS,
+                new CopyOnWriteArrayList<>(List.of("sub-1")), null, null));
+        snapshot.getConversationSteps().add(step);
         when(followUpFacade.extractResponse(any())).thenReturn(null);
         doAnswer(inv -> {
             inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
             return null;
         }).when(followUpConversationService).say(any(), eq(AGENT_A), eq("member-conv"), any(), any(), any(), any(),
                 anyBoolean(), any());
+        // What the conditional write receives, captured when it is made: the document
+        // is mutable, so reading it after the call returns proves nothing about it.
+        var written = new AtomicReference<List<Object>>();
+        doAnswer(inv -> {
+            GroupConversation doc = inv.getArgument(0);
+            written.set(List.of(doc.getTotalCost(), List.copyOf(doc.getCreatedAgentIds()), doc.getTranscript().size(), doc.getState()));
+            return null;
+        }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.IN_PROGRESS));
 
         assertThrows(IGroupConversationService.GroupExecutionException.class, () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
 
-        // The failed turn cost money: it is written (conditionally, on the run state)
-        // so
-        // later ceilings and cleanup see it — but no answer and no question are
-        // recorded.
+        // The failed turn cost money and created an agent: both are written
+        // (conditionally, on the run state) so later ceilings and cleanup see them —
+        // but no answer and no question are recorded.
         verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
-        assertEquals(0.25, gc.getTotalCost());
-        assertEquals(GroupConversationState.COMPLETED, gc.getState());
-        assertEquals(transcriptBefore, gc.getTranscript().size(), "the unanswered question is not recorded");
+        assertEquals(List.of(0.25, List.of("sub-1"), transcriptBefore, GroupConversationState.COMPLETED), written.get());
     }
 
     @Test

@@ -23,8 +23,10 @@ GR1–GR4.
 
 2. **A discussion that ends without an answer says so.** New fields
    `GroupConversation.outcome` (`ANSWERED` | `NO_ANSWER` | `FAILED`) and `outcomeReason`
-   (`NO_MEMBER_ANSWERED`, `SYNTHESIS_FAILED`, `SYNTHESIS_NOT_RUN`, `TURN_LIMIT_REACHED`,
-   `COST_CEILING_REACHED`, `DISCUSSION_ERROR`), set when a round ends
+   (`NO_MEMBER_ANSWERED`, `NO_DECISION`, `SYNTHESIS_FAILED`, `SYNTHESIS_NOT_RUN`,
+   `TURN_LIMIT_REACHED`, `COST_CEILING_REACHED`, `DISCUSSION_ERROR`, `REJECTED_BY_HUMAN`,
+   `APPROVAL_TIMED_OUT`, `NO_PROGRESS` — the full list is `DiscussionOutcomes.Reason`;
+   the later ones came with the review follow-ups below), set when a round ends
    (`DiscussionOutcomes`), carried by REST, the MCP tools and the `group_complete` event.
    A round in which no member answered because member turns failed or timed out ends in
    the existing `FAILED` state; every other round without an answer stays `COMPLETED`
@@ -73,7 +75,8 @@ GR1–GR4.
 ### Behaviour changes for upgraders
 
 - Entries stored before this change carry no `outcome`; they read as `ANSWERED`
-  (`SKIPPED`/`ERROR` entries as `SKIPPED`/`FAILED`). Old placeholder entries keep their text.
+  (`SKIPPED`/`ERROR` entries as `SKIPPED`/`FAILED`). An old failure-placeholder entry reads
+  as `FAILED` without content (see M1 below).
 - A follow-up whose member fails answers 502 instead of recording the placeholder.
 - A first round in which every member turn failed or timed out is `FAILED`, not
   `COMPLETED`; a later round that fails stays `COMPLETED` with `outcome: FAILED`
@@ -169,3 +172,24 @@ its persisted write and pins a legacy document's answer history first. `phaseCap
 each later synthesis phase, also from a synthesis phase. `inheritedMaxTurns` bumps the group
 conversation schema to 6 (identity hop). The MCP `cancel_group_discussion` answers `CANCELLING` when
 the status cannot be read.
+
+**Review follow-ups (2026-11-26, second round).** A cancel that lands before a resumed leg with no
+phase left to run is honoured (the leg used to settle `COMPLETED`). A blank synthesis is no answer and
+no longer replaces an earlier usable one. An answer whose completion write failed is not counted as an
+earlier answered round, so that round's failure can still fail the discussion. A cancel written to the
+store clears `outcome`, so a cancel racing a continuation's claim cannot store `CANCELLED` beside the
+previous round's `ANSWERED`. A no-progress TASK failure clears the stalled round's turn count, so a
+continuation starts with its full budget. A tool-pause resume that a cancel reached before it started
+is not started (the member's pause is cancelled), and its spend and created agents are booked in the
+resume callback, so a cancel that releases the wait first does not lose them. A parallel batch's
+deadline includes the drain of the timed-out attempt before each `RETRY`, and that drain is released
+by a cancel. A store that throws for a missing subgroup still refunds the parent's claim. A legacy
+round-1 document whose members contributed but which has no synthesis on record keeps its answer
+history unknown instead of zero. The Full Metrics Reference groups unanswered rounds by `reason` too
+and shows the VERIFY panel's legend.
+
+Left open from this round: a follow-up or resumed turn whose callback arrives after the group already
+settled is not merged into the stored record (needs a field-level merge write); `onAgentFailure: ABORT`
+still records a failure in a parallel phase rather than stopping it (unchanged, pinned by a test); a
+phase whose turns the cap skipped entirely still pauses at its `requiresApproval` gate; a sole
+`SYNTHESIS` phase whose turn fails settles `NO_ANSWER` / `SYNTHESIS_FAILED`, not `FAILED`.

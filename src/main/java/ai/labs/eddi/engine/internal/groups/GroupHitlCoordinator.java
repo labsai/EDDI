@@ -347,6 +347,9 @@ public class GroupHitlCoordinator {
         boolean discussionFails = !gc.hasAnsweredRound();
         gc.setState(discussionFails ? GroupConversationState.FAILED : GroupConversationState.COMPLETED);
         DiscussionOutcomes.noProgress(gc);
+        // The stalled round's turn count dies with it, as on a normal completion: a
+        // continuation seeds its counter from it and would start with the cap spent.
+        gc.setPausedTurnCount(0);
         gc.setPausedAt(null);
         gc.setHitlApprovalContext(null);
         gc.setHitlLastPauseFingerprint(null);
@@ -614,6 +617,9 @@ public class GroupHitlCoordinator {
         // The audit entry names the cancelled pause, which setPausedAt(null) clears.
         final Instant cancelledPausedAt = gc.getPausedAt();
         gc.setState(GroupConversationState.CANCELLED);
+        // outcome is null after a cancel: a record read while a continuation was
+        // claiming its round can still carry the previous round's outcome.
+        DiscussionOutcomes.clear(gc);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
         gc.setHitlApprovalContext(null);
         gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed

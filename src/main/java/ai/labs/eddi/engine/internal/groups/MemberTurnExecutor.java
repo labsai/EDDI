@@ -127,7 +127,7 @@ public class MemberTurnExecutor {
      * How long a RETRY after a timeout waits for the cancelled first attempt to end
      * (capped by the turn timeout).
      */
-    static final int RETRY_DRAIN_SECONDS = 5;
+    public static final int RETRY_DRAIN_SECONDS = 5;
 
     private static final Environment DEFAULT_ENV = Environment.production;
 
@@ -642,7 +642,7 @@ public class MemberTurnExecutor {
                     // to stop (cooperative: effective at its next task boundary, a running
                     // model call is not interrupted) and retry only if it ended within the
                     // wait — otherwise record the timeout without a retry.
-                    if (!stopTimedOutAttempt(member, privateConvId, attemptInFlight, timeout)) {
+                    if (!stopTimedOutAttempt(member, privateConvId, attemptInFlight, timeout, cancellation)) {
                         return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(),
                                 TranscriptEntryType.SKIPPED, TurnOutcome.TIMED_OUT, REASON_TIMEOUT_NOT_RETRIED, targetAgentId);
                     }
@@ -829,6 +829,18 @@ public class MemberTurnExecutor {
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
 
+        // Cancelled before the resume started: start no new turn. The member's pause
+        // is cancelled instead, as for any pause the group cannot honour.
+        if (cancellation != null && cancellation.isCancelled()) {
+            try {
+                conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
+            } catch (Exception e) {
+                LOGGER.debugf("Could not cancel the paused turn of member %s: %s", LogSanitizer.sanitize(member.agentId()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+            throw new GroupConversationService.MemberTurnCancelledException();
+        }
+
         var decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.REJECTED);
         decision.setDecidedBy("system:group");
@@ -843,14 +855,28 @@ public class MemberTurnExecutor {
                     new ConversationResponseHandler() {
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            book(snapshot);
                             resumeFuture.complete(snapshot);
                         }
 
                         @Override
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            book(snapshot);
                             // Dropped without producing a fresh answer — treat as
                             // "could not complete" so the caller falls back.
                             resumeFuture.complete(null);
+                        }
+
+                        // Whatever the resumed run did, it created what it created and
+                        // spent what it spent. Booked here, as the ordinary turn's
+                        // callback does, not after the wait: a cancel or timeout that
+                        // releases the wait first must not lose the spend or the agents
+                        // the group's cleanup has to undeploy.
+                        private void book(SimpleConversationMemorySnapshot snapshot) {
+                            if (snapshot != null) {
+                                GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
+                                GroupCostLedger.accumulateMemberCost(gc, costKey, snapshot);
+                            }
                         }
                     }, true, true, List.of());
         } catch (Exception e) {
@@ -883,15 +909,6 @@ public class MemberTurnExecutor {
             if (cancellation != null) {
                 cancellation.unregister(resumeFuture);
             }
-        }
-
-        // Whatever the resumed run did — answered, abstained or paused again — it
-        // created what it created and spent what it spent: the same bookkeeping as
-        // the ordinary turn, before any return, so the next member's ceiling check
-        // sees this spend.
-        if (resumed != null) {
-            GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
-            GroupCostLedger.accumulateMemberCost(gc, costKey, resumed);
         }
 
         // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
@@ -1196,9 +1213,15 @@ public class MemberTurnExecutor {
      * ({@link #handleMemberPause}). A cancel limited to the in-flight turn
      * ({@code cancelInFlightTurn}, on a sibling branch) is the follow-up.
      *
+     * The wait hears the discussion's cancel: the attempt is registered with
+     * {@code cancellation}, which releases it.
+     *
      * @return whether the attempt ended, so a retry will not queue behind it
+     * @throws GroupConversationService.MemberTurnCancelledException
+     *             when the discussion was cancelled during the wait
      */
-    private boolean stopTimedOutAttempt(GroupMember member, String convId, CompletableFuture<String> attempt, int timeoutSeconds) {
+    private boolean stopTimedOutAttempt(GroupMember member, String convId, CompletableFuture<String> attempt, int timeoutSeconds,
+                                        GroupConversationService.MemberTurnCancellation cancellation) {
         if (attempt == null || attempt.isDone()) {
             return true;
         }
@@ -1208,6 +1231,9 @@ public class MemberTurnExecutor {
             LOGGER.debugf("Could not cancel the timed-out turn of member %s: %s", LogSanitizer.sanitize(member.agentId()),
                     LogSanitizer.sanitize(e.getMessage()));
         }
+        if (cancellation != null) {
+            cancellation.register(attempt);
+        }
         try {
             attempt.get(Math.max(1, Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds)), TimeUnit.SECONDS);
             return true;
@@ -1215,11 +1241,22 @@ public class MemberTurnExecutor {
             Thread.currentThread().interrupt();
             return false;
         } catch (ExecutionException e) {
+            // Released by a cancel, not ended: the attempt may still be running.
+            if (cancellation != null && cancellation.isCancelled()) {
+                if (cancellation.stopsInFlight()) {
+                    stopMemberTurn(member, convId);
+                }
+                throw new GroupConversationService.MemberTurnCancelledException();
+            }
             return true;
         } catch (TimeoutException e) {
             LOGGER.warnf("Agent %s: the timed-out turn did not stop within %ds — not retrying it", LogSanitizer.sanitize(member.agentId()),
                     Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds));
             return false;
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(attempt);
+            }
         }
     }
 

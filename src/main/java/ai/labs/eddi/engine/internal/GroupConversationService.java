@@ -575,11 +575,23 @@ public class GroupConversationService implements IGroupConversationService, User
 
         // Load group config — null-safe: getCurrentResourceId may return null on
         // PostgreSQL
-        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+        // A store may also throw for a missing group (the historized store does):
+        // translated here, before the child runs, so the parent refunds its claim.
+        IResourceStore.IResourceId currentGroupId;
+        try {
+            currentGroupId = groupStore.getCurrentResourceId(groupId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NestedGroupNotFoundException("Group not found.");
+        }
         if (currentGroupId == null) {
             throw new NestedGroupNotFoundException("Group not found.");
         }
-        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
+        AgentGroupConfiguration config;
+        try {
+            config = groupStore.read(groupId, currentGroupId.getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NestedGroupNotFoundException("Group configuration not found.");
+        }
         if (config == null) {
             throw new NestedGroupNotFoundException("Group configuration not found.");
         }
@@ -1710,7 +1722,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // below stayed silent about it.
             int roundStart = Math.max(0, Math.min(gc.getRoundStartTranscriptIndex(), gc.getTranscript().size()));
             gc.getTranscript().stream().skip(roundStart)
-                    .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.answered())
+                    // Non-blank: an empty reply is not an answer, and must not replace
+                    // an earlier usable synthesis of the same round.
+                    .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.answered() && !e.content().isBlank())
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(
                             DebateVerdictParser.isRenderedFrom(gc.getDecision(), e.content())
@@ -1742,6 +1756,12 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 return gc;
             }
+            // A cancel the phase loop never saw: a resume past the last phase (its PHASE
+            // gate approved) runs no iteration, so none of the loop's checks ran.
+            var settleToken = discussionControls.get(gc.getId());
+            if (settleToken != null && settleToken.isCancelled()) {
+                return persistCancelled(gc, listener);
+            }
             // #27/#45: complete with a CAS on the persisted state still being a
             // running one (IN_PROGRESS or SYNTHESIZING — see RunningDiscussionWrites).
             // If a cross-pod cancel/ABORT already flipped the persisted state, the
@@ -1749,6 +1769,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // completed answer for work a human tried to stop.
             // K1/K3: COMPLETED is not "answered" — record how the round ended, and
             // fail a round in which no member answered at all.
+            // settle counts an answered round before the completion write commits; if
+            // that write fails, the failure path must not read the count as history.
+            Integer answeredBeforeSettle = gc.getAnsweredRounds();
             DiscussionOutcomes.settle(gc, phaseList, costCeilingSynthesizeNow);
             // M3: FAILED ends the discussion only if no round of it ever answered; a
             // continuation that fails stays COMPLETED (continuable, agents kept).
@@ -1767,7 +1790,12 @@ public class GroupConversationService implements IGroupConversationService, User
             // (superseded / deleted) is handled by the catch blocks below, which
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
-            persistWhileRunning(gc);
+            try {
+                persistWhileRunning(gc);
+            } catch (Exception e) {
+                gc.setAnsweredRounds(answeredBeforeSettle);
+                throw e;
+            }
             // Counted only now, past the conditional write: a result a cross-pod cancel
             // discarded is not a failed or unanswered round.
             if (noMemberAnswered) {
@@ -2750,7 +2778,10 @@ public class GroupConversationService implements IGroupConversationService, User
         long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
                 ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
                 : 1L;
-        return Math.min(timeout * attempts + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+        // Before each retry the timed-out attempt is drained (MemberTurnExecutor waits
+        // up to RETRY_DRAIN_SECONDS for it to stop); the batch has to cover that too.
+        long drain = (attempts - 1) * Math.max(1, Math.min(MemberTurnExecutor.RETRY_DRAIN_SECONDS, timeout));
+        return Math.min(timeout * attempts + drain + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
     }
 
     /**

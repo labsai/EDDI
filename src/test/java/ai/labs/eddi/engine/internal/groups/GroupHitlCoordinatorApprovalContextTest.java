@@ -162,6 +162,18 @@ class GroupHitlCoordinatorApprovalContextTest {
     }
 
     @Test
+    @DisplayName("a no-progress failure clears the stalled round's turn count, so a continuation starts fresh")
+    void noProgress_clearsThePausedTurnCount() throws Exception {
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        gc.setPausedTurnCount(12);
+
+        coordinator.failDiscussionNoProgress(gc, 0, phase, null);
+
+        assertEquals(0, gc.getPausedTurnCount());
+    }
+
+    @Test
     @DisplayName("a restored pause (failed resume) gets its context again")
     void restoreRendersAgain() throws Exception {
         when(renderer.render(any(), any(), anyInt(), anyString())).thenReturn(context("again"));

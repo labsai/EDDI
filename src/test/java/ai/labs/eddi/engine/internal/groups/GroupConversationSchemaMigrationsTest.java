@@ -72,10 +72,9 @@ class GroupConversationSchemaMigrationsTest {
      */
     @Test
     void inheritedMaxTurnsDocuments_claimAVersionAboveFive() throws Exception {
-        assertTrue(GroupConversation.CURRENT_SCHEMA_VERSION >= 6, "a v5 pod must see these documents as newer than it understands");
-
         var v5 = gc(5);
         var result = GroupConversationSchemaMigrations.prepareForResume(v5);
+        assertTrue(result.getSchemaVersion() > 5, "a v5 pod must see these documents as newer than it understands");
         assertEquals(GroupConversation.CURRENT_SCHEMA_VERSION, result.getSchemaVersion(), "a v5 document resumes through an identity hop");
         assertNull(result.getInheritedMaxTurns());
     }

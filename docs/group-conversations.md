@@ -1356,7 +1356,9 @@ a timeout happens only when the first attempt stops within that wait; otherwise 
 is recorded `TIMED_OUT` and not retried — a second request would queue behind the first
 in the same member conversation and be billed twice. A timed-out turn may still finish
 later: its reply then lands in the member's private conversation history, where the
-member's next turn sees it as earlier context (it is not a transcript entry).
+member's next turn sees it as earlier context (it is not a transcript entry). A parallel
+phase's one deadline covers that wait for every retry it allows, and a cancel during the
+wait ends it at once.
 
 ### Turn outcomes
 

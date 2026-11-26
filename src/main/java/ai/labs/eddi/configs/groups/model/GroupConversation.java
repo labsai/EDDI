@@ -1492,8 +1492,26 @@ public class GroupConversation {
         // answered)
         if (answerOnRecord) {
             answeredRounds = 1;
-        } else if (round <= 1) {
+        } else if (round <= 1 && !hasMemberContribution()) {
+            // A missing synthesis is no proof by itself: a style without a synthesis
+            // phase answers with its members' contributions, and the phases the round
+            // ran are not on the record. Only a round nobody contributed to is pinned
+            // at zero; one with contributions stays unknown.
             answeredRounds = 0;
+        }
+    }
+
+    /** The entry types a member's own answer is recorded as. */
+    private static final Set<TranscriptEntryType> CONTRIBUTION_TYPES = Set.of(TranscriptEntryType.OPINION,
+            TranscriptEntryType.CRITIQUE, TranscriptEntryType.REVISION, TranscriptEntryType.CHALLENGE, TranscriptEntryType.DEFENSE,
+            TranscriptEntryType.ARGUMENT, TranscriptEntryType.REBUTTAL, TranscriptEntryType.PLAN, TranscriptEntryType.TASK_RESULT,
+            TranscriptEntryType.PROPOSAL, TranscriptEntryType.BARGAIN, TranscriptEntryType.VOTE, TranscriptEntryType.HUMAN_INPUT,
+            TranscriptEntryType.RETRO, TranscriptEntryType.BID);
+
+    private boolean hasMemberContribution() {
+        synchronized (transcript) {
+            return transcript.stream().anyMatch(e -> e != null && e.speakerAgentId() != null && CONTRIBUTION_TYPES.contains(e.type())
+                    && e.answered() && !e.content().isBlank());
         }
     }
 

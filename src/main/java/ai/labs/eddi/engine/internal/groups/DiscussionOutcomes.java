@@ -170,7 +170,9 @@ public final class DiscussionOutcomes {
         // (A dissent-only record, made when no deciding phase ran, is not that.)
         boolean endedWithoutDecision = gc.getDecision() != null && gc.getDecision().type() == GroupConversation.DecisionType.NONE
                 && !"dissent-round".equals(gc.getDecision().method());
-        if (gc.getSynthesizedAnswer() != null || (!hasSynthesisPhase && memberContributed && !endedWithoutDecision)) {
+        // A blank synthesis (a READY snapshot with no output) is no answer either.
+        boolean synthesized = gc.getSynthesizedAnswer() != null && !gc.getSynthesizedAnswer().isBlank();
+        if (synthesized || (!hasSynthesisPhase && memberContributed && !endedWithoutDecision)) {
             record(gc, DiscussionOutcome.ANSWERED, cutShort);
             return;
         }

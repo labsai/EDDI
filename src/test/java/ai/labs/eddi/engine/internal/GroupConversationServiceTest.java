@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -1012,8 +1013,12 @@ class GroupConversationServiceTest {
             givenGroupConfigReadable();
             var gc = completedGc();
             when(conversationStore.read("gc-1")).thenReturn(gc);
-            when(conversationStore.compareAndSetState("gc-1",
-                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // The stored state, changed only by a compare-and-set that matches it: the
+            // in-memory document is set COMPLETED before the failed write, so it cannot
+            // show whether the restore reached the store.
+            var stored = new AtomicReference<>(GroupConversationState.COMPLETED);
+            when(conversationStore.compareAndSetState(eq("gc-1"), any(), any()))
+                    .thenAnswer(inv -> stored.compareAndSet(inv.getArgument(1), inv.getArgument(2)));
             doThrow(new RuntimeException("agent boom")).when(conversationService)
                     .say(any(), eq("agentA"), eq("convA"), any(), any(), any(), any(), anyBoolean(), any());
             doThrow(new RuntimeException("store down")).when(conversationStore).updateIfState(any(), any());
@@ -1021,6 +1026,7 @@ class GroupConversationServiceTest {
             assertThrows(GroupDiscussionException.class,
                     () -> service.followUpWithMember("gc-1", "Alice", "hello"));
 
+            assertEquals(GroupConversationState.COMPLETED, stored.get(), "the stored state is back at COMPLETED");
             verify(conversationStore).compareAndSetState("gc-1",
                     GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
         }
