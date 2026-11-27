@@ -538,7 +538,6 @@ public class HealthReportService {
     public HealthCompare compare(String agentId, int fromVersion, int toVersion, int days, List<String> requestedOrigins,
                                  boolean qualityAllowed) {
         int newer = Math.max(fromVersion, toVersion);
-        int older = Math.min(fromVersion, toVersion);
         LocalDate today = today();
         Map<Integer, LocalDate> firstDays = firstDays(agentId, firstTurnOrigins(requestedOrigins));
         LocalDate newerStart = firstDays.get(newer);
