@@ -37,6 +37,7 @@ import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DiscussionOutcome;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -56,6 +57,9 @@ import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
 import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
+import ai.labs.eddi.engine.internal.groups.DiscussionOutcomes;
+import ai.labs.eddi.engine.internal.groups.GroupMemberPreflight;
+import ai.labs.eddi.engine.internal.groups.TurnBudget;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupApprovedResultActions;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
@@ -413,6 +417,8 @@ public class GroupConversationService implements IGroupConversationService, User
 
         this.timerGroupDiscussion = meterRegistry.timer("eddi_group_discussion_duration");
         this.counterGroupDiscussion = meterRegistry.counter("eddi_group_discussion_count");
+        // Counts failed ROUNDS: a failed continuation of an answered discussion counts
+        // although the discussion itself stays COMPLETED (see docs/metrics.md).
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
         this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
         this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");
@@ -432,6 +438,7 @@ public class GroupConversationService implements IGroupConversationService, User
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
         this.phaseExecutionEngine.setSigningGuard(signingGuard);
+        this.phaseExecutionEngine.setDiscussionControls(discussionControls);
         this.phaseExecutionEngine
                 .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
@@ -545,6 +552,21 @@ public class GroupConversationService implements IGroupConversationService, User
                                      GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling,
                                      String attachmentSourceConversationId)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discussNested(groupId, question, userId, depth, listener, attachments, inheritedCostCeiling, attachmentSourceConversationId,
+                null, null);
+    }
+
+    /**
+     * A nested discussion run as a GROUP member's turn (K8): as
+     * {@link #discuss(String, String, String, int, GroupDiscussionEventListener, List, Double, String)},
+     * and the child also hears the parent's cancel ({@code parentToken}) and runs
+     * under the turns the parent has left ({@code inheritedMaxTurns}). Both may be
+     * {@code null}.
+     */
+    public GroupConversation discussNested(String groupId, String question, String userId, int depth,
+                                           GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling,
+                                           String attachmentSourceConversationId, DiscussionControlToken parentToken, Integer inheritedMaxTurns)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
@@ -556,13 +578,25 @@ public class GroupConversationService implements IGroupConversationService, User
 
         // Load group config — null-safe: getCurrentResourceId may return null on
         // PostgreSQL
-        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
-        if (currentGroupId == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group not found.");
+        // A store may also throw for a missing group (the historized store does):
+        // translated here, before the child runs, so the parent refunds its claim.
+        IResourceStore.IResourceId currentGroupId;
+        try {
+            currentGroupId = groupStore.getCurrentResourceId(groupId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NestedGroupNotFoundException("Group not found.");
         }
-        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
+        if (currentGroupId == null) {
+            throw new NestedGroupNotFoundException("Group not found.");
+        }
+        AgentGroupConfiguration config;
+        try {
+            config = groupStore.read(groupId, currentGroupId.getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NestedGroupNotFoundException("Group configuration not found.");
+        }
         if (config == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
+            throw new NestedGroupNotFoundException("Group configuration not found.");
         }
 
         // Resolve phases
@@ -570,14 +604,51 @@ public class GroupConversationService implements IGroupConversationService, User
         if (phases.isEmpty()) {
             throw new GroupDiscussionException("No discussion phases are defined for this group.");
         }
+        // GR4: a group no member of which can take a turn is refused before anything
+        // runs.
+        GroupMemberPreflight.requireMembers(config);
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
         materializeAttachments(gc, attachments, attachmentSourceConversationId);
         gc.setInheritedCostCeiling(inheritedCostCeiling);
-        // Artifacts live in their own collection and are attached at read time; the
-        // discuss response is a read of the finished discussion too, and without this
-        // it reported "artifacts": [] for a discussion that had created some.
-        return withArtifacts(executeDiscussion(gc, config, phases, question, listener, 0));
+        gc.setInheritedMaxTurns(inheritedMaxTurns);
+        Runnable unlinkParent = () -> {
+        };
+        DiscussionControlToken installedToken = null;
+        if (parentToken != null) {
+            // Registered before the leg starts (executeDiscussion keeps an existing
+            // token), so a parent cancel that lands now already reaches the child.
+            var childToken = new DiscussionControlToken();
+            discussionControls.put(gc.getId(), childToken);
+            installedToken = childToken;
+            unlinkParent = parentToken.onCancel(childToken::setSignal);
+        }
+        try {
+            // Artifacts live in their own collection and are attached at read time; the
+            // discuss response is a read of the finished discussion too, and without this
+            // it reported "artifacts": [] for a discussion that had created some.
+            return withArtifacts(executeDiscussion(gc, config, phases, question, listener, 0));
+        } finally {
+            unlinkParent.run();
+            if (installedToken != null) {
+                // A setup failure before executeDiscussion's own cleanup scope would leave
+                // the token behind for a child that has no running leg. By identity, so a
+                // replacement token is never removed.
+                discussionControls.remove(gc.getId(), installedToken);
+            }
+        }
+    }
+
+    /**
+     * The nested group (or its configuration) could not be found — thrown by
+     * {@link #discussNested} before any child conversation exists, so the parent
+     * can tell it from a lookup failure raised after the child ran and refund the
+     * turns it claimed for it.
+     */
+    public static final class NestedGroupNotFoundException extends IResourceStore.ResourceNotFoundException {
+        public NestedGroupNotFoundException(String message) {
+            super(message);
+        }
     }
 
     private GroupConversation withArtifacts(GroupConversation gc) {
@@ -631,6 +702,9 @@ public class GroupConversationService implements IGroupConversationService, User
         if (phases.isEmpty()) {
             throw new GroupDiscussionException("No discussion phases are defined for this group.");
         }
+        // GR4: a group no member of which can take a turn is refused before anything
+        // runs.
+        GroupMemberPreflight.requireMembers(config);
 
         // Create the conversation synchronously so we can return its ID
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
@@ -739,6 +813,9 @@ public class GroupConversationService implements IGroupConversationService, User
         if (phases.isEmpty()) {
             throw new GroupDiscussionException("No discussion phases are defined for this group.");
         }
+        // GR4: a group no member of which can take a turn is refused before anything
+        // runs.
+        GroupMemberPreflight.requireMembers(config);
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
         gc.setInheritedCostCeiling(maxCostPerRun);
@@ -879,7 +956,8 @@ public class GroupConversationService implements IGroupConversationService, User
                 : new ProtocolConfig(resolvedProtocol.agentTimeoutSeconds(), resolvedProtocol.onAgentFailure(), resolvedProtocol.maxRetries(),
                         resolvedProtocol.onMemberUnavailable(), resolvedProtocol.maxTurns(), effectiveCeiling,
                         resolvedProtocol.onCostExceeded());
-        int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
+        // K8: a nested discussion runs under the turns its parent had left.
+        int maxTurns = TurnBudget.legCap(protocol.maxTurns(), gc.getInheritedMaxTurns());
 
         // I12: the loop iterates a runtime COPY of the phase list. A facilitator
         // move may diverge it mid-run (CALL_VOTE inserts a phase, EXTEND_PHASE bumps
@@ -960,6 +1038,8 @@ public class GroupConversationService implements IGroupConversationService, User
         if (startPhaseIndex == 0) {
             gc.setCostCeilingSkipAhead(false);
         }
+        // The outcome describes a round that ran to its end; a running leg has none.
+        DiscussionOutcomes.clear(gc);
         boolean costCeilingSynthesizeNow = gc.isCostCeilingSkipAhead();
 
         try {
@@ -1034,17 +1114,26 @@ public class GroupConversationService implements IGroupConversationService, User
                     startRepeat = Math.min(Math.max(repeatBookmark.repeatIdx(), 0), Math.max(phase.repeats(), 1) - 1);
                 }
 
+                // K3: one turn per remaining SYNTHESIS phase is kept back from the
+                // phases before it, so the cap cannot silently drop the answer.
+                final int phaseMaxTurns = TurnBudget.phaseCap(maxTurns, phaseList, phaseIdx);
+                // K8: what a GROUP member's child discussion may still spend.
+                gc.bindLegTurnBudget(turnCounter, phaseMaxTurns);
+
                 for (int repeat = startRepeat; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
+                    // K2: a cancel is honoured before every repeat, not only between phases.
+                    if (token != null && token.isCancelled()) {
+                        LOGGER.infof("Group discussion %s cancelled via control token before repeat %d of phase %d",
+                                LogSanitizer.sanitize(gc.getId()), repeat, phaseIdx);
+                        return persistCancelled(gc, listener);
+                    }
+
                     // --- maxTurns safety cap ---
-                    if (turnCounter.get() >= maxTurns) {
+                    if (turnCounter.get() >= phaseMaxTurns) {
                         LOGGER.warnf("Max turns (%d) exceeded for group %s — skipping remaining phases",
                                 maxTurns, LogSanitizer.sanitize(gc.getGroupId()));
-                        gc.getTranscript().add(new TranscriptEntry(
-                                null, "System", null, phaseIdx, phase.name(),
-                                TranscriptEntryType.SKIPPED, Instant.now(),
-                                "Max turns (%d) exceeded — remaining phases skipped".formatted(maxTurns),
-                                null));
+                        TurnBudget.noteCut(gc, phaseIdx, phase.name());
                         break;
                     }
 
@@ -1133,22 +1222,22 @@ public class GroupConversationService implements IGroupConversationService, User
                     // commitPause call sites below end theirs.
                     try {
                         if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
-                            executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                            executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, phaseMaxTurns);
                         } else if (phase.targetEachPeer()) {
                             phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
                                     turnCounter,
-                                    maxTurns);
+                                    phaseMaxTurns);
                         } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
                             // F2: PARALLEL never honors a speaker offset — with I6's
                             // one carve-out: a HUMAN_TURN_PARALLEL bookmark resumes
                             // the phase's human tail instead of re-running the
                             // fan-out; see GroupConversation.ResumePoint's Javadoc.
-                            executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                            executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, phaseMaxTurns,
                                     parallelHumanResumeIdx);
                         } else {
                             phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
                                     turnCounter,
-                                    maxTurns, startSpeakerIdx);
+                                    phaseMaxTurns, startSpeakerIdx);
                         }
                     } catch (PhaseExecutionEngine.HumanTurnRequired humanTurn) {
                         // I6 slice-base fix: the pause lands MID-repeat, after other
@@ -1162,6 +1251,12 @@ public class GroupConversationService implements IGroupConversationService, User
                                 listener, config);
                         convertPauseToCancelIfSignalled(gc, listener);
                         return gc;
+                    }
+
+                    // K2: cancelled while the last speaker of this repeat ran — stop
+                    // before the convergence judge, facilitator or dissent round spend.
+                    if (token != null && token.isCancelled()) {
+                        return persistCancelled(gc, listener);
                     }
 
                     // I1: a phase executor hit the cost ceiling and stopped scheduling
@@ -1230,7 +1325,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                     : List.of();
                         }
                         outcome = phaseExecutionEngine.checkConvergence(gc, config, phase, protocol, phaseIdx, repeat, speakers,
-                                repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
+                                repeatEntries, previousRepeatEntries, listener, turnCounter, phaseMaxTurns);
                     }
 
                     // I11: fold this repeat's PROPOSAL/BARGAIN turns into the
@@ -1278,7 +1373,7 @@ public class GroupConversationService implements IGroupConversationService, User
                         var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
                                 phaseIdx, repeat, true, moreRepeats, !outcome.isContinue(), escalationTarget);
                         var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
-                                protocol, question, listener, turnCounter, maxTurns);
+                                protocol, question, listener, turnCounter, phaseMaxTurns);
                         switch (facilitatorAction.kind()) {
                             case END_PHASE -> {
                                 LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
@@ -1352,7 +1447,7 @@ public class GroupConversationService implements IGroupConversationService, User
                         }
                         if (config.isRecordDissents()) {
                             phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
-                                    turnCounter, maxTurns);
+                                    turnCounter, phaseMaxTurns);
                         }
                         // I14 fold-in (§4 gap): decision_reached finally has a producer.
                         // Fired AFTER the dissent round so the event's record carries the
@@ -1371,7 +1466,7 @@ public class GroupConversationService implements IGroupConversationService, User
                     HumanTieBreakEngine.PendingTieBreak tieBreak = null;
                     if (phase.type() == PhaseType.VOTE && lastRepeat) {
                         tieBreak = phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers,
-                                listener, turnCounter, maxTurns);
+                                listener, turnCounter, phaseMaxTurns);
                     }
 
                     // I8: a completed RETRO phase harvests its lessons into
@@ -1574,6 +1669,9 @@ public class GroupConversationService implements IGroupConversationService, User
 
                 // Check again after inner repeat loop in case maxTurns was hit mid-repeat
                 if (turnCounter.get() >= maxTurns) {
+                    if (phaseIdx + 1 < phaseList.size()) {
+                        TurnBudget.noteCut(gc, phaseIdx, phase.name());
+                    }
                     break;
                 }
 
@@ -1591,7 +1689,7 @@ public class GroupConversationService implements IGroupConversationService, User
                             phaseIdx, Math.max(phase.repeats(), 1) - 1, false, false, false,
                             phaseIdx + 1 < phaseList.size());
                     var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
-                            protocol, question, listener, turnCounter, maxTurns);
+                            protocol, question, listener, turnCounter, phaseMaxTurns);
                     switch (facilitatorAction.kind()) {
                         case INSERT_VOTE -> {
                             phaseList.add(phaseIdx + 1, facilitatorAction.insertPhase());
@@ -1627,7 +1725,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // below stayed silent about it.
             int roundStart = Math.max(0, Math.min(gc.getRoundStartTranscriptIndex(), gc.getTranscript().size()));
             gc.getTranscript().stream().skip(roundStart)
-                    .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
+                    // Non-blank: an empty reply is not an answer, and must not replace
+                    // an earlier usable synthesis of the same round.
+                    .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.answered() && !e.content().isBlank())
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(
                             DebateVerdictParser.isRenderedFrom(gc.getDecision(), e.content())
@@ -1659,12 +1759,27 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 return gc;
             }
+            // A cancel the phase loop never saw: a resume past the last phase (its PHASE
+            // gate approved) runs no iteration, so none of the loop's checks ran.
+            var settleToken = discussionControls.get(gc.getId());
+            if (settleToken != null && settleToken.isCancelled()) {
+                return persistCancelled(gc, listener);
+            }
             // #27/#45: complete with a CAS on the persisted state still being a
             // running one (IN_PROGRESS or SYNTHESIZING — see RunningDiscussionWrites).
             // If a cross-pod cancel/ABORT already flipped the persisted state, the
             // CAS fails and we honor the terminal state instead of resurrecting a
             // completed answer for work a human tried to stop.
-            gc.setState(GroupConversationState.COMPLETED);
+            // K1/K3: COMPLETED is not "answered" — record how the round ended, and
+            // fail a round in which no member answered at all.
+            // settle counts an answered round before the completion write commits; if
+            // that write fails, the failure path must not read the count as history.
+            Integer answeredBeforeSettle = gc.getAnsweredRounds();
+            DiscussionOutcomes.settle(gc, phaseList, costCeilingSynthesizeNow);
+            // M3: FAILED ends the discussion only if no round of it ever answered; a
+            // continuation that fails stays COMPLETED (continuable, agents kept).
+            boolean noMemberAnswered = DiscussionOutcomes.failsDiscussion(gc);
+            gc.setState(noMemberAnswered ? GroupConversationState.FAILED : GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
             gc.setCostCeilingSkipAhead(false);
@@ -1678,18 +1793,33 @@ public class GroupConversationService implements IGroupConversationService, User
             // (superseded / deleted) is handled by the catch blocks below, which
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
-            persistWhileRunning(gc);
+            try {
+                persistWhileRunning(gc);
+            } catch (Exception e) {
+                gc.setAnsweredRounds(answeredBeforeSettle);
+                throw e;
+            }
+            // Counted only now, past the conditional write: a result a cross-pod cancel
+            // discarded is not a failed or unanswered round. The failure counter counts
+            // the failed ROUND, as failConversation and the no-progress failure do, so a
+            // failed continuation of an answered discussion counts although the
+            // discussion stays COMPLETED; a NO_ANSWER round is only in the unanswered
+            // meter.
+            if (gc.getOutcome() == DiscussionOutcome.FAILED) {
+                counterGroupFailure.increment();
+            }
+            DiscussionOutcomes.countUnanswered(gc);
 
             // Only past the CAS above: a discussion a human cancelled mid-flight must not
             // file work for another team. Idempotent (deterministic dedupe keys), never
             // throws.
-            if (decisionHandoffs != null) {
+            if (decisionHandoffs != null && !noMemberAnswered) {
                 decisionHandoffs.afterCompleted(gc, config, listener);
                 persistDecisionHandoffs(gc);
             }
 
             if (listener != null) {
-                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
+                listener.onGroupComplete(GroupConversationEventSink.GroupCompleteEvent.of(gc));
             }
 
             return gc;
@@ -1858,6 +1988,9 @@ public class GroupConversationService implements IGroupConversationService, User
     private GroupConversation persistCancelled(GroupConversation gc, GroupDiscussionEventListener listener)
             throws IResourceStore.ResourceStoreException {
         gc.setState(GroupConversationState.CANCELLED);
+        // A cancelled round has no outcome, also when settle had already classified it
+        // and the completion write then failed.
+        DiscussionOutcomes.clear(gc);
         gc.setLastModified(Instant.now());
         try {
             // H14a: conditional like every other leg write — a terminal state another
@@ -1964,7 +2097,7 @@ public class GroupConversationService implements IGroupConversationService, User
             if (state == GroupConversationState.CANCELLED) {
                 notifyCancelled(persisted, listener);
             } else if (state == GroupConversationState.COMPLETED || state == GroupConversationState.CLOSED) {
-                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(state, persisted.getSynthesizedAnswer()));
+                listener.onGroupComplete(GroupConversationEventSink.GroupCompleteEvent.of(persisted));
             } else {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
                         "The group discussion was ended elsewhere (" + state + ")."));
@@ -2563,6 +2696,52 @@ public class GroupConversationService implements IGroupConversationService, User
                 future.completeExceptionally(new MemberTurnCancelledException());
             }
         }
+
+        private volatile boolean stopInFlight;
+
+        /**
+         * {@link #cancel()}, and the released turns also stop their member
+         * conversation's running turn ({@code CANCEL_IMMEDIATE} of the discussion). A
+         * batch deadline uses plain {@code cancel()}: there the late turn is still
+         * harvested for its cost and the agents it created.
+         */
+        public void cancelAndStopInFlight() {
+            stopInFlight = true;
+            cancel();
+        }
+
+        /** Whether a released turn should stop its member conversation's turn. */
+        public boolean stopsInFlight() {
+            return stopInFlight;
+        }
+    }
+
+    /**
+     * The control token of the discussion leg running on this node, or
+     * {@code null}. For a nested GROUP member's turn, whose child discussion must
+     * hear its parent's cancel.
+     */
+    public DiscussionControlToken controlTokenOf(String groupConversationId) {
+        return groupConversationId == null ? null : discussionControls.get(groupConversationId);
+    }
+
+    /**
+     * Whether the stored discussion is gone or no longer running (anything but
+     * {@code IN_PROGRESS} / {@code SYNTHESIZING}). A member turn whose conversation
+     * was ended under it asks before starting a fresh member conversation: a
+     * discussion deleted or ended elsewhere must not get new ones (K2). An
+     * unreadable store answers {@code false} — the turn's own failure handling
+     * decides then.
+     */
+    public boolean discussionEnded(String groupConversationId) {
+        try {
+            var state = conversationStore.read(groupConversationId).getState();
+            return state != null && state != GroupConversationState.IN_PROGRESS && state != GroupConversationState.SYNTHESIZING;
+        } catch (IResourceStore.ResourceNotFoundException | IGroupConversationStore.GroupConversationGoneException e) {
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -2609,7 +2788,10 @@ public class GroupConversationService implements IGroupConversationService, User
         long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
                 ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
                 : 1L;
-        return Math.min(timeout * attempts + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+        // Before each retry the timed-out attempt is drained (MemberTurnExecutor waits
+        // up to RETRY_DRAIN_SECONDS for it to stop); the batch has to cover that too.
+        long drain = (attempts - 1) * Math.max(1, Math.min(MemberTurnExecutor.RETRY_DRAIN_SECONDS, timeout));
+        return Math.min(timeout * attempts + drain + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
     }
 
     /**
@@ -2829,6 +3011,9 @@ public class GroupConversationService implements IGroupConversationService, User
         // The field initialiser is the LEGACY sentinel so key-less stored documents
         // read as legacy — a genuinely new document must claim current explicitly.
         gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        // M3: counted from 0, so a later failed round can tell the discussion answered
+        // before.
+        gc.setAnsweredRounds(0);
         gc.setGroupId(groupId);
         gc.setUserId(userId);
         gc.setState(GroupConversationState.IN_PROGRESS);

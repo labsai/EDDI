@@ -589,6 +589,9 @@ class McpHitlToolsCoverageTest {
     void cancelGroup_approverOnly_pausedDiscussion_cancelled() throws Exception {
         when(guard.mayCancelExecuting(any())).thenReturn(false);
         when(groupConversationService.cancelPausedDiscussion(eq("gc1"), any())).thenReturn(true);
+        var cancelled = new GroupConversation();
+        cancelled.setState(GroupConversation.GroupConversationState.CANCELLED);
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(cancelled);
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("CANCELLED"), out);
         verify(groupConversationService, never()).cancelDiscussion(any(), any());
