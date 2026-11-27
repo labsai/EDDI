@@ -48,6 +48,13 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             """;
 
     /** Backs both the newest-first read and the retention sweep's range delete. */
+    /**
+     * Added after the table first shipped, so it cannot live in
+     * {@link #CREATE_TABLE}: that statement is a no-op on an existing table.
+     * Existing rows read back with a null exception.
+     */
+    private static final String ADD_EXCEPTION_COLUMN = "ALTER TABLE database_logs ADD COLUMN IF NOT EXISTS exception TEXT";
+
     private static final String CREATE_INDEX_TIMESTAMP = "CREATE INDEX IF NOT EXISTS idx_database_logs_ts ON database_logs (timestamp DESC)";
 
     private final Instance<DataSource> dataSourceInstance;
@@ -63,6 +70,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(ADD_EXCEPTION_COLUMN);
             stmt.execute(CREATE_INDEX_TIMESTAMP);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -86,8 +94,8 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
 
         String sql = """
                 INSERT INTO database_logs (message, level, logger_name, timestamp, environment,
-                 AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id, exception)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (LogEntry entry : entries) {
@@ -105,6 +113,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                 ps.setString(8, entry.conversationId());
                 ps.setString(9, entry.userId());
                 ps.setString(10, entry.instanceId());
+                ps.setString(11, entry.exception());
                 ps.addBatch();
             }
             ps.executeBatch();
@@ -160,7 +169,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                     Timestamp ts = rs.getTimestamp("timestamp");
                     logs.add(new LogEntry(ts != null ? ts.getTime() : 0L, rs.getString("level"), rs.getString("logger_name"), rs.getString("message"),
                             rs.getString("environment"), rs.getString("AGENT_ID"), (Integer) rs.getObject("AGENT_VERSION"),
-                            rs.getString("conversation_id"), rs.getString("user_id"), rs.getString("instance_id")));
+                            rs.getString("conversation_id"), rs.getString("user_id"), rs.getString("instance_id"), rs.getString("exception")));
                 }
             }
         } catch (SQLException e) {

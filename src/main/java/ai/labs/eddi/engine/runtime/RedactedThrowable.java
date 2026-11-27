@@ -85,6 +85,11 @@ final class RedactedThrowable extends Throwable {
         return copy;
     }
 
+    /** The type name of the throwable this one stands in for. */
+    String originalTypeName() {
+        return originalTypeName;
+    }
+
     /**
      * Renders as the original type would, so a printed stack trace is unchanged
      * apart from the rewritten text.
