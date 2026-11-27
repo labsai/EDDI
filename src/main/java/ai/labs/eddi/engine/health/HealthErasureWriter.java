@@ -125,13 +125,15 @@ public class HealthErasureWriter implements AsyncErasureWriter {
 
     @Override
     public long eraseConversation(String conversationId) {
-        String agentId = agentOf(conversationId);
         HealthDeletedRows deleted = store.deleteConversationReturningDays(conversationId);
         if (deleted == null) {
             // Nothing to mark; countForConversation still verifies the rows are gone.
             return 0;
         }
         if (deleted.deleted() > 0) {
+            // The agent only when the days are unknown: the guard erases these rows
+            // before the conversation's snapshot is deleted, so it can still be read.
+            String agentId = deleted.daysKnown() ? null : agentOf(conversationId);
             markDeleted(conversationId, agentId == null ? List.of() : List.of(agentId), deleted);
         }
         return deleted.deleted();

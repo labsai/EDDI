@@ -83,8 +83,9 @@ class ConversationPurgeServiceHealthTest {
         service(memoryStore, healthStore).purge("conv");
 
         InOrder order = inOrder(healthStore, memoryStore);
-        order.verify(memoryStore).loadListingSummaries(List.of("conv"));
         order.verify(healthStore).deleteConversationReturningDays("conv");
+        // Unknown days: the agent is read after the delete, before the snapshot goes.
+        order.verify(memoryStore).loadListingSummaries(List.of("conv"));
         order.verify(healthStore).countByConversationId("conv");
         order.verify(memoryStore).deleteConversationMemorySnapshot("conv");
         // Once, by the guard: no second, unguarded delete after the snapshot.

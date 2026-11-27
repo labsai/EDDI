@@ -80,6 +80,13 @@ class HealthErasureWriterTest {
         assertEquals(2L, marking.eraseConversation("conv"));
         verify(dirty).markDeletedRows("conv", List.of("agent"), unknown);
 
+        // Known days need no agent lookup.
+        HealthDeletedRows known = new HealthDeletedRows(1L, Map.of("agent", Set.of(LocalDate.of(2026, 11, 9))));
+        when(store.deleteConversationReturningDays("known")).thenReturn(known);
+        marking.eraseConversation("known");
+        verify(conversations, never()).loadListingSummaries(List.of("known"));
+        verify(dirty).markDeletedRows("known", List.of(), known);
+
         Map<String, Set<LocalDate>> days = Map.of("agent", Set.of(LocalDate.of(2026, 11, 10)));
         when(store.agentDaysOfConversation("conv")).thenReturn(days);
         when(store.deleteRow("conv", "exec")).thenReturn(1L);
