@@ -25,6 +25,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -66,18 +67,33 @@ import java.util.TreeMap;
  * tombstones right before it is written ({@link ErasureGuard#erasedForReading},
  * captured at the session's start, the matcher's rule): a row of an erased user
  * or a deleted conversation is withheld, also when the tombstones cannot be
- * read (fail closed). Tombstones are written before anything is deleted, so no
- * row read before an erasure is written after it began. The check is made once
- * per conversation per page, when the conversation's first row of the page is
- * reached (two point reads of the tombstone store: at most two per row,
- * typically fewer). The daily kind holds counts only, which the rollup re-rolls
- * without an erased user's rows.
+ * read (fail closed). What is guaranteed: a row is handed to the response
+ * stream only if its tombstone check passed at most {@link #VERDICT_MAX_AGE}
+ * before — a verdict is reused for the conversation's further rows of the same
+ * page only while it is that fresh (two point reads of the tombstone store per
+ * check). Tombstones are written before anything is deleted, so a row handed on
+ * within that time after an erasure began can slip through, none later; bytes
+ * the response stream still buffers are not recalled. The daily kind holds
+ * counts only, which the rollup re-rolls without an erased user's rows.
  */
 @ApplicationScoped
 public class HealthExport {
 
     /** The most sessions one export carries ({@code truncated} says so). */
     public static final int MAX_SESSIONS = 10_000;
+
+    /**
+     * How old a tombstone verdict may be when a row is handed on; an older one is
+     * taken again.
+     */
+    static final Duration VERDICT_MAX_AGE = Duration.ofSeconds(1);
+
+    /** {@link #VERDICT_MAX_AGE} in nanos, lowered by tests. */
+    long verdictMaxAgeNanos = VERDICT_MAX_AGE.toNanos();
+
+    /** A tombstone verdict and when it was taken ({@link System#nanoTime}). */
+    private record Verdict(boolean erased, long takenAt) {
+    }
     static final int PAGE = 1_000;
 
     public static final List<String> DAILY_COLUMNS = List.of("day", "turns", "conversations", "failedTurns", "agentFailedTurns",
@@ -301,8 +317,8 @@ public class HealthExport {
             List<HealthOutcome> page = outcomeStore.sessions(new HealthSessionQuery(agentId, window.from(), window.to(), versions, origins, List.of(),
                     List.of(), offset, size + 1));
             int consumed = Math.min(size, page.size());
-            // Per page, so a verdict is never older than the page it decides.
-            Map<String, Boolean> withheld = new HashMap<>();
+            // Per page, and per verdict at most VERDICT_MAX_AGE old.
+            Map<String, Verdict> withheld = new HashMap<>();
             for (int i = 0; i < consumed; i++) {
                 HealthOutcome session = page.get(i);
                 if (withheld(session, page, withheld)) {
@@ -320,18 +336,19 @@ public class HealthExport {
     }
 
     /**
-     * Whether {@code session} belongs to an erasure and must not be written. One
-     * verdict per conversation of the page, taken when its first row is reached, at
-     * the earliest start of the page's sessions of that conversation and user —
-     * which withholds rather than writes when they differ.
+     * Whether {@code session} belongs to an erasure and must not be written. A
+     * verdict per conversation of the page, taken when its first row is reached and
+     * again once it is older than {@link #verdictMaxAgeNanos}, at the earliest
+     * start of the page's sessions of that conversation and user — which withholds
+     * rather than writes when they differ.
      */
-    private boolean withheld(HealthOutcome session, List<HealthOutcome> page, Map<String, Boolean> verdicts) {
+    private boolean withheld(HealthOutcome session, List<HealthOutcome> page, Map<String, Verdict> verdicts) {
         if (erasureGuard == null) {
             return false;
         }
         String key = session.userId() + "\n" + session.conversationId();
-        Boolean verdict = verdicts.get(key);
-        if (verdict == null) {
+        Verdict verdict = verdicts.get(key);
+        if (verdict == null || System.nanoTime() - verdict.takenAt() > verdictMaxAgeNanos) {
             // Null is "before any erasure", the strictest: it is never replaced.
             Instant capturedAt = session.startedAt();
             for (int i = 0; capturedAt != null && i < page.size(); i++) {
@@ -341,10 +358,10 @@ public class HealthExport {
                     capturedAt = other.startedAt();
                 }
             }
-            verdict = erasureGuard.erasedForReading(session.userId(), session.conversationId(), capturedAt);
+            verdict = new Verdict(erasureGuard.erasedForReading(session.userId(), session.conversationId(), capturedAt), System.nanoTime());
             verdicts.put(key, verdict);
         }
-        return verdict;
+        return verdict.erased();
     }
 
     static List<Object> sessionValues(HealthOutcome o) {

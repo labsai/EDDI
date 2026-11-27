@@ -67,9 +67,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * because the tombstones could not be read is retried with the next pass).
  * Right after the write it asks again ({@link ErasureGuard#afterWrite}) and
  * deletes the event when an erasure started meanwhile, or records a pending
- * removal ({@code event:<id>}); such an event is counted {@code erased}. When
- * the user's processing is restricted (Art. 18, as ratings honour it) the event
- * is dropped ({@code restricted}) — nothing is derived from a restricted user's
+ * removal ({@code event:<conversationId>|<id>}); such an event is counted
+ * {@code erased}. A refused match leaves the event pending: unless a later pass
+ * matches it, it ends as {@code expired}. When the user's processing is
+ * restricted (Art. 18, as ratings honour it) the event is dropped
+ * ({@code restricted}) — nothing is derived from a restricted user's
  * conversation. A restriction that cannot be read leaves the event pending
  * (fail closed, retried). An event for a purged conversation finds no session
  * and expires.
@@ -210,11 +212,22 @@ public class HealthEventMatcher {
             Instant now = clock.instant();
             HealthEvent matched = event.matched(session.conversationId(), session.sessionNo(), session.agentVersion(), session.origin(),
                     session.userId(), match.evidence(), now);
-            if (!eventStore.markMatched(matched)) {
+            String conversationId = session.conversationId();
+            boolean recorded = false;
+            boolean withheld = false;
+            try {
+                recorded = eventStore.markMatched(matched);
+            } finally {
+                // Also after a failed write, whose update may have applied.
+                if (admission != null) {
+                    withheld = erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(conversationId, event.id()),
+                            admission, () -> eventStore.deleteInConversation(event.id(), conversationId));
+                }
+            }
+            if (!recorded) {
                 return Outcome.PENDING;
             }
-            if (admission != null && erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(event.id()), admission,
-                    () -> eventStore.delete(List.of(event.id())))) {
+            if (withheld) {
                 // An erasure started while the match was written: the event is gone (or
                 // its removal pending), and its session is not judged on it.
                 metrics.events(HealthMetrics.EVENT_ERASED, 1);

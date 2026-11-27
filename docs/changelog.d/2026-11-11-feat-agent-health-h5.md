@@ -45,8 +45,17 @@ after a conversation becomes the strongest outcome evidence there is. Documented
   delete starts during the insert. `eraseConversation` / `countForConversation` include the conversation's events
   (pending ones too); `HealthEventGdprParticipant` verifies with `verifyUserErased`; the new `countByUserId` /
   `countByConversationId` read committed data from the Mongo primary. The sessions export checks each conversation's
-  rows with the new read-side `ErasureGuard.erasedForReading` right before writing them, so an export in progress
-  never emits rows of a user erased meanwhile.
+  rows with the new read-side `ErasureGuard.erasedForReading`, reusing a verdict for at most 1 s, so a row is handed to
+  the response stream only if its tombstone check passed at most 1 s before (rows handed on within that second after
+  an erasure began, or still buffered, are not recalled).
+- **Review follow-ups.** `ErasureGuard.Admission.checkFailed()` tells "tombstones unreadable" from "erased" (every
+  other caller still refuses both): ingest answers `erasure_check_unavailable`, and `503` + `Retry-After` when that is
+  every refusal, instead of a permanent `422`. Event rows of the guard are `event:<conversationId>|<eventId>` and are
+  removed with `deleteInConversation(id, conversationId)`, so a sender reusing an event id across conversations never
+  has another conversation's row deleted. An ingest event removed by `afterWrite` counts `erased`, not `accepted`.
+  The matcher runs `afterWrite` in a `finally` around `markMatched`. The unguarded agent-test purge deletes sessions
+  and events even when the turn rows are kept for the orphan sweep. A guard-refused match ends as `expired`; plain
+  by-reference pending events survive an erasure until the 72 h window (documented in the GDPR guide).
 - **Business section and export.** One `event:<type>` measure per declared type (matched count, baseline, significance,
   `byReference` / `byConversationId` / `valueSum`). `GET /agents/{agentId}/health/export?format=json|csv&kind=daily|sessions`
   — daily needs VIEW, sessions the drill-down rule; fixed CSV columns, formula cells defused, no user ids.

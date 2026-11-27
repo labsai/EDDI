@@ -64,13 +64,17 @@ import java.util.regex.Pattern;
  * <p>
  * <b>GDPR.</b> An event that names a conversation is a guarded write of Agent
  * Health's async writer ({@link HealthErasureWriter}): every ingest runs
- * through a {@link DrainBarrier} ({@link #awaitDrained}), such an event is
- * refused ({@code conversation_unavailable}) when the erasure guard does not
- * admit its conversation — it was deleted or erased, or the tombstones cannot
- * be read (fail closed) — and right after the insert the guard asks again and
- * deletes it when a delete started meanwhile. An event that names a reference
- * names neither a user nor a conversation; nothing joins it to a person until
- * {@link HealthEventMatcher} matches it, which is guarded in turn.
+ * through a {@link DrainBarrier} ({@link #awaitDrained}). Such an event is
+ * refused {@code conversation_unavailable} while its conversation carries an
+ * erasure tombstone — it was permanently deleted or erased, within
+ * {@code eddi.gdpr.tombstone-retention} — and {@code erasure_check_unavailable}
+ * when the tombstones cannot be read (fail closed; retryable: a request whose
+ * only refusals are these is answered 503). Right after the insert (also a
+ * failed one) the guard asks again and deletes the event of that conversation
+ * when a delete started meanwhile; it is then counted {@code erased}, not
+ * accepted. An event that names a reference names neither a user nor a
+ * conversation; nothing joins it to a person until {@link HealthEventMatcher}
+ * matches it, which is guarded in turn.
  */
 @ApplicationScoped
 public class HealthEventIngest {
@@ -90,6 +94,7 @@ public class HealthEventIngest {
     public static final String REASON_BACKLOG_FULL = "agent_backlog_full";
     public static final String REASON_HASHING_UNAVAILABLE = "hashing_unavailable";
     public static final String REASON_CONVERSATION_UNAVAILABLE = "conversation_unavailable";
+    public static final String REASON_ERASURE_CHECK_UNAVAILABLE = "erasure_check_unavailable";
 
     /** How far in the future an event's {@code at} may lie (clock skew). */
     static final Duration FUTURE_SKEW = Duration.ofMinutes(5);
@@ -102,7 +107,8 @@ public class HealthEventIngest {
      * @param status
      *            202 when at least one event was stored (or was a duplicate), 429
      *            when every refusal was a full backlog, 413 for too many events,
-     *            503 when Agent Health is off, else 422
+     *            503 when Agent Health is off or every refusal was an erasure check
+     *            that could not be made (retry later), else 422
      */
     public record Result(int status, int accepted, int duplicates, List<Map<String, Object>> refused, String error) {
         public Map<String, Object> body() {
@@ -195,6 +201,7 @@ public class HealthEventIngest {
         Map<String, Long> backlog = new HashMap<>();
         Map<String, Admission> admissions = new LinkedHashMap<>();
         boolean onlyBacklog = true;
+        boolean onlyCheckFailed = true;
         for (int i = 0; i < items.size(); i++) {
             String reason;
             Object item = items.get(i);
@@ -207,17 +214,20 @@ public class HealthEventIngest {
                 }
                 Admission admission = admit(event, now);
                 if (admission != null && !admission.allowed()) {
-                    throw new Refusal(REASON_CONVERSATION_UNAVAILABLE, "The conversation is not available");
+                    throw admission.checkFailed()
+                            ? new Refusal(REASON_ERASURE_CHECK_UNAVAILABLE, "The conversation could not be checked; retry later")
+                            : new Refusal(REASON_CONVERSATION_UNAVAILABLE, "The conversation is not available");
                 }
                 backlog.put(event.agentId(), pending + 1);
                 accepted.add(event);
                 if (admission != null) {
-                    admissions.put(event.id(), admission);
+                    admissions.put(event.id() + "|" + event.conversationId(), admission);
                 }
                 continue;
             } catch (Refusal r) {
                 reason = r.reason;
                 onlyBacklog &= REASON_BACKLOG_FULL.equals(r.reason);
+                onlyCheckFailed &= REASON_ERASURE_CHECK_UNAVAILABLE.equals(r.reason);
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("index", i);
                 entry.put("reason", reason);
@@ -227,23 +237,37 @@ public class HealthEventIngest {
         }
         metrics.events(HealthMetrics.EVENT_REFUSED, refused.size());
         int inserted;
+        int withheld = 0;
         try {
             inserted = accepted.isEmpty() ? 0 : store.insert(accepted);
         } finally {
             // Also after a failed insert, which may have stored part of the batch.
-            for (Map.Entry<String, Admission> admitted : admissions.entrySet()) {
-                String id = admitted.getKey();
-                // A delete that started meanwhile: the event goes again (also a
-                // redelivery's row, which names the same conversation).
-                erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(id), admitted.getValue(),
-                        () -> store.delete(List.of(id)));
+            for (HealthEvent event : accepted) {
+                Admission admission = admissions.get(event.id() + "|" + event.conversationId());
+                if (admission == null) {
+                    continue;
+                }
+                String id = event.id();
+                String conversationId = event.conversationId();
+                // A delete that started meanwhile: the event of that conversation goes
+                // again — only that one, never a row of another conversation that
+                // shares the sender's id.
+                if (erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(conversationId, id), admission,
+                        () -> store.deleteInConversation(id, conversationId))) {
+                    withheld++;
+                }
             }
         }
+        int stored = Math.max(0, inserted - withheld);
         int duplicates = accepted.size() - inserted;
-        metrics.events(HealthMetrics.EVENT_ACCEPTED, inserted);
+        metrics.events(HealthMetrics.EVENT_ACCEPTED, stored);
         metrics.events(HealthMetrics.EVENT_DUPLICATE, duplicates);
-        int status = !accepted.isEmpty() ? 202 : onlyBacklog ? 429 : 422;
-        return new Result(status, inserted, duplicates, refused, accepted.isEmpty() ? "No event was accepted." : null);
+        metrics.events(HealthMetrics.EVENT_ERASED, withheld);
+        int status = !accepted.isEmpty() ? 202 : onlyBacklog ? 429 : onlyCheckFailed ? 503 : 422;
+        String error = accepted.isEmpty()
+                ? status == 503 ? "The erasure tombstones could not be read; retry later." : "No event was accepted."
+                : null;
+        return new Result(status, stored, duplicates, refused, error);
     }
 
     /**

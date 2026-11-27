@@ -239,11 +239,18 @@ the routing by `triggers`.
   `agent_missing`, `event_missing`, `event_invalid`, `ref_or_conversation_required`,
   `ref_invalid`, `ref_not_declared`, `conversation_id_invalid`, `value_invalid`,
   `at_invalid`, `id_invalid`, `not_an_object`, `hashing_unavailable`,
-  `agent_backlog_full`, `conversation_unavailable` — the named conversation was
-  deleted or erased); `422` when none was; `429` when every refusal was a full
-  backlog (`eddi.health.events.max-pending-per-agent`, 10 000 unmatched events per
-  agent); `413` past the per-request cap; `503` with Agent Health off. A repeat
-  of an accepted delivery is `200 {"duplicate": true}`.
+  `agent_backlog_full`, `conversation_unavailable` — the named conversation
+  carries an erasure tombstone: it was permanently deleted or its user erased,
+  within `eddi.gdpr.tombstone-retention` (400 days by default) — and
+  `erasure_check_unavailable` — the tombstones could not be read, so the event
+  was refused to be safe; retry it); `422` when none was; `429` when every
+  refusal was a full backlog (`eddi.health.events.max-pending-per-agent`, 10 000
+  unmatched events per agent); `413` past the per-request cap; `503` (with
+  `Retry-After`) with Agent Health off, or when every refusal was
+  `erasure_check_unavailable`. In a `202`, resend the events refused with
+  `erasure_check_unavailable` on their own. `accepted` does not count an event
+  that a conversation delete starting during the request removed again. A
+  repeat of an accepted delivery is `200 {"duplicate": true}`.
 
 ## What the agent sees
 

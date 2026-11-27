@@ -48,11 +48,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code <conversationId>|<executionId>} ({@link #rowId}), the same pair that
  * keys it in both stores; a session as
  * {@code session:<conversationId>|<sessionNo>} ({@link #sessionRowId}); an
- * event as {@code event:<eventId>} ({@link #eventRowId}). Sessions and events
- * are one writer with the turn rows, not further ones: they are derived from or
- * joined to those rows, by the same feature, in the same rollup pass, and an
- * erasure must drain and verify all of them. Their deletes mark no day dirty —
- * the daily rows hold no outcome or event counts (outcome reports and business
+ * event as {@code event:<conversationId>|<eventId>} ({@link #eventRowId}) —
+ * removed only while it names that conversation. Sessions and events are one
+ * writer with the turn rows, not further ones: they are derived from or joined
+ * to those rows, by the same feature, in the same rollup pass, and an erasure
+ * must drain and verify all of them. Their deletes mark no day dirty — the
+ * daily rows hold no outcome or event counts (outcome reports and business
  * measures read the session and event rows themselves).
  * <p>
  * <b>Daily rows.</b> Every delete here marks the days of the deleted rows dirty
@@ -150,9 +151,14 @@ public class HealthErasureWriter implements AsyncErasureWriter {
     /** Marks a business event's row id apart from a turn row id. */
     static final String EVENT_PREFIX = "event:";
 
-    /** The id of the business event {@code eventId}. */
-    public static String eventRowId(String eventId) {
-        return EVENT_PREFIX + eventId;
+    /**
+     * The id of the business event {@code eventId} as a row of
+     * {@code conversationId}: an event id is the sender's, so two conversations'
+     * events can share it, and a removal must reach only the one it was recorded
+     * for. Conversation ids hold no {@code |}.
+     */
+    public static String eventRowId(String conversationId, String eventId) {
+        return EVENT_PREFIX + conversationId + "|" + eventId;
     }
 
     @Override
@@ -238,16 +244,19 @@ public class HealthErasureWriter implements AsyncErasureWriter {
 
     /** Removes one business event ({@link #eventRowId}); idempotent. */
     private void removeEvent(String rowId) {
-        String id = rowId.substring(EVENT_PREFIX.length());
-        if (id.isEmpty()) {
+        String row = rowId.substring(EVENT_PREFIX.length());
+        int separator = row.indexOf('|');
+        if (separator <= 0 || separator == row.length() - 1) {
             throw new IllegalArgumentException("Not an Agent Health event row id: " + rowId);
         }
+        String conversationId = row.substring(0, separator);
+        String id = row.substring(separator + 1);
         IHealthEventStore businessEvents = resolved(events);
         if (businessEvents == null) {
             // Never report a removal that did not run: it stays pending.
             throw new IllegalStateException("No Agent Health event store to remove an event from");
         }
-        businessEvents.delete(List.of(id));
+        businessEvents.deleteInConversation(id, conversationId);
     }
 
     @Override

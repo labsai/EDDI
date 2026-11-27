@@ -219,15 +219,18 @@ public class ErasureGuard {
      */
     public static final class Admission {
 
-        private static final Admission REFUSED = new Admission(false, null, null, null);
+        private static final Admission REFUSED = new Admission(false, false, null, null, null);
+        private static final Admission CHECK_FAILED = new Admission(false, true, null, null, null);
 
         private final boolean allowed;
+        private final boolean checkFailed;
         private final String userKey;
         private final String conversationId;
         private final Instant capturedAt;
 
-        private Admission(boolean allowed, String userKey, String conversationId, Instant capturedAt) {
+        private Admission(boolean allowed, boolean checkFailed, String userKey, String conversationId, Instant capturedAt) {
             this.allowed = allowed;
+            this.checkFailed = checkFailed;
             this.userKey = userKey;
             this.conversationId = conversationId;
             this.capturedAt = capturedAt;
@@ -236,6 +239,15 @@ public class ErasureGuard {
         /** Whether the writer may write the row; {@code false}: skip it. */
         public boolean allowed() {
             return allowed;
+        }
+
+        /**
+         * Whether a refusal is because the tombstones could not be read (fail closed),
+         * not because the user or conversation was erased — a refusal a writer may
+         * report as retryable. Never {@code true} for an allowed write.
+         */
+        public boolean checkFailed() {
+            return checkFailed;
         }
     }
 
@@ -258,11 +270,11 @@ public class ErasureGuard {
                 metrics.writeSkipped(ErasureMetrics.REASON_TOMBSTONE);
                 return Admission.REFUSED;
             }
-            return new Admission(true, userKey, conversationId, capturedAt);
+            return new Admission(true, false, userKey, conversationId, capturedAt);
         } catch (RuntimeException e) {
             LOGGER.warnf("Erasure tombstones could not be read; skipping a guarded write: %s", e.toString());
             metrics.writeSkipped(ErasureMetrics.REASON_CHECK_FAILED);
-            return Admission.REFUSED;
+            return Admission.CHECK_FAILED;
         }
     }
 

@@ -237,7 +237,7 @@ class HealthEventMatcherTest {
             return true;
         });
         assertEquals(HealthEventMatcher.Outcome.DROPPED, matcher.tryMatch(byConversation("c1", NOW)));
-        verify(events).delete(List.of("e2"));
+        verify(events).deleteInConversation("e2", "c1");
         verify(outcomes, never()).markDue(anyString(), any(), any());
         assertEquals(1, counted(HealthMetrics.EVENT_ERASED));
         assertEquals(0, tombstones.pendingCount());
@@ -251,9 +251,22 @@ class HealthEventMatcherTest {
             guard.tombstoneConversation("c1");
             return true;
         });
-        when(events.delete(any())).thenThrow(new HealthStoreException("down", null));
+        when(events.deleteInConversation(any(), any())).thenThrow(new HealthStoreException("down", null));
         assertEquals(HealthEventMatcher.Outcome.DROPPED, matcher.tryMatch(byConversation("c1", NOW)));
         assertEquals(1, tombstones.pendingCount());
+    }
+
+    @Test
+    @DisplayName("a write that fails after its update applied still gets the post-write check")
+    void failedWriteStillChecked() {
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "u")));
+        when(events.markMatched(any())).thenAnswer(inv -> {
+            guard.tombstoneConversation("c1");
+            throw new HealthStoreException("timed out after the update", null);
+        });
+        assertEquals(HealthEventMatcher.Outcome.PENDING, matcher.tryMatch(byConversation("c1", NOW)));
+        verify(events).deleteInConversation("e2", "c1");
+        verify(outcomes, never()).markDue(anyString(), any(), any());
     }
 
     @Test

@@ -23,7 +23,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -46,6 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -122,12 +123,13 @@ class HealthEventErasureTest {
         void pendingEventRemovalIsRetried() {
             Admission admission = guard.beforeWrite("user", "conv", NOW.minusSeconds(3600));
             guard.tombstoneConversation("conv");
-            assertTrue(guard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId("ev1"), admission, () -> {
+            assertTrue(guard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId("conv", "ev1"), admission, () -> {
                 throw new HealthStoreException("down", null);
             }));
             assertEquals(1, tombstones.pendingCount());
             assertEquals(1, guard.retryPending(null, null, "conv"));
-            verify(events).delete(List.of("ev1"));
+            verify(events).deleteInConversation("ev1", "conv");
+            verify(events, never()).delete(any());
             assertEquals(0, tombstones.pendingCount());
         }
 
@@ -172,14 +174,16 @@ class HealthEventErasureTest {
     class Ingest {
 
         HealthEventIngest real;
+        SimpleMeterRegistry registry;
 
         @BeforeEach
         void setUp() {
             HealthConfigPolicy policy = mock(HealthConfigPolicy.class);
             when(policy.current("a1")).thenReturn(new Resolved(Map.of(), true, Map.of(), false, List.of("orderId"), Map.of(), false));
             when(events.insert(anyCollection())).thenAnswer(i -> ((Collection<?>) i.getArgument(0)).size());
-            real = new HealthEventIngest(events, policy, HealthEventMatcherTest.HASHER, HealthSettings.defaults(),
-                    new HealthMetrics(new SimpleMeterRegistry()), Clock.fixed(NOW, ZoneOffset.UTC));
+            registry = new SimpleMeterRegistry();
+            real = new HealthEventIngest(events, policy, HealthEventMatcherTest.HASHER, HealthSettings.defaults(), new HealthMetrics(registry),
+                    Clock.fixed(NOW, ZoneOffset.UTC));
             real.erasureGuard = guard;
         }
 
@@ -194,6 +198,20 @@ class HealthEventErasureTest {
             HealthEventIngest.Result r = real.ingest("int", List.of("a1"), "webhook", byConversation("conv"));
             assertEquals(0, r.accepted());
             assertEquals(HealthEventIngest.REASON_CONVERSATION_UNAVAILABLE, r.refused().get(0).get("reason"));
+            assertEquals(422, r.status());
+            verify(events, never()).insert(anyCollection());
+        }
+
+        @Test
+        @DisplayName("tombstones that cannot be read refuse retryably: erasure_check_unavailable, and 503 when that is every refusal")
+        void unreadableTombstonesRefuseRetryably() {
+            IErasureTombstoneStore broken = mock(IErasureTombstoneStore.class);
+            when(broken.erasedAt(any(), any(), any())).thenThrow(new IllegalStateException("down"));
+            real.erasureGuard = new ErasureGuard(broken, List.of(), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(1), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+            HealthEventIngest.Result r = real.ingest("int", List.of("a1"), "webhook", byConversation("conv"));
+            assertEquals(503, r.status());
+            assertEquals(HealthEventIngest.REASON_ERASURE_CHECK_UNAVAILABLE, r.refused().get(0).get("reason"));
             verify(events, never()).insert(anyCollection());
         }
 
@@ -204,11 +222,14 @@ class HealthEventErasureTest {
                 guard.tombstoneConversation("conv");
                 return ((Collection<?>) i.getArgument(0)).size();
             });
-            real.ingest("int", List.of("a1"), "webhook", byConversation("conv"));
-            @SuppressWarnings("unchecked")
-            ArgumentCaptor<Collection<String>> deleted = ArgumentCaptor.forClass(Collection.class);
-            verify(events).delete(deleted.capture());
-            assertEquals(1, deleted.getValue().size());
+            HealthEventIngest.Result r = real.ingest("int", List.of("a1"), "webhook", byConversation("conv"));
+            // Only the row of that conversation: never a by-id delete that could reach
+            // another conversation's event sharing the sender's id.
+            verify(events).deleteInConversation(anyString(), eq("conv"));
+            verify(events, never()).delete(any());
+            assertEquals(0, r.accepted(), "a removed event is not reported as accepted");
+            assertEquals(1, registry.counter(HealthMetrics.EVENTS, "outcome", HealthMetrics.EVENT_ERASED).count());
+            assertEquals(0, registry.counter(HealthMetrics.EVENTS, "outcome", HealthMetrics.EVENT_ACCEPTED).count());
         }
 
         @Test
@@ -232,7 +253,7 @@ class HealthEventErasureTest {
                 throw new HealthStoreException("partial", null);
             });
             assertThrows(HealthStoreException.class, () -> real.ingest("int", List.of("a1"), "webhook", byConversation("conv")));
-            verify(events).delete(anyCollection());
+            verify(events).deleteInConversation(anyString(), eq("conv"));
         }
 
         @Test
@@ -348,6 +369,22 @@ class HealthEventErasureTest {
             List<String> written = conversations(json());
             assertEquals(HealthExport.PAGE, written.size(), "the first page in full, nothing of the second");
             assertEquals(1, written.stream().filter("c-late"::equals).count());
+        }
+
+        @Test
+        @DisplayName("a verdict older than the bound is taken again before the next row of the same conversation is handed on")
+        void staleVerdictTakenAgain() throws Exception {
+            export.verdictMaxAgeNanos = 0;
+            Instant started = NOW.minus(Duration.ofHours(2));
+            when(outcomes.sessions(any(HealthSessionQuery.class)))
+                    .thenReturn(List.of(session("c1", 0, "late", started), session("c1", 1, "late", started)));
+            List<Integer> written = new ArrayList<>();
+            export.forEachSession("agent", window, Set.of(2), List.of("api"), s -> {
+                written.add(s.sessionNo());
+                // The erasure begins while the first row is being written out.
+                guard.tombstoneUser("late", List.of("c1"));
+            });
+            assertEquals(List.of(0), written);
         }
     }
 }

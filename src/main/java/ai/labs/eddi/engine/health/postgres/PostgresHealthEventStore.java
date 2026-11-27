@@ -208,6 +208,14 @@ public class PostgresHealthEventStore implements IHealthEventStore {
     }
 
     @Override
+    public long deleteInConversation(String id, String conversationId) {
+        return update("DELETE FROM health_events WHERE id = ? AND conversation_id = ?", "Could not delete a health event", s -> {
+            s.setString(1, id);
+            s.setString(2, conversationId);
+        });
+    }
+
+    @Override
     public long countPending(String agentId) {
         try (Connection connection = connection();
                 PreparedStatement s = connection.prepareStatement("SELECT COUNT(*) FROM health_events WHERE state = 'PENDING' AND agent_id = ?")) {

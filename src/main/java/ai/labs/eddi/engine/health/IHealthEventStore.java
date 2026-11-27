@@ -42,6 +42,16 @@ public interface IHealthEventStore {
     long delete(Collection<String> ids);
 
     /**
+     * Deletes event {@code id} only while it names {@code conversationId} — the
+     * erasure guard's removal of one event of one conversation, which must not
+     * reach a row of another conversation that happens to share the id (a sender
+     * reusing its event id).
+     *
+     * @return how many were deleted (0 or 1)
+     */
+    long deleteInConversation(String id, String conversationId);
+
+    /**
      * Deletes pending events received before {@code before} (unmatched in time).
      */
     long deletePendingReceivedBefore(Instant before);

@@ -140,6 +140,11 @@ public class MongoHealthEventStore implements IHealthEventStore {
     }
 
     @Override
+    public long deleteInConversation(String id, String conversationId) {
+        return deleteMany(and(eq("_id", id), eq(FIELD_CONVERSATION, conversationId)), "Could not delete a health event");
+    }
+
+    @Override
     public long deletePendingReceivedBefore(Instant before) {
         return deleteMany(and(eq(FIELD_STATE, HealthEvent.PENDING), lt(FIELD_RECEIVED, Date.from(before))),
                 "Could not delete unmatched health events");

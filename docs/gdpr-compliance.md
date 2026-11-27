@@ -260,8 +260,14 @@ each of their conversations, and every node drains its asynchronous writers — 
     for the matches and ingests in flight, a match is not written for a tombstoned user or
     conversation, a match written while the erasure starts is deleted again, and the step verifies
     with a committed count that no event of the user is left. Events naming a deleted conversation
-    (pending ones too) go with it, verified the same way; a sessions export of Agent Health withholds
-    the rows of an erased user even when it read them first. Events expire with the turn rows. The export carries them under `events` in
+    (pending ones too) go with it, verified the same way. A pending event that names only a business
+    reference names no user and is **not** removed by the erasure: with an agent that does not hash
+    references, its plain value (e.g. an order id) stays stored until it matches — it can no longer
+    match the erased user's sessions — or the 72 h match window ends. A sessions export of Agent
+    Health checks each row against the tombstones at most 1 second before handing it to the response
+    stream, so it withholds the rows of an erased user it read before the erasure; a row handed on
+    within that second after the erasure began, or still in the response buffer, is not recalled.
+    Events expire with the turn rows. The export carries them under `events` in
     the `agentHealthEvents` section, newest first, at most 10,000 ([details](agent-health.md#business-outcomes))
 
 #### The erasure guarantee for asynchronously written data

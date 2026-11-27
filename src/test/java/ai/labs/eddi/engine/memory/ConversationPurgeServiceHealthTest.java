@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.health.HealthDirtyDays;
 import ai.labs.eddi.engine.health.HealthErasureWriter;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.HealthTurnRecorder;
+import ai.labs.eddi.engine.health.IHealthEventStore;
 import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
@@ -188,5 +189,23 @@ class ConversationPurgeServiceHealthTest {
 
         when(outcomes.deleteByConversationId("conv")).thenThrow(new HealthStoreException("down", null));
         assertDoesNotThrow(() -> service.deleteHealthTurns("conv", "agent"));
+    }
+
+    @Test
+    @DisplayName("unguarded (agent test): the business events go even when the turn rows are kept and there is no outcome store")
+    void agentTestPurgeDeletesEventsIndependently() throws Exception {
+        IHealthTurnStore healthStore = mock(IHealthTurnStore.class);
+        when(healthStore.deleteConversationIfDaysKnown("conv")).thenReturn(null);
+        IHealthEventStore events = mock(IHealthEventStore.class);
+        ConversationPurgeService service = service(mock(IConversationMemoryStore.class), healthStore);
+        service.healthOutcomeStore = null;
+        service.healthEventStore = instance(events);
+
+        service.deleteHealthTurns("conv");
+        verify(events).deleteByConversationId("conv");
+
+        service.healthTurnStore = null;
+        service.deleteHealthTurns("conv");
+        verify(events, times(2)).deleteByConversationId("conv");
     }
 }

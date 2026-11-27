@@ -625,11 +625,15 @@ one row per session that ended in the period — the drill-down's columns plus i
 references in the form stored, at most 10 000 (`truncated` in JSON). `format=csv`
 has a header and a fixed column order (formula-looking cells get a leading
 `'`); `format=json` the same rows as objects. Neither carries a user id or
-conversation content. A sessions export never writes a row of an erased user or
-a deleted conversation, also one it read before the erasure began: each
-conversation's rows are checked against the erasure tombstones right before
-they are written (up to two point reads per conversation and page of 1,000;
-when the tombstones cannot be read the rows are withheld).
+conversation content. A sessions export also withholds the rows of an erased
+user or a deleted conversation that it read before the erasure began: a row is
+handed to the response stream only if its check against the erasure tombstones
+passed at most 1 second before (the verdict for a conversation's rows in a page
+is reused only that long; two point reads of the tombstone store per check).
+Rows handed on within that second after an erasure began, and bytes the
+response stream still buffers, can still reach the client. When the tombstones
+cannot be read the rows are withheld — the export is then shorter without
+saying so.
 
 ## Change markers
 
@@ -922,15 +926,21 @@ Turn rows are personal data about a user's use of an agent:
   guard asks again and deletes the event (`erased`), or records a pending
   removal. A match the guard refuses is not written and the event stays pending
   — it names no user; once the erasure deleted the sessions it can no longer
-  match, and a refusal because the tombstones could not be read (fail closed)
-  is retried with the next pass. A match for a user whose processing is
+  match and ends as `expired` after the match window, while a refusal because
+  the tombstones could not be read (fail closed) is retried with the next pass. A match for a user whose processing is
   restricted (Art. 18) is dropped (`restricted`) — see [Matching](#matching).
   The `agentHealthEvents` step then verifies that no event of the user is left,
   and a conversation delete that none naming the conversation is — pending
   ones included. An event that names a conversation is refused at ingest
-  (`conversation_unavailable`) once that conversation is tombstoned. A pending
-  event that names only a reference names no user; once the erasure deleted
-  the user's sessions it can no longer match and expires with the match window.
+  (`conversation_unavailable`, counted `refused`) while that conversation
+  carries an erasure tombstone (`eddi.gdpr.tombstone-retention`), and
+  `erasure_check_unavailable` (retryable, `503` when it is every refusal) when
+  the tombstones cannot be read; one removed again because a delete started
+  during the request is counted `erased`, not `accepted`. A pending event that
+  names only a reference names no user, but its plain reference value (when the
+  agent does not hash references) stays stored until it matches or the 72 h
+  match window ends — an erasure does not remove it; once the user's sessions
+  are gone it can no longer match and ends as `expired`.
   Events share the turn rows' retention.
 - **Deleting a conversation** permanently — explicitly or by the
   conversation-retention sweep — deletes its rows and verifies that none is
@@ -996,7 +1006,7 @@ eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent da
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed, also those the erasure guard refused (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
-eddi_health_events_total             # Business events; tag: outcome (accepted|duplicate|refused|matched|expired|restricted|erased)
+eddi_health_events_total             # Business events; tag: outcome (accepted|duplicate|refused|matched|expired|restricted|erased) — refused includes conversation_unavailable and erasure_check_unavailable; erased = removed after its write because an erasure or delete started meanwhile (a match, or an ingest); a match the guard refused stays pending and ends as expired
 eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
 

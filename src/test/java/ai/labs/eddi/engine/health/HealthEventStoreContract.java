@@ -150,4 +150,14 @@ public interface HealthEventStoreContract {
         assertEquals(0, store().countByUserId("user"));
         assertEquals(1, store().countByConversationId("c2"));
     }
+
+    @Test
+    @DisplayName("deleteInConversation deletes an event only while it names that conversation")
+    default void deleteInConversation() {
+        store().insert(List.of(pending("e1", "agent", "x", null, null, "c1", null, T0)));
+        assertEquals(0, store().deleteInConversation("e1", "c2"), "another conversation sharing the id");
+        assertEquals(1, store().countByConversationId("c1"));
+        assertEquals(1, store().deleteInConversation("e1", "c1"));
+        assertEquals(0, store().countByConversationId("c1"));
+    }
 }

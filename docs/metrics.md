@@ -983,8 +983,13 @@ backlog. See [Agent Health](agent-health.md#daily-rollup).
 
 `eddi_health_events_total` counts what became of the business events of `health-outcomes` webhook targets:
 a steady `expired` share means events arrive for references no session set (a wrong `externalRefs`
-name, or a reference the agent never records), `refused` that senders send malformed or unbound events,
-and `restricted` / `erased` events dropped for GDPR. See [Agent Health](agent-health.md#business-outcomes).
+name, or a reference the agent never records) — it also counts events whose match the erasure guard
+refused (they stay pending until the window ends); `refused` that senders send malformed or unbound
+events, or events for deleted conversations (`conversation_unavailable`) or refused while the erasure
+tombstones could not be read (`erasure_check_unavailable`, together with
+`eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}`); `restricted` events dropped for a user
+with restricted processing; and `erased` events removed right after their write (a match or an
+ingest) because an erasure or a conversation delete started meanwhile. See [Agent Health](agent-health.md#business-outcomes).
 
 ### GDPR Erasure Guarantee Metrics
 
