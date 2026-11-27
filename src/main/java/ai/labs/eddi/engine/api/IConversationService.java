@@ -348,6 +348,18 @@ public interface IConversationService {
     ConversationState getConversationState(String conversationId);
 
     /**
+     * The conversation state as the store holds it now, bypassing this node's state
+     * cache — which can be stale in a cluster (another node ended or deleted the
+     * conversation). For the answers that must agree with the store: the
+     * {@code 404} of an end on a deleted conversation, the {@code 410} of an
+     * undo/redo refused because it is ended. Throws
+     * {@link ConversationNotFoundException} when there is no such conversation.
+     */
+    default ConversationState getStoredConversationState(String conversationId) {
+        return getConversationState(conversationId);
+    }
+
+    /**
      * Refuses a turn up front when this node is already at its effective turn
      * limit, before anything is read for it. Throws a
      * {@code RejectedExecutionException} (answered 503 {@code capacity_exceeded}
@@ -625,6 +637,20 @@ public interface IConversationService {
 
     class AgentNotReadyException extends Exception {
         public AgentNotReadyException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The agent's deployment failed on the server (its load threw — a store error,
+     * a deleted agent or configuration): a server-side fault, answered {@code 503}
+     * on REST rather than the {@code 404} of a missing deployment. A subclass, so
+     * every surface that handles a not-ready agent still handles it. A deployment
+     * refused for a missing vault grant is not one: that is a configuration denial
+     * and stays an {@link AgentNotReadyException}.
+     */
+    class AgentDeploymentFailedException extends AgentNotReadyException {
+        public AgentDeploymentFailedException(String message) {
             super(message);
         }
     }

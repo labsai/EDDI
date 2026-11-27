@@ -171,8 +171,30 @@ class ConversationLongTermPersistenceTest {
                 false, 0, Instant.ofEpochMilli(changedAt - 60_000), Instant.ofEpochMilli(changedAt - 60_000));
         var owed = new Property("K", List.<Object>of("a, b"), Scope.longTerm);
 
-        assertFalse(Conversation.isNewerElsewhere(List.of(stored), "K", owed, Visibility.global, "agent-1", changedAt),
+        assertFalse(Conversation.isNewerElsewhere(List.of(stored), "K", owed, Visibility.global, List.of(), "agent-1", changedAt),
                 "an older, different stored value must not suppress the owed write");
+    }
+
+    @Test
+    @DisplayName("F4 — the right value at the wrong visibility or in other groups is not 'already the same'")
+    void sameValueAtAnotherDestinationIsNotAlreadyStored() {
+        long changedAt = System.currentTimeMillis();
+        Instant older = Instant.ofEpochMilli(changedAt - 60_000);
+        var owed = new Property("K", "1", Scope.longTerm);
+        var asSelf = new UserMemoryEntry("e", "user-1", "K", "1", "fact", Visibility.self, "agent-1", List.of(), "conv-b", false, 0,
+                older, older);
+        var inOtherGroup = new UserMemoryEntry("e", "user-1", "K", "1", "fact", Visibility.group, "agent-1", List.of("g2"), "conv-b",
+                false, 0, older, older);
+        var inSameGroups = new UserMemoryEntry("e", "user-1", "K", "1", "fact", Visibility.group, "agent-1", List.of("g2", "g1"),
+                "conv-b", false, 0, older, older);
+
+        assertFalse(Conversation.isNewerElsewhere(List.of(asSelf), "K", owed, Visibility.group, List.of("g1"), "agent-1", changedAt),
+                "a self row must still be moved to group, or its group readers never see it");
+        assertFalse(Conversation.isNewerElsewhere(List.of(inOtherGroup), "K", owed, Visibility.group, List.of("g1"), "agent-1", changedAt),
+                "a group row in other groups must still be rewritten");
+        assertTrue(Conversation.isNewerElsewhere(List.of(inSameGroups), "K", owed, Visibility.group, List.of("g1", "g2"), "agent-1",
+                changedAt), "same value, visibility and groups (in any order) is already stored");
+        assertTrue(Conversation.isNewerElsewhere(List.of(asSelf), "K", owed, Visibility.self, List.of(), "agent-1", changedAt));
     }
 
     @Test

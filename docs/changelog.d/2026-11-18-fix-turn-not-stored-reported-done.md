@@ -36,8 +36,9 @@ handling. Six turns in a row were lost this way in the live test.
   the legacy migration refuse or skip them; an entry stored earlier is ignored when memories are loaded.
 - **Smaller state fixes.** Undo/redo on an `ENDED` conversation change nothing and answer `410` (A9);
   `endConversation` on an unknown id answers `404`, and the sync timeout's `408` carries a JSON body (A11); a turn on an
-  agent whose deployment failed (deleted agent, missing config) answers `404` "Agent is not deployed or not ready"
-  instead of `500` (A12); the "Error while processing user input" log line names the state the conversation really
+  agent whose deployment failed answers instead of a `500` from the placeholder (A12): `503` `agent_deployment_failed`
+  for a failure on the server (a store error, a deleted agent or configuration), `404` "Agent is not deployed or not
+  ready" for a refused vault grant (see the third review entry below); the "Error while processing user input" log line names the state the conversation really
   has (A13).
 
 ### Behaviour an upgrader notices
@@ -206,3 +207,37 @@ so the tests were rewritten, not the engine:
 - Docs: the size estimate is calibrated on fixtures, the single-node fence holds only when the store confirms it, a
   cancel racing the write does not remove a committed turn, and a resume that does not re-pause is answered before its
   write.
+
+## 🐛 fix(engine): third review — a stored turn is never marked interrupted, start memories wait for the descriptor (2026-11-27)
+
+**Repo:** EDDI (`fix/turn-not-stored-reported-done`)
+
+### What changed and why
+
+- **A deadline that runs out after the write.** The agent timeout can expire in a turn's completion callback, after the
+  snapshot was stored, while the deferred long-term memory write runs. The watchdog then wrote `EXECUTION_INTERRUPTED`
+  over the `READY` the turn had stored. `ConversationStepRunner#awaitTurn` now takes the turn's `committed` flag and
+  leaves a stored turn's state alone; the cancel still goes out, so an interrupted long-term write is owed and made up
+  by the next turn. A HITL resume records its commit through a new `onStored` hook of
+  `storeConversationMemoryIfState`, which runs after the write and before the deferred writes.
+- **Start-turn memories wait for the descriptor.** A greeting's long-term memories used to be written right after
+  the snapshot insert; when the descriptor write then failed, the conversation was discarded but the memories stayed.
+  `startConversation` now stores the snapshot without them (`storeOnly`), runs them
+  (`ConversationStepRunner#commitDeferredWork`) once the descriptor exists, and drops them
+  (`discardDeferredWork`, counted as `discarded`) when it does not.
+- **"Already stored" means the same destination.** An owed make-up write is skipped only when the stored row has the
+  same value **and** the same visibility, and for `group` the same groups (`Conversation#isNewerElsewhere`). A row with
+  the right value at `self` no longer cancels an owed move to `group`. The timestamp check is unchanged.
+- **A failed deployment is a server fault.** A turn on an `ERROR` deployment placeholder answers `503`
+  `agent_deployment_failed` (`IConversationService.AgentDeploymentFailedException`, a subclass of
+  `AgentNotReadyException`, so MCP, email, webhooks and the OpenAI bridge still handle it as not-ready). A deployment
+  refused for a missing vault grant keeps the `404`. A stream keeps the code `agent_not_ready`.
+- **End and undo/redo read the store.** `IConversationService#getStoredConversationState` bypasses the node's state
+  cache. `POST /agents/{conversationId}/endConversation` answers `404` for a conversation another
+  node deleted, and a refused undo/redo answers `410` for a conversation another node ended, instead of `200`/`409`
+  from a stale cached state.
+
+### Not changed
+
+- A contested-memory marker is still lifted when the long-term write is handed off, not per key as each upsert
+  succeeds; a write that fails halfway leaves the unwritten key owed but no longer marked contested.

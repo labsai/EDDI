@@ -1676,7 +1676,7 @@ class ConversationStepRunner {
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future, BooleanSupplier committed) {
         long waitStarted = System.nanoTime();
-        TurnWait wait = awaitTurn(loggingContext, conversationId, memory, future);
+        TurnWait wait = awaitTurn(loggingContext, conversationId, memory, future, committed);
         reportTurnOutcome(memory, wait);
         // Agent Health records every turn, clean or not, on its own worker.
         conversationService.reportHealthTurn(memory, wait, (System.nanoTime() - waitStarted) / 1_000_000L,
@@ -1773,7 +1773,8 @@ class ConversationStepRunner {
         return ceiling ? ErrorKind.COST_CEILING : ErrorKind.TENANT_BUDGET;
     }
 
-    private TurnWait awaitTurn(Map<String, String> loggingContext, String conversationId, IConversationMemory memory, Future<Void> future) {
+    private TurnWait awaitTurn(Map<String, String> loggingContext, String conversationId, IConversationMemory memory, Future<Void> future,
+                               BooleanSupplier committed) {
         try {
             future.get(agentTimeout, TimeUnit.SECONDS);
             return TurnWait.COMPLETED;
@@ -1817,6 +1818,17 @@ class ConversationStepRunner {
                 }
                 if (currentState == ConversationState.AWAITING_HUMAN) {
                     return TurnWait.ABANDONED_WHILE_PAUSED;
+                }
+                if (committed != null && committed.getAsBoolean()) {
+                    // The turn is stored: the deadline ran out in its completion callback,
+                    // after the write, while it made the long-term memory writes it
+                    // deferred until then. The READY it stored is the turn's true state;
+                    // interrupting it would mark a finished turn as cut off. The cancel
+                    // above stands — an interrupted long-term write is owed and made up
+                    // by the next turn.
+                    LOGGER.warnf("Turn of conversation %s ran past the agent timeout after it was stored; leaving its state as stored",
+                            sanitize(conversationId));
+                    return e instanceof TimeoutException ? TurnWait.TIMED_OUT : TurnWait.INTERRUPTED;
                 }
                 // Compare-and-set, never a blind write: the conversation may have been
                 // ended while the turn hung (an end only raises the cooperative-cancel
@@ -2019,16 +2031,16 @@ class ConversationStepRunner {
     }
 
     /**
-     * Stores the turn, then runs what it deferred until it is stored (A5; M1 — the
-     * conversation's start turn comes through here too) and clears the owed
-     * long-term markers once their write succeeded.
+     * Runs what a stored turn deferred until its store and clears the owed
+     * long-term markers once their write succeeded. The conversation's start turn
+     * (M1) calls this itself, only once its descriptor exists: a start that is
+     * discarded because the descriptor failed must not leave user memories behind
+     * ({@link #discardDeferredWork}).
      */
-    String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
-        String conversationId = storeOnly(conversationMemory, environment, true);
+    void commitDeferredWork(IConversationMemory conversationMemory, Environment environment) {
         if (runDeferredWork(conversationMemory)) {
             clearOwedMarkers(conversationMemory, environment);
         }
-        return conversationId;
     }
 
     /**
@@ -2111,6 +2123,18 @@ class ConversationStepRunner {
     boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
                                            ConversationState expectedState, boolean sizeGuarded)
             throws ResourceStoreException {
+        return storeConversationMemoryIfState(conversationMemory, environment, expectedState, sizeGuarded, null);
+    }
+
+    /**
+     * @param onStored
+     *            run once the write succeeded and before the turn's deferred
+     *            long-term writes, so a caller can record the commit before work
+     *            that may outlast its watchdog; {@code null} for none
+     */
+    boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
+                                           ConversationState expectedState, boolean sizeGuarded, Runnable onStored)
+            throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         if (sizeGuarded) {
@@ -2120,6 +2144,9 @@ class ConversationStepRunner {
         if (stored) {
             conversationMemory.setRevision(memorySnapshot.getRevision());
             conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
+            if (onStored != null) {
+                onStored.run();
+            }
             // A resumed turn's long-term writes (A5).
             if (runDeferredWork(conversationMemory)) {
                 clearOwedMarkers(conversationMemory, environment);

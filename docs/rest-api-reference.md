@@ -639,7 +639,7 @@ admin endpoints, described under
 | `400` | `Request body must include a 'verdict' field …` | Malformed request |
 | `401` | — | OIDC on and no or invalid token |
 | `403` | — | Wrong role, not the conversation's owner, or processing restricted for this user ([GDPR](gdpr-compliance.md)) |
-| `404` | `Agent is not deployed or not ready` | No `READY` deployment of the agent in that environment — also when the agent's deployment failed, for example because the agent or a configuration it names was deleted while conversations were open |
+| `404` | `Agent is not deployed or not ready` | No `READY` deployment of the agent in that environment — also when its deployment was refused because a vault grant is missing |
 | `404` | `No conversation found! (conversationId=…)`; `Conversation not found.` from cancel, resume and approval-status | Unknown conversation id |
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message, rerun, undo or redo on an ended conversation |
@@ -651,6 +651,7 @@ admin endpoints, described under
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |
+| `503` | `{"error": "agent_deployment_failed", …}` | `POST /agents/{conversationId}`: the deployment of the conversation's agent version failed on the server — a database error while loading it, or the agent or a configuration it names was deleted while conversations were open. The server log has the reason; a failed deployment is retried in the background. A stream answers `agent_not_ready` |
 
 For symptoms and fixes beyond the status code, see
 [Troubleshooting](troubleshooting.md).

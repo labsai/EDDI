@@ -1101,7 +1101,8 @@ public class Conversation implements IConversation {
                     if (stored == null) {
                         stored = store.getAllEntries(userId);
                     }
-                    if (isNewerElsewhere(stored, propertyEntry.getKey(), property, vis, agentId, owedSince.get(propertyEntry.getKey()))) {
+                    if (isNewerElsewhere(stored, propertyEntry.getKey(), property, vis, groupIds, agentId,
+                            owedSince.get(propertyEntry.getKey()))) {
                         LOGGER.infof("[MEMORY] Not making up the owed write of '%s' in conversation %s: the stored value is newer or "
                                 + "already the same", sanitize(propertyEntry.getKey()), sanitize(conversationId));
                         propertiesHandler.countLongTermWrite("skipped_newer");
@@ -1142,10 +1143,14 @@ public class Conversation implements IConversation {
      * memory store already holds this value, or a value updated after this
      * conversation changed the key ({@code changedAt}; a marker without a time
      * counts as old). Only the entry the write would replace is compared — the
-     * global one for a global write, this agent's own otherwise.
+     * global one for a global write, this agent's own otherwise. "Already holds
+     * this value" means the same value with the same visibility (and, for a
+     * {@code group} write, the same groups): a row with the right value that the
+     * owed write would move from {@code self} to {@code group} is not yet written,
+     * since its intended readers still cannot see it.
      */
-    static boolean isNewerElsewhere(List<UserMemoryEntry> stored, String key, Property property, Visibility visibility, String agentId,
-                                    Long changedAt) {
+    static boolean isNewerElsewhere(List<UserMemoryEntry> stored, String key, Property property, Visibility visibility,
+                                    List<String> groupIds, String agentId, Long changedAt) {
         if (stored == null) {
             return false;
         }
@@ -1166,12 +1171,32 @@ public class Conversation implements IConversation {
             Object owedValue = PropertyValues.valueOf(property);
             boolean container = owedValue instanceof Collection<?> || owedValue instanceof Map<?, ?>
                     || entry.value() instanceof Collection<?> || entry.value() instanceof Map<?, ?>;
-            if (container ? Objects.equals(entry.value(), owedValue) : String.valueOf(entry.value()).equals(String.valueOf(owedValue))) {
+            boolean sameValue = container
+                    ? Objects.equals(entry.value(), owedValue)
+                    : String.valueOf(entry.value()).equals(String.valueOf(owedValue));
+            if (sameValue && sameDestination(entry, visibility, groupIds)) {
                 return true;
             }
             return entry.updatedAt() != null && entry.updatedAt().toEpochMilli() > since;
         }
         return false;
+    }
+
+    /**
+     * Whether {@code entry} already sits where an owed write of {@code visibility}
+     * would put it: the same visibility and, for {@code group}, the same groups in
+     * any order.
+     */
+    private static boolean sameDestination(UserMemoryEntry entry, Visibility visibility, List<String> groupIds) {
+        if (entry.visibility() != visibility) {
+            return false;
+        }
+        if (visibility != Visibility.group) {
+            return true;
+        }
+        Set<String> owedGroups = groupIds != null ? new HashSet<>(groupIds) : Set.of();
+        Set<String> storedGroups = entry.groupIds() != null ? new HashSet<>(entry.groupIds()) : Set.of();
+        return owedGroups.equals(storedGroups);
     }
 
     /**

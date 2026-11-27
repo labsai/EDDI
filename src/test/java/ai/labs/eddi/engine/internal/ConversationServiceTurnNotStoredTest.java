@@ -9,7 +9,9 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService.AgentDeploymentFailedException;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -35,6 +37,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.runtime.BaseRuntime;
@@ -69,8 +72,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -79,6 +84,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -90,6 +96,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -488,6 +495,49 @@ class ConversationServiceTurnNotStoredTest {
         assertNull(memory.takeAfterCommit());
     }
 
+    @Test
+    @Timeout(30)
+    @DisplayName("resume: the commit is recorded once the write lands, before the deferred long-term write that may outlast the watchdog")
+    void conditionalStoreRecordsTheCommitBeforeTheDeferredWrite() throws Exception {
+        var memory = convertConversationMemorySnapshot(storedSnapshot(1));
+        memory.setConversationState(ConversationState.READY);
+        memory.deferUntilCommitted(() -> events.add("long-term write"));
+        when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS))).thenReturn(true);
+
+        assertTrue(conversationService.storeConversationMemoryIfState(memory, ENV, ConversationState.IN_PROGRESS,
+                () -> events.add("committed")));
+
+        assertEquals(List.of("committed", "long-term write"), events);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a turn whose deadline runs out after it was stored, in its long-term write, keeps the READY it stored")
+    void timeoutAfterTheWriteDoesNotInterruptAStoredTurn() throws Exception {
+        conversationService = service(1);
+        when(conversationMemoryStore.storeConversationMemorySnapshot(any())).thenAnswer(inv -> {
+            events.add("stored");
+            return CONVERSATION_ID;
+        });
+        CountDownLatch release = new CountDownLatch(1);
+        // The long-term write outlasts the 1 s agent timeout.
+        when(userMemoryStore.upsert(any())).thenAnswer(inv -> {
+            release.await(10, TimeUnit.SECONDS);
+            return "entry-1";
+        });
+
+        try {
+            conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), false,
+                    handler(new AtomicReference<>()));
+            runQueuedTurn();
+        } finally {
+            release.countDown();
+        }
+
+        assertTrue(events.contains("stored"));
+        verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), eq(ConversationState.EXECUTION_INTERRUPTED));
+    }
+
     // ─── M1: the conversation's start turn ───
 
     @Test
@@ -533,6 +583,40 @@ class ConversationServiceTurnNotStoredTest {
         verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(
                 argThat(snapshot -> CONVERSATION_ID.equals(snapshot.getConversationId()) && snapshot.getPendingLongTermWrites().isEmpty()),
                 eq(ConversationState.READY));
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("M1: a start discarded because its descriptor failed writes none of the greeting's long-term memories")
+    void startTurnWithAFailedDescriptorWritesNoMemories() throws Exception {
+        var startAgent = new Agent(AGENT_ID, 1);
+        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
+        ILifecycleManager lifecycle = mock(ILifecycleManager.class);
+        when(workflow.getWorkflowId()).thenReturn("wf1");
+        when(workflow.getLifecycleManager()).thenReturn(lifecycle);
+        AtomicReference<IConversationMemory> started = new AtomicReference<>();
+        doAnswer(inv -> {
+            IConversationMemory memory = inv.getArgument(0);
+            started.set(memory);
+            memory.getConversationProperties().put("favorite_color",
+                    new Property("favorite_color", "green", Property.Scope.longTerm));
+            return null;
+        }).when(lifecycle).executeLifecycle(any(), any());
+        startAgent.addWorkflow(workflow);
+        when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(startAgent);
+        when(conversationSetup.computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull())).thenReturn(USER_ID);
+        when(conversationSetup.computeAnonymousUserIdIfEmpty(eq(USER_ID), any())).thenReturn(USER_ID);
+        when(tenantQuotaService.acquireConversationSlot()).thenReturn(new QuotaCheckResult(true, null));
+        when(conversationMemoryStore.storeConversationMemorySnapshot(any())).thenReturn(CONVERSATION_ID);
+        doThrow(new IllegalStateException("descriptor store down")).when(conversationSetup)
+                .createConversationDescriptor(anyString(), any(), any(), anyString(), any(), any());
+
+        assertThrows(IllegalStateException.class, () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
+
+        verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+        verify(userMemoryStore, never()).upsert(any());
+        assertNull(started.get().takeAfterCommit(), "dropped with the discarded conversation");
+        assertEquals(1.0, meterRegistry.counter("eddi.turn.long_term_writes", "outcome", "discarded").count());
     }
 
     // ─── delivery order and surfaces ───
@@ -593,13 +677,37 @@ class ConversationServiceTurnNotStoredTest {
     // ─── block 4 ───
 
     @Test
-    @DisplayName("A12: a turn on an agent whose deployment failed is 'not ready' (404), not a 500 from the placeholder")
-    void failedDeploymentIsNotReady() {
+    @DisplayName("A12: a turn on an agent whose deployment failed on the server is a deployment failure (503), not 'not deployed'")
+    void failedDeploymentIsADeploymentFailure() {
         when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.ERROR);
+        when(agent.getDeploymentFailure()).thenReturn(DeploymentFailure.generic("Agent deployment failed"));
 
-        assertThrows(AgentNotReadyException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
-                new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class)));
+        assertThrows(AgentDeploymentFailedException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false,
+                List.of(), new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class)));
         verify(conversationCoordinator, never()).submitInOrder(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("A12: a deployment refused for a missing vault grant stays 'not ready' (404)")
+    void grantRefusedDeploymentIsNotReady() {
+        when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.ERROR);
+        when(agent.getDeploymentFailure())
+                .thenReturn(new DeploymentFailure(DeploymentFailure.VAULT_GRANT_MISSING, "not granted", null, null));
+
+        var refused = assertThrows(AgentNotReadyException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false,
+                false, List.of(), new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class)));
+        assertNotSame(AgentDeploymentFailedException.class, refused.getClass());
+        verify(conversationCoordinator, never()).submitInOrder(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("the stored state is read from the store, not the cache; a conversation the store no longer has is not found")
+    void storedConversationStateReadsTheStore() {
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(ConversationState.ENDED);
+        assertEquals(ConversationState.ENDED, conversationService.getStoredConversationState(CONVERSATION_ID));
+
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(null);
+        assertThrows(ConversationNotFoundException.class, () -> conversationService.getStoredConversationState(CONVERSATION_ID));
     }
 
     @Test

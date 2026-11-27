@@ -69,6 +69,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
@@ -805,7 +806,9 @@ public class ConversationService implements IConversationService, UserErasurePar
             // with the conversation): decided before the store, armed once the
             // descriptor exists.
             decideContinuation(conversationMemory);
-            var conversationId = storeConversationMemory(conversationMemory, environment);
+            // Stored without its deferred long-term writes: those run once the
+            // descriptor exists, since a failed descriptor discards the conversation.
+            var conversationId = conversationStepRunner.storeOnly(conversationMemory, environment, true);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                 counterHitlPause.increment();
@@ -813,8 +816,15 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri,
-                    groupConversationIdOf(context));
+            try {
+                createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri,
+                        groupConversationIdOf(context));
+            } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
+                // Discarded: the greeting's long-term memories go with it.
+                conversationStepRunner.discardDeferredWork(conversationMemory);
+                throw e;
+            }
+            conversationStepRunner.commitDeferredWork(conversationMemory, environment);
             // The CONVERSATION_START turn ran inline and never reaches the step runner's
             // hook; recorded once the conversation is sure to exist.
             reportHealthTurn(conversationMemory, conversationId, ConversationStepRunner.TurnWait.COMPLETED,
@@ -1634,11 +1644,19 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentNotReadyException(msg);
             }
             if (agent.getDeploymentStatus() == Deployment.Status.ERROR) {
-                // A failed deployment leaves a placeholder (the agent was deleted, or a
-                // config it names is gone) whose continueConversation throws "deployment
-                // still in progress" — a 500 for what is "this agent cannot run" (A12).
-                throw new AgentNotReadyException(String.format("Agent deployment failed (environment=%s, agentId=%s, version=%s)",
-                        environment, conversationMemory.getAgentId(), agent.getAgentVersion()));
+                // A failed deployment leaves a placeholder whose continueConversation
+                // throws "deployment still in progress" (A12). A refused vault grant is a
+                // configuration denial: the agent is not deployed (404). Any other failure
+                // — the load threw: a store error, or the agent or a config it names is
+                // gone — is the server's, and the placeholder cannot tell a transient one
+                // from a permanent one, so it is not answered as "not deployed" (503).
+                String msg = String.format("Agent deployment failed (environment=%s, agentId=%s, version=%s)",
+                        environment, conversationMemory.getAgentId(), agent.getAgentVersion());
+                DeploymentFailure failure = agent.getDeploymentFailure();
+                if (failure != null && failure.isGrantMissing()) {
+                    throw new AgentNotReadyException(msg);
+                }
+                throw new AgentDeploymentFailedException(msg);
             }
 
             // In-flight admission BEFORE the quota slot: a turn refused for capacity
@@ -2281,6 +2299,18 @@ public class ConversationService implements IConversationService, UserErasurePar
             throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         return tail;
+    }
+
+    @Override
+    public ConversationState getStoredConversationState(String conversationId) {
+        checkNotNull(conversationId, "conversationId");
+        ConversationState conversationState = conversationMemoryStore.getConversationState(conversationId);
+        if (conversationState == null) {
+            conversationStateCache.remove(conversationId);
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", conversationId));
+        }
+        cacheConversationState(conversationId, conversationState);
+        return conversationState;
     }
 
     @Override
@@ -3540,14 +3570,20 @@ public class ConversationService implements IConversationService, UserErasurePar
         conversationStepRunner.cacheConversationState(conversationId, conversationState);
     }
 
-    private String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
-        return conversationStepRunner.storeConversationMemory(conversationMemory, environment);
-    }
-
     boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
                                            ConversationState expectedState)
             throws ResourceStoreException {
         return conversationStepRunner.storeConversationMemoryIfState(conversationMemory, environment, expectedState);
+    }
+
+    /**
+     * As above; {@code onStored} runs after the write, before the deferred
+     * long-term writes.
+     */
+    boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
+                                           ConversationState expectedState, Runnable onStored)
+            throws ResourceStoreException {
+        return conversationStepRunner.storeConversationMemoryIfState(conversationMemory, environment, expectedState, false, onStored);
     }
 
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId) {

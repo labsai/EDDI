@@ -254,6 +254,12 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     static final String AGENT_MISCONFIGURED = "agent_misconfigured";
 
+    /**
+     * The {@code error} code of a turn on an agent whose deployment failed on the
+     * server ({@code 503}).
+     */
+    static final String AGENT_DEPLOYMENT_FAILED = "agent_deployment_failed";
+
     /** Longest refusal message a 422 carries; the full one is in the server log. */
     static final int MAX_REFUSAL_MESSAGE_CHARS = 1000;
 
@@ -299,8 +305,9 @@ public class RestAgentEngine implements IRestAgentEngine {
         // the owner guard admits an admin (and everyone with auth off) for a
         // conversation with no descriptor — so an unknown id was answered 200. Every
         // sibling endpoint answers 404; so does this one now (ConversationNotFound is
-        // mapped to 404).
-        conversationService.getConversationState(conversationId);
+        // mapped to 404). Read from the store, not this node's cache: another node may
+        // have deleted the conversation since this one cached its state.
+        conversationService.getStoredConversationState(conversationId);
         // G4: attribute a pause-terminating end to the calling principal so it lands
         // in the hitl.approval audit trail (null-safe for anonymous callers).
         String endedBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
@@ -568,6 +575,12 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (AgentMismatchException e) {
             LOGGER.warn("Agent mismatch for conversation " + conversationId + ": " + e.getMessage());
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity("Agent version mismatch").build());
+        } catch (AgentDeploymentFailedException e) {
+            // Before its superclass: a deployment that failed on the server is a server
+            // fault (503), not a missing deployment (404).
+            LOGGER.warn("Agent deployment failed for conversation " + conversationId + ": " + e.getMessage());
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.APPLICATION_JSON)
+                    .entity(Map.of("error", AGENT_DEPLOYMENT_FAILED, "message", "The agent's deployment failed on the server")).build());
         } catch (AgentNotReadyException e) {
             LOGGER.warn("Agent not ready for conversation " + conversationId + ": " + e.getMessage());
             response.resume(new NotFoundException("Agent is not deployed or not ready"));
@@ -785,7 +798,9 @@ public class RestAgentEngine implements IRestAgentEngine {
      * before (nothing to undo/redo, paused, running, or a concurrent writer won).
      */
     private Response historyEditRefused(String conversationId) {
-        if (conversationService.getConversationState(conversationId) == ConversationState.ENDED) {
+        // The store's state, not this node's cache: the edit read ENDED from the store,
+        // and another node may have ended the conversation since this one cached READY.
+        if (conversationService.getStoredConversationState(conversationId) == ConversationState.ENDED) {
             return Response.status(Response.Status.GONE).entity("Conversation has ended").build();
         }
         return Response.status(Response.Status.CONFLICT).build();
