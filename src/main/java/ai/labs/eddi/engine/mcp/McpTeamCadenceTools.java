@@ -88,7 +88,7 @@ public class McpTeamCadenceTools {
             + "fire, whether it is enabled, how many backlog tasks a run pulls, its per-run cost cap and who created it. Needs VIEW on "
             + "the group.")
     public String listTeamCadences(@ToolArg(description = "The group's id (required)") String groupId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_team_cadences"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -135,7 +135,7 @@ public class McpTeamCadenceTools {
                                     @ToolArg(description = "Backlog tasks one run pulls, 1..20 (default 5)",
                                              required = false) Integer maxBacklogTasksPerRun,
                                     @ToolArg(description = "Cost cap of one run in USD, more than 0 and at most 100 (required)") Double maxCostPerRun) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_team_cadence"));
         if (groupId == null || groupId.isBlank() || cronExpression == null || cronExpression.isBlank()) {
             return errorJson("groupId and cronExpression are required", "BAD_REQUEST", null);
         }
@@ -157,7 +157,7 @@ public class McpTeamCadenceTools {
     @Tool(name = "delete_team_cadence", description = "Delete one of a standing team's cadences and its schedule. Needs EDIT on the group.")
     public String deleteTeamCadence(@ToolArg(description = "The group's id (required)") String groupId,
                                     @ToolArg(description = "The cadenceId, from list_team_cadences (required)") String cadenceId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_team_cadence"));
         if (groupId == null || groupId.isBlank() || cadenceId == null || cadenceId.isBlank()) {
             return errorJson("groupId and cadenceId are required", "BAD_REQUEST", null);
         }
@@ -171,7 +171,7 @@ public class McpTeamCadenceTools {
     @Tool(name = "read_lesson_consolidation", description = "Whether a standing team's lesson consolidation is configured "
             + "(lessonConfig.consolidation on the group) and scheduled, with its cron and time zone. Needs VIEW on the group.")
     public String readLessonConsolidation(@ToolArg(description = "The group's id (required)") String groupId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_lesson_consolidation"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -188,7 +188,7 @@ public class McpTeamCadenceTools {
     public String scheduleLessonConsolidation(@ToolArg(description = "The group's id (required)") String groupId,
                                               @ToolArg(description = "5-field cron expression, e.g. '0 3 * * 1' (required)") String cronExpression,
                                               @ToolArg(description = "IANA time zone (default UTC)", required = false) String timeZone) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("schedule_lesson_consolidation"));
         if (groupId == null || groupId.isBlank() || cronExpression == null || cronExpression.isBlank()) {
             return errorJson("groupId and cronExpression are required", "BAD_REQUEST", null);
         }
@@ -203,7 +203,7 @@ public class McpTeamCadenceTools {
     @Tool(name = "unschedule_lesson_consolidation", description = "Remove a standing team's lesson-consolidation schedule. Needs EDIT on "
             + "the group.")
     public String unscheduleLessonConsolidation(@ToolArg(description = "The group's id (required)") String groupId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("unschedule_lesson_consolidation"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }

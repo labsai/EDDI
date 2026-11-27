@@ -59,6 +59,9 @@ public class VaultGrantService {
     public static final String AUDIT_TASK_TYPE = "vault";
     public static final String AUDIT_TASK_ID = "vault.grant.append";
 
+    /** Ledger task id of removing a permanently deleted agent from a grant. */
+    public static final String REVOKE_AUDIT_TASK_ID = "vault.grant.revoke-deleted-agent";
+
     /**
      * Compare-and-set attempts before giving up. Each conflict means another writer
      * landed in between; a handful covers any realistic admin burst.
@@ -128,11 +131,119 @@ public class VaultGrantService {
             }
             try {
                 SecretMetadata after = secretProvider.updateGrant(secret, next, null, current);
-                audit(secret, agentId, actor, origin, current, after.allowedAgents());
+                audit(AUDIT_TASK_ID, secret, agentId, actor, origin, current, after.allowedAgents());
                 return new AppendResult(before, after, true);
             } catch (GrantConflictException e) {
                 // Somebody else changed the grant between the read and the guarded write.
                 // Re-read and try again: their change is kept, ours is added to it.
+                lastConflict = e;
+            }
+        }
+        throw lastConflict;
+    }
+
+    /**
+     * Removes a permanently deleted agent's id from every grant that lists it, in
+     * every tenant.
+     * <p>
+     * A grant is a list of agent ids, and nothing else ever takes an id off it: a
+     * deleted agent stayed on every grant it had held, so the grant read as wider
+     * than it is, and an admin reviewing it could not tell a live grantee from a
+     * leftover. Replacing an agent (the operator's upgrade does it on every run)
+     * left one stale id per replacement.
+     * <p>
+     * <b>Never widens.</b> When the deleted agent is the ONLY id on a grant,
+     * removing it would leave an empty list — which every layer reads as "every
+     * agent". That grant is left as it is and logged: an id that names no agent
+     * grants nothing, and a secret that silently opened to everyone would.
+     * <p>
+     * The same compare-and-set as {@link #grantAgent}, so a concurrent grant edit
+     * is kept rather than overwritten. Best-effort per secret: one that cannot be
+     * read or written is logged and the sweep goes on — the agent is already gone,
+     * and a failure here must not fail its deletion.
+     *
+     * @param actor
+     *            who deleted the agent, for the audit entry
+     * @return the references whose grant no longer lists the agent
+     */
+    public List<String> revokeDeletedAgent(String agentId, String actor) {
+        if (agentId == null || agentId.isBlank() || !secretProvider.isAvailable()) {
+            return List.of();
+        }
+        List<String> tenants;
+        try {
+            tenants = secretProvider.listTenants();
+        } catch (SecretProviderException e) {
+            LOGGER.warnf("Could not list the vault's tenants to remove deleted agent '%s' from its grants: %s", sanitize(agentId),
+                    sanitize(e.getMessage()));
+            return List.of();
+        }
+        List<String> revoked = new ArrayList<>();
+        for (String tenant : tenants) {
+            List<SecretMetadata> secrets;
+            try {
+                secrets = secretProvider.listKeys(tenant);
+            } catch (SecretProviderException e) {
+                LOGGER.warnf("Could not list the secrets of tenant '%s' to remove deleted agent '%s' from their grants: %s",
+                        sanitize(tenant), sanitize(agentId), sanitize(e.getMessage()));
+                continue;
+            }
+            for (SecretMetadata metadata : secrets) {
+                if (!listsAgent(metadata.allowedAgents(), agentId)) {
+                    continue;
+                }
+                SecretReference secret = new SecretReference(tenant, metadata.keyName());
+                try {
+                    if (revokeFrom(secret, agentId, actor)) {
+                        revoked.add(secret.toReferenceString());
+                    }
+                } catch (SecretNotFoundException e) {
+                    // Deleted meanwhile: nothing left to clean.
+                } catch (SecretProviderException | RuntimeException e) {
+                    LOGGER.warnf("Could not remove deleted agent '%s' from the grant of %s: %s", sanitize(agentId),
+                            sanitize(secret.toReferenceString()), sanitize(e.getMessage()));
+                }
+            }
+        }
+        if (!revoked.isEmpty()) {
+            LOGGER.infof("Removed deleted agent '%s' from the grant of %d secret(s): %s", sanitize(agentId), revoked.size(),
+                    sanitize(String.join(", ", revoked)));
+        }
+        return revoked;
+    }
+
+    /**
+     * Whether a grant names {@code agentId} explicitly — a wildcard grant lists
+     * nobody.
+     */
+    private static boolean listsAgent(List<String> allowedAgents, String agentId) {
+        return !SecretMetadata.grantsAllAgents(allowedAgents) && allowedAgents.contains(agentId);
+    }
+
+    /**
+     * One secret's revoke, re-read and retried on a conflict. False when nothing
+     * was (or may be) removed.
+     */
+    private boolean revokeFrom(SecretReference secret, String agentId, String actor) throws SecretNotFoundException, SecretProviderException {
+        GrantConflictException lastConflict = null;
+        for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            List<String> current = secretProvider.getMetadata(secret).allowedAgents();
+            if (!listsAgent(current, agentId)) {
+                return false;
+            }
+            List<String> next = new ArrayList<>(current);
+            next.removeIf(agentId::equals);
+            if (next.isEmpty()) {
+                LOGGER.infof("Deleted agent '%s' was the only agent granted %s; its id is left on the grant, because an empty grant "
+                        + "means every agent. Narrow or delete the secret if nothing should use it.", sanitize(agentId),
+                        sanitize(secret.toReferenceString()));
+                return false;
+            }
+            try {
+                SecretMetadata after = secretProvider.updateGrant(secret, next, null, current);
+                audit(REVOKE_AUDIT_TASK_ID, secret, agentId, actor, "agent-delete", current, after.allowedAgents());
+                return true;
+            } catch (GrantConflictException e) {
                 lastConflict = e;
             }
         }
@@ -144,7 +255,8 @@ public class VaultGrantService {
                 metadata.lastRotatedAt(), metadata.checksum(), metadata.description(), List.copyOf(grant));
     }
 
-    private void audit(SecretReference secret, String agentId, String actor, String origin, List<String> previous, List<String> now) {
+    private void audit(String taskId, SecretReference secret, String agentId, String actor, String origin, List<String> previous,
+                       List<String> now) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
             return;
         }
@@ -153,15 +265,15 @@ public class VaultGrantService {
             input.put("secret", secret.toReferenceString());
             input.put("origin", origin);
             Map<String, Object> output = new LinkedHashMap<>();
-            output.put("grantedAgentId", agentId);
+            output.put(AUDIT_TASK_ID.equals(taskId) ? "grantedAgentId" : "revokedAgentId", agentId);
             output.put("previousAllowedAgents", List.copyOf(previous));
             output.put("allowedAgents", List.copyOf(now));
             output.put("actor", actor != null ? actor : "unknown");
-            auditLedgerService.submit(new AuditEntry(UUID.randomUUID().toString(), null, agentId, null, actor, null, 0, AUDIT_TASK_ID,
-                    AUDIT_TASK_TYPE, 0, 0L, input, output, null, null, List.of(AUDIT_TASK_ID), 0.0, Instant.now(), null, null));
+            auditLedgerService.submit(new AuditEntry(UUID.randomUUID().toString(), null, agentId, null, actor, null, 0, taskId,
+                    AUDIT_TASK_TYPE, 0, 0L, input, output, null, null, List.of(taskId), 0.0, Instant.now(), null, null));
         } catch (Exception e) {
             // The grant is written; a failed audit write must not report it as failed.
-            LOGGER.warnf("Failed to write the audit entry for granting %s to agent '%s': %s", sanitize(secret.toReferenceString()),
+            LOGGER.warnf("Failed to write the %s audit entry of %s for agent '%s': %s", taskId, sanitize(secret.toReferenceString()),
                     sanitize(agentId), sanitize(e.getMessage()));
         }
     }

@@ -17,9 +17,9 @@ package ai.labs.eddi.configs;
  * <p>
  * A {@link ScopedValue}: the binding ends with the call and cannot leak onto a
  * pooled thread; the writes it wraps run synchronously on the caller's thread.
- * Open PR #1417 adds {@code ExistingRuleSetWrite}, the same idea for its own
- * retired-config checks; once both exist, {@link #isActive()} should also
- * answer for it.
+ * {@code ExistingRuleSetWrite} is the same idea for a ruleset's retired
+ * condition configs; a ruleset write of an existing configuration enters both
+ * scopes.
  */
 public final class LenientConfigWrite {
 
