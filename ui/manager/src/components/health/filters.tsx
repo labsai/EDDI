@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "./api";
-import { cn } from "./deps";
+import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "@eddi/app-kit/lib/api/health";
+import { Button } from "./deps";
 import { enumLabel, formatDays, periodDays, selectClass, versionOptions } from "./format";
 
 export interface HealthFilterState {
@@ -56,19 +56,19 @@ export function HealthFilters({
     <div className="flex flex-wrap items-center gap-3" data-testid="health-filters">
       <div role="group" aria-label={t("health.filters.period", "Period")} className="inline-flex overflow-hidden rounded-lg border border-input">
         {HEALTH_PERIODS.map((p) => (
-          <button
+          <Button
             key={p}
             type="button"
+            size="sm"
+            variant={value.period === p ? "primary" : "ghost"}
             aria-pressed={value.period === p}
             onClick={() => onChange({ ...value, period: p })}
-            className={cn(
-              "px-3 py-1 text-xs font-medium transition-colors",
-              value.period === p ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-secondary",
-            )}
+            // A segment of the group: the group draws the border and the rounding.
+            className="h-auto rounded-none px-3 py-1 shadow-none hover:shadow-none active:scale-100"
             data-testid={`health-period-${p}`}
           >
             {formatDays(periodDays(p))}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -82,7 +82,8 @@ export function HealthFilters({
           data-testid="health-version-filter"
         >
           <option value="">{t("health.filters.allVersions", "All versions")}</option>
-          {versionOptions(latestVersion).map((v) => (
+          {/* The chosen version stays an option after new saves push it past the cap. */}
+          {versionOptions(latestVersion, undefined, [value.version]).map((v) => (
             <option key={v} value={v}>
               {`v${v}`}
             </option>

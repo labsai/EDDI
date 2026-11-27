@@ -3,10 +3,10 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Link } from "react-router-dom";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { HEALTH_AGENTS, compareFor } from "@/test/mocks/health-fixtures";
-import { resetHealthMockState } from "@/test/mocks/health-handlers";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { HEALTH_AGENTS, compareFor } from "@eddi/app-kit/test/mocks/health-fixtures";
+import { resetHealthMockState } from "@eddi/app-kit/test/mocks/health-handlers";
 import { AgentHealthPanel } from "../agent-health-panel";
 import { healthKeys } from "../use-agent-health";
 import { formatShortDate } from "../format";
@@ -223,7 +223,7 @@ describe("AgentHealthPanel", () => {
     // The figures still render; only the trends are missing.
     expect(within(await measureCard("agentFailureRate")).getByTestId("health-value")).toHaveTextContent("0.4%");
     fail = false;
-    await userEvent.click(within(section).getByTestId("health-series-retry"));
+    await userEvent.click(within(section).getByTestId("error-state-retry"));
     await waitFor(() => expect(within(section).queryByTestId("health-series-error")).toBeNull());
     expect(await within(section).findAllByTestId("health-sparkline")).not.toHaveLength(0);
   });
@@ -824,9 +824,10 @@ describe("health profile editor", () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
     await userEvent.click(screen.getByTestId("health-add-override"));
-    const select = within(screen.getByTestId("health-override")).getAllByRole("combobox")[0]!;
-    // By value, not label: the label is localised copy.
-    expect(select.querySelector('option[value="business"]')).not.toBeNull();
+    const select = within(screen.getByTestId("health-override")).getByTestId("health-override-target");
+    expect(within(select).getByTestId("health-override-section-business")).toHaveValue("business");
+    await userEvent.selectOptions(select, "business");
+    expect(select).toHaveValue("business");
   });
 
   it("shows an error when the reset fails", async () => {
@@ -940,6 +941,143 @@ describe("owner report links", () => {
     await userEvent.click(within(screen.getByTestId("health-report-list")).getByRole("button"));
     await userEvent.click(within(screen.getByTestId("health-report-list")).getByTestId("health-report-revoke-confirm"));
     await waitFor(() => expect(within(screen.getByTestId("health-report-list")).queryAllByRole("listitem")).toHaveLength(0));
+  });
+});
+
+describe("review follow-ups", () => {
+  it("opens a mounted, closed panel when the hash becomes #health", async () => {
+    window.localStorage.removeItem("eddi.manager.agentHealthOpen");
+    renderWithProviders(
+      <>
+        <Link to="#health" data-testid="to-health">health</Link>
+        <AgentHealthPanel agentId={HEALTH_AGENTS.healthy} latestVersion={8} canEdit />
+      </>,
+    );
+    expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(screen.getByTestId("to-health"));
+    expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByTestId("health-section-reliability")).toBeInTheDocument();
+    // The toggle still closes it while the hash stays.
+    await userEvent.click(screen.getByTestId("agent-health-toggle"));
+    expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "false");
+    window.localStorage.removeItem("eddi.manager.agentHealthOpen");
+  });
+
+  it("fetches no trend of the new period before its summary arrives", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const seriesPeriods: string[] = [];
+    const listener = ({ request }: { request: Request }) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/health/series")) seriesPeriods.push(url.searchParams.get("period") ?? "");
+    };
+    server.use(
+      http.get("*/agents/:agentId/health", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("period") !== "7d") return;
+        await gate;
+      }),
+    );
+    server.events.on("request:start", listener);
+    try {
+      renderPanel(HEALTH_AGENTS.healthy);
+      await screen.findByTestId("health-section-reliability");
+      await waitFor(() => expect(seriesPeriods.length).toBeGreaterThan(0));
+      await userEvent.click(screen.getByTestId("health-period-7d"));
+      // The 7-day summary is still loading (no placeholder: the 30-day one is withdrawn),
+      // so no section card is mounted and no 7-day trend may be fetched yet.
+      expect(screen.queryByTestId("health-section-reliability")).toBeNull();
+      await new Promise((r) => setTimeout(r, 150));
+      expect(seriesPeriods).not.toContain("7d");
+      release();
+      await waitFor(() => expect(seriesPeriods).toContain("7d"));
+    } finally {
+      release();
+      server.events.removeListener("request:start", listener);
+    }
+  });
+
+  it("keeps a chosen version selectable after new versions push it past the cap", async () => {
+    const view = renderPanel(HEALTH_AGENTS.healthy, { latestVersion: 25 });
+    await screen.findByTestId("health-section-reliability");
+    await userEvent.selectOptions(screen.getByTestId("health-version-filter"), "1");
+    view.rerender(panel(HEALTH_AGENTS.healthy, { latestVersion: 26 }));
+    expect(screen.getByTestId("health-version-filter")).toHaveValue("1");
+  });
+
+  it("offers the resolved older version in compare when it is beyond the cap", async () => {
+    renderPanel(HEALTH_AGENTS.healthy, { latestVersion: 26 });
+    await screen.findByTestId("health-section-reliability");
+    await userEvent.click(screen.getByTestId("health-open-compare"));
+    await userEvent.selectOptions(await screen.findByTestId("health-compare-to"), "2");
+    expect(screen.getByTestId("health-compare-from")).toHaveValue("1");
+  });
+
+  it("says when a section's trends failed and retries them", async () => {
+    let fail = true;
+    server.use(
+      http.get("*/agents/:agentId/health/series", ({ request }) => {
+        const measures = new URL(request.url).searchParams.getAll("measure");
+        if (fail && measures.includes("agentFailureRate")) return HttpResponse.json({ error: "X", message: "Series down" }, { status: 500 });
+      }),
+    );
+    renderPanel(HEALTH_AGENTS.healthy);
+    const reliability = await screen.findByTestId("health-section-reliability");
+    expect(await within(reliability).findByTestId("health-series-error")).toBeInTheDocument();
+    // Another section's trends loaded and are not marked failed.
+    expect(within(screen.getByTestId("health-section-efficiency")).queryByTestId("health-series-error")).toBeNull();
+    fail = false;
+    await userEvent.click(within(reliability).getByTestId("error-state-retry"));
+    await waitFor(() => expect(within(reliability).queryByTestId("health-series-error")).toBeNull());
+  });
+
+  it("marks the portfolio stale when a profile is saved", async () => {
+    const view = renderPanel(HEALTH_AGENTS.healthy);
+    const key = healthKeys.portfolio("7d", "attention", []);
+    view.queryClient.setQueryData(key, { pages: [], pageParams: [] });
+    await screen.findByTestId("health-section-reliability");
+    await userEvent.click(screen.getByTestId("health-open-profile"));
+    await screen.findByTestId("health-threshold-resolutionRate-red");
+    expect(view.queryClient.getQueryState(key)?.isInvalidated).toBe(false);
+    await userEvent.click(screen.getByTestId("health-profile-save"));
+    await waitFor(() => expect(view.queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("blocks Save and Reset while either profile write is pending", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get("*/agents/:agentId/health/profile", () =>
+        HttpResponse.json({ stored: true, preset: "support", critical: [], thresholds: { resolutionRate: { green: 0.7, red: 0.4 } }, budgets: {}, slo: {}, overrides: [] }),
+      ),
+      http.put("*/agents/:agentId/health/profile", async () => {
+        await gate;
+        return HttpResponse.json({});
+      }),
+    );
+    try {
+      renderPanel(HEALTH_AGENTS.healthy);
+      await screen.findByTestId("health-section-reliability");
+      await userEvent.click(screen.getByTestId("health-open-profile"));
+      await screen.findByTestId("health-threshold-resolutionRate-red");
+      await userEvent.click(screen.getByTestId("health-profile-save"));
+      await waitFor(() => expect(screen.getByTestId("health-profile-reset")).toBeDisabled());
+      expect(screen.getByTestId("health-profile-save")).toBeDisabled();
+    } finally {
+      release();
+    }
+  });
+
+  it("drills into the sessions of the chosen version only", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    await screen.findByTestId("health-section-reliability");
+    await userEvent.selectOptions(screen.getByTestId("health-version-filter"), "7");
+    const resolution = await measureCard("resolutionRate");
+    await userEvent.click(within(resolution).getByTestId("health-drill-resolutionRate"));
+    await waitFor(() => {
+      const rows = screen.getAllByTestId("health-session-row");
+      expect(rows).toHaveLength(1);
+      expect(within(rows[0]!).getByRole("link")).toHaveAttribute("href", "/manage/conversationview/conv-dd");
+    });
   });
 });
 

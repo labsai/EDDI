@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Measure } from "../api";
+import type { Measure } from "@eddi/app-kit/lib/api/health";
 import {
   allowedReportSections,
   bandMeta,
@@ -136,6 +136,14 @@ describe("small helpers", () => {
     expect(versionOptions(3)).toEqual([3, 2, 1]);
     expect(versionOptions(100, 5)).toEqual([100, 99, 98, 97, 96]);
     expect(versionOptions(0)).toEqual([]);
+  });
+
+  it("keeps a chosen version that the cap cut off, in descending order and once", () => {
+    expect(versionOptions(26, 25, [1])).toEqual([...versionOptions(26), 1]);
+    expect(versionOptions(30, 3, [5, 29, null, undefined])).toEqual([30, 29, 28, 5]);
+    expect(versionOptions(30, 3, [5, 5])).toEqual([30, 29, 28, 5]);
+    // Nothing that is not a version of this agent.
+    expect(versionOptions(3, 25, [0, 4, 1.5])).toEqual([3, 2, 1]);
   });
 
   it("orders known sections first and keeps unknown ones", () => {

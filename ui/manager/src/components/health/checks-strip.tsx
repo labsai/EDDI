@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, CircleDashed, Clock, XCircle, type LucideIcon } from "lucide-react";
-import type { HealthCheck } from "./api";
+import type { HealthCheck } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { formatAge } from "./format";
 

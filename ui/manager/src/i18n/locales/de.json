@@ -3699,7 +3699,7 @@
       "reviewScope": "Es werden nur Sitzungen von Versionen aufgelistet, bei denen die Konversationsprüfung aktiviert ist."
     },
     "noTrend": "Zu wenige Tage mit Daten für einen Trend.",
-    "seriesError": "Die Verläufe konnten nicht geladen werden.",
+    "seriesError": "Einige Trends konnten nicht geladen werden.",
     "sparklineLabel": "{{label}} im Zeitraum, zwischen {{min}} und {{max}}",
     "noReasons": "Kein Messwert braucht Aufmerksamkeit.",
     "overview": {

@@ -3740,7 +3740,7 @@
       "reviewScope": "Only sessions of versions with conversation review enabled are listed."
     },
     "noTrend": "Not enough days with data for a trend.",
-    "seriesError": "The trends could not be loaded.",
+    "seriesError": "Some trends could not be loaded.",
     "sparklineLabel": "{{label}} over the period, between {{min}} and {{max}}",
     "noReasons": "No measure needs attention.",
     "overview": {

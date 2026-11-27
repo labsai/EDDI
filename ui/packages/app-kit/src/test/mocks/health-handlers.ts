@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "@/components/health/api";
+import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "../../lib/api/health";
 import {
   HEALTH_AGENTS,
   MARKERS,
@@ -86,8 +86,15 @@ const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "t
   ratingScore: [0.84, "score"],
 };
 
+/** Days per period id; an unknown or missing period answers 30 days, the contract's default. */
+const PERIOD_DAYS = new Map<string, number>([
+  ["7d", 7],
+  ["30d", 30],
+  ["90d", 90],
+]);
+
 /** The days of the requested `period` (7, 30 or 90; the contract's default is 30). */
-const periodDays = (url: URL): number => ({ "7d": 7, "30d": 30, "90d": 90 })[url.searchParams.get("period") ?? "30d"] ?? 30;
+const periodDays = (url: URL): number => PERIOD_DAYS.get(url.searchParams.get("period") ?? "30d") ?? 30;
 
 /** Measures without daily values yet: the backend answers them with all-null points. */
 const NO_DAILY_VALUES = new Set(["costPerResolvedSession", "returningUserShare"]);

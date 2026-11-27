@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight, GitCompareArrows, HeartPulse, LayoutList, Link2, SlidersHorizontal } from "lucide-react";
-import { laterHealthPhasesAvailable, type HealthQuery, type MeasureUnit } from "./api";
+import { laterHealthPhasesAvailable, type HealthQuery, type MeasureUnit } from "@eddi/app-kit/lib/api/health";
 import { useAgentHealth } from "./use-agent-health";
 import { isApiError, Button, Skeleton, getErrorMessage } from "./deps";
 import { ChecksStrip } from "./checks-strip";
@@ -86,6 +86,9 @@ export function AgentHealthPanel({
   );
   // Nothing is requested while the section is collapsed.
   const health = useAgentHealth(agentId, query, open);
+  // No placeholder summary (see `useAgentHealth`): while a new selection loads
+  // there is no summary and so no section card, which keeps the trends and the
+  // drill-down on the query of the summary they sit beside.
   const data = health.data;
 
   const info = useMemo(() => {

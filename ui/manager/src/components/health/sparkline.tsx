@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { HealthMarker, MeasureUnit, SeriesPoint } from "./api";
+import type { HealthMarker, MeasureUnit, SeriesPoint } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { formatMeasureValue } from "./format";
 import { SPARK_H, SPARK_W, sparklineGeometry } from "./sparkline-geometry";
@@ -64,7 +64,20 @@ export function Sparkline({
           <title>{m.label}</title>
         </line>
       ))}
-      <path d={g.path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      {g.path && <path d={g.path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+      {/* An isolated day as a zero-length stroke with a round cap: with a non-scaling stroke it stays round,
+          where a <circle> would stretch into an ellipse under preserveAspectRatio="none". */}
+      {g.dots.length > 0 && (
+        <path
+          d={g.dots.map((d) => `M${d.x.toFixed(1)} ${d.y.toFixed(1)}h0`).join("")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3}
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+          data-testid="health-sparkline-dots"
+        />
+      )}
     </svg>
   );
 }

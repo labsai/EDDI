@@ -3699,7 +3699,7 @@
       "reviewScope": "会話レビューが有効なバージョンのセッションのみ表示されます。"
     },
     "noTrend": "傾向を示すには、データのある日数が足りません。",
-    "seriesError": "推移を読み込めませんでした。",
+    "seriesError": "一部の傾向を読み込めませんでした。",
     "sparklineLabel": "期間中の{{label}}：{{min}}〜{{max}}の範囲",
     "noReasons": "注意が必要な指標はありません。",
     "overview": {

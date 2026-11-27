@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Lock, ListTree, RotateCw, Wand2 } from "lucide-react";
-import type { HealthQuery, HealthSection } from "./api";
+import { Lock, ListTree, Wand2 } from "lucide-react";
+import type { HealthQuery, HealthSection } from "@eddi/app-kit/lib/api/health";
 import { useHealthSeries } from "./use-agent-health";
-import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "./deps";
+import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, Skeleton } from "./deps";
 import { drillForMeasure, drillForResolution, type DrillFilter } from "./drill";
 import { formatMeasureValue, formatShortDate, sectionTitle } from "./format";
 import { MeasureCard } from "./measure-card";
@@ -77,13 +77,10 @@ export function SectionCard({ agentId, sectionId, section, query, onDrill, onMap
           })
         )}
         {!section.restricted && series.isLoading && measures.length > 0 && <Skeleton className="h-6 w-full" />}
+        {/* A failed trend call is said, not hidden: its sparklines are missing, the ones that loaded stay. */}
         {!section.restricted && series.isError && measures.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="alert" data-testid="health-series-error">
-            {t("health.seriesError", "The trends could not be loaded.")}
-            <Button size="sm" variant="outline" onClick={series.retry} data-testid="health-series-retry">
-              <RotateCw className="me-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              {t("common.retry", "Retry")}
-            </Button>
+          <div data-testid="health-series-error">
+            <ErrorState message={t("health.seriesError", "Some trends could not be loaded.")} error={series.error} onRetry={series.retry} />
           </div>
         )}
         {/* The dashed lines on the trends, in words: reachable by keyboard and touch, not just a tooltip. */}

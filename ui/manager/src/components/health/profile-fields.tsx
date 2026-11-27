@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
-import { SECTION_IDS, type HealthProfile, type MeasureUnit, type ProfileOverride, type ProfileViolation } from "./api";
+import { SECTION_IDS, type HealthProfile, type MeasureUnit, type ProfileOverride, type ProfileViolation } from "@eddi/app-kit/lib/api/health";
 import { Button, cn } from "./deps";
 import { measureLabel as labelOf, sectionTitle } from "./format";
 import { fromInput, inputClass, toInput, violationsAt } from "./profile-utils";
@@ -162,11 +162,12 @@ export function OverrideRows({
               className={inputClass}
               value={o.measure}
               onChange={(e) => patch(i, { measure: e.target.value })}
+              data-testid="health-override-target"
             >
               <option value="">—</option>
               <optgroup label={t("health.profile.overrideSections", "Sections")}>
                 {SECTION_IDS.map((id) => (
-                  <option key={id} value={id}>{sectionTitle(t, id)}</option>
+                  <option key={id} value={id} data-testid={`health-override-section-${id}`}>{sectionTitle(t, id)}</option>
                 ))}
               </optgroup>
               <optgroup label={t("health.profile.overrideMeasures", "Measures")}>

@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
-import type { AgentHealth, HealthCompare, Measure } from "./api";
+import type { AgentHealth, HealthCompare, Measure } from "@eddi/app-kit/lib/api/health";
 import { useHealthCompare } from "./use-agent-health";
 import { AccessibleDialog, Skeleton, cn, getErrorMessage } from "./deps";
 import { TONE_CLASS, compareVerdict, formatDays, formatDelta, formatMeasureValue, measureLabel, selectClass, versionOptions } from "./format";
@@ -110,12 +110,13 @@ export function CompareDialog({
   const defaultFrom = to !== null && to > 1 ? to - 1 : null;
   const from = chosenFrom !== null && to !== null && chosenFrom < to ? chosenFrom : defaultFrom;
   const compare = useHealthCompare(agentId, open ? from : null, open ? to : null, days);
-  const options = versionOptions(latestVersion);
-  // The older side lists the versions just below the newer one (capped like the rest), so the
-  // derived default is always selectable even when the newer one sits at the bottom of the list;
-  // a stale choice further down stays listed rather than leaving the select without its value.
-  const olderOptions = to === null ? [...options] : versionOptions(to - 1);
-  if (from !== null && !olderOptions.includes(from)) olderOptions.push(from);
+  // The newer side keeps its resolved version even when the cap cut it off. The older side lists
+  // the versions just below the newer one (capped like the rest), so the derived default is always
+  // selectable even when the newer one sits at the bottom of the list; a stale or resolved choice
+  // further down stays listed rather than leaving the select without its value (v1 against v2 of a
+  // 26-version agent).
+  const options = versionOptions(latestVersion, undefined, [to]);
+  const olderOptions = to === null ? [...options] : versionOptions(to - 1, undefined, [from]);
 
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.compare.title", "Compare versions")} maxWidth="max-w-3xl" testId="health-compare-dialog">

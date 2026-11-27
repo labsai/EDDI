@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { HealthStatus, Reason } from "./api";
+import type { HealthStatus, Reason } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { BAND_META, bandMeta, statusLabelKey } from "./format";
 import { StatusIcon } from "./band-badge";

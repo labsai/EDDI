@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
-import { downloadHealthExport, type HealthPeriod } from "./api";
+import { downloadHealthExport, type HealthPeriod } from "@eddi/app-kit/lib/api/health";
 import { Button, getErrorMessage } from "./deps";
 
 /**

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { portfolioFixture } from "@/test/mocks/health-fixtures";
-import { healthPortfolioHandler } from "@/test/mocks/health-handlers";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { portfolioFixture } from "@eddi/app-kit/test/mocks/health-fixtures";
+import { healthPortfolioHandler } from "@eddi/app-kit/test/mocks/health-handlers";
 import { HealthOverviewPage } from "../health-overview";
 
 describe("HealthOverviewPage", () => {
@@ -52,6 +52,27 @@ describe("HealthOverviewPage", () => {
     }
   });
 
+  it("shows no rows of the previous period while the new one loads", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get("*/health/agents", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("period") !== "30d") return;
+        await gate;
+      }),
+    );
+    try {
+      renderWithProviders(<HealthOverviewPage />);
+      expect(await screen.findAllByTestId("health-overview-row")).toHaveLength(3);
+      await userEvent.selectOptions(screen.getByTestId("health-overview-period"), "30d");
+      await waitFor(() => expect(screen.queryAllByTestId("health-overview-row")).toHaveLength(0));
+      release();
+      expect(await screen.findAllByTestId("health-overview-row")).toHaveLength(3);
+    } finally {
+      release();
+    }
+  });
+
   it("filters by status (H4)", async () => {
     server.use(healthPortfolioHandler("H4"));
     renderWithProviders(<HealthOverviewPage />);
@@ -89,7 +110,7 @@ describe("HealthOverviewPage", () => {
       http.get("*/health/agents", ({ request }) => {
         const filtered = new URL(request.url).searchParams.has("status");
         const items = filtered ? [] : portfolioFixture().items.map((i) => ({ ...i, status: null }));
-        return HttpResponse.json({ items, platformIncidents: [], nextCursor: null });
+        return HttpResponse.json({ items, platformIncidents: [], nextCursor: null, agentsTruncated: false });
       }),
     );
     renderWithProviders(<HealthOverviewPage />);
@@ -104,7 +125,7 @@ describe("HealthOverviewPage", () => {
     server.use(
       http.get("*/health/agents", ({ request }) => {
         const filtered = new URL(request.url).searchParams.has("status");
-        return HttpResponse.json({ items: filtered ? [] : portfolioFixture("H4").items, platformIncidents: [], nextCursor: null });
+        return HttpResponse.json({ items: filtered ? [] : portfolioFixture("H4").items, platformIncidents: [], nextCursor: null, agentsTruncated: false });
       }),
     );
     renderWithProviders(<HealthOverviewPage />);

@@ -13,7 +13,7 @@ Review findings on PR #1390.
   that another admin had saved since. The form now also needs `!profile.isError`; the error is shown instead
   (`health-profile-load-error`). New test: "a reopened editor whose refetch fails shows the error and no form".
 - **The mocked version comparison agrees with itself.** `compareFor` in
-  [`health-fixtures.ts`](../../ui/manager/src/test/mocks/health-fixtures.ts) had hand-written deltas that contradicted
+  [`health-fixtures.ts`](../../ui/packages/app-kit/src/test/mocks/health-fixtures.ts) had hand-written deltas that contradicted
   its own sections. They are now read from the two sides, and a test checks each delta against its two values.
 - **Stable selectors.** The profile tests find Cancel by `health-profile-cancel` and the override's section target by
   its option value, not by English copy.

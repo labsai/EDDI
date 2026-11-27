@@ -1,4 +1,4 @@
-import type { HealthPreset, HealthProfile, MeasureUnit, ProfileViolation } from "./api";
+import type { HealthPreset, HealthProfile, MeasureUnit, ProfileViolation } from "@eddi/app-kit/lib/api/health";
 import { activeLocale } from "./deps";
 
 export const inputClass =

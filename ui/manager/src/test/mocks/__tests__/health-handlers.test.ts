@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getAgentHealth, getHealthSeries, getHealthSessions, getPortfolio } from "@/components/health/api";
-import { HEALTH_AGENTS, MOCK_TODAY } from "../health-fixtures";
+import { getAgentHealth, getHealthSeries, getHealthSessions, getPortfolio } from "@eddi/app-kit/lib/api/health";
+import { HEALTH_AGENTS, MOCK_TODAY } from "@eddi/app-kit/test/mocks/health-fixtures";
 
 /** The health mocks answer the way planning/agent-health-api.md says the backend does, so tests built on them hold against it. */
 describe("health handlers", () => {

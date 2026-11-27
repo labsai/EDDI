@@ -3733,7 +3733,7 @@
       "reviewScope": "Só são listadas as sessões de versões com a revisão de conversas ativada."
     },
     "noTrend": "Poucos dias com dados para uma tendência.",
-    "seriesError": "Não foi possível carregar as tendências.",
+    "seriesError": "Não foi possível carregar algumas tendências.",
     "sparklineLabel": "{{label}} no período, entre {{min}} e {{max}}",
     "noReasons": "Nenhuma medida precisa de atenção.",
     "overview": {

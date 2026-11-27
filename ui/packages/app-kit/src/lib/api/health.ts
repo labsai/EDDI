@@ -1,4 +1,5 @@
-import { api, ApiClientError, seg } from "./deps";
+import { api, ApiClientError } from "../api-client";
+import { seg } from "./path-segment";
 
 /**
  * Agent Health — the REST contract in planning/agent-health-api.md, section by
@@ -131,7 +132,16 @@ export interface PortfolioItem {
 }
 /** `from` and `to` are DAYS (`YYYY-MM-DD`), not instants: incidents are detected per day. */
 export interface PlatformIncident { from: string; to: string; failureClass: string; agents: number }
-export interface Portfolio { items: PortfolioItem[]; platformIncidents: PlatformIncident[]; nextCursor: string | null }
+export interface Portfolio {
+  items: PortfolioItem[];
+  platformIncidents: PlatformIncident[];
+  nextCursor: string | null;
+  /**
+   * The caller may view more agents than one portfolio looks at (the backend's `HealthAccess.MAX_AGENTS`):
+   * the agents past that cap are in no page and in no incident count. The backend always sends it.
+   */
+  agentsTruncated: boolean;
+}
 export type PortfolioSort = "attention" | "name" | "traffic";
 
 export interface ProfileOverride { measure: string; state: string; reason: string; until: string }
