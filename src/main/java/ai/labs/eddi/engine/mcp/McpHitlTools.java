@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.hitl.HitlPlanBinding;
 import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
@@ -337,6 +338,10 @@ public class McpHitlTools {
                     + "\",\"verdict\":\"" + parsed.name() + "\"}";
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call needs a mandatory approval this caller cannot give; the pause is
+            // untouched. Fixed text.
+            return errorJson(e.getMessage(), "FORBIDDEN", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Conversation not found", "NOT_FOUND", null);
         } catch (IConversationService.PlanMismatchException e) {
@@ -793,7 +798,7 @@ public class McpHitlTools {
             }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
             return cancelled
-                    ? "{\"status\":\"CANCELLED\"}"
+                    ? "{\"status\":\"" + cancelStatus(conversationId) + "\"}"
                     : errorJson("Group conversation is already in a terminal state — nothing to cancel",
                             "WRONG_STATE", null);
         } catch (ForbiddenException e) {
@@ -806,6 +811,27 @@ public class McpHitlTools {
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);
             return errorJson("Failed to cancel group discussion", "INTERNAL", null);
+        }
+    }
+
+    /**
+     * The truth about a cancel just accepted: {@code CANCELLING} while the
+     * discussion still runs (it stops before its next turn), otherwise the state it
+     * ended in — {@code CANCELLED}, or {@code COMPLETED}/{@code FAILED} when it
+     * finished before the cancel landed. Unreadable reads as {@code CANCELLING}:
+     * the accepted signal does not establish that execution has stopped, so a
+     * terminal status needs a successful read.
+     */
+    private String cancelStatus(String conversationId) {
+        try {
+            var state = groupConversationService.readGroupConversation(conversationId).getState();
+            if (state == GroupConversation.GroupConversationState.IN_PROGRESS || state == GroupConversation.GroupConversationState.SYNTHESIZING
+                    || state == GroupConversation.GroupConversationState.CREATED) {
+                return "CANCELLING";
+            }
+            return state != null ? state.name() : "CANCELLING";
+        } catch (Exception e) {
+            return "CANCELLING";
         }
     }
 

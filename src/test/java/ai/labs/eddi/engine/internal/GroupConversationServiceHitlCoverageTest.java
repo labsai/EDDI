@@ -324,6 +324,23 @@ class GroupConversationServiceHitlCoverageTest {
     }
 
     @Test
+    @DisplayName("cancel: a stored cancel clears the outcome a continuation's claim had not cleared yet")
+    void cancelStored_clearsAPreviousRoundsOutcome() throws Exception {
+        var gc = pausedPhaseGc("gc-claimed-continuation");
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setPausedAt(null);
+        gc.setOutcome(GroupConversation.DiscussionOutcome.ANSWERED);
+        gc.setOutcomeReason("TURN_LIMIT_REACHED");
+        doReturn(gc).when(conversationStore).read("gc-claimed-continuation");
+
+        assertTrue(service.cancelDiscussion("gc-claimed-continuation", ControlSignal.CANCEL_GRACEFUL));
+
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+        assertNull(gc.getOutcome(), "outcome is null after a cancel");
+        assertNull(gc.getOutcomeReason());
+    }
+
+    @Test
     @DisplayName("cancel: no token, IN_PROGRESS (not paused) → cancelled without schedule cleanup")
     void cancelInProgressNotPaused() throws Exception {
         var gc = pausedPhaseGc("gc-inprogress-cancel");
