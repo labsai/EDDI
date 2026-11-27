@@ -490,6 +490,7 @@ public class ChatModelRegistry {
     private Map<String, String> filterParams(Map<String, String> processedParams) {
         var returnMap = new HashMap<>(processedParams);
         returnMap.remove(KEY_INCLUDE_FIRST_AGENT_MESSAGE);
+        returnMap.remove("emptyInputPrompt");
         returnMap.remove(KEY_SYSTEM_MESSAGE);
         returnMap.remove(KEY_PROMPT);
         returnMap.remove(KEY_LOG_SIZE_LIMIT);
