@@ -616,14 +616,19 @@ conversation write failed, or the size guard (`eddi.conversations.max-document-b
 refused it. The caller is answered with `error.code` `TURN_NOT_STORED` instead of
 the answer (REST: 507, 422, 409 or 503 by reason; a stream ends with an `error`
 event), and the log line names the conversation, the agent and the reason.
-`conversation_too_large` means a conversation reached its size limit and every
-further turn of it fails the same way; `data_rejected` is a PostgreSQL data error;
+`conversation_too_large` means the turn would have pushed the conversation past
+its size limit (`eddi.conversations.max-document-bytes`, or the database's own). The
+turn was not stored and the stored conversation is unchanged, so a later, smaller
+turn can still succeed; once the stored conversation itself is over the limit (an
+upgrade can leave existing ones there), each further say turn is refused before it
+runs. `data_rejected` is a PostgreSQL data error;
 `conflict` and `fenced` are lost races with another writer or node,
 `conversation_ended` an end that won the race; `store_failure` (the database did
 not confirm the write) and `outcome_unknown` (the watchdog gave up on the turn, or it
 failed after its answer) mean the turn *may* have been stored.
 `eddi_turn_long_term_writes_total{outcome="failed"}` counts long-term memory
-writes that failed after their turn was stored (the next turn makes them up);
+writes that failed after their turn was stored (the next turn tries to make them
+up, which can fail again while the long-term store is unavailable);
 `outcome="discarded"` counts writes dropped with a turn that was not stored;
 `outcome="skipped_newer"` counts make-up writes left out because a newer value was
 already stored by another conversation.

@@ -53,9 +53,11 @@ public final class TurnNotStored {
      */
     public enum Reason {
         /**
-         * The conversation document reached its size limit (the database's, or
-         * {@code eddi.conversations.max-document-bytes}). Every further turn of this
-         * conversation fails the same way: start a new conversation.
+         * The turn would have pushed the conversation document past its size limit (the
+         * database's, or {@code eddi.conversations.max-document-bytes}). The stored
+         * conversation is unchanged, so a smaller turn can still be stored; once the
+         * stored document itself is over the limit, every further say turn is refused
+         * at admission and only a new conversation helps.
          */
         CONVERSATION_TOO_LARGE("conversation_too_large", false, null, 507,
                 "The turn ran but was not stored: this conversation has reached its size limit. Start a new conversation."),
