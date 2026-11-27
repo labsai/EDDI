@@ -292,6 +292,23 @@ class HealthReportServiceTest {
     }
 
     @Test
+    @DisplayName("the session views default to the report's origins: the preset from the window and baseline rows")
+    void effectiveOriginsMatchTheReport() {
+        Window window = last(3);
+        LocalDate inBaseline = window.baseline().from();
+        // Interactive traffic in the baseline only, automated traffic in the window.
+        when(daily.find("agent", inBaseline, TODAY)).thenReturn(List.of(row(inBaseline, 1, "api", 10), row(TODAY, 1, "schedule", 30)));
+        // The window's rows alone would make it a task agent.
+        when(daily.find("agent", window.from(), TODAY)).thenReturn(List.of(row(TODAY, 1, "schedule", 30)));
+
+        AgentHealth report = service.report(new Scope("agent", window, null, null), "Support", false);
+
+        assertEquals("support", report.preset());
+        assertEquals(HealthPeriods.defaultOrigins(report.preset()), service.effectiveOrigins("agent", window, null));
+        assertEquals(List.of("schedule"), service.effectiveOrigins("agent", window, List.of("schedule")), "asked-for origins win");
+    }
+
+    @Test
     @DisplayName("series: a failed rating read is unavailable, not a measured zero; a day without ratings in a good read is zero")
     void seriesRatingReadFailure() {
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 1, "api", 40)));

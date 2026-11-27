@@ -300,10 +300,13 @@ stay behind the catch-all. What protects it:
   reports. `429` with `Retry-After` beyond. The client address is the remote
   address as Quarkus resolves it — a forwarded one only from a proxy in
   `quarkus.http.proxy.trusted-proxies`, never a raw `X-Forwarded-For`.
-- **The creator's authority is re-checked on every read**: the link shows only
-  while its creator still holds `EDIT` on the agent (ownership, grants, shares
-  and the agent's space as they are now; the creator's teams as they were at
-  creation). Losing `EDIT` makes the link a 404. **What revoking a person does
+- **The creator's authority is re-checked on every read**: where workspaces
+  are enforced (`eddi.workspaces.enabled=true` with authentication on), the
+  link shows only while its creator still holds `EDIT` on the agent (ownership,
+  grants, shares and the agent's space as they are now; the creator's teams as
+  they were at creation). Losing `EDIT` makes the link a 404. Without workspace
+  enforcement (the default) there is no per-agent access to re-check. Either
+  way, with authentication on, a link whose creator was erased (GDPR) is a 404. **What revoking a person does
   not do**: their roles and team memberships live in their identity provider
   and cannot be re-checked without their sign-in, so removing someone's
   `eddi-editor` role, or removing them from a team, does not end their links.

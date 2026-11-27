@@ -316,13 +316,15 @@ public class HealthReportService {
 
     /**
      * The origins a request counts: those asked for, else the default of the
-     * agent's preset over the window — for the session views.
+     * agent's preset — for the session views. The preset comes from the same rows
+     * as the report's and the series' (window and baseline), so one window gets one
+     * default origin set whichever endpoint is asked.
      */
     public List<String> effectiveOrigins(String agentId, Window window, List<String> requested) {
         if (requested != null) {
             return requested;
         }
-        return HealthPeriods.defaultOrigins(profile(agentId, daily(agentId, window.from(), window.to())).preset());
+        return HealthPeriods.defaultOrigins(profile(agentId, daily(agentId, window.baseline().from(), window.to())).preset());
     }
 
     /**

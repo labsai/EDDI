@@ -857,12 +857,21 @@ POST /agents/{agentId}/health/reports
   `DELETE …/health/reports` all of them. Expired links are deleted by the rollup
   pass a day after they expire; an agent's links are revoked when the agent is
   deleted (soft or permanent).
-- **A link shows only while its creator still holds `EDIT` on the agent.** Every
+- **Where workspaces are enforced** (`eddi.workspaces.enabled=true` with
+  authentication on), **a link shows only while its creator still holds `EDIT`
+  on the agent.** Every
   read re-checks the creator's access as it is now — ownership, grants, shares,
   a move to another space — with the team list taken when the link was created.
   A link whose creator lost `EDIT` answers 404 like a revoked one (and shows
-  again if the access comes back); one whose creator was erased (GDPR) answers
-  404 for good. What cannot be re-checked without the creator's own sign-in —
+  again if the access comes back). Without workspace enforcement (the default)
+  there is no per-agent access to re-check, and a link shows until it expires
+  or is revoked.
+- **A link whose creator was erased (GDPR) answers 404 for good** whenever
+  authentication is on (`authorization.enabled=true`), whether or not
+  workspaces are enforced: with authentication on every link is created by a
+  signed-in account, so a link without a creator is an erased one. With
+  authentication off there are no accounts — every link is created as
+  `anonymous` — and nothing is re-checked. What cannot be re-checked without the creator's own sign-in —
   their roles (administrator, the rating roles behind `quality`) and leaving a
   team — is as it was at creation: **revoke a departing person's links** (`DELETE
   …/health/reports` per agent).
@@ -1043,7 +1052,10 @@ Turn rows are personal data about a user's use of an agent:
   (`createdBy`, with the team snapshot and administrator flag taken when the
   link was created); erasure blanks them and keeps the profile (it belongs to
   the agent) and the link row — which, with nobody's authority behind it,
-  answers 404 from then on, also when its creator was an administrator. The export lists the profiles the person saved last (agent,
+  answers 404 from then on whenever authentication is on, also when its creator
+  was an administrator and also without workspace enforcement. Other nodes may
+  still show the erased name as a profile's `updatedBy` for up to 60 seconds,
+  the lifetime of their profile cache (the stored row is blank at once). The export lists the profiles the person saved last (agent,
   time) and the links they created (id, agent, sections, period, created,
   expiry) — never a token.
 - **Deleting an agent** revokes its report links; a permanent delete also

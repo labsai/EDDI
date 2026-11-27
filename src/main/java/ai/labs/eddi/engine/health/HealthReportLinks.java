@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard.UseCheck;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -101,13 +102,21 @@ public class HealthReportLinks {
     private ResourceAccessGuard accessGuard;
     /** {@code null} only in tests built without it. */
     private HealthAdminAudit audit;
+    /**
+     * {@code authorization.enabled}: with it on, every link is created by a
+     * signed-in caller, so a link without a creator is one whose creator was
+     * erased.
+     */
+    private boolean authEnabled;
 
     @Inject
     public HealthReportLinks(IHealthReportLinkStore store, HealthReportService reports, IDocumentDescriptorStore descriptorStore,
-            ResourceAccessGuard accessGuard, HealthAdminAudit audit) {
+            ResourceAccessGuard accessGuard, HealthAdminAudit audit,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this(store, reports, descriptorStore, Clock.systemUTC());
         this.accessGuard = accessGuard;
         this.audit = audit;
+        this.authEnabled = authEnabled;
     }
 
     HealthReportLinks(IHealthReportLinkStore store, HealthReportService reports, IDocumentDescriptorStore descriptorStore, Clock clock) {
@@ -121,6 +130,12 @@ public class HealthReportLinks {
     HealthReportLinks with(ResourceAccessGuard accessGuard, HealthAdminAudit audit) {
         this.accessGuard = accessGuard;
         this.audit = audit;
+        return this;
+    }
+
+    /** With {@code authorization.enabled} set — for tests. */
+    HealthReportLinks withAuth(boolean authEnabled) {
+        this.authEnabled = authEnabled;
         return this;
     }
 
@@ -261,20 +276,32 @@ public class HealthReportLinks {
     }
 
     /**
-     * Whether the link's creator still holds {@code EDIT} on its agent, judged now
-     * from the agent's current ownership, grants and shares (with the creator's
-     * team snapshot). {@link UseCheck#UNKNOWN} when the descriptor store could not
-     * answer. A link without a creator (erased, or created with authentication off)
-     * is {@code DENIED} wherever access is enforced.
+     * Whether the link may still be read on its creator's authority.
+     * <ul>
+     * <li>With authentication on, a link without a creator — its creator was erased
+     * (GDPR) — is {@code DENIED}, whatever the workspace settings: the access guard
+     * admits everything while workspaces are not enforced, so it cannot be what
+     * ends such a link.</li>
+     * <li>Otherwise the creator's {@code EDIT} on the agent is judged now from the
+     * agent's current ownership, grants and shares (with the creator's team
+     * snapshot) — only where workspaces are enforced; without enforcement the guard
+     * allows every principal. {@link UseCheck#UNKNOWN} when the descriptor store
+     * could not answer.</li>
+     * <li>With authentication off there are no accounts to erase or to lose access:
+     * every link is created as {@code anonymous} and is allowed.</li>
+     * </ul>
      */
     public UseCheck authorized(HealthReportLink link) {
+        boolean creatorless = link.createdBy() == null || link.createdBy().isBlank();
+        if (authEnabled && creatorless) {
+            return UseCheck.DENIED;
+        }
         if (accessGuard == null) {
             return UseCheck.ALLOWED;
         }
         // The admin flag stands for its creator: with the creator erased it stands for
-        // nobody, so it never authorises a creatorless link (a row blanked before the
-        // erasure also cleared the flag).
-        boolean creatorAdmin = link.creatorAdmin() && link.createdBy() != null && !link.createdBy().isBlank();
+        // nobody, so it never authorises a creatorless link.
+        boolean creatorAdmin = link.creatorAdmin() && !creatorless;
         return accessGuard.checkPrincipalLevel(link.agentId(), link.createdBy(), link.creatorTeams(), creatorAdmin, AccessLevel.EDIT);
     }
 

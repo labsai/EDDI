@@ -96,8 +96,17 @@ business owner without Manager access can read a **branded, read-only report** t
   blanks the team snapshot and the admin flag with the name (MongoDB and PostgreSQL), and `HealthReportLinks.authorized`
   ignores the flag of a link without a creator. On MongoDB the profiles to blank are found on the primary at majority
   read concern, so a lagging secondary cannot hide one just saved. The profile cache is invalidated on the erasing
-  node only; other nodes' cached profiles still carry the old `updatedBy` until their TTL ends (the stored row is
-  blank).
+  node only; other nodes' cached profiles still carry the old `updatedBy` for up to 60 seconds (`CACHE_SECONDS`; the
+  stored row is blank at once).
+- **Fixed after review**: `checkPrincipalLevel` also admits every principal while workspaces are not enforced (the
+  default), so an erased creator's link still served the report with OIDC on and workspaces off. With
+  `authorization.enabled=true`, `HealthReportLinks.authorized` now denies a link without a creator before asking the
+  guard, whatever the workspace settings; with authentication off every link is created as `anonymous`, there is no
+  account to erase, and the link is allowed as before. The docs now say that the "creator still holds EDIT" re-check
+  applies only where workspaces are enforced.
+- **Fixed after review**: the session views (`/health/sessions`, `list_agent_health_sessions`) pick an agent's
+  auto-preset, and so their default origins, from the window and baseline rows like the report and the series, not
+  from the window alone.
 - **Platform Operator**: revision 85 (h3 is at 84).
 
 ### Design decisions

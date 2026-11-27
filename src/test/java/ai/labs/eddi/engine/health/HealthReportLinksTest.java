@@ -229,6 +229,15 @@ class HealthReportLinksTest {
         when(guard.checkPrincipalLevel("a", null, List.of(), false, AccessLevel.EDIT)).thenReturn(UseCheck.DENIED);
         assertEquals(UseCheck.DENIED, links.authorized(creatorless));
 
+        // Workspaces not enforced: the guard admits every principal (as
+        // ResourceAccessGuard does when !isEnforcing()). With authentication on, an
+        // erased creator's link still answers 404; with it off there is nobody to
+        // erase and the guard decides.
+        when(guard.checkPrincipalLevel("a", null, List.of(), false, AccessLevel.EDIT)).thenReturn(UseCheck.ALLOWED);
+        assertEquals(UseCheck.DENIED, links.withAuth(true).authorized(creatorless), "auth on: a creatorless link is erased");
+        assertEquals(UseCheck.ALLOWED, links.withAuth(true).authorized(link), "auth on: a creator's link is the guard's to judge");
+        assertEquals(UseCheck.ALLOWED, links.withAuth(false).authorized(creatorless), "auth off: no accounts, the guard decides");
+
         // Creation snapshots the creator's teams and admin flag and is audited without
         // the token.
         when(guard.currentTeamSubjects()).thenReturn(List.of("team:ops"));
