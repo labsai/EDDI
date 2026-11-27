@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ArrowRight, X, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import type { TourPlacement } from "./tour-chapters";
 
 interface TourTooltipProps {

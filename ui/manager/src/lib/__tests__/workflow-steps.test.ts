@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addWorkflowStep } from "@/lib/workflow-steps";
-import type { WorkflowExtension } from "@/lib/api/workflows";
+import type { WorkflowExtension } from "@eddi/app-kit/lib/api/workflows";
 
 const step = (type: string): WorkflowExtension => ({
   type,

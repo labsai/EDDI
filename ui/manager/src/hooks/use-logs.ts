@@ -9,14 +9,14 @@ import {
   type LogFilters,
   type HistoryFilters,
   type DatabaseLogEntry,
-} from "@/lib/api/logs";
-import type { BearerEventSource } from "@/lib/bearer-event-source";
+} from "@eddi/app-kit/lib/api/logs";
+import type { BearerEventSource } from "@eddi/app-kit/lib/bearer-event-source";
 import {
   useSessionLogStore,
   connect as connectSessionLogStream,
   reconnect as reconnectSessionLogStream,
 } from "@/hooks/session-log-store";
-import { historyEntryKey, mergeNewestFirst, newByMultiplicity } from "@/lib/log-entries";
+import { historyEntryKey, mergeNewestFirst, newByMultiplicity } from "@eddi/app-kit/lib/log-entries";
 
 // ==================== Query Keys ====================
 

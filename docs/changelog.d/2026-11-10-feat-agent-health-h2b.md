@@ -216,3 +216,27 @@ presets, status and reasons.
   exists (it reads one past the cap), and the portfolio carries it as the new field `agentsTruncated` (existing fields
   unchanged). Tests: `HealthAccessTest.viewableAgentsCap` (exactly 5,000 is not truncated, 5,001 is),
   `RestAgentHealthTest.portfolioTruncated`.
+
+## 🔀 merge(health): H2b on the GDPR erasure guarantee of the merged Agent Health 1/N (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+The final #1386 replaced `HealthErasureFence` with `HealthErasureWriter`, an `AsyncErasureWriter` of the GDPR erasure
+guarantee. H2b's dirty-day marking moves onto that design; the fence (and the step-0 agent noting H2b had added to it,
+see the 2026-11-11 entry above) is gone.
+
+- `HealthTurnRecorder` keeps the guard's `DrainBarrier` and `beforeWrite`/`afterWrite`, with H2b's late-write stamp,
+  stored-day and discard-day notes and the shutdown flush layered on. A row the guard removes again after its write
+  has its days marked dirty at once (`HealthDirtyDays.markDeletedRows`).
+- `HealthErasureWriter.eraseConversation` (guarded purge, retention sweep, the user erasure's conversation step) deletes
+  with `deleteConversationReturningDays` and marks the days; unknown days fall back to the conversation's agent, read
+  from the conversation store while the conversation still exists. Unlike the unguarded agent-test purge, it deletes
+  even when neither is known (the guarantee verifies that no row is left) and `markDeletedRows` warns. `removeRow` (a
+  pending removal's retry) reads the conversation's (agent, day)s before the delete and marks them.
+- `HealthTurnGdprParticipant` keeps `deleteByUserIdReturningDays` + `markErasedRows`, then `verifyUserErased`. The
+  user's own conversations are erased (and their days marked, agent known) in the cascade's conversation step before
+  the participant runs; for what is left, the agents come from conversations still in the conversation store.
+- The daily, dirty-day and change-marker stores hold counts, (agent, day) pairs and agent/version labels — no user or
+  conversation id — so they take no part in erasure.
+- MCP: the three health tools join `McpToolTiers` (tier `HEALTH_READ`); 123 tools. Dashboard panels "Agent Health rollup
+  backlog/work" are 469/470 inside the Agent Health row (466). Operator revision 83.

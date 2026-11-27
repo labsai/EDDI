@@ -1,0 +1,107 @@
+<!doctype html>
+<!--
+  Source of screenshots/eddi-social-preview.png, the image GitHub shows when
+  someone shares a link to the repository (Settings > General > Social preview).
+  GitHub wants 1280x640; it is rendered at device scale factor 1 so the upload
+  stays well under GitHub's 1 MB limit, by
+  ui/manager/scripts/capture-readme-images.mjs --only social. It shares its
+  colours and wording with banner.html; change both together.
+
+  It is read at thumbnail size in chat apps and feeds, so the text is large and
+  there is less of it than on the README banner.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>EDDI social preview</title>
+<style>
+  :root {
+    --bg: #0c0a09;
+    --line: #292524;
+    --text: #fafaf9;
+    --muted: #a8a29e;
+    --amber: #f59e0b;
+    --amber-soft: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; background: var(--bg); }
+  body {
+    position: relative;
+    overflow: hidden;
+    font-family: "Noto Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+  }
+  .glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(640px 520px at 84% 50%, rgba(245, 158, 11, 0.22), transparent 70%),
+      radial-gradient(560px 360px at 6% 112%, rgba(245, 158, 11, 0.09), transparent 70%);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(250, 250, 249, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(250, 250, 249, 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: linear-gradient(90deg, transparent 0%, #000 50%, #000 100%);
+  }
+  /* Platforms crop the edges of a preview differently, so everything sits at
+     least 80px in from each side. */
+  .left {
+    position: absolute; left: 88px; top: 88px; bottom: 88px; width: 610px;
+    display: flex; flex-direction: column;
+  }
+  .wordmark { height: 72px; width: auto; align-self: flex-start; margin-left: -5px; }
+  h1 {
+    margin-top: 44px;
+    font-size: 54px; line-height: 1.12; font-weight: 600; letter-spacing: -0.015em;
+  }
+  .verbs {
+    margin-top: 30px;
+    font-size: 26px; font-weight: 500; line-height: 1.35; color: var(--muted);
+  }
+  .verbs span { color: #57534e; padding: 0 12px; }
+  .foot {
+    margin-top: auto;
+    font-size: 21px; color: var(--muted); letter-spacing: 0.01em;
+  }
+  .foot b { color: var(--text); font-weight: 600; }
+
+  .right {
+    position: absolute; right: 88px; top: 0; bottom: 0; width: 470px;
+    display: flex; flex-direction: column; justify-content: center; gap: 16px;
+  }
+  .tile {
+    background: rgba(28, 25, 23, 0.88);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px 24px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+    display: flex; align-items: baseline; gap: 18px;
+  }
+  .tile b {
+    flex: 0 0 120px;
+    font-size: 26px; font-weight: 600; color: var(--amber-soft);
+  }
+  .tile span { font-size: 22px; line-height: 1.3; color: #e7e5e4; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="grid"></div>
+
+  <div class="left">
+    <img class="wordmark" src="../../ui/packages/app-kit/src/assets/logo_eddi.png" alt="E.D.D.I" />
+    <h1>The open-source AI agent management system</h1>
+    <div class="verbs">Works with Claude, Cursor and any MCP client</div>
+    <div class="foot"><b>github.com/labsai/EDDI</b> &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; Apache-2.0</div>
+  </div>
+
+  <div class="right">
+    <div class="tile"><b>Run</b><span>on your servers, any LLM</span></div>
+    <div class="tile"><b>Limit</b><span>only the tools you grant</span></div>
+    <div class="tile"><b>Approve</b><span>a person signs off</span></div>
+    <div class="tile"><b>Record</b><span>every step, in a ledger</span></div>
+  </div>
+</body>
+</html>

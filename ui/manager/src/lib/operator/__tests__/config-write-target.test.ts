@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveConfigWriteTarget, bodyHasRedactions } from "../config-write-target";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 function preview(overrides: Partial<ResolvedRequestPreview> = {}): ResolvedRequestPreview {
   return {

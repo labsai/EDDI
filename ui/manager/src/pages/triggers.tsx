@@ -16,20 +16,20 @@ import {
   Pencil,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { ENVIRONMENTS } from "@/lib/constants";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { ENVIRONMENTS } from "@eddi/app-kit/lib/constants";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import {
   useTriggers,
   useCreateTrigger,
   useUpdateTrigger,
   useDeleteTrigger,
 } from "@/hooks/use-triggers";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import type { AgentTriggerConfiguration, AgentDeployment } from "@/lib/api/triggers";
 
-import { parseResourceUri } from "@/lib/api/agents";
-import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
 
 export function TriggersPage() {
   const { t } = useTranslation();

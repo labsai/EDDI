@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { api } from "../../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 import {
   resumeConversation,
   getApprovalStatus,
@@ -19,9 +19,9 @@ import {
   type GroupApprovalRequest,
   type ApprovalStatusSummary,
   type PendingApprovalSummary,
-} from "../hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 
-vi.mock("../../api-client", () => ({
+vi.mock("@eddi/app-kit/lib/api-client", () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),

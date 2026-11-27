@@ -143,8 +143,10 @@ public interface IAlertEventStore {
     Optional<AlertEvent> findByDedupeKey(String dedupeKey);
 
     /**
-     * GDPR erasure: blanks the stored {@code OUTPUT_MATCH} value of every event
-     * that came from a conversation of {@code userId}, and forgets the subject.
+     * GDPR erasure: blanks the stored {@code OUTPUT_MATCH} value (and a rating
+     * comment excerpt) of every event whose internal subject is {@code userId} — an
+     * output value's conversation owner, or the keyed rater of a rating alert
+     * ({@code ErasureGuard#subjectKey}) — and forgets the subject.
      *
      * An event whose send claim is live at {@code now} is skipped.
      *
@@ -170,6 +172,39 @@ public interface IAlertEventStore {
      * was being written.
      */
     long redactRatingComment(String eventId, Instant now);
+
+    /**
+     * GDPR (the erasure guarantee): blanks everything personal one event holds —
+     * the stored output value, its subject and a rating comment excerpt — unless
+     * its send claim is live at {@code now}.
+     *
+     * @return how many events changed (0 or 1)
+     */
+    long redactEventContent(String eventId, Instant now);
+
+    /**
+     * Explicit conversation delete (and the user erasure's per-conversation step):
+     * blanks the personal content of every event of {@code conversationId} — a
+     * stored {@code OUTPUT_MATCH} value, a rating comment excerpt, and the subject
+     * either carries — skipping an event whose send claim is live at {@code now}.
+     * The same content {@link #holdsPersonalContent} looks for.
+     */
+    long redactConversationContent(String conversationId, Instant now);
+
+    /**
+     * How many events of {@code conversationId} still hold an output value, a
+     * rating comment excerpt, or a subject — what
+     * {@link #redactConversationContent} removes.
+     */
+    long countConversationContent(String conversationId);
+
+    /**
+     * Whether the event still holds anything personal — an output value, a rating
+     * comment excerpt or a subject. The erasure guarantee's read-back after a
+     * removal, so it reads what the write committed (MongoDB: the primary, with
+     * majority read concern). An event that no longer exists holds nothing.
+     */
+    boolean holdsPersonalContent(String eventId);
 
     /**
      * Claims the right to send {@code eventId} until {@code until}: an atomic

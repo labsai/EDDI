@@ -31,95 +31,20 @@ import java.util.Set;
 public class McpToolFilter implements ToolFilter {
 
     /**
-     * Whitelist of MCP tool names that should be exposed to external clients. All
-     * other tools (built-in langchain4j Agent tools) are hidden.
+     * Whitelist of MCP tool names that should be exposed to external clients: the
+     * key set of {@link McpToolTiers#TIERS}, so a tool is exposed exactly when it
+     * has a role tier. All other tools (built-in langchain4j Agent tools) are
+     * hidden.
      * <p>
-     * <b>A tool missing from this set is invisible, silently.</b>
+     * <b>A tool missing from that map is invisible, silently.</b>
      * {@code ToolFilter} sees only a name, so a newly added {@code @Tool} that
-     * nobody adds here still compiles, still passes its own unit test (which calls
-     * the method directly), and simply never appears in {@code tools/list}.
+     * nobody adds to the map still compiles and never appears in {@code tools/list}
+     * (its own role gate would also fail on the missing tier).
      * {@code McpToolFilterCoverageTest} pins both directions — every {@code @Tool}
      * is listed, and every listed name exists — so that failure mode cannot recur.
      * Package-visible for exactly that test.
      */
-    static final Set<String> MCP_TOOLS = Set.of(
-            // Conversation tools
-            "list_agents", "list_agent_configs", "create_conversation", "talk_to_agent", "chat_with_agent", "read_conversation",
-            "read_conversation_log", "list_conversations", "get_agent",
-            // Build identity (McpVersionTools) — which EDDI is running
-            "get_eddi_version",
-            // Model price catalog (McpPricingTools) — read only; prices are a budget
-            // lever an administrator changes in the Manager
-            "read_model_prices",
-            // Spending controls (McpSpendControlTools) — admin-only; a stricter write
-            // applies, a looser one is filed for an administrator's approval
-            "read_tenant_quota", "update_model_prices", "update_tenant_quota", "list_spend_control_changes",
-            "withdraw_spend_control_change",
-            // Vault key names and grants (McpVaultTools) — admin-only, never a value
-            "list_vault_keys",
-            // Admin tools
-            "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent", "delete_agent",
-            "update_agent",
-            "read_workflow", "read_resource",
-            // Setup tools
-            "setup_agent", "create_api_agent",
-            // Resource CRUD + Cascade (Phase 8a.2)
-            "update_resource", "create_resource", "delete_resource", "apply_agent_changes", "list_agent_resources",
-            // Diagnostic tools (Phase 8a.2)
-            "read_agent_logs", "read_audit_trail",
-            // Discovery + Managed Agents (Phase 8a.3)
-            "discover_agents", "chat_managed",
-            // Agent Trigger CRUD (Phase 8a.3)
-            "list_agent_triggers", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
-            // Group Conversations (Phase 10)
-            "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
-            "add_team_task", "list_team_backlog",
-            // Cross-team handoff intake (McpTeamHandoffTools) — VIEW/EDIT on the group
-            "list_team_handoffs", "accept_team_handoff", "decline_team_handoff",
-            // Team cadences and lesson consolidation (McpTeamCadenceTools) — VIEW/EDIT on
-            // the group
-            "list_team_cadences", "create_team_cadence", "delete_team_cadence", "read_lesson_consolidation",
-            "schedule_lesson_consolidation", "unschedule_lesson_consolidation",
-            // Team budgets (McpTeamBudgetTools) — reads as REST, writes admin-only
-            "read_team_budget", "list_team_budgets", "adjust_team_budget", "transfer_team_budget",
-            "list_group_templates", "create_group_from_template",
-            "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
-            // Group Conversation Follow-Ups
-            "followup_with_member", "continue_group_discussion", "close_group_conversation",
-            // Schedule Management
-            "create_schedule", "list_schedules", "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
-            // Channel Integrations
-            "list_channel_integrations", "read_channel_integration", "create_channel_integration", "update_channel_integration",
-            "delete_channel_integration",
-            // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
-            "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
-            "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
-            "approve_group_phase", "cancel_group_discussion", "submit_group_human_input",
-            // HITL oversight reads (McpOversightTools) — analytics, earned-autonomy
-            // states, the sampled-audit count; no oversight write is ever a tool
-            "summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state", "count_pending_audit_samples",
-            // Persistent user memory (McpMemoryTools) — role-guarded (viewer read / admin
-            // write) + per-user ownership
-            "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",
-            "upsert_user_memory", "delete_user_memory", "delete_all_user_memories", "count_user_memories",
-            // GDPR/CCPA data-subject operations (McpGdprTools) — admin-only
-            "delete_user_data", "export_user_data",
-            // EDDI's own documentation (McpDocTools) — the tool counterpart to the
-            // eddi://docs/* resources, for agentic clients that consume tools/list
-            // and never call resources/read
-            "list_docs", "read_docs",
-            // Agent test suites (McpAgentTestTools) — same tier as deploy
-            "run_agent_tests", "get_agent_test_run", "list_agent_test_runs", "cancel_agent_test_run",
-            // Conversation ratings (McpRatingTools) — same tier and agent scoping as
-            // the REST /ratings resource
-            "list_conversation_ratings", "summarize_conversation_ratings", "count_ratings_needing_attention",
-            "review_conversation_rating",
-            // Alert inbox (McpAlertTools) — same tier and agent scoping as the REST
-            // /alerts/events resource
-            "list_alert_events", "acknowledge_alert_event",
-            // Agent Health (McpHealthTools) — read-only, same tier and VIEW scoping as
-            // the REST /agents/{agentId}/health and /health/agents resources
-            "read_agent_health", "list_agent_health", "compare_agent_versions_health");
+    static final Set<String> MCP_TOOLS = McpToolTiers.TIERS.keySet();
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

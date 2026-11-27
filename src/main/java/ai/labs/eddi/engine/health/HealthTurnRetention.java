@@ -43,18 +43,18 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * same reason. The H2b rollups, which recompute and must not run twice, are the
  * ones that will take the system-job path.
  * <p>
- * <b>The orphan sweep</b> has the same shape, so it runs in the same job. A row
- * can land after its conversation was deleted — by a purge or by a user's
- * erasure, which deletes the user's conversations — when it waited on a node's
- * health queue; {@code HealthTurnRecorder} deletes such a row right after the
- * write, but when that check or that delete fails the row would otherwise stay
- * until the retention. So once a day this reads the distinct conversations of
- * rows written within {@code eddi.health.orphan-sweep-window} (48 hours by
- * default: such a write is recent by construction, and the slack covers a
- * missed day), asks the conversation store which of them still exist — one
- * projected batch read per {@value #BATCH} ids
- * ({@link IConversationMemoryStore#loadListingSummaries}) — and deletes the
- * rows of the ones that do not, counting them as
+ * <b>The orphan sweep</b> has the same shape, so it runs in the same job. Every
+ * delete of a conversation but one goes through the GDPR erasure guarantee
+ * ({@link HealthErasureWriter}), which keeps a queued row from landing after
+ * it. The exception is the purge of an agent-test conversation, which takes no
+ * tombstone (its user is synthetic): a row that waited on a node's health queue
+ * can land after it and would otherwise stay until the retention. So once a day
+ * this reads the distinct conversations of rows written within
+ * {@code eddi.health.orphan-sweep-window} (48 hours by default: such a write is
+ * recent by construction, and the slack covers a missed day), asks the
+ * conversation store which of them still exist — one projected batch read per
+ * {@value #BATCH} ids ({@link IConversationMemoryStore#loadListingSummaries}) —
+ * and deletes the rows of the ones that do not, counting them as
  * {@code eddi_health_dropped_total{reason="orphaned"}}. Only a definite "does
  * not exist" deletes: a batch the conversation store cannot answer keeps its
  * rows (a WARN; the next sweep asks again while the rows are inside the window,

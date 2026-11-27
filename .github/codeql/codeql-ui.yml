@@ -1,18 +1,21 @@
 # CodeQL configuration for the javascript-typescript analysis (ci.yml `codeql-ui` and the
-# scheduled codeql.yml). It scans the application code that ships in the image: the Manager
-# and Chat UI sources.
+# scheduled codeql.yml). It scans the application code that ships in the image: the Manager,
+# Workforce and Chat UI sources.
 #
 # Everything else is out of scope on purpose, not overlooked:
-#   - ui/manager/public/mockServiceWorker.js is MSW's generated dev worker; the Maven build
-#     excludes it from the jar.
-#   - ui/manager/scripts, e2e/, .ds-sync/ and .design-sync/ are CI and developer tooling.
+#   - ui/manager/public/mockServiceWorker.js and ui/workforce/public/mockServiceWorker.js are
+#     MSW's generated dev worker; the Maven build excludes them from the jar.
+#   - ui/scripts, ui/manager/scripts, e2e/, .ds-sync/ and .design-sync/ are CI and developer
+#     tooling.
 #   - Without `paths` the JavaScript extractor also reads YAML across the repository, so it
 #     graded backend files such as helm/eddi/values.yaml, which the java-kotlin analysis and
 #     the manifest tests already own.
 name: EDDI UI
-#   - ui/packages holds the shared workspace packages (@eddi/core and later), which
-#     ship inside both apps' bundles, so their sources are in scope from the start.
+#   - ui/packages holds the shared workspace packages (@eddi/core, @eddi/ui,
+#     @eddi/conversation, @eddi/app-kit), which ship inside the apps' bundles, so their
+#     sources are in scope.
 paths:
   - ui/manager/src
+  - ui/workforce/src
   - ui/chat/src
   - ui/packages

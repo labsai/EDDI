@@ -1,4 +1,4 @@
-import type { WorkflowExtension } from "@/lib/api/workflows";
+import type { WorkflowExtension } from "@eddi/app-kit/lib/api/workflows";
 
 /** Workflow step types that resolve Qute placeholders in the step's output. */
 const TEMPLATING_TYPES = new Set([

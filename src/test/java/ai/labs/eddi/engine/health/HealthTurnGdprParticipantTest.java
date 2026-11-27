@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
@@ -25,6 +27,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -84,28 +87,7 @@ class HealthTurnGdprParticipantTest {
     }
 
     @Test
-    @DisplayName("unknown days: the agents noted at step 0 are re-rolled")
-    void unknownDaysUseStepZeroAgents() throws Exception {
-        HealthDirtyDays dirty = dirtyDays();
-        HealthDeletedRows unknown = new HealthDeletedRows(4L, null);
-        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(unknown);
-        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
-        when(conversations.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1", "c2"));
-        when(conversations.loadListingSummaries(any())).thenReturn(Map.of("c1", summary("c1", "a1"), "c2", summary("c2", "a2")));
-        HealthErasureFence fence = new HealthErasureFence();
-        fence.conversations = instance(conversations);
-        fence.stopInFlightWork("user-1");
-        // The cascade deletes the conversations before the participant runs.
-        when(conversations.getConversationIdsByUserId("user-1")).thenReturn(List.of());
-        participant.fence = instance(fence);
-        participant.conversations = instance(conversations);
-
-        assertEquals(4L, participant.erase("user-1"));
-        verify(dirty).markErasedRows(Set.of("a1", "a2"), unknown);
-    }
-
-    @Test
-    @DisplayName("unknown days and nothing noted at step 0: the agents of conversations still stored are re-rolled")
+    @DisplayName("unknown days: the agents of the user's conversations still stored are re-rolled")
     void unknownDaysUseLiveConversations() throws Exception {
         HealthDirtyDays dirty = dirtyDays();
         HealthDeletedRows unknown = new HealthDeletedRows(1L, null);
@@ -113,7 +95,6 @@ class HealthTurnGdprParticipantTest {
         IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
         when(conversations.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1"));
         when(conversations.loadListingSummaries(any())).thenReturn(Map.of("c1", summary("c1", "a1")));
-        participant.fence = instance(new HealthErasureFence());
         participant.conversations = instance(conversations);
 
         participant.erase("user-1");
@@ -134,12 +115,25 @@ class HealthTurnGdprParticipantTest {
         verify(dirty).markErasedRows(Set.of(), unknown);
 
         participant.conversations = null;
-        participant.fence = null;
         assertEquals(2L, participant.erase("user-1"));
     }
 
     private static ConversationListingSummary summary(String conversationId, String agentId) {
         return new ConversationListingSummary(conversationId, "user-1", null, null, agentId, 1, 1);
+    }
+
+    @Test
+    @DisplayName("with the erasure guard, erasure verifies: rows or markers left fail the step")
+    void eraseVerifies() {
+        ErasureGuard guard = TestErasureGuards.withoutWriters();
+        HealthTurnGdprParticipant guarded = new HealthTurnGdprParticipant(store, guard);
+        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(new HealthDeletedRows(2L, Map.of()));
+        when(store.countByUserId("user-1")).thenReturn(0L);
+        assertEquals(2L, guarded.erase("user-1"));
+
+        when(store.deleteByUserIdReturningDays("user-2")).thenReturn(new HealthDeletedRows(0L, Map.of()));
+        when(store.countByUserId("user-2")).thenReturn(1L);
+        assertThrows(IllegalStateException.class, () -> guarded.erase("user-2"));
     }
 
     @Test

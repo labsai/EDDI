@@ -69,12 +69,14 @@ import java.util.stream.Collectors;
  * CAS pattern, and race-window comment carries over unchanged.
  * <p>
  * Holds a back-reference to the concrete {@link GroupConversationService} for
- * three calls that stay on the facade: {@code executeDiscussion} (the phase
- * loop {@code resumeDiscussion} re-enters), {@code resolvePhases}, and
- * {@code cleanupEphemeralAgents}. Same safety argument as
- * {@link MemberTurnExecutor}'s self-reference — this class's constructor only
- * stores it, never invokes a method on it before the facade's own constructor
- * (and therefore full field initialization) completes.
+ * the calls that stay on the facade: {@code executeDiscussion} (the phase loop
+ * {@code resumeDiscussion} re-enters), {@code effectivePhases},
+ * {@code resolveParticipants} / {@code rosterWithRecruits},
+ * {@code approvalContextRenderer}, {@code planHashStrict},
+ * {@code announceUserEvents} and {@code cleanupEphemeralAgents}. Same safety
+ * argument as {@link MemberTurnExecutor}'s self-reference — this class's
+ * constructor only stores it, never invokes a method on it before the facade's
+ * own constructor (and therefore full field initialization) completes.
  * <p>
  * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
@@ -625,6 +627,11 @@ public class GroupHitlCoordinator {
             // release resources that were kept alive across the pause.
             auditHitlCancellation(gc, mode, cancelledPausedAt);
             cleanupAfterTerminalState(gc);
+        }
+        // No running leg ends here, so the leg's own end-of-leg announcement never
+        // runs: tell the owner and the human members that it ended.
+        if (groupConversationService != null) {
+            groupConversationService.announceUserEvents(gc);
         }
         return true;
     }

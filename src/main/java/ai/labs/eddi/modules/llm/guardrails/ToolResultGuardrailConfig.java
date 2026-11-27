@@ -51,9 +51,9 @@ public class ToolResultGuardrailConfig {
     /**
      * Tool sources {@link #directiveAction} applies to, by provenance tag
      * ({@code builtin}, {@code http}, {@code mcp}, {@code a2a}, {@code dynamic},
-     * {@code memory}, {@code recall}). Empty or null means every source — the safe
-     * reading, and the one that does not silently stop covering a source added
-     * later.
+     * {@code team}, {@code memory}, {@code recall}). Empty or null means every
+     * source — the safe reading, and the one that does not silently stop covering a
+     * source added later.
      * <p>
      * Named for what it narrows. As {@code appliesToSources} it read as "this whole
      * config applies to these sources", and the implementation obliged by skipping

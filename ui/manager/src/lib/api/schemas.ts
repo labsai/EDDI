@@ -1,5 +1,5 @@
-import { api } from "../api-client";
-import type { ResourceTypeConfig } from "./resources";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
 
 /** In-memory cache for JSON schemas (they don't change at runtime) */
 const schemaCache = new Map<string, object>();

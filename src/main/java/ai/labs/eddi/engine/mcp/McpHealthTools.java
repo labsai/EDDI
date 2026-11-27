@@ -34,8 +34,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  * for the report and the compare, only viewable agents in the portfolio, and
  * the quality section {@code restricted} for callers who may not read ratings.
  * <p>
- * Tier {@link McpRoles#HEALTH_READ} (admin, editor, viewer), equal to the REST
- * {@code @RolesAllowed}.
+ * Tier {@link McpRoles#HEALTH_READ} (admin, editor, viewer; written in
+ * {@link McpToolTiers}), equal to the REST {@code @RolesAllowed}.
  *
  * @since 6.7.0
  */
@@ -77,7 +77,7 @@ public class McpHealthTools {
                                   @ToolArg(description = "Last day YYYY-MM-DD (with from)", required = false) String to,
                                   @ToolArg(description = "Only this agent version", required = false) Integer version,
                                   @ToolArg(description = ORIGINS_ARG, required = false) String origins) {
-        requireAnyRole(identity, authEnabled, McpRoles.HEALTH_READ);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_agent_health"));
         if (agentId == null || agentId.isBlank()) {
             return errorJson("agentId is required", "BAD_REQUEST", null);
         }
@@ -96,7 +96,7 @@ public class McpHealthTools {
                                   @ToolArg(description = "attention, name or traffic (default attention)", required = false) String sort,
                                   @ToolArg(description = "Page size, default 100, at most 500", required = false) Integer limit,
                                   @ToolArg(description = "nextCursor of the previous page", required = false) String cursor) {
-        requireAnyRole(identity, authEnabled, McpRoles.HEALTH_READ);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_agent_health"));
         try {
             return jsonSerialization.serialize(portfolio.listAgentHealth(period, sort, null, limit, cursor));
         } catch (Exception e) {
@@ -112,7 +112,7 @@ public class McpHealthTools {
                                              @ToolArg(description = "The other version (required)") Integer toVersion,
                                              @ToolArg(description = "Days of the older version, 1 to 90 (default 14)", required = false) Integer days,
                                              @ToolArg(description = ORIGINS_ARG, required = false) String origins) {
-        requireAnyRole(identity, authEnabled, McpRoles.HEALTH_READ);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("compare_agent_versions_health"));
         if (agentId == null || agentId.isBlank()) {
             return errorJson("agentId is required", "BAD_REQUEST", null);
         }

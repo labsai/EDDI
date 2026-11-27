@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.health.model.HealthUsagePoint;
 import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -596,6 +598,38 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
             return turns.deleteMany(eq(FIELD_CONVERSATION, conversationId)).getDeletedCount();
         } catch (MongoException e) {
             throw new HealthStoreException("Could not delete a conversation's health turns", e);
+        }
+    }
+
+    @Override
+    public long deleteRow(String conversationId, String executionId) {
+        try {
+            return turns.deleteOne(eq("_id", id(conversationId, executionId))).getDeletedCount();
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not delete a health turn", e);
+        }
+    }
+
+    @Override
+    public long countByUserId(String userId) {
+        return count(eq(FIELD_USER, userId), "Could not count a user's health turns");
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count(eq(FIELD_CONVERSATION, conversationId), "Could not count a conversation's health turns");
+    }
+
+    /**
+     * Counts on the primary with majority read concern: the client reads
+     * {@code nearest()}, and a lagging secondary could answer "0 left" while a row
+     * is still stored.
+     */
+    private long count(Bson filter, String failure) {
+        try {
+            return turns.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY).countDocuments(filter);
+        } catch (MongoException e) {
+            throw new HealthStoreException(failure, e);
         }
     }
 
