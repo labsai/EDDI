@@ -292,7 +292,7 @@ public class RagConfiguration {
             // one, a vector size that is not a size, an endpoint that is not http(s) — is
             // refused here, where the author is looking. Writes only: a stored
             // configuration is never judged by this.
-            String endpointProblem = StoreParameterChecks.findEndpointProblem(embeddingParameters);
+            String endpointProblem = StoreParameterChecks.findEndpointProblem(embeddingProvider, embeddingParameters);
             if (endpointProblem != null) {
                 throw new IllegalArgumentException(endpointProblem);
             }
@@ -342,7 +342,7 @@ public class RagConfiguration {
      */
     public List<String> findStrictProblems() {
         List<String> problems = new ArrayList<>();
-        addIfNotNull(problems, StoreParameterChecks.findEndpointProblem(embeddingParameters));
+        addIfNotNull(problems, StoreParameterChecks.findEndpointProblem(embeddingProvider, embeddingParameters));
         addIfNotNull(problems, StoreParameterChecks.findProblem(storeType, storeParameters));
         if (name != null && name.isBlank()) {
             problems.add("name must not be empty");

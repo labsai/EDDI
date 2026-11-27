@@ -72,13 +72,22 @@ public final class StoreParameterChecks {
      * An embedding endpoint ({@code baseUrl}, {@code endpoint}) that is a literal
      * must be an {@code http} or {@code https} URL: {@code file:///…} and the like
      * are refused when the model is built, which is long after they were saved.
+     * Vertex AI's {@code endpoint} is the exception: it is a {@code host[:port]}
+     * (or a URL), judged the way the model factory judges it.
      */
-    public static String findEndpointProblem(Map<String, String> embeddingParameters) {
+    public static String findEndpointProblem(String embeddingProvider, Map<String, String> embeddingParameters) {
         if (embeddingParameters == null) {
             return null;
         }
         for (String key : new String[]{"baseUrl", "endpoint"}) {
-            String problem = httpUrl(embeddingParameters, key, "embeddingParameters");
+            Map<String, String> judged = embeddingParameters;
+            String value = literal(embeddingParameters.get(key));
+            if (embeddingProvider != null && "vertex".equals(embeddingProvider.trim()) && "endpoint".equals(key) && value != null
+                    && !value.contains("://")) {
+                // A bare host[:port], as buildVertex accepts it.
+                judged = Map.of(key, "https://" + value);
+            }
+            String problem = httpUrl(judged, key, "embeddingParameters");
             if (problem != null) {
                 return problem;
             }

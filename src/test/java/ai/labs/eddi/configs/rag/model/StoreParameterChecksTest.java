@@ -114,6 +114,20 @@ class StoreParameterChecksTest {
     }
 
     @Test
+    @DisplayName("a Vertex AI endpoint may be a bare host:port, as the model factory accepts it")
+    void vertexHostPortEndpoint() {
+        assertNull(StoreParameterChecks.findEndpointProblem("vertex", Map.of("endpoint", "us-central1-aiplatform.googleapis.com:443")));
+        assertNull(StoreParameterChecks.findEndpointProblem("vertex", Map.of("endpoint", "https://us-central1-aiplatform.googleapis.com")));
+        assertNull(StoreParameterChecks.findEndpointProblem(" vertex ", Map.of("endpoint", "us-central1-aiplatform.googleapis.com:443")),
+                "the provider is trimmed, as the factory trims it");
+        assertTrue(StoreParameterChecks.findEndpointProblem("vertex", Map.of("endpoint", "file:///etc/passwd"))
+                .contains("embeddingParameters.endpoint"));
+        // Only Vertex: another provider's endpoint is still a URL.
+        assertTrue(StoreParameterChecks.findEndpointProblem("azure-openai", Map.of("endpoint", "example.openai.azure.com:443"))
+                .contains("embeddingParameters.endpoint"));
+    }
+
+    @Test
     @DisplayName("a store URL given but blank is refused; one left out, or a reference, is not")
     void blankStoreUrls() {
         for (String blank : new String[]{"", "   "}) {
