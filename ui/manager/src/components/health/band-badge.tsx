@@ -18,7 +18,7 @@ export function BandBadge({ band, className }: { band: Band | string; className?
   const meta = bandMeta(band);
   const Icon = BAND_ICON[band as Band] ?? CircleDashed;
   return (
-    <Badge variant="outline" className={cn("gap-1 px-2 font-medium", meta.classes, className)} data-testid="health-band" data-band={band}>
+    <Badge variant={meta.badge} className={cn("gap-1 px-2 font-medium", className)} data-testid="health-band" data-band={band}>
       <Icon className="h-3 w-3" aria-hidden="true" />
       {t(`health.band.${meta.key}`, meta.fallback)}
     </Badge>
@@ -32,7 +32,7 @@ export function StatusBadge({ status, className }: { status: HealthStatus; class
   const Icon = STATUS_ICON[status] ?? CircleDashed;
   const [key, fallback] = statusLabelKey(status);
   return (
-    <Badge variant="outline" className={cn("gap-1.5 py-1", meta.classes, className)} data-testid="health-status-badge" data-status={status}>
+    <Badge variant={meta.badge} className={cn("gap-1.5 py-1", className)} data-testid="health-status-badge" data-status={status}>
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       {t(key, fallback)}
     </Badge>

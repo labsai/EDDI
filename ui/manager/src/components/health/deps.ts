@@ -13,7 +13,7 @@
  *  - import React, react-query, react-i18next, react-router-dom, sonner and
  *    lucide-react directly.
  */
-export { Button, Badge, activeLocale } from "@eddi/ui";
+export { Button, Badge, activeLocale, type BadgeProps } from "@eddi/ui";
 export { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 export { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";

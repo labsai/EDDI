@@ -1,4 +1,4 @@
-import { activeLocale, formatDuration, formatUsd } from "./deps";
+import { activeLocale, formatDuration, formatUsd, type BadgeProps } from "./deps";
 import type { TFunction } from "i18next";
 import {
   SECTION_IDS,
@@ -140,11 +140,16 @@ export function deltaTone(measure: Pick<Measure, "delta" | "significant" | "thre
   return (delta > 0) === thresholds.higherIsBetter ? "better" : "worse";
 }
 
+/** A colour variant of the shared `Badge`. */
+export type BadgeVariant = NonNullable<BadgeProps["variant"]>;
+
 export interface BandMeta {
   /** i18n key suffix under `health.band.` */
   key: "green" | "amber" | "red" | "grey";
   fallback: string;
-  /** Border, tint and text classes for a badge. */
+  /** The shared `Badge` variant that draws this band (border, tint and text). */
+  badge: BadgeVariant;
+  /** The same border, tint and text as classes, for pills that are not a `Badge` (the status filter buttons). */
   classes: string;
   /** The text colour alone, for text and for SVG marks (`currentColor`). */
   text: string;
@@ -159,10 +164,10 @@ const GOOD_TEXT = "text-emerald-700 dark:text-emerald-400";
 
 /** Display metadata per band: label key, fallback text and Tailwind classes. */
 export const BAND_META: Record<Band, BandMeta> = {
-  GREEN: { key: "green", fallback: "On target", classes: `border-emerald-500/40 bg-emerald-500/10 ${GOOD_TEXT}`, text: GOOD_TEXT, border: "border-emerald-500" },
-  AMBER: { key: "amber", fallback: "Watch", classes: "border-warning/40 bg-warning/10 text-warning", text: "text-warning", border: "border-warning" },
-  RED: { key: "red", fallback: "Off target", classes: "border-destructive/40 bg-destructive/10 text-destructive", text: "text-destructive", border: "border-destructive" },
-  GREY: { key: "grey", fallback: "Not rated", classes: "border-border bg-muted text-muted-foreground", text: "text-muted-foreground", border: "border-border" },
+  GREEN: { key: "green", fallback: "On target", badge: "success-outline", classes: `border-emerald-500/40 bg-emerald-500/10 ${GOOD_TEXT}`, text: GOOD_TEXT, border: "border-emerald-500" },
+  AMBER: { key: "amber", fallback: "Watch", badge: "warning-outline", classes: "border-warning/40 bg-warning/10 text-warning", text: "text-warning", border: "border-warning" },
+  RED: { key: "red", fallback: "Off target", badge: "destructive-outline", classes: "border-destructive/40 bg-destructive/10 text-destructive", text: "text-destructive", border: "border-destructive" },
+  GREY: { key: "grey", fallback: "Not rated", badge: "muted-outline", classes: "border-border bg-muted text-muted-foreground", text: "text-muted-foreground", border: "border-border" },
 };
 
 /** Text colour of a change: better, worse or neutral. */
@@ -180,6 +185,9 @@ export function bandMeta(band: Band | string | undefined): BandMeta {
 export interface StatusMeta {
   key: "healthy" | "watch" | "needsAttention" | "notEnoughData";
   fallback: string;
+  /** The shared `Badge` variant, as in `BandMeta.badge`. */
+  badge: BadgeVariant;
+  /** The same colours as classes, for pills that are not a `Badge`. */
   classes: string;
   /** Severity order for "needs me first": higher is more urgent. */
   rank: number;
@@ -187,10 +195,10 @@ export interface StatusMeta {
 
 /** Display metadata per overall status, reusing the band colours. `rank` orders agents for the attention sort (3 = most urgent). */
 export const STATUS_META: Record<HealthStatus, StatusMeta> = {
-  NEEDS_ATTENTION: { key: "needsAttention", fallback: "Needs attention", classes: BAND_META.RED.classes, rank: 3 },
-  WATCH: { key: "watch", fallback: "Watch", classes: BAND_META.AMBER.classes, rank: 2 },
-  HEALTHY: { key: "healthy", fallback: "Healthy", classes: BAND_META.GREEN.classes, rank: 1 },
-  NOT_ENOUGH_DATA: { key: "notEnoughData", fallback: "Not enough data", classes: BAND_META.GREY.classes, rank: 0 },
+  NEEDS_ATTENTION: { key: "needsAttention", fallback: "Needs attention", badge: BAND_META.RED.badge, classes: BAND_META.RED.classes, rank: 3 },
+  WATCH: { key: "watch", fallback: "Watch", badge: BAND_META.AMBER.badge, classes: BAND_META.AMBER.classes, rank: 2 },
+  HEALTHY: { key: "healthy", fallback: "Healthy", badge: BAND_META.GREEN.badge, classes: BAND_META.GREEN.classes, rank: 1 },
+  NOT_ENOUGH_DATA: { key: "notEnoughData", fallback: "Not enough data", badge: BAND_META.GREY.badge, classes: BAND_META.GREY.classes, rank: 0 },
 };
 
 // ── Resolution split (plan §4.4, decision 3) ──────────────────────

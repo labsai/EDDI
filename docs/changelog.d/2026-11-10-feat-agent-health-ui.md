@@ -38,7 +38,9 @@ overview page is empty, and `npm run dev` in mock mode shows the full set of sce
   two MSW entry points, locale files), plus `ApiClient.getRaw` in `@eddi/app-kit` (a GET that returns the raw response through the
   same token refresh and 401 retry, used by the export) and the export of `activeLocale` from `@eddi/ui`.
 - **No chart library**: the sparkline is a small SVG. Good/caution/bad use the Manager's existing emerald, `warning` and
-  `destructive` colours (not brand tokens), and every band or status also carries an icon and a word.
+  `destructive` colours (not brand tokens), and every band or status also carries an icon and a word. The band and status badges
+  draw those colours through four new variants of the shared `Badge` in `@eddi/ui` (`success-outline`, `warning-outline`,
+  `destructive-outline`, `muted-outline`: tinted, with a matching border) instead of overriding `outline` at the call site.
 - **Every number and date is formatted in the app's language** (`Intl`, through the same `activeLocale` the cost formatter uses),
   and raw backend enums (outcome, evidence, origin) are translated.
 - **The health mocks are not in `handlers.ts`**: the OpenAPI contract test grades that file against the backend's operation snapshot,
