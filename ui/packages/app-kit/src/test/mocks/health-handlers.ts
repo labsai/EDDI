@@ -76,12 +76,19 @@ const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "t
   sessions: [60, "count"],
 };
 
+/** Days per period id; an unknown or missing period answers 30 days. */
+const PERIOD_DAYS = new Map<string, number>([
+  ["7d", 7],
+  ["30d", 30],
+  ["90d", 90],
+]);
+
 /** MSW handlers for the Agent Health contract (planning/agent-health-api.md). Profiles and report links are kept in memory for the test run; the rest answer from fixtures. */
 export const healthHandlers = [
   http.get("*/agents/:agentId/health/series", ({ request, params }) => {
     const url = new URL(request.url);
     const measures = url.searchParams.getAll("measure");
-    const count = { "7d": 7, "30d": 30, "90d": 90 }[url.searchParams.get("period") ?? "30d"] ?? 30;
+    const count = PERIOD_DAYS.get(url.searchParams.get("period") ?? "30d") ?? 30;
     // The bounds are the first and last of the days the series covers.
     const covered = days(count);
     return HttpResponse.json({

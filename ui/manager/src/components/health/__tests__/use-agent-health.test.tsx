@@ -28,16 +28,18 @@ describe("useHealthSeries", () => {
     );
     const { result } = renderHook(() => useHealthSeries(HEALTH_AGENTS.healthy, MEASURES, { period: "30d" }), { wrapper });
 
+    // Each chunk settles on its own: wait for the failure and for the other chunk's data separately.
     await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => expect(result.current.byMeasure.has("m1")).toBe(true));
     expect(result.current.error).toBeTruthy();
-    expect(result.current.byMeasure.has("m1")).toBe(true);
     expect(result.current.byMeasure.has("m7")).toBe(false);
     expect(calls).toHaveLength(2);
 
     fail = false;
     act(() => result.current.retry());
+    // Wait for each outcome of the retry on its own: m7's data, then the error clearing.
+    await waitFor(() => expect(result.current.byMeasure.has("m7")).toBe(true));
     await waitFor(() => expect(result.current.isError).toBe(false));
-    expect(result.current.byMeasure.has("m7")).toBe(true);
     // Only the failed call went out again.
     expect(calls).toHaveLength(3);
     expect(calls[2]).toEqual(["m7"]);
