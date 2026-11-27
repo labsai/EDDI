@@ -321,10 +321,12 @@ with an `outcome` (`ANSWERED`, `NO_ANSWER` or `FAILED`) and a `reason`; see
   (`NO_PROGRESS`). It counts the round, not the discussion. A failed continuation of a discussion
   that answered earlier counts, although the discussion stays `COMPLETED`. A `NO_ANSWER` round is
   not a failure and is not counted here: members were all skipped, the synthesis did not answer,
-  or no decision was reached. A `DISCUSSION_ERROR` round is counted when the error is handled,
-  before its result is written, so it stays visible even if a cancel from another pod commits
-  after that point; a round whose error arrives after a cancel was already stored is not
-  counted. Settled rounds and `NO_PROGRESS` failures are counted only once their result is stored.
+  or no decision was reached. A `DISCUSSION_ERROR` round is counted as soon as its error reaches
+  the failure handler, before the stored state is checked, so it is counted even when another
+  pod has already stored a cancel (for example a continuation whose configuration fails to load).
+  The exception is an error from a member turn that the run sees only after re-reading a stored
+  cancel: the run then stops as superseded and is not counted. Settled rounds and `NO_PROGRESS`
+  failures are counted only once their result is stored.
 - **`eddi_group_discussion_unanswered_total{outcome,reason}`** counts each round that ended
   `NO_ANSWER` or `FAILED`, once that outcome is stored. A round whose result was discarded
   because a cancel won the conditional write is not counted. This includes rounds that fail with an
