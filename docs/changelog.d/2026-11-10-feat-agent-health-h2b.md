@@ -278,3 +278,6 @@ see the 2026-11-11 entry above) is gone.
   schedule lease can overwrite a newer rollup of the same day. A fence in both stores is a follow-up.
 - Tests: `HealthDirtyDaysTest` stops its flusher in a `finally`; `HealthQueryCacheTest` waits until every caller is
   parked in the cache instead of sleeping 500 ms.
+- Operator prompt (`system-prompt.ts`) matches the docs: the rollup interval is the cadence, not a lag bound, and
+  failures are attributed by the agent's own failure classes, an incident day being supporting context only. The
+  revision stays 83 (this PR's bump); only its fingerprint changes.

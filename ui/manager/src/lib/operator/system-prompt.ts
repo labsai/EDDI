@@ -866,16 +866,20 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   call, one point per day; \`groupBy=version\` or \`origin\` splits them) and
   look at its \`markers\` (deployments, first turn of a version, global
   variable and snippet changes): a step change right after a marker points at
-  that change. If \`platformFailureRate\` rose with it, or
-  \`GET /health/agents\` lists a \`platformIncidents\` entry for those days
-  (one failure class hitting several agents at once), it is the provider, not
-  the agent. To compare versions use
+  that change. Attribute failures by the agent's own failure classes: when
+  \`platformFailureRate\` rose rather than \`agentFailureRate\`, it is the
+  provider, not the agent. A \`platformIncidents\` entry of
+  \`GET /health/agents\` for those days (one failure class hitting several
+  agents at once) is supporting context only, never the evidence on its own.
+  To compare versions use
   \`/health/compare?from=7&to=8\` (the newer since its first turn, the older
   over its last \`days\`, default 14); \`deltas\` say \`better\` and
   \`significant\` per measure.
 - \`GET /health/agents\` lists every agent the caller may view, the ones
   needing attention first, with sessions, \`sessionsDelta\` and key measures.
-- Numbers lag by up to one rollup interval (\`dataThrough\`). Daily rows reach
+- Today's numbers normally trail by about one rollup interval; that is the
+  cadence, not a bound (a failed or queued day waits for a later pass), and
+  \`dataThrough\` says how far they are complete. Daily rows reach
   back two years; sessions, users and engagement only as far as the turn rows
   (90 days). You cannot change thresholds; a health profile is the admin's.`;
 
