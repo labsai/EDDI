@@ -108,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:727dae67a171bdcba9e7f79881994f8959e2b0f5eecfaeb18ce695efedcd5dfa AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -119,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:727dae67a171bdcba9e7f79881994f8959e2b0f5eecfaeb18ce695efedcd5dfa
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.
