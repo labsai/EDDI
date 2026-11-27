@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [November 2026](changelog/2026-11.md) | 177 | 857 KB |
+| [November 2026](changelog/2026-11.md) | 182 | 865 KB |
 | [October 2026](changelog/2026-10.md) | 267 | 1236 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1217 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
@@ -67,6 +67,37 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 📝 docs(branding): a social preview image for the repository (2026-11-21)
+
+**Repo:** EDDI (`docs/social-preview`)
+
+### What changed and why
+
+The image GitHub shows when someone shares a link to the repository was still
+the old README banner, whose tagline ("The Enterprise AI Orchestrator")
+matched neither the README nor the repository description, both changed in the
+README redesign. A social preview is read at thumbnail size in chat apps and
+feeds, so it is its own design rather than a crop of the README banner: large
+type, and no code, which is unreadable that small.
+
+- [`branding/readme-banner/social-preview.html`](../branding/readme-banner/social-preview.html)
+  is the source: the wordmark, "The open-source AI agent management system",
+  "Works with Claude, Cursor and any MCP client", the repository URL, and four
+  tiles for run, limit, approve and record. It shares its colours and wording
+  with `banner.html`.
+- [`ui/manager/scripts/capture-readme-images.mjs`](../ui/manager/scripts/capture-readme-images.mjs)
+  renders it with `--only social` at 1280×640, GitHub's size, and device scale
+  factor 1 so the file stays well under GitHub's 1 MB limit.
+- `screenshots/eddi-social-preview.png` is the rendered image (about 240 KB).
+
+### What's next
+
+GitHub has no API for the social preview, so the image is uploaded by hand in
+the repository's Settings, General, Social preview. Nothing in the README
+references it.
 
 ---
 
@@ -162,6 +193,29 @@ documented, so the existing "3.6 and newer ignore temperature" rule is
 unchanged. The DeepSeek, Qwen, GLM and MiniMax ids were re-checked against the vendors' model lists
 (see the second pass above); what remains unconfirmed is only the list under "Not confirmable from docs". Their
 *parameter rules* were not re-verified against the APIs.
+
+---
+
+## 🐛 fix(workspaces): stale directory entries stop counting as team members (`eddi.workspaces.directory.stale-after`) (2026-11-18)
+
+**Repo:** EDDI (`fix/1087-directory-stale-after`) — resolves labsai/EDDI#1087
+
+### What changed and why
+
+The user directory records a person's teams from their token at sign-in and has no other signal. Somebody removed from a team who never signed in again kept the old membership indefinitely, and since #1081 scoped suggestions and e-mail visibility to shared teams, stayed suggested — with their address — to their former teammates.
+
+- **New property `eddi.workspaces.directory.stale-after`** (a `Duration`, e.g. `90d`). **Unset means never**, which is the behaviour before it existed. A person whose `lastSeen` is older than the window counts as a member of no team for `UserDirectory.sharesTeam`, `UserDirectory.detailFor` and the non-admin branch of `UserDirectory.search`: they are not suggested, and their e-mail is not shown to former teammates (they see the username). The boundary is inclusive.
+- **Filtered in the query.** `IUserDirectoryStore.searchWithinTeams` takes a `seenSince` instant (`null` = no window); `MongoUserDirectoryStore` adds `lastSeen >= seenSince`, `PostgresUserDirectoryStore` adds `last_seen >= ?`. The existing indexes cover it (Mongo: `teams` and `lastSeen` descending; Postgres: the GIN index on `teams` and `idx_user_directory_last_seen`), so no index was added. `UserDirectory` computes the cutoff once per call, truncated to milliseconds, and uses the same instant for the query, the in-memory re-check and each suggestion's e-mail detail, so all three draw the line at the same point. The store contract compares at millisecond precision.
+- **Hidden, not deleted.** `find`, `findAll`, `findByUsername`, `findByVerifiedEmail` and the admin `search` are not windowed: a share typed by exact username or verified e-mail still resolves to a stale person, their grants still carry their name and are not flagged as unknown. Their next sign-in re-records the entry from the then-current token and refreshes `lastSeen`, which restores them for the teams that token still lists (not for teams they have left); another instance's cached label may lag by up to two minutes.
+- **Validation.** A zero or negative value is read as never; a positive value under one hour is raised to one hour (`lastSeen` is only refreshed about every ten minutes, so a shorter window would hide people who are active); a value over a century is lowered to a century, since the cutoff would otherwise fall before what PostgreSQL's `timestamptz` holds or overflow `Instant`. All three log a warning instead of failing, because the bean is created lazily and a refusal would fail a request, not the boot.
+- **Docs.** [Workspaces → Stale entries](workspaces.md#stale-entries-stale-after) and the [configuration reference](configuration-reference.md); a commented entry in `application.properties`.
+
+### Design decisions
+
+- **Directory visibility is not grant validity.** Grants are checked against the live token on every request and are untouched; `StaleDirectoryGrantIndependenceTest` runs a real `ResourceAccessGuard` and `SpaceContext` and shows a stale entry keeps its team and personal grants, while a stale entry still listing a team does not admit somebody whose token no longer does.
+- **Administrators still see everybody**, stale entries included, unmarked, and with e-mail unless `expose-email` is off; their search computes no cutoff at all: a `stale` flag on `Match` would change the REST shape and the Manager for little gain.
+- **Out of scope, still unwindowed:** `teamMembers` (notification fan-out, and the "team has no recorded members" warning in `RestWorkspaces`), `teamExists` and the admin team search. Re-validating membership against the identity provider (SCIM or a back-channel) is future work and noted in the docs.
+- **Platform Operator:** no change. Its prompt does not cover the user directory and its allow-list does not include `/workspaces/directory`; it answers such questions from `workspaces.md`, which now documents the property.
 
 ---
 
@@ -521,56 +575,6 @@ The owner batched the stack behind one CI run. Each PR head was merged with a re
 - Manager: the MSW stream mock writes one `data:` line per payload line; the RTL fullstack spec opens the widget on the backend's port; the sanitizer test waits for the lazy HTML parser before its negative checks.
 
 **Design decisions:** Stop still releases the composer at once instead of blocking sends until `/cancel` returns. The cancel's result is applied only if no turn was sent since, which is the design #1308 builds on.
-
----
-
-## Manager first-load budget raised to 660 KB (2026-11-16)
-
-**Repo / branch:** labsai/EDDI, carried by `feat/agent-signing-key-provisioning` (#1365) so the PRs waiting on it can merge.
-
-**What changed:** in `ui/bundle-budget.json`, the first-load budget of the Manager pages (`manage.html`, `workforce.html`, `welcome.html`) goes from 650 KB to 660 KB gzip, by the owner's decision. The chat widget's budget stays at 170 KB.
-
-**Why:** `main` sat just under 650 KB, so every PR adding a little UI or operator-prompt text crossed it: #1273 and #1365 measured 651.1 KB, #1375 650.9 KB and #1278 650.7 KB, each with everything else green.
-
-**Design decisions:** 660 KB is still about 84 KB below the 743.8 KB phase-0 baseline. Getting the first load back down (lazy-loading what grew it) stays with the frontend-unification plan; this raise only buys headroom for the PRs already in flight.
-
----
-
-## Manager first-load budget raised to 700 KB (2026-11-16)
-
-**Repo / branch:** labsai/EDDI, carried by `feat/ui-eddi-conversation` (#1280).
-
-**What changed:** in `ui/bundle-budget.json`, the first-load budget of the Manager pages (`manage.html`, `workforce.html`, `welcome.html`) goes from 660 KB to 700 KB gzip, by the owner's decision. The chat widget's budget stays at 170 KB.
-
-**Why:** #1280 moves `@eddi/conversation` into the Manager bundle and measured 660.3 KB, hours after the budget had been raised to 660 KB. The PRs stacked on it (#1283 to #1333) keep adding Workforce features, so the owner chose one raise covering the stack instead of one per PR.
-
-**Design decisions:** 700 KB is still about 44 KB below the 743.8 KB phase-0 baseline. Bringing the first load back down (lazy-loading what grew it) stays with the frontend-unification plan, and is worth doing once the stack has landed.
-
----
-
-## ♿ fix(workforce, chat): focus after Forget, and a non-modal auto-opened embed panel (2026-11-16)
-
-**Repo:** EDDI · **Branch:** `feat/workforce-memory-composer-embed` (PR #1331, review findings)
-
-- **"What I remember about you": focus survives Forget.** `useDeleteMemory` returns its invalidation from `onSuccess`, so the page's own `onSuccess` runs once the list was re-read without the entry and then focuses the row that took its place ([`workforce-memory.tsx`](../ui/workforce/src/pages/workforce/workforce-memory.tsx), [`use-user-memory.ts`](../ui/packages/app-kit/src/hooks/use-user-memory.ts)). While a delete runs, the other Forget buttons are `aria-disabled` (and ignore clicks) instead of `disabled`, which used to drop the focus the person had on one. Test: "moves focus to the row that took the forgotten one's place".
-- **`/chat/embed.js`: `aria-modal` only when the panel took focus.** Opened by default (`data-open`, no focus move), an `aria-modal` dialog hid the host page from screen readers while the person was still on it. The panel is now modal only when the person opens it (button, `EddiChat.open()`), and the attribute is removed on close ([`launcher.ts`](../ui/chat/src/embed/launcher.ts)). Covered in `launcher.test.ts`.
-
----
-
-## 🐛 fix(workforce): hand-off review fixes — secret input, failed starts, held team questions (2026-11-16)
-
-**Repo:** EDDI · **Branch:** `feat/workforce-teams-mention-artifacts` (PR #1317, review findings)
-
-- **Secret input never leaves through a hand-off.** Entering secret mode drops the chosen @mention target, and `handleSend` refuses the hand-off branch while secret mode is on, so a typed secret is sent as a secret turn in this chat — never as the plain first message of another agent's or team's conversation, and never into the browser's hand-off record ([`chat-panel.tsx`](../ui/packages/app-kit/src/components/chat/chat-panel.tsx)). An edited message brought back by ↑ / Edit also drops a target picked before.
-- **A hand-off is linked only once its question arrived.** `onInitialConversationStarted` now fires after the first message was sent (through `mutateAsync`, whose promise settles even after the page unmounts), not after the conversation was created; when the start or the send fails, the question goes back into the composer instead of being lost. On the board, a handed-in question is linked from its own start's stream slot (`lib/team-handoff-link.ts`), never from whatever board is on screen, and a refused start hands the question back like a typed one.
-- **A team question that arrives while the board streams is held, on screen** (`board-held-question`): **Start it** (enabled once nothing streams) or **Discard**. It used to wait silently and start a paid discussion by itself when the running one ended.
-- **Marker wording.** "Recorded in this browser only" is visible text on both markers (it was a `title`, unreachable by touch, keyboard and most screen readers); "It did not start." became "Not linked yet." (`Workforce.handoff.notLinked`), which is also true while the question is on its way.
-- **Hand-off storage across tabs.** Writes start from what storage holds, not the cache, and the cache is dropped when the last subscriber leaves, so a tab that stopped listening cannot overwrite another tab's records ([`workforce-handoffs.ts`](../ui/packages/app-kit/src/lib/workforce-handoffs.ts)).
-- **Home with teams but no agent** picks the first team, so it can send.
-- **Decision summary:** a `NONE` record with an unparsed ruling (`raw`) says "No structured decision was read: the conclusion is kept as prose below." (`groups.decisionPlain.unparsed`) instead of claiming no decision was reached.
-- **Turn notes:** escalation notes say "Another model was tried because …" — the note is recorded when the cascade moves on, before the next model answers. The operator prompt and the guide say the same.
-- i18n: 5 new keys and 1 renamed, in all eleven locales; the five escalation sentences reworded in all eleven.
-- Answered, not changed: the human-turn announcement with no signed-in principal ("It's your turn") — that only happens with auth off, where anyone may answer the turn.
 
 ---
 
