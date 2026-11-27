@@ -39,10 +39,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -245,7 +247,7 @@ class GdprErasureInFlightAndGrantsTest {
     void deleteUserData_aNodeThatCouldNotStopTheUsersWorkMakesTheClusterStopAFailedStep() throws Exception {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(Map.of(
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet())).thenReturn(Map.of(
                 "n2", Map.of("stopped", 1),
                 "n3", Map.of("stopped", 0, "error", "stop step(s) failed: runningGroupDiscussions")));
         service.clusterRpc = rpc;
@@ -263,8 +265,8 @@ class GdprErasureInFlightAndGrantsTest {
         // sweep.
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.expectedPeers()).thenReturn(2);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
         service.clusterRpc = rpc;
 
         var result = service.deleteUserData(USER_ID);
@@ -281,8 +283,8 @@ class GdprErasureInFlightAndGrantsTest {
         // dictionary-reversible SHA-256.
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.expectedPeers()).thenReturn(3);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt()))
+        when(rpc.expectedPeerIds()).thenReturn(Set.of("n2", "n3", "n4"));
+        when(rpc.callAllAwaiting(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anySet()))
                 .thenReturn(Map.of("n2", Map.of("stopped", 0), "n3", Map.of("stopped", 0), "n4", Map.of("stopped", 0)));
         service.clusterRpc = rpc;
         ClusterMessageSigner signer = new ClusterMessageSigner(
@@ -296,7 +298,7 @@ class GdprErasureInFlightAndGrantsTest {
         var result = service.deleteUserData(USER_ID);
 
         ArgumentCaptor<Map<String, Object>> request = ArgumentCaptor.forClass(Map.class);
-        verify(rpc).callAll(eq(IClusterRpc.GDPR_STOP), request.capture(), eq(Duration.ofSeconds(10)), eq(3));
+        verify(rpc).callAllAwaiting(eq(IClusterRpc.GDPR_STOP), request.capture(), eq(Duration.ofSeconds(10)), eq(Set.of("n2", "n3", "n4")));
         assertFalse(request.getValue().containsKey("userIdHash"), "the plain hash must not travel when a key is configured");
         assertEquals(KvKeys.sha256(USER_ID), signer.unseal(String.valueOf(request.getValue().get("userIdSealed"))).orElseThrow());
         assertFalse(result.failedSteps().contains("clusterStop"));

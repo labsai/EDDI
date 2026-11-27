@@ -955,7 +955,7 @@ eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the s
 eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
 eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
 eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
-eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
+eddi_alerts_dropped_total           # Alert work dropped because a queue was full; tag: reason (queue_full: evaluation dropped; delivery_queue_full: first send left to the maintenance pass)
 eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
 ```
 
@@ -964,6 +964,53 @@ No tag carries an agent id (a rule over every agent would mint a series per agen
 worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana alert
 rule on `outcome="gave_up"` is in the
 [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
+
+### Agent Health Metrics
+
+```text
+eddi_health_recorded_total          # Agent Health turn rows written
+eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown|erased|orphaned)
+eddi_health_queue_depth             # Gauge: turn records waiting for the health worker
+```
+
+No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
+`queue_full` means the health worker cannot keep up with the turn rate (raise
+`eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
+that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
+or removed because their user was erased or their conversation deleted — `erased` by the
+[erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) on the health worker, `orphaned` by
+the daily orphan sweep (rows of purged agent-test conversations, the one delete outside the guarantee). `erased` also counts
+writes the guard refused because the erasure tombstones could not be read (fail closed): a rising `erased` together with
+`eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}` is a tombstone-store fault, not erasures. A dropped row is a gap in
+the health views, never a slower or failed turn. See [Agent Health](agent-health.md).
+
+### GDPR Erasure Guarantee Metrics
+
+```text
+eddi_gdpr_guard_writes_skipped_total        # Guarded async writes not stored because their user or conversation was erased; tag: reason (tombstone|check_failed)
+eddi_gdpr_guard_self_deletions_total        # Rows an async writer removed again because an erasure started while it wrote them; tag: writer
+eddi_gdpr_guard_pending_removals_total      # Pending removals of erased rows; tag: outcome (recorded|cleared|record_failed)
+eddi_gdpr_guard_drain_seconds               # Timer: how long an erasure or permanent conversation delete waited for this node's async writers (_count, _sum, _max)
+eddi_gdpr_guard_drain_timeouts_total        # Drain barriers an async writer did not pass within eddi.gdpr.drain-timeout; tag: writer
+eddi_gdpr_guard_key_mismatch_total          # The tombstone key did not match the stored check value; every guarded operation fails closed until it is restored
+eddi_gdpr_guard_pending_backlog             # Gauge: pending removals stored, for every node, as counted by this node's last maintenance pass (every 5 minutes); NaN before the first
+```
+
+`eddi_gdpr_guard_key_mismatch_total` must stay at zero: any increase means the
+tombstone key changed and erasures are failing — see
+[The tombstone key](gdpr-compliance.md#the-tombstone-key) for the operator action.
+`check_failed` and `record_failed` should stay at zero: the first means the
+tombstone store could not be read and a write was skipped to be safe, the second
+that a row of an erased user could neither be removed nor recorded for a retry (the
+erasure's own delete still reaches it). The `pending_removals_total` counters are
+removal *activity* of one process: they start at zero after a restart while the
+stored removals stay, so `recorded` minus `cleared` is not the backlog — it can read
+zero with removals outstanding, or go negative when a pass clears removals recorded
+before the restart. The backlog is `eddi_gdpr_guard_pending_backlog`, a count of what
+is actually stored; every node reports the same deployment-wide number, so chart its
+`max`. Each pending removal keeps erasures of its user or conversation failing until
+the five-minute retry clears it, and one that fails again moves to the back of the
+retry queue. A drain timeout fails the erasure or delete that waited. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).
 
 ### Agent Identity & Signing Metrics
 

@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import ai.labs.eddi.engine.hitl.audit.HitlChannel;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -151,6 +152,23 @@ public class HitlDecision {
      */
     @JsonIgnore
     private String planBinding;
+    /**
+     * How a mandatory approval this decision gives was accepted
+     * ({@code MandatoryApproverCheck}): who approved and, for an administrator, on
+     * whose behalf. Set by the resume path after the approver was checked, read by
+     * the resumed tool loop — which executes a mandatory call only when it is set —
+     * and by the decision's audit entry. Server-side only, never read from a body.
+     */
+    @JsonIgnore
+    private MandatoryApprovalAttribution mandatoryApproval;
+    /**
+     * The same, per approved mandatory call (call id to attribution): a batch may
+     * hold calls with different approver rules, and each call is executed and
+     * recorded with its own. {@link #getMandatoryApproval()} is the strictest of
+     * them, for the decision's audit entry. Server-side only.
+     */
+    @JsonIgnore
+    private Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -265,6 +283,39 @@ public class HitlDecision {
     @JsonIgnore
     public void setChannel(HitlChannel channel) {
         this.channel = channel;
+    }
+
+    @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApproval() {
+        return mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApproval(MandatoryApprovalAttribution mandatoryApproval) {
+        this.mandatoryApproval = mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public Map<String, MandatoryApprovalAttribution> getMandatoryApprovalsByCallId() {
+        return mandatoryApprovalsByCallId;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApprovalsByCallId(Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId) {
+        this.mandatoryApprovalsByCallId = mandatoryApprovalsByCallId;
+    }
+
+    /**
+     * How the approval of mandatory call {@code callId} was accepted, or null. Per
+     * call when the resume path recorded it per call; otherwise the decision-wide
+     * attribution.
+     */
+    @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApprovalOf(String callId) {
+        if (mandatoryApprovalsByCallId != null) {
+            return callId == null ? null : mandatoryApprovalsByCallId.get(callId);
+        }
+        return mandatoryApproval;
     }
 
     @JsonIgnore
