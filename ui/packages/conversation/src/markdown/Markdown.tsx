@@ -130,12 +130,30 @@ function remarkHtmlAsText() {
 const REMARK_ESCAPED: PluggableList = [remarkGfm, remarkHtmlAsText];
 
 /**
+ * Whether a URL is protocol-relative (`//host`) the way a browser reads it: tab
+ * and newline characters are dropped everywhere, leading whitespace and control
+ * characters are skipped, and `\` counts as `/` (`/\host`, `\\host`).
+ */
+function isProtocolRelative(url: string | undefined): boolean {
+  if (!url) return false;
+  const cleaned = url
+    .replace(/[\t\n\r]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/^[\u0000-\u0020\u007f-\u00a0\u2000-\u200b\u3000\ufeff]+/, "");
+  return /^[/\\]{2}/.test(cleaned);
+}
+
+/**
  * Links open in a new tab. A plain link navigated the page itself away —
  * inside the widget's iframe that is the whole chat, and the conversation was
  * lost. Same-page anchors (`#…`, GFM footnote references) stay in the page.
  * `node` is react-markdown's AST node, not an attribute.
  */
 function MarkdownLink({ node: _node, ...props }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  // A protocol-relative `//host/…` is an off-site link whose scheme the
+  // sanitizer's allow-list never sees (it is a relative URL to it): show the
+  // text, not a link.
+  if (isProtocolRelative(props.href)) return <span>{props.children}</span>;
   if (props.href?.startsWith("#")) {
     // rehype-sanitize prefixes every id (clobber protection) but leaves hrefs
     // alone, so a GFM footnote's `#user-content-fn-1` pointed at nothing once
@@ -156,6 +174,9 @@ function MarkdownLink({ node: _node, ...props }: ComponentPropsWithoutRef<"a"> &
  */
 function MarkdownImage({ src, alt, title }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
   const href = typeof src === "string" ? src : undefined;
+  // An image that points at `//host` is not offered as a link either: only its
+  // alt text (or "image") is shown, and the address is not.
+  if (isProtocolRelative(href)) return <span>{(alt && alt.trim()) || "image"}</span>;
   const label = (alt && alt.trim()) || href || "image";
   if (!href) return <span style={{ fontStyle: "italic", opacity: 0.7 }}>{label}</span>;
   return (
@@ -189,8 +210,9 @@ export interface MarkdownContentProps {
   /** highlight.js for fenced code. Default on. */
   enableCodeHighlight?: boolean;
   /**
-   * Sanitised raw HTML. Default on here; `Message` passes the agent's
-   * `conversationControls.rawHtml` (D9), off unless the agent enables it.
+   * Sanitised raw HTML. Default OFF: the HTML is dropped. A host passes the
+   * agent's `conversationControls.rawHtml` (D9) — `Message` and the Manager and
+   * Workforce chat do — so HTML renders only for an agent that enabled it.
    */
   enableRawHtml?: boolean;
   /**
@@ -206,7 +228,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   children,
   enableMath = true,
   enableCodeHighlight = true,
-  enableRawHtml = true,
+  enableRawHtml = false,
   escapeRawHtml = false,
 }: MarkdownContentProps) {
   const rich = useRichPlugins(children, enableMath, enableCodeHighlight, enableRawHtml && !escapeRawHtml);

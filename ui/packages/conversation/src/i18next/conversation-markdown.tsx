@@ -1,8 +1,10 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ConversationTextProvider } from "../react/hooks";
 import { MarkdownContent, type MarkdownContentProps } from "../markdown/Markdown";
 import type { Translate } from "../i18n/text";
+import { formatMarkdownText } from "../team/group-utils";
+import { STREAM_RENDER_INTERVAL_MS, useThrottledValue } from "../react/use-throttled-value";
 
 /**
  * The Manager's translator for the shared conversation components, following
@@ -34,4 +36,28 @@ export function ConversationMarkdown({ children, ...options }: MarkdownContentPr
       </div>
     </ManagerConversationText>
   );
+}
+
+export interface FormattedConversationMarkdownProps extends Omit<MarkdownContentProps, "children"> {
+  /** The agent's text, before the light repair of `formatMarkdownText`. */
+  children: string;
+  /** The text is still arriving: repair and parse it at a capped rate. */
+  streaming?: boolean;
+}
+
+/**
+ * {@link ConversationMarkdown} for text that is repaired first
+ * (`formatMarkdownText`). The repair and the Markdown parse are memoised by
+ * text and, while the reply streams, run at most once per
+ * `STREAM_RENDER_INTERVAL_MS`; when the stream ends the final text renders at
+ * once and in full.
+ */
+export function FormattedConversationMarkdown({
+  children,
+  streaming = false,
+  ...options
+}: FormattedConversationMarkdownProps) {
+  const shown = useThrottledValue(children, STREAM_RENDER_INTERVAL_MS, streaming);
+  const formatted = useMemo(() => formatMarkdownText(shown), [shown]);
+  return <ConversationMarkdown {...options}>{formatted}</ConversationMarkdown>;
 }
