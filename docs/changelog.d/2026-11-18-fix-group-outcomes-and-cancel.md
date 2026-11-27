@@ -86,7 +86,14 @@ GR1–GR4.
 - `maxTurns`-bound discussions run one opinion turn fewer per remaining synthesis phase.
 - `POST …/cancel` on a running discussion answers `202` (was `200`); `200` now means "no
   longer running", with the state it ended in.
-- Saving a group without members, or starting a discussion on one, is refused.
+- Saving a group without members, or starting a discussion on one, is refused. Re-creating
+  or re-saving such a group from a config an older version stored or exported (REST or
+  MCP create/update) therefore fails with `400` too: add a member to it first.
+- `eddi_group_discussion_failure_count` counts failed rounds: a failed continuation of an
+  answered discussion counts although the discussion stays `COMPLETED`.
+- A failed round that leaves the discussion `COMPLETED` clears its pause bookkeeping
+  (`pausedTurnCount`, the no-progress fingerprint), and every continuation resets them,
+  so the next round starts with its full turn budget.
 - A TASK_FORCE whose verifier is not deployed or fails no longer passes every task.
 
 ### Review follow-ups (same day)

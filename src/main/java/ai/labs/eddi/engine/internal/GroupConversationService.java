@@ -416,6 +416,8 @@ public class GroupConversationService implements IGroupConversationService, User
 
         this.timerGroupDiscussion = meterRegistry.timer("eddi_group_discussion_duration");
         this.counterGroupDiscussion = meterRegistry.counter("eddi_group_discussion_count");
+        // Counts failed ROUNDS: a failed continuation of an answered discussion counts
+        // although the discussion itself stays COMPLETED (see docs/metrics.md).
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
         this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
         this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");

@@ -533,6 +533,13 @@ public class GroupLifecycleOps {
             // for a DIFFERENT question, and the signed-acceptance indices in the
             // decision would even point at round 1's transcript entries.
             gc.setNegotiation(null);
+            // A COMPLETED discussion is never paused, so whatever pause bookkeeping it
+            // still carries belongs to an earlier round. A new round starts its turn
+            // counter at zero (executeDiscussion seeds it from pausedTurnCount) and its
+            // no-progress guard clean — also for a document stored before
+            // failConversation cleared these.
+            gc.setPausedTurnCount(0);
+            gc.setHitlLastPauseFingerprint(null);
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",
@@ -926,6 +933,13 @@ public class GroupLifecycleOps {
         var priorOutcomeReason = gc.getOutcomeReason();
         gc.setState(gc.hasAnsweredRound() ? GroupConversationState.COMPLETED : GroupConversationState.FAILED);
         DiscussionOutcomes.failed(gc);
+        // The failed round's pause bookkeeping dies with it, as on a normal completion
+        // and in failDiscussionNoProgress. COMPLETED is continuable: a continuation
+        // seeds its turn counter from pausedTurnCount and would start with the
+        // round's budget already spent, and a stale fingerprint could trip the
+        // no-progress guard on the next round's first TASK pause.
+        gc.setPausedTurnCount(0);
+        gc.setHitlLastPauseFingerprint(null);
         gc.setLastModified(Instant.now());
         // Count the failure itself, never the outcome of the race — otherwise a lost
         // CAS

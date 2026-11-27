@@ -14,8 +14,10 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -35,10 +37,12 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -471,6 +475,120 @@ class GroupLifecycleOpsTest {
 
         assertDoesNotThrow(() -> ops.failConversation(gc));
         verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+    }
+
+    // =================================================================
+    // A failed round that stays COMPLETED: its pause bookkeeping must not
+    // reach the next round
+    // =================================================================
+
+    /**
+     * The state a round 2 leaves behind when it paused at an approval gate after N
+     * turns, was approved, and its resumed leg then failed: round 1 answered, the
+     * run is IN_PROGRESS, and the pause's turn count and fingerprint are still set
+     * (the resume preserves pausedTurnCount to seed the resumed leg's counter).
+     */
+    private GroupConversation resumedRoundThatFails() {
+        var gc = completedGc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        gc.setPausedTurnCount(17);
+        gc.setHitlLastPauseFingerprint("phase-1|task-a,");
+        return gc;
+    }
+
+    private IAgentGroupStore continueGroupStore;
+
+    /**
+     * Ops whose continueDiscussion reaches a mocked executeDiscussion, which
+     * records the pausedTurnCount it was handed — the value its turn counter is
+     * seeded from.
+     */
+    private GroupLifecycleOps continueOps(GroupConversation stored, AtomicInteger seededTurnCount,
+                                          AtomicReference<String> seededFingerprint)
+            throws Exception {
+        conversationStore = mock(IGroupConversationStore.class);
+        continueGroupStore = mock(IAgentGroupStore.class);
+        var facade = Mockito.mock(GroupConversationService.class);
+        when(conversationStore.read("gc-1")).thenReturn(stored);
+        when(conversationStore.compareAndSetState(eq("gc-1"), any(), any())).thenReturn(true);
+        IResourceStore.IResourceId groupResource = mock(IResourceStore.IResourceId.class);
+        when(groupResource.getVersion()).thenReturn(1);
+        when(continueGroupStore.getCurrentResourceId("group-1")).thenReturn(groupResource);
+        var config = new AgentGroupConfiguration();
+        when(continueGroupStore.read("group-1", 1)).thenReturn(config);
+        when(facade.resolvePhases(config)).thenReturn(List.of(new DiscussionPhase("Opinion", PhaseType.OPINION)));
+        when(facade.executeDiscussion(any(), any(), any(), any(), any(), anyInt())).thenAnswer(inv -> {
+            GroupConversation g = inv.getArgument(0);
+            seededTurnCount.set(g.getPausedTurnCount());
+            seededFingerprint.set(g.getHitlLastPauseFingerprint());
+            return g;
+        });
+        return new GroupLifecycleOps(conversationStore, continueGroupStore, mock(IConversationService.class),
+                mock(IAgentFactory.class), mock(IAgentStore.class), mock(IDeploymentStore.class),
+                mock(ISharedArtifactStore.class), mock(IAttachmentStore.class), ConcurrentHashMap.newKeySet(),
+                new ConcurrentHashMap<String, DiscussionControlToken>(), facade,
+                new SimpleMeterRegistry().counter("test.followup"), new SimpleMeterRegistry().counter("test.continue"),
+                new SimpleMeterRegistry().counter("test.close"), new SimpleMeterRegistry().counter("test.failure"));
+    }
+
+    @Test
+    void failConversation_thatStaysCompleted_clearsThePauseBookkeepingOfTheFailedRound() throws Exception {
+        var ops = ops();
+        var gc = resumedRoundThatFails();
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+        // What the conditional write receives, captured when it is made.
+        var written = new AtomicReference<List<Object>>();
+        doAnswer(inv -> {
+            GroupConversation doc = inv.getArgument(0);
+            written.set(Arrays.asList(doc.getState(), doc.getPausedTurnCount(), doc.getHitlLastPauseFingerprint()));
+            return null;
+        }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.IN_PROGRESS));
+
+        ops.failConversation(gc);
+
+        assertEquals(Arrays.asList(GroupConversationState.COMPLETED, 0, null), written.get(),
+                "a continuable COMPLETED discussion must not be stored with the failed round's turn count or fingerprint");
+    }
+
+    @Test
+    void continueDiscussion_afterAPausedRoundFailedOnResume_startsTheNewRoundsTurnCounterAtZero() throws Exception {
+        // Round 2 paused after 17 turns, was approved, and its resumed leg failed.
+        var failedRound = resumedRoundThatFails();
+        var ops = ops();
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+        ops.failConversation(failedRound);
+        assertEquals(GroupConversationState.COMPLETED, failedRound.getState(), "round 1 answered: continuable");
+
+        // Round 3 continues the document exactly as failConversation left it.
+        var seeded = new AtomicInteger(-1);
+        var fingerprint = new AtomicReference<String>("unset");
+        continueOps(failedRound, seeded, fingerprint).continueDiscussion("gc-1", "round three?", null);
+
+        assertEquals(0, seeded.get(), "the new round's turn counter must start at zero, not at the failed round's count");
+        assertNull(fingerprint.get(), "the new round's no-progress guard must start clean");
+    }
+
+    @Test
+    void continueDiscussion_ofADocumentStoredWithStalePauseState_resetsItBeforeTheRoundRuns() throws Exception {
+        // A COMPLETED document written before failConversation cleared these.
+        var stored = completedGc();
+        stored.setRound(2);
+        stored.setAnsweredRounds(1);
+        stored.setPausedTurnCount(17);
+        stored.setHitlLastPauseFingerprint("phase-1|task-a,");
+        var seeded = new AtomicInteger(-1);
+        var fingerprint = new AtomicReference<String>("unset");
+
+        continueOps(stored, seeded, fingerprint).continueDiscussion("gc-1", "round three?", null);
+
+        assertEquals(0, seeded.get(), "a COMPLETED discussion is never paused: its stored turn count belongs to an earlier round");
+        assertNull(fingerprint.get());
     }
 
     @Test

@@ -237,8 +237,9 @@ class TaskForceEngineReworkTest {
             assertTrue(workerInputs.isEmpty(), "no member is asked to rework");
             // The reset above dropped the worker stub that fills workerInputs, so the
             // check on it is vacuous: also assert the worker turn (the nine-argument
-            // overload) is never called.
-            Mockito.verify(memberTurnExecutor, Mockito.never()).executeAgentTurn(any(), any(), anyString(), any(),
+            // overload) is never called — with any() for the input, since anyString()
+            // skips null and would let a call with a null input through.
+            Mockito.verify(memberTurnExecutor, Mockito.never()).executeAgentTurn(any(), any(), any(), any(),
                     anyInt(), any(), any(), any(), any());
         }
     }
