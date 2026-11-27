@@ -786,6 +786,19 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("a turn's capture is taken as the recorder admitted it: a turn resumed after the user's erasure is not refused")
+        void resumedTurnCapturedAfterTheErasure() {
+            fence.tombstoneUser("user", List.of());
+            Instant first = NOW.minus(Duration.ofDays(2));
+            Instant resumed = NOW.plus(Duration.ofHours(1));
+            HealthTurn turn = new HealthTurn("c1", 0, "e0", "agent", 1, null, "user", "api", LocalDate.ofInstant(first, ZoneOffset.UTC), first,
+                    resumed, 0.01, null, null, null, null, 100L, null, false, List.of(), false, 0, 0, 0, 0, true, true, false, List.of("act"), false);
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(List.of(turn));
+            evaluator.evaluate("c1", null);
+            verify(outcomes).upsert(any());
+        }
+
+        @Test
         @DisplayName("nothing is written for a tombstoned conversation")
         void erasedConversation() {
             fence.tombstoneConversation("c1");

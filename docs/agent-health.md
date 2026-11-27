@@ -840,7 +840,7 @@ eddi_health_rollup_failures_total    # Agent days whose rollup failed (retried)
 eddi_health_rollup_pending           # Gauge: agent days waiting (the shared queue, cached 10 s)
 eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent day
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
-eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
+eddi_health_outcomes_failures_total  # Conversation evaluations that failed, also those the erasure guard refused (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
 eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```

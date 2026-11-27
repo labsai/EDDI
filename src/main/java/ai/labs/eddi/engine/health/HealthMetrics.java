@@ -50,8 +50,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <li>{@code eddi.health.outcomes.sessions} — session outcome rows the outcome
  * evaluation wrote (each re-evaluation counts again);</li>
  * <li>{@code eddi.health.outcomes.failures} — conversation evaluations that
- * failed (the feed retries them for up to an hour, then with their next change
- * or due time);</li>
+ * failed, also those the erasure guard refused (the feed retries them for up to
+ * an hour, then with their next change or due time);</li>
  * <li>{@code eddi.health.outcomes.lag.seconds} — how far the outcome feed's
  * watermark is behind the clock (a gauge over the shared state, like the
  * backlog gauges);</li>

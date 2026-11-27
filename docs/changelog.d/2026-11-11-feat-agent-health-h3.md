@@ -113,7 +113,8 @@ H2b (#1388) moved Agent Health from the best-effort `HealthErasureFence` to `Hea
   row's `<conversationId>|<executionId>`); `eraseConversation` and `countForConversation` cover both stores. Session
   deletes mark no day dirty: the daily rows hold no outcome counts.
 - `HealthOutcomeEvaluator` runs each conversation's evaluation through a `DrainBarrier` (on the caller's thread), asks
-  `beforeWrite` captured at the earliest turn the sessions derive from, and calls `afterWrite` for each session written
+  `beforeWrite` captured at the earliest turn the sessions derive from (each turn's capture as the recorder takes it,
+  `updatedAt` else `timestamp`), and calls `afterWrite` for each session written
   — also after a failed bulk write. A refused write is a failed evaluation, retried by the feed and the due pass: after
   the erasure deleted the turn rows a retry leaves nothing; after a tombstone-store outage (fail closed) it writes them.
 - `HealthOutcomeGdprParticipant` (`agentHealthOutcomes`) deletes, then `verifyUserErased` under the writer's name.

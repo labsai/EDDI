@@ -698,9 +698,11 @@ public class HealthOutcomeEvaluator {
     /**
      * The guard's admission of the sessions about to be written; {@code null}
      * without a guard (everything allowed). Captured at the <em>earliest</em> of
-     * the turns they are derived from: a session holding anything of a turn
-     * captured before the user's erasure is refused (the user's later
-     * conversations, all captured after it, are not).
+     * the turns they are derived from, each turn's capture taken as the recorder
+     * admitted its row ({@code updatedAt}, else {@code timestamp}): a session
+     * holding anything of a turn captured before the user's erasure is refused (the
+     * user's later conversations, all captured after it, are not), and a resumed
+     * turn the recorder admitted does not make its sessions refused.
      */
     private Admission admit(String conversationId, String userId, List<HealthTurn> live) {
         if (erasureGuard == null) {
@@ -708,7 +710,7 @@ public class HealthOutcomeEvaluator {
         }
         Instant capturedAt = null;
         for (HealthTurn turn : live) {
-            Instant at = turn.timestamp() != null ? turn.timestamp() : turn.updatedAt();
+            Instant at = turn.updatedAt() != null ? turn.updatedAt() : turn.timestamp();
             if (at != null && (capturedAt == null || at.isBefore(capturedAt))) {
                 capturedAt = at;
             }
