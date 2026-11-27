@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.ErasureIncompleteException;
+import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -69,6 +70,15 @@ public class ConversationPurgeService {
     Instance<ISecretProvider> secretProvider;
 
     /**
+     * Agent Health turn rows of an agent-test conversation, deleted with it (best
+     * effort — they hold no content and expire on their own); every other purge
+     * erases them through {@link #erasureGuard}. Field-injected like
+     * {@link #secretProvider}; null when the service is built by hand.
+     */
+    @Inject
+    Instance<IHealthTurnStore> healthTurnStore;
+
+    /**
      * The erasure guarantee for rows written asynchronously about the conversation
      * (alert events): tombstone, drain barrier on every node, delete, verify.
      * Field-injected; null when the service is built by hand — such a service
@@ -106,7 +116,7 @@ public class ConversationPurgeService {
     }
 
     static final String NO_GUARD = "This conversation purge service was built without the erasure guard, so it cannot guarantee that "
-            + "asynchronously written data (alerts) of the conversation is gone and cannot be written later.";
+            + "asynchronously written data (alerts, Agent Health rows) of the conversation is gone and cannot be written later.";
 
     /**
      * The erasure guarantee for many conversations about to be deleted permanently
@@ -248,8 +258,10 @@ public class ConversationPurgeService {
             } catch (ErasureIncompleteException e) {
                 LOGGER.errorf("GDPR: the asynchronously written data of conversation %s could not be erased with a guarantee: %s",
                         sanitize(conversationId), sanitize(e.getMessage()));
-                throw new ResourceStoreException("Could not erase the asynchronously written data (alerts) of conversation " + conversationId
-                        + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.", e);
+                throw new ResourceStoreException(
+                        "Could not erase the asynchronously written data (alerts, Agent Health rows) of conversation " + conversationId
+                                + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.",
+                        e);
             }
         }
 
@@ -272,7 +284,31 @@ public class ConversationPurgeService {
         }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
+        if (!guarded) {
+            // A guarded delete erased them through the erasure guard already
+            // (HealthErasureWriter); an agent-test conversation's are deleted here.
+            deleteHealthTurns(conversationId);
+        }
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
+    }
+
+    /**
+     * Deletes the Agent Health turn rows of an agent-test conversation, which is
+     * purged without the erasure guarantee (its user is synthetic). Best effort:
+     * the rows carry ids and counts, not content, and expire with
+     * {@code eddi.health.facts-retention}; a row its queue writes later is removed
+     * by the daily orphan sweep of {@code HealthTurnRetention}.
+     */
+    void deleteHealthTurns(String conversationId) {
+        if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
+            return;
+        }
+        try {
+            healthTurnStore.get().deleteByConversationId(conversationId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
+                    sanitize(conversationId), sanitize(e.getMessage()));
+        }
     }
 
     /**
