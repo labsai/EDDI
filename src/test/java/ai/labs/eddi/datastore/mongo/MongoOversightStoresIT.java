@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.engine.hitl.oversight.OversightFixtures;
 import ai.labs.eddi.engine.hitl.oversight.OversightStoreContracts;
+import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecision;
 import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.analytics.mongo.MongoApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
@@ -20,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -56,6 +60,23 @@ class MongoOversightStoresIT extends MongoTestBase {
             List<String> names = indexNames("approval_decisions");
             assertTrue(names.containsAll(List.of("idx_decision_agent_category", "idx_decision_group_category", "idx_decision_decided",
                     "idx_decision_user", "idx_decision_decider")), names.toString());
+        }
+
+        @Test
+        void aPendingDocumentWithoutAVersionFieldReadsAsInitialAndSettles() {
+            ApprovalDecision row = OversightFixtures.decision("APPROVED", OversightFixtures.NOW).withPersonalFields(null, "gdpr:alice");
+            store.insertPendingIfAbsent(row);
+            // A document written before settleVersion existed.
+            getDatabase().getCollection("approval_decisions").updateOne(new Document("_id", row.id()),
+                    new Document("$unset", new Document("settleVersion", "")));
+
+            IApprovalDecisionStore.Pending pending = store.pendingCheck(10).getFirst();
+            assertEquals(IApprovalDecisionStore.INITIAL_VERSION, pending.version());
+            assertTrue(store.updateIdentities(row.id(), pending.version(), "user-1", "alice", true), "the initial version matches a missing field");
+            assertFalse(store.updateIdentities(row.id(), IApprovalDecisionStore.INITIAL_VERSION, "user-1", "alice", false),
+                    "once versioned, the initial version no longer matches");
+            assertTrue(store.updateIdentities(row.id(), 1, "user-1", "alice", false));
+            assertTrue(store.pendingCheck(10).isEmpty());
         }
     }
 

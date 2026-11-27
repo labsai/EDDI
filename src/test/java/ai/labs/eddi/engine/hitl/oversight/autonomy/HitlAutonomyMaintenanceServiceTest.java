@@ -95,6 +95,7 @@ class HitlAutonomyMaintenanceServiceTest {
         assertTrue(first.backfilled());
         assertFalse(second.backfilled());
         verify(backfill, times(1)).rebuild(NOW.minus(Duration.ofDays(90)), NOW);
+        verify(backfill, times(2)).reconcilePending();
     }
 
     @Test

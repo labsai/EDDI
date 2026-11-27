@@ -55,6 +55,7 @@ import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore;
 import ai.labs.eddi.engine.gdpr.erasure.mongo.ErasureTombstoneStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
+import ai.labs.eddi.datastore.postgres.PostgresErasedSubjectStore;
 import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
 import ai.labs.eddi.datastore.postgres.PostgresLessonHistoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresOutcomeEventStore;
@@ -63,6 +64,8 @@ import ai.labs.eddi.engine.groups.lessons.mongo.MongoLessonHistoryStore;
 import ai.labs.eddi.engine.groups.outcomes.IOutcomeEventStore;
 import ai.labs.eddi.engine.groups.outcomes.mongo.MongoOutcomeEventStore;
 import ai.labs.eddi.datastore.postgres.PostgresAutonomyStateStore;
+import ai.labs.eddi.engine.gdpr.IErasedSubjectStore;
+import ai.labs.eddi.engine.gdpr.mongo.MongoErasedSubjectStore;
 import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.analytics.mongo.MongoApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
@@ -212,6 +215,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IApprovalDecisionStore approvalDecisionStore(Instance<MongoApprovalDecisionStore> mongo,
                                                         Instance<PostgresApprovalDecisionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IErasedSubjectStore erasedSubjectStore(Instance<MongoErasedSubjectStore> mongo, Instance<PostgresErasedSubjectStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

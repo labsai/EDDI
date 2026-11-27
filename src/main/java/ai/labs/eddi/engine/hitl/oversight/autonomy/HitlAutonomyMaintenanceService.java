@@ -32,6 +32,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>evaluates earned autonomy for deployed agents, round-robin, at most
  * {@code eddi.hitl.autonomy.max-agents-per-run} per run;</li>
  * <li>deletes decision facts and samples past retention;</li>
+ * <li>checks decision rows a projection left pending the erased-subject check
+ * ({@link ApprovalBackfillService#reconcilePending});</li>
  * <li>once per deployment, rebuilds the decision facts of the last
  * {@code eddi.hitl.analytics.initial-backfill} from the ledger.</li>
  * </ol>
@@ -116,6 +118,7 @@ public class HitlAutonomyMaintenanceService {
 
         long decisionsDeleted = decisionStore.deleteDecidedBefore(now.minus(settings.analyticsRetention()));
         long samplesDeleted = sampleStore.deleteSampledBefore(now.minus(settings.samplesRetention()));
+        backfill.reconcilePending();
         boolean backfilled = initialBackfill(now);
         return new Result(expired, evaluated, opened, decisionsDeleted, samplesDeleted, backfilled);
     }
