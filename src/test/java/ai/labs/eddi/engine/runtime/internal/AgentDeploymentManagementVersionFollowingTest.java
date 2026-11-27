@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -27,16 +28,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import org.mockito.InOrder;
+
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -148,5 +157,77 @@ class AgentDeploymentManagementVersionFollowingTest {
         verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(anyString(), any());
         verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), any());
         verify(agentFactory).undeployAgent(ENV, AGENT, 5);
+    }
+
+    /**
+     * A single node, so nothing ever reconciles a served agent against an
+     * undeployed record. The sweep runs inside the undeploy twice — right after the
+     * record write and right after the registry removal, whichever order they come
+     * in. When the registry removal came first, the second sweep found the agent no
+     * longer served and still recorded deployed, and deployed it again for good.
+     */
+    @Test
+    @DisplayName("a deployment sweep that runs in the middle of an undeploy does not deploy the agent again")
+    void aSweepInsideTheUndeployDoesNotRedeploy() throws Exception {
+        version(5, 2);
+        readyOfGeneration(2, 6);
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn(AGENT);
+        when(served.getAgentVersion()).thenReturn(5);
+        when(served.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        AtomicReference<List<IAgent>> registry = new AtomicReference<>(List.of(served));
+        AtomicReference<DeploymentInfo.DeploymentStatus> record = new AtomicReference<>(DeploymentInfo.DeploymentStatus.deployed);
+        when(agentFactory.getAllDeployedAgents(ENV)).thenAnswer(inv -> registry.get());
+        when(agentFactory.getAgent(ENV, AGENT, 5)).thenAnswer(inv -> registry.get().isEmpty() ? null : served);
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                .thenAnswer(inv -> record.get() == DeploymentInfo.DeploymentStatus.deployed ? List.of(deployedRecord(5)) : List.of());
+        // The first sweep confirms the deployment READY and tracks it.
+        management.checkDeployments();
+        verify(agentFactory).deployAgent(ENV, AGENT, 5, null);
+
+        // Ordering hooks: each half of the undeploy is followed by a full sweep.
+        doAnswer(inv -> {
+            record.set(inv.getArgument(3));
+            management.checkDeployments();
+            return null;
+        }).when(deploymentStore).setDeploymentInfo("production", AGENT, 5, DeploymentInfo.DeploymentStatus.undeployed);
+        doAnswer(inv -> {
+            registry.set(List.of());
+            management.checkDeployments();
+            return null;
+        }).when(agentFactory).undeployAgent(ENV, AGENT, 5);
+
+        assertTrue(management.retireIfConversationsCanMove(ENV, AGENT, 5));
+
+        // Not deployed again by either sweep, nor by one after the undeploy.
+        management.checkDeployments();
+        verify(agentFactory, times(1)).deployAgent(ENV, AGENT, 5, null);
+        InOrder order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 5, DeploymentInfo.DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(ENV, AGENT, 5);
+    }
+
+    @Test
+    @DisplayName("a retirement whose registry removal fails puts the deployed record back")
+    void failedRegistryRemovalRestoresTheRecord() throws Exception {
+        version(5, 2);
+        readyOfGeneration(2, 6);
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 5);
+
+        assertThrows(IllegalStateException.class, () -> management.retireIfConversationsCanMove(ENV, AGENT, 5));
+
+        InOrder order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 5, DeploymentInfo.DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(ENV, AGENT, 5);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 5, DeploymentInfo.DeploymentStatus.deployed);
+    }
+
+    private static DeploymentInfo deployedRecord(int version) {
+        var info = new DeploymentInfo();
+        info.setAgentId(AGENT);
+        info.setAgentVersion(version);
+        info.setEnvironment(ENV);
+        info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
+        return info;
     }
 }

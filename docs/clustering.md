@@ -53,7 +53,7 @@ one node. NATS adds:
 | Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. Only a change is announced — a cache filled from the database is not. A node that may have missed events (gap, long disconnect, outbox overflow, its first subscription after boot, an event stream that was deleted and recreated) flushes everything. Cache evictions and the other events are handled in two separate bounded queues, so a burst of evictions does not delay a secret rotation. |
 | Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not written to the deployment collection) is recorded in the `<prefix>_DEPLOYMENTS` KV bucket instead — deployed, or a tombstone once undeployed — and the sweep reconciles it like a recorded one, so a node that joins later deploys it and a lost undeploy event is still applied. The record lasts while the cluster runs and is forgotten once no node has served it for `eddi.cluster.deployments.transient-ttl`. An event older than the records (an undeploy that arrives after the redeploy that followed it) is dropped. A request that reaches a node before its sweep has caught up deploys that agent there on demand and waits for it (at most 15 s, counted from the start of the request's wait) instead of answering 404; the deployment runs on a worker thread, not inside the sweep, so it never waits behind one, and a version whose deployment already failed on that node answers at once rather than after 15 s (the sweep retries it with its backoff). Which deployments a node counts as done comes from its own registry on every sweep, so a version the node undeployed itself — a REST undeploy, the daily retirement, a delete — is deployed there again when a later deploy is recorded on any node. |
 | Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
-| Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node; the user travels as a hash — sealed with the cluster signing key when one is set — and the erasure waits up to `eddi.cluster.gdpr-stop-timeout` (10 s) for every member of a fresh member count. Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease; a second node does not start a discussion whose lease a live node holds (only while NATS is unreachable does a discussion run without it). The lease is not a fence, though: a discussion's writes carry no fencing token and a holder that loses its lease is not stopped, so if it is cut off past `lease.ttl` and another node takes the lease, both can act on the discussion until the first one finishes its current leg. |
+| Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node; the user travels as a hash — sealed with the cluster signing key when one is set — and the erasure waits up to `eddi.cluster.gdpr-stop-timeout` (10 s) for every member of a fresh member count (plus `eddi.gdpr.drain-timeout`, 30 s, because each node also passes its **drain barrier** before it answers: the work its asynchronous writers — alerts — queued before the erasure's tombstones has finished, confirmed by `drained: true`; see [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data)). A permanent conversation delete runs the same barrier through its own scatter, `erasure-drain`, and fails unless every node confirms it. Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease; a second node does not start a discussion whose lease a live node holds (only while NATS is unreachable does a discussion run without it). The lease is not a fence, though: a discussion's writes carry no fencing token and a holder that loses its lease is not stopped, so if it is cut off past `lease.ttl` and another node takes the lease, both can act on the discussion until the first one finishes its current leg. |
 | Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event and webhook delivery de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`), knowledge-base ingestion statuses (`RAG_INGESTION`, so an ingestion's status answers on any node). |
 | Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. That ring is held **in memory only**, capped by `eddi.coordinator.max-dead-letters` (1000, oldest evicted): entries beyond the cap are dropped, and a restart of the node loses all of them. Forward them from the console once NATS is back. A locally kept entry is never forwarded for a conversation that a GDPR erasure marked (`ERASED` bucket) or that no longer exists; if the marker cannot be read (NATS dropped again) the entry stays on the node and is retried. |
 | A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it and having raised the fence, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. A turn the runtime refused after its lease was granted is answered the same way, and its dead letter cannot be replayed (`ANSWERED_RETRY`), so the retry and a replay never both run it. |
@@ -338,6 +338,19 @@ Going back runs the same steps in reverse. During step 2 a GDPR stop from a node
 cannot be read by a node without it; that node answers an error, so the erasure reports its
 cluster step incomplete rather than a clean erasure — run it again after the rollout.
 
+While nodes of a release without the erasure drain barrier are still in the cluster, an
+erasure reports `clusterStop` failed (their `gdpr-stop` reply carries no `drained: true`) and
+a permanent conversation delete fails (they have no `erasure-drain` handler): neither can be
+guaranteed while such a node may still write a queued row. Re-run them once the rollout
+finished. The reverse — an erasure *run on* an older node, which writes no tombstones — is
+caught by the upgraded nodes: they still stop and drain, but answer its `gdpr-stop` with an
+error (and log a WARN), and the older coordinator records that as an incomplete cluster
+stop. Only an older node's erasure with no upgraded peer at all reports complete, and then
+there is no guarded writer to protect. **Upgrade every node before relying on the erasure
+guarantee**, and re-run erasures made during the rollout. The retention sweep's permanent
+deletes need the same drain, so during the rollout it keeps the conversations it would have
+deleted, for its next run.
+
 ### Upgrading from the build-profile NATS coordinator
 
 The `nats` Quarkus build profile and its coordinator are gone; the published
@@ -522,6 +535,22 @@ hand. None of them is part of the normal build or a required check.
   task TTL expires it. The write would have to stall for the whole cascade. The conversation
   such a record points at is deleted by the cascade regardless, so it holds the peer's own
   message and the reply, not a live conversation.
+- The erasure drain barrier (`gdpr-stop`, `erasure-drain`) reaches the members of the
+  presence view read when the erasure starts. A node that is running but cut off from NATS
+  is not among them; work it queued before the erasure writes after the tombstones and so
+  removes its own row again (`afterWrite`) — or leaves a pending removal, retried every five
+  minutes — possibly after the erasure has answered. If on such a node the row can neither
+  be removed nor the pending removal recorded (the database unreachable for both), no
+  re-run is blocked by it (`eddi_gdpr_guard_pending_removals_total{outcome="record_failed"}`),
+  but a re-run still finds and deletes it: re-run the erasure once the database has
+  recovered, or the row stays until the writer's retention deletes it. A crashed node stays
+  in the presence view until its entry expires — 3 × `eddi.cluster.presence.interval`,
+  30 s by default — and fails every erasure and permanent conversation delete (the
+  retention sweep's included) until then: a failure, not a leak, since a silent node
+  cannot be told apart from one that is cut off and still writing. A node that shuts down
+  cleanly leaves presence at once. The time half of a user tombstone
+  assumes node clocks agree within `eddi.gdpr.tombstone-clock-skew` (run NTP). All limits:
+  [GDPR](gdpr-compliance.md#residual-limits-of-the-erasure-guarantee).
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's

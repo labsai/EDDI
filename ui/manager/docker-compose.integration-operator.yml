@@ -15,6 +15,12 @@ services:
     depends_on:
       llm-stub:
         condition: service_healthy
+    environment:
+      # The upgrade test gives the operator a vault-held model key restricted to
+      # its agent, so the vault must be on. A throwaway key for a loopback-only
+      # test backend: 24 characters, 6 distinct — passes VaultMasterKeyStrength
+      # and is obviously not a secret.
+      EDDI_VAULT_MASTER_KEY: "abcdefabcdefabcdefabcdef"
 
   llm-stub:
     # The Node NODE_VERSION in ci.yml pins. The stub uses nothing beyond

@@ -17,6 +17,11 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.mongodb.client.model.Filters.and;
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
+import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Filters.or;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -45,6 +50,20 @@ class MongoAlertStoresIT extends MongoTestBase implements AlertStoreContract {
     @Override
     public IAlertEventStore eventStore() {
         return events;
+    }
+
+    /**
+     * A conversation delete selects by the full conversation-content predicate
+     * (value, excerpt or subject), which the value-only partial index cannot serve;
+     * the conversation index can.
+     */
+    @Test
+    void theConversationContentLookupHasAnIndex() {
+        Document plan = getDatabase().getCollection("alertevents").find(and(eq("conversationId", "conv-x"),
+                or(exists("match.value", true), ne("match.commentExcerpt", null), ne("subjectUserId", null)))).explain();
+        // The winning plan only: a rejected plan naming the index proves nothing.
+        String winning = plan.get("queryPlanner", Document.class).get("winningPlan", Document.class).toJson();
+        assertTrue(winning.contains("\"idx_alertevent_conversation\""), winning);
     }
 
     @Test

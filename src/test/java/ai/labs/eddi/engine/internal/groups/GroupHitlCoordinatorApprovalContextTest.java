@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
@@ -23,6 +24,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -146,6 +149,55 @@ class GroupHitlCoordinatorApprovalContextTest {
 
         assertNull(gc.getHitlApprovalContext());
         assertEquals(GroupConversationState.FAILED, gc.getState());
+    }
+
+    @Test
+    @DisplayName("a no-progress failure after an answered round leaves the discussion COMPLETED")
+    void noProgressAfterAnAnsweredRound_staysContinuable() throws Exception {
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+
+        coordinator.failDiscussionNoProgress(gc, 0, phase, null);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        assertEquals(GroupConversation.DiscussionOutcome.FAILED, gc.getOutcome());
+        assertEquals("NO_PROGRESS", gc.getOutcomeReason());
+    }
+
+    @Test
+    @DisplayName("a no-progress failure is an unanswered round once its write commits, and not when a cancel won")
+    void noProgress_countsTheUnansweredRound_onlyPastTheWrite() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            coordinator.failDiscussionNoProgress(gc, 0, phase, null);
+            assertEquals(1.0, unanswered(registry));
+
+            var other = new GroupConversation();
+            other.setId("gc-2");
+            other.setState(GroupConversationState.IN_PROGRESS);
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled elsewhere")).when(conversationStore).updateIfState(eq(other), any());
+            assertThrows(Exception.class, () -> coordinator.failDiscussionNoProgress(other, 0, phase, null));
+            assertEquals(1.0, unanswered(registry), "a lost write is not counted");
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    private static double unanswered(SimpleMeterRegistry registry) {
+        return registry.find(DiscussionOutcomes.METER_UNANSWERED).counters().stream().mapToDouble(c -> c.count()).sum();
+    }
+
+    @Test
+    @DisplayName("a no-progress failure clears the stalled round's turn count, so a continuation starts fresh")
+    void noProgress_clearsThePausedTurnCount() throws Exception {
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        gc.setPausedTurnCount(12);
+
+        coordinator.failDiscussionNoProgress(gc, 0, phase, null);
+
+        assertEquals(0, gc.getPausedTurnCount());
     }
 
     @Test
