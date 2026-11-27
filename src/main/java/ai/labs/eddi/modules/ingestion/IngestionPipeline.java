@@ -26,12 +26,16 @@ import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.crawl.WebSourceConnector;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.ExtractionLimits;
+import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.UploadSourceConnector;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
+import ai.labs.eddi.modules.rag.OperatorFailureException;
+import ai.labs.eddi.modules.rag.RagFailures;
+import ai.labs.eddi.modules.rag.VectorSpaceGuard;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
@@ -145,6 +149,15 @@ public class IngestionPipeline {
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * Refuses a run into a vector space other than the one the store holds, and
+     * checks the size of the first embedding. Field-injected so the constructors
+     * keep their shape; null for a pipeline assembled by hand, which then skips the
+     * check.
+     */
+    @Inject
+    VectorSpaceGuard vectorSpaceGuard;
 
     /**
      * The pipeline with the two built-in connectors, for callers that assemble it
@@ -335,7 +348,9 @@ public class IngestionPipeline {
         } catch (Throwable t) {
             LOGGER.errorf(t, "Ingestion failed for source '%s'", LogSanitizer.sanitize(source.getName()));
             try {
-                IngestionReport report = collector.toReport(null, describe(t), startedAt);
+                // What the caller reads in the run history: no driver text or SQL. The
+                // log line above has the whole failure.
+                IngestionReport report = collector.toReport(null, RagFailures.clientMessage(t), startedAt);
                 finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED, trigger);
                 if (t instanceof Error error) {
                     // Recorded, then rethrown: an Error says the JVM is in trouble and
@@ -402,6 +417,13 @@ public class IngestionPipeline {
             // store the run writes to. A later lookup could return a newer, empty store
             // if the knowledge base were dropped or remodelled meanwhile, and every
             // document would then pass as "unchanged" against the old store's state.
+            if (vectorSpaceGuard != null) {
+                // Before the store is built (which may create its table) and before
+                // anything is embedded: the run fails with the reason, instead of
+                // writing vectors of another model next to the old ones. Read from the
+                // store, not this node's cache: once per run.
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, knowledgeBase);
+            }
             collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
             current = EmbeddingStoreFactory.fingerprintOf(collector.store);
         } else {
@@ -789,7 +811,7 @@ public class IngestionPipeline {
             if (partitions.size() != 1) {
                 // Several partitions need a cursor each and a coverage per partition,
                 // which arrive with the work queue. Refused rather than half-run.
-                throw new IllegalStateException("Source type '" + connector.type() + "' lists "
+                throw new OperatorFailureException("Source type '" + connector.type() + "' lists "
                         + partitions.size() + " partitions; this version runs exactly one per source");
             }
             Partition partition = partitions.get(0);
@@ -797,7 +819,8 @@ public class IngestionPipeline {
             Instant deadline = uploadDeadline(Instant.now(), source);
             result = connector.discover(new Discovery(connector, context, partition, deadline, collector));
         } catch (SourceException e) {
-            throw new IllegalStateException(e.getMessage(), e);
+            // A connector's own words about its own failure.
+            throw new OperatorFailureException(e.getMessage(), e);
         }
         if (result.nextCursor() != null) {
             // Nothing persists cursors yet, so the next run lists in full — the safe
@@ -1035,6 +1058,8 @@ public class IngestionPipeline {
          * no document may be judged unchanged — see {@link #reconcileStoreFingerprint}.
          */
         private boolean reembedAll;
+        /** Whether the first embedding of this run was checked against the store. */
+        private boolean dimensionChecked;
         /**
          * Why the in-memory store refused this run's writes, once it has; the run stops
          * there rather than failing every remaining document the same way.
@@ -1297,7 +1322,12 @@ public class IngestionPipeline {
         private void onPage(SourceDocument document, Content.HtmlPage page) {
             seen++;
             try {
-                String markdown = converter.convert(page.html(), document.citationUrl(),
+                // Off unless the source asks: a page hides accordions and tabs that script
+                // reveals, which a knowledge base wants — see IngestionSettings.
+                String html = source.settings().visibleTextOnlyOrDefault(false)
+                        ? HtmlDocumentExtractor.withoutHiddenElements(page.html())
+                        : page.html();
+                String markdown = converter.convert(html, document.citationUrl(),
                         source.settings().maxContentLengthOrDefault());
                 logIfTruncated(document);
                 acceptDocument(document, markdown);
@@ -1363,7 +1393,8 @@ public class IngestionPipeline {
         private ExtractionLimits extractionLimits() {
             if (extractionLimits == null) {
                 extractionLimits = ExtractionLimits.defaults()
-                        .withMaxCharacters(source.settings().maxContentLengthOrDefault());
+                        .withMaxCharacters(source.settings().maxContentLengthOrDefault())
+                        .withVisibleTextOnly(source.settings().visibleTextOnlyOrDefault(source.isUpload()));
             }
             return extractionLimits;
         }
@@ -1440,8 +1471,11 @@ public class IngestionPipeline {
 
         private void recordDocumentFailure(RuntimeException e) {
             // Either refusal ends the run: no later document could be stored either.
-            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
-                storeRefused = e.getMessage();
+            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException
+                    || RagFailures.endsRun(e)) && storeRefused == null) {
+                // A refused vector space, rejected credentials and an unknown model fail
+                // every later document the same way, and each attempt is a provider call.
+                storeRefused = RagFailures.clientMessage(e);
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
                         LogSanitizer.sanitize(storeRefused));
             }
@@ -1643,6 +1677,13 @@ public class IngestionPipeline {
             // crash in that window did the same with no exception. This order costs a
             // moment of duplication instead, which the runId filter then removes.
             var embeddings = model().embedAll(textSegments).content();
+            if (!dimensionChecked && vectorSpaceGuard != null && !embeddings.isEmpty()) {
+                // The size is only known now. Checked before anything is written, so a
+                // model of another size is refused with a message instead of a driver
+                // error from the first INSERT.
+                vectorSpaceGuard.verifyDimension(ragConfigId, knowledgeBase, embeddings.get(0).dimension(), true);
+                dimensionChecked = true;
+            }
             // Ownership is asked again after the provider answers. An embedding call
             // can stall past the claim's deadline; meanwhile the run is reaped and
             // the file deleted, vectors and all. Publishing now would make that

@@ -223,6 +223,8 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). `kbId` is deprecated — see below |
 | `DELETE` | `/ragstore/rags/{id}/documents?version=N&documentName=...` | Remove a document ingested through `/ingest` (see [Deleting a document](#deleting-a-document)) |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
+| `GET` | `/ragstore/rags/{id}/vector-space?version=N` | Which embedding model the vector store holds and which one the configuration names (see [Changing the embedding model](#changing-the-embedding-model)) |
+| `POST` | `/ragstore/rags/{id}/reembed?version=N` | Remove the vectors and embed every source again, in the model the configuration names now (202) |
 
 > **Documents always go into the knowledge base in the path.** `kbId` no longer selects a store. Up
 > to 6.5.0 it did: an editor of one knowledge base could pass another's name as `?kbId=` and write
@@ -335,6 +337,218 @@ until that file is gone.
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
 the originals again.
+
+### Changing the embedding model
+
+Vectors made by one embedding model mean nothing next to vectors of another: a search over a mixture
+ranks by meaningless scores and still answers. So a knowledge base on an external vector store
+(`pgvector`, `mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma`) **knows which embedding space its
+store holds** and refuses to work in any other.
+
+> **Upgrading to the version with this check.** Nothing has to be done.
+>
+> - Older configurations keep importing, syncing and upgrading: values an interactive save now refuses
+>   (an unknown store type, a host with a port, a blank name, `minScore` outside 0..1, `maxResults` below 1)
+>   are brought into range or kept, with a WARN naming the knowledge base and the field. Only
+>   `POST`/`PUT /ragstore/rags` refuse them.
+> - Every existing knowledge base **adopts the space it is configured for on its first use** after the
+>   upgrade (logged once). That cannot be checked against the vectors already stored: one whose model was
+>   changed before the upgrade stays as wrong as it was, and the next change is caught.
+> - Two knowledge bases that **share a table or collection** each get their own record, so they may hold
+>   different models of the same size. A pgvector table keeps one vector size: a model of another size is
+>   refused for the knowledge base that tries it, with the real column size named, and re-embedding it
+>   is refused (`SHARED_TABLE_SIZE`, naming the others) until it has a table of its own. Two same-named
+>   knowledge bases in the 6.5.0 name layout share their chunks outright, so neither can be re-embedded
+>   (`SHARED_CHUNKS`) until they are given separate tables.
+
+**What is recorded — two things, because two different things are true.**
+
+- *Which model made a knowledge base's vectors*: the embedding provider, the model (or Azure
+  `deploymentName`) and Gemini's `taskType`. That is a fact about the **knowledge base**: retrieval and
+  deletion are filtered by the chunk tag, so two knowledge bases that share one table can hold different
+  models without touching each other. The record is keyed by the store *location* (store type, server,
+  database, table or collection) **and the chunk tag** — the knowledge base's id, or in the 6.5.0 name
+  layout its name, so two same-named knowledge bases there share one record, by definition.
+- *The vector size*: configured through `dimensions`/`outputDimensionality`, or measured from the first
+  embedding an ingestion makes. That is a fact about the **table**: its column has one size. It is
+  recorded per location, and for pgvector checked against the table's real column (`atttypmod`), which
+  nothing can contradict — a legacy `vector(1536)` table with `dimension: 3072` configured is refused with
+  the real size named.
+
+Credentials and endpoints are not part of either: moving a model to another host does not change a
+vector. Both live in EDDI's own database (next to the ingestion state), under a digest. It is the same
+mechanism for every store type; a pgvector-only metadata table was rejected because no other store has an
+equivalent place, and a record kept two ways has to be kept in step. The cost: a vector store wiped or
+restored behind EDDI's back keeps its record until the knowledge base is re-embedded, which resets it.
+
+**What is refused.** When the configured space differs from the recorded one, search, `/ingest`, and
+every source run answer with a message that names both spaces and the way out. The REST answer is
+`409` with `"code": "VECTOR_SPACE_MISMATCH"`; at retrieval time the agent gets no context from that
+knowledge base (a `rag:trace:*` entry says why) rather than context from the wrong space. An ingestion
+status polls as `failed: <the same message>`. The vector size is checked too, before anything is
+written: the first embedding of a run is compared with the record and, for pgvector, with
+`storeParameters.dimension` (default `1536`), so a model of another size is refused with the parameter
+to change instead of a driver error from the first `INSERT`. A run also **stops** at the first
+rejected credential, unknown model or space mismatch instead of trying every remaining document.
+
+**A knowledge base from before this check** has no record. It adopts the configured space on its first
+use, under its own key (logged once) — so one knowledge base's adoption never tells another to
+re-embed. That cannot be verified — nothing says what the existing vectors were made with — so a
+knowledge base whose model was changed before the upgrade is as wrong as it was; it keeps working, and
+the next change is caught. Nothing is adopted, judged or reset while a `${vars:…}` reference in the
+embedding settings cannot be resolved: the call is refused (retryable) instead, so a record never holds
+the reference's text.
+
+**Visibility.** A refusal repeats on every turn of every agent that uses the knowledge base. It is
+counted in `eddi_rag_vector_space_refused_total{reason}` (see [metrics](metrics.md)), written to the log
+once a minute per knowledge base without a stack trace, and put into `rag:trace:*` as the same
+client-safe sentence the REST answers carry — never the raw exception text.
+
+**Saving a changed model.** `PUT /ragstore/rags/{id}` still saves, because the save is how a wrong
+model is fixed and a knowledge base that holds nothing yet loses nothing by it. When the new version
+changes the embedding space while keeping the store location, the `200` carries a body
+`{"warnings": [...], "code": "EMBEDDING_SPACE_CHANGED"}` next to the usual `Location` header, naming
+the old and the new model. The refusal above is what then makes the change safe. Moving the vectors
+elsewhere (another table, collection or server) starts empty and warns about nothing.
+
+A node that still holds a store for a table another node dropped reads it as empty rather than failing
+with "relation does not exist", and rebuilds it on the next write. How long another node can be behind is
+under **In a cluster** below.
+
+**Re-embedding.** `GET /ragstore/rags/{id}/vector-space?version=N` shows the recorded and the
+configured space and whether they match. `POST /ragstore/rags/{id}/reembed?version=N` (EDIT) then:
+
+0. refuses, with `409` and nothing changed, what cannot be done safely:
+   - the version asked for is not the latest (`NOT_LATEST_VERSION`, because agents use the latest and the
+     record would describe the wrong model);
+   - an embedding setting or a store parameter names a variable that cannot be resolved now
+     (`EMBEDDING_SETTINGS_UNRESOLVED`, retryable);
+   - another knowledge base keeps its chunks under the same tag in the same store (`SHARED_CHUNKS`, the
+     6.5.0 name layout: same name, same table — deleting by the tag would take its chunks too; give them
+     separate tables and re-embed each);
+   - the **embedding probe** fails (`EMBEDDING_PROBE_FAILED`): one embedding call is made with the new
+     settings before anything is touched. It proves the credentials and the model work — a re-embed that
+     cannot embed must not delete — and measures the size the new vectors will have, which every check
+     below uses;
+   - the new size does not fit where the vectors go, **per store type**:
+     - *pgvector*: the table must be an EDDI pgvector table (`NOT_A_PGVECTOR_TABLE`);
+       `storeParameters.dimension` must be the new size, because the table is recreated from it
+       (`DIMENSION_SETTING_MISMATCH` names the value to set); and a table whose column has another size is
+       dropped and recreated, which is refused while other knowledge bases keep rows in it
+       (`SHARED_TABLE_SIZE`);
+     - *Qdrant, Chroma, Elasticsearch, MongoDB Atlas*: a collection keeps its vector size and EDDI cannot
+       recreate it. If a size is recorded for it and differs, the re-embed is refused —
+       `SHARED_TABLE_SIZE` while other knowledge bases keep vectors there, `STORE_CANNOT_CHANGE_SIZE` when
+       this one is alone, which says to recreate the collection with the new size (or point
+       `collectionName`/`indexName` at a new one) and re-embed. Most collections have no recorded size
+       (nothing records one for vectors written before sizes were tracked), so EDDI then **searches the
+       collection once with the probe vector**: a collection of another size rejects it, and the re-embed is
+       refused (`STORE_PROBE_FAILED`) before anything is deleted. The same answer comes when the collection
+       does not exist yet (run the sources instead) or the store cannot be reached (retry); the log has the
+       store's own words;
+     - *in-memory*: nothing to decide, the store is replaced;
+   - the other knowledge bases cannot all be checked (`503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE`): one could not
+     be read, or its store parameters could not be resolved, so it cannot be ruled out that it shares the
+     store. The log names it. Only a knowledge base that can be read can be classified, so one unreadable
+     document anywhere blocks re-embedding until it is fixed — deliberately: a sharer that is not seen is
+     the one whose data is lost;
+1. claims every source, so nothing runs while the vectors go — a run in flight anywhere answers `409`
+   and changes nothing;
+2. **marks the knowledge base "rebuilding"**, durably and for every node: from here search, `/ingest` and
+   every source run are refused (`409` `VECTOR_SPACE_MISMATCH`, "being re-embedded, or a re-embed of it did
+   not finish") until step 5 replaces the mark. A write anywhere in the cluster sees the mark at once (it
+   reads the record from the database, not from the node's cache); a search on another node within 30
+   seconds. A re-embed that dies or fails part-way **leaves the mark**: the knowledge base is refused, not
+   answered from half its vectors, until it is re-embedded again. A refusal before anything was removed
+   takes the mark back;
+3. **forgets every source's content hashes**, so that after a crash at any later point the next run —
+   scheduled or manual — embeds everything again instead of reporting "unchanged" over an empty store;
+4. removes every vector of this knowledge base:
+   - *pgvector, same vector size*: its rows are deleted by its chunk tag; a table that is then empty is
+     dropped under an exclusive lock (and recreated by the next write); one that is busy or still holds
+     other knowledge bases' rows is left as it is, which is fine — its size is already the new one;
+   - *pgvector, another vector size*: the **whole table is dropped in one transaction**, under an exclusive
+     lock, and only while every row in it carries this knowledge base's tag; the next write recreates it
+     for the new size. It waits up to 5 seconds for searches and writes in flight. If the table stays busy
+     (`409` `TABLE_BUSY`) or rows of another knowledge base appeared (`409` `SHARED_TABLE_SIZE`), **nothing is
+     removed** and the record is as it was; re-embed again later;
+   - *another store*: the chunks are deleted by tag; the collection stays. A store that cannot delete by
+     metadata answers `501` and nothing is removed, and a retry answers the same. To change the model there,
+     give the knowledge base a new, empty collection: the model is recorded per location, so the new one
+     starts without a record and takes the configured model on its first write. Run its sources, then drop
+     the old collection by hand once nothing else uses it;
+   - *in-memory*: the store is dropped.
+
+   A table that is not an EDDI pgvector table is never touched. The answer's `tableRecreated` is `true`
+   when the pgvector table was dropped (or did not exist), `false` when only this knowledge base's rows
+   were deleted;
+5. records the configured space as this knowledge base's (which clears the mark), and forgets the
+   location's vector size when nothing else keeps vectors there;
+6. forgets each source's ingestion state and starts an ordinary run of every enabled source.
+
+The whole contract, for a client (the RAG screens of the Manager read this table):
+
+| Status and `code` | When | What is left |
+| --- | --- | --- |
+| `202` | Vectors removed, runs started. Body below | Record = the configured space; runs filling it |
+| `409` `NOT_LATEST_VERSION` | `version` is not the latest. `latestVersion` says which is | Unchanged |
+| `409` `EMBEDDING_SETTINGS_UNRESOLVED` | An embedding setting or a store parameter names a variable that cannot be resolved now; retry | Unchanged |
+| `409` `SHARED_CHUNKS` | Another knowledge base keeps its chunks under the same tag in the same store (6.5.0 name layout). `knowledgeBases` lists them | Unchanged |
+| `409` `EMBEDDING_PROBE_FAILED` | The embedding call with the new settings failed. The error says why (credentials, model, rate limit) | Unchanged |
+| `409` `NOT_A_PGVECTOR_TABLE` | `storeParameters.table` names a table that is not an EDDI pgvector table | Unchanged |
+| `409` `DIMENSION_SETTING_MISMATCH` | pgvector: `storeParameters.dimension` is not the size the new model returns | Unchanged |
+| `409` `SHARED_TABLE_SIZE` | The vector size would change in a table or collection other knowledge bases keep vectors in. `knowledgeBases` lists them where known | Unchanged (when found under the lock, the content hashes are already forgotten) |
+| `409` `STORE_CANNOT_CHANGE_SIZE` | A collection with a recorded size of another size, used by this knowledge base alone; the error says what to do | Unchanged |
+| `409` `STORE_PROBE_FAILED` | The collection rejected a search with a vector of the new size, does not exist, or could not be reached | Unchanged |
+| `409` `TABLE_BUSY` | pgvector, size change: the table stayed in use past the lock timeout | Vectors and record unchanged; content hashes forgotten |
+| `409` (no `code`, `sourceId`) | A run is in flight for that source | Unchanged |
+| `501` | The store cannot delete by metadata | Vectors and record unchanged; content hashes forgotten |
+| `503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE` | Another knowledge base could not be read or resolved, so sharers cannot be ruled out. The log names it | Unchanged |
+| `503` `REEMBED_NOT_STARTED` | The re-embed could not be prepared (the state store or the vector store failed before anything was removed); retry | Vectors unchanged |
+| `503` `REEMBED_INCOMPLETE` | The removal failed part-way | Some vectors may be gone; **marked "rebuilding"** (refused everywhere) and content hashes forgotten. Re-embed again |
+
+The `202` body: `{"status": "started", "kbId", "sources": [{"sourceId", "runId" or null, "note" or null}],
+"notReEmbedded": [text], "tableRecreated": true | false | null (not pgvector), "warnings": []}` — `warnings` is
+always present and today always empty: a situation that would need one is refused instead. The `409` and
+`503` bodies are `{"error": text, "code": …}`; a refused search, ingest or run uses `code: VECTOR_SPACE_MISMATCH`.
+`GET …/vector-space` answers `rebuilding: true` while the mark is set.
+
+**What counts as "the same place".** Two knowledge bases share a store when their locations are equal after
+global variables are resolved the way the store factory resolves them (`${vars:host}` and the host it stands
+for are one place); unresolvable variables refuse the operation instead of guessing. Aliases the comparison
+cannot see are **not** recognised: `localhost` and `127.0.0.1`, two DNS names of one server, a vault
+reference and the secret it holds, a connection string written two ways. Where such aliases exist, give each
+knowledge base a table or collection of its own — which is the safe setup anyway.
+
+**In a cluster.** The records and the "rebuilding" mark live in EDDI's shared database. Each node caches a
+record for up to 30 seconds for **searches** — so for that long after a model change or a re-embed on another
+node a search there may still be answered under the old record (and, during a re-embed, from a store being
+emptied and refilled), or refused under it. **Writes never use the cache**: a source run reads the record
+from the database once when it starts, and `POST /ingest` reads it before the store is built and again just
+before the vectors are written. A source run holds its source's claim, which a re-embed on any node must take
+first. A direct `POST /ingest` holds no claim: a re-embed that another node starts between that second read
+and the write is not seen, and the write can land in the store being rebuilt, under the old model. Do not
+ingest directly into a knowledge base while it is being re-embedded. The
+column size read from a pgvector table is remembered for up to a minute (or until the store is rebuilt or
+its table dropped); a stale value there is fail-safe, because PostgreSQL itself refuses a vector of the wrong
+size. Sources are claimed in the shared state store, so concurrent runs and a concurrent second re-embed (on
+any node) are refused with `409` and change nothing.
+
+**Cost per call.** Steady state, the check adds no query to a search or a document: per knowledge base and
+node, two state-store reads every 30 seconds (the model and the size record), and for pgvector three catalogue
+queries a minute (table, layout, column size). A write adds one state-store read per source run, and two per
+`POST /ingest` call. A search of a pgvector knowledge base whose table does not exist yet costs one catalogue
+query (the table is not created by a read). A re-embed reads every knowledge base's current configuration once
+(to find the ones sharing its store) and, for pgvector, scans the table once for other knowledge bases' rows.
+
+The `202` answer has, per source, the `runId` to follow in
+`GET /ragstore/rags/{id}/sources/{sourceId}/runs`, and a list `notReEmbedded`. **Documents sent
+through `POST /ingest` cannot be rebuilt**: EDDI embeds them and keeps no copy, so they are removed
+with the old vectors and have to be sent again. Uploaded files are kept and web pages are fetched
+again, so those sources come back by themselves — which is also why an upload source is the better home
+for text that must survive a model change. An in-memory knowledge base is not tracked: its store is
+replaced when its embedding configuration changes, as described under
+[Vector Stores](#vector-stores).
 
 ### Knowledge base isolation
 
@@ -499,6 +713,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | Field | Default | What it does |
 | --- | --- | --- |
 | `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
+| `visibleTextOnly` | upload: `true`, crawl: `false` | Leave out text the document hides from a reader — see [Hidden text](#hidden-text) |
 | `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
 | `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control. Checked before a document is embedded: a document that would cross it waits for the next run, and one that alone needs more chunks than the ceiling is reported as failed rather than embedded in part |
 | `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
@@ -692,8 +907,9 @@ source** is what extracts its text and embeds it — the same verb every other s
 | `maxTotalBytes` | `500 MB` | Size of everything the source holds |
 
 **The files are kept, not just their embeddings.** That is what makes this a source rather than a
-one-way import: changing the embedding model or the chunk size and re-running re-ingests from what is
-stored, a purge is recoverable, and deleting a file removes its vectors through the same reconciliation
+one-way import: changing the chunk size and re-running re-ingests from what is stored, changing the
+embedding model and calling [`/reembed`](#changing-the-embedding-model) rebuilds every vector from the
+files, a purge is recoverable, and deleting a file removes its vectors through the same reconciliation
 a crawl uses. Embedding on upload and keeping nothing would make each of those "ask the operator to
 upload two hundred files again".
 
@@ -741,6 +957,35 @@ formats, which have no signature to read.
 Older `.doc`, `.xls` and `.ppt` files are **not** supported — the message says to save them as the
 modern format. Images and scanned pages carry no text layer and there is no OCR; a PDF of scans
 produces an empty document.
+
+#### Hidden text
+
+Retrieved text is prompt input, and text a person never sees is the classic way to put instructions in
+front of a model: a document that looks clean to whoever uploads it would otherwise carry them into
+every prompt that retrieves it. So an **uploaded** file is read the way a person sees it
+(`settings.visibleTextOnly`, default `true` for an upload):
+
+| Format | Left out |
+| --- | --- |
+| Word | runs marked hidden (`w:vanish`, `w:specVanish` or `w:webHidden`, unless switched off) and runs set at one point or smaller (`w:sz` 2 or less). A paragraph whose *mark* is hidden keeps its text |
+| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** a hidden row that lies inside the sheet's `autoFilter` range (a filter can be the reason), and rows or columns collapsed by grouping (`outlineLevel`) — also when they are explicitly hidden as well, because a collapsed group is not the author hiding text. **Dropped:** a row or column hidden by hand that is neither grouped nor inside a filter's range; a row without a row number (`r`) is the one after the previous row, and a cell without a reference (`r`) the one after the previous cell. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
+| PowerPoint | slides marked "hide slide" (`show="0"`) and any shape marked hidden — text boxes, pictures, groups (with everything in them), connectors and any other shape kind; a hidden shape ends where it ends and never takes the next one's text with it |
+| HTML | elements the markup hides outright — the `hidden` attribute, `display:none`, zero `opacity`, off-screen or zero-size elements — on top of what the page converter always drops (comments, one-pixel text, transparent text, text the same colour as an explicitly set background) |
+
+**Not covered, and why.** White-on-white and tiny-but-not-one-point text in Word cannot be told from
+legitimate styling without rendering the page (white text on a dark table cell is everywhere), and
+character styles that carry `vanish` are not resolved (only the run's own properties are read), and a row hidden by a filter is dropped like a hand-hidden one if the sheet's `autoFilter` element lies beyond the rows that are read (the row limit). **A PDF is not filtered**: its invisible text
+(render mode 3) is also the only text layer of an OCR'd scan, so dropping it would empty every
+searchable scan; a PDF is therefore only as trustworthy as whoever made it. HTML stylesheet rules
+(`<style>` blocks) are not read for an upload, as they are for an e-mail body.
+
+**For a crawl the default is `false`**, because a page hides accordions, tab panels and "read more"
+sections that script reveals and that a knowledge base wants — the crawler keeps those on purpose. Set
+`visibleTextOnly: true` on a web source whose content you do not control to remove the elements the
+markup hides outright as well; set it to `false` on an upload whose hidden sheets are data you do want.
+This is a behaviour change for existing knowledge bases: hidden text in an **uploaded** file is no longer
+extracted. Documents already embedded are not touched until the file changes or the source is
+re-embedded.
 
 #### Limits, and why each one is there
 
@@ -845,8 +1090,8 @@ filters on the run id.
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
 | `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
-| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata) |
-| `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 naming the cause when the provider or store fails) |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata). At most `limit` chunks (default 100, ceiling 200) come back, and `"truncated": true` says the document has more — the stores cannot list everything, so the chunks are the best similarity matches |
+| `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 with a fixed sentence — rejected credentials, unknown model, store error — never the provider's or the driver's text, which stays in the server log; 409 `VECTOR_SPACE_MISMATCH` when the store holds another embedding model's vectors) |
 | `POST` | `/ragstore/rags/{id}/evaluate?version=N` | EDIT | Benchmark retrieval: golden queries `{query, expected[], k?}` run through the same search and scored — first-hit rank, hit@k, reciprocal rank, recall@k, MRR — optionally against a baseline (one embedding call per query; see [Evaluating retrieval](#evaluating-retrieval)) |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
@@ -1082,10 +1327,9 @@ connector reports.
 
 `SourceMetadataKeys` also reserves `acl.principals`, a list of namespaced principals such as
 `google:user:a@x.com`, `entra:group:<object-id>`, `link:organization` or `anyone`. It is schema only,
-and nothing enforces it yet. The shared `filters` block (`SourceFilters`: `formats`,
-`excludeNamePatterns`, `includePaths`, `maxFileBytes`) and the shared `partitions` block
-(`SourcePartitions`: `mode` `LISTED` | `ALL_ACCESSIBLE`, `ids`) are config models that a file-shaped
-connector adopts. No source type reads them yet.
+and nothing enforces it yet. (The shared `filters` and `partitions` config blocks this section used to
+describe were never read by any source and are gone; a file-shaped connector that needs them adds them
+with its first reader.)
 
 ## Observability
 
@@ -1129,6 +1373,7 @@ all. Otherwise work through it in this order:
 | 3 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
 | 4 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
 | 5 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, check whether EDDI has restarted since, or the knowledge base changed its embedding model or moved to a new store (below): each empties it until the next run of each source re-embeds it (see [Vector Stores](#vector-stores)) |
+| 5b | Is there a `rag:trace:*` entry with an `error`? | The knowledge base was found and retrieval failed. If the error names two embedding models, the vector store holds another model's vectors than the configuration names: `GET /ragstore/rags/{id}/vector-space?version=N`, then `POST …/reembed` (see [Changing the embedding model](#changing-the-embedding-model)) |
 | 6 | Did ingestion write where retrieval reads? | Both address the store by the knowledge base's id, so they cannot diverge any more. If the KB was renamed while in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, it now has a new, empty store — re-ingest (see [Knowledge base isolation](#knowledge-base-isolation)) |
 
 Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show

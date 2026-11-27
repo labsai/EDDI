@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rag.model;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 /**
@@ -235,6 +236,51 @@ public final class KnowledgeBaseStorage {
                 : null;
         return config.getStoreType() + "|" + (usesIdNamespace(config) ? NAMESPACE_ID : NAMESPACE_NAME + ":" + config.getName())
                 + "|" + physical;
+    }
+
+    /**
+     * Where the vectors physically are, as one string — the store type, the server
+     * parameters ({@link #SERVER_PARAMETERS}, as written, with the factory's
+     * defaults) and the canonical table or collection name — or {@code null} for
+     * {@code in-memory} and for a configuration whose location cannot be derived.
+     * Two knowledge bases that name the same table on the same server get the same
+     * string, which is exactly when they share vectors, and so share one
+     * {@link VectorSpace}. Unlike {@link #locationKey} it does not depend on the
+     * knowledge base's name or layout.
+     */
+    public static String vectorSpaceLocation(String ragConfigId, RagConfiguration config) {
+        if (config == null || config.getStoreType() == null || physicalNameParameter(config.getStoreType()) == null) {
+            return null;
+        }
+        String physical = physicalNameOrNull(ragConfigId, config);
+        if (physical == null) {
+            return null;
+        }
+        Map<String, String> given = config.getStoreParameters() == null ? Map.of() : config.getStoreParameters();
+        StringBuilder location = new StringBuilder(config.getStoreType());
+        new TreeMap<>(SERVER_PARAMETERS.getOrDefault(config.getStoreType(), Map.of())).forEach((key, fallback) -> {
+            String value = given.get(key);
+            location.append('|').append(key).append('=')
+                    .append(normalizedServerValue(key, value == null || value.isBlank() ? fallback : value.trim()));
+        });
+        return location.append('|').append(canonicalLocation(config.getStoreType(), physical)).toString();
+    }
+
+    /**
+     * A server parameter as the factory reads it: a numeric {@code port} is parsed,
+     * so {@code 5432} and {@code 05432}, which open the same server, are one
+     * location. Anything else is kept as written; a port that does not parse is
+     * left alone, and the factory refuses it when the store is built.
+     */
+    private static String normalizedServerValue(String key, String value) {
+        if ("port".equals(key)) {
+            try {
+                return Integer.toString(Integer.parseInt(value));
+            } catch (NumberFormatException e) {
+                return value;
+            }
+        }
+        return value;
     }
 
     private static String physicalNameOrNull(String ragConfigId, RagConfiguration config) {

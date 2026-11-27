@@ -57,7 +57,11 @@ class HiddenContentFilterTest {
                 "<div style=\"transform:scale(0)\">INJECTED</div>",
                 "<div hidden>INJECTED</div>",
                 "<div style=\"display:none\"><p style=\"display:block\">INJECTED</p></div>",
-                "<div style=\"visibility:hidden\"><span>INJECTED</span></div>"})
+                "<div style=\"visibility:hidden\"><span>INJECTED</span></div>",
+                "<div style=\"visibility:hidden\"><span style=\"visibility:inherit\">INJECTED</span></div>",
+                "<div style=\"visibility:hidden\"><span style=\"visibility:unset\">INJECTED</span></div>",
+                "<div style=\"visibility:hidden\"><span style=\"visibility:revert\">INJECTED</span></div>",
+                "<div style=\"visibility:hidden\"><span style=\"visibility:hidd3n\">INJECTED</span></div>"})
         @DisplayName("is removed in mail")
         void removed(String html) {
             String mail = mail(html);

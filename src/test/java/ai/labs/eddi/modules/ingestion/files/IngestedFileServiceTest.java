@@ -25,6 +25,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -35,6 +36,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -221,6 +224,37 @@ class IngestedFileServiceTest {
                     outcome.rejected().getFirst().reason());
             assertTrue(fileStore.list(IngestionPipeline.stateKey(KB_ID, source(500, 1_000_000L, 100_000_000L)))
                     .isEmpty(), "nothing is stored that no run could ever index");
+        }
+
+        @Test
+        @DisplayName("a file of nothing but hidden text is refused by default, and accepted by a source that keeps hidden text")
+        void theUploadProbeFollowsTheSourcesVisibilitySetting() throws Exception {
+            byte[] hiddenOnly = hiddenOnlyDocx();
+
+            var byDefault = service.upload(KB_ID, source(500, 1_000_000L, 100_000_000L),
+                    List.of(IngestedFileService.IncomingFile.of("hidden.docx", hiddenOnly)));
+            assertTrue(byDefault.accepted().isEmpty(), "filtering is on for an upload unless the source says otherwise");
+
+            var keepsHidden = source(500, 1_000_000L, 100_000_000L);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setVisibleTextOnly(false);
+            keepsHidden.setSettings(settings);
+            var outcome = service.upload(KB_ID, keepsHidden, List.of(IngestedFileService.IncomingFile.of("hidden.docx", hiddenOnly)));
+
+            assertEquals(1, outcome.accepted().size(), outcome.rejected().toString());
+        }
+
+        private static byte[] hiddenOnlyDocx() throws IOException {
+            var bytes = new ByteArrayOutputStream();
+            try (var zip = new ZipOutputStream(bytes)) {
+                zip.putNextEntry(new ZipEntry("word/document.xml"));
+                zip.write(("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                        + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
+                        + "<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>Only hidden words here</w:t></w:r></w:p>"
+                        + "</w:body></w:document>").getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+            return bytes.toByteArray();
         }
 
         @Test

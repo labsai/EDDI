@@ -39,9 +39,18 @@ import java.time.Duration;
  *            wall-clock time one file may take. A PDF is the format that needs
  *            it: its page descriptions are programs, and a page can be written
  *            to keep the parser busy for as long as nobody stops it
+ * @param visibleTextOnly
+ *            leave out what the document hides from a reader: Word text marked
+ *            hidden (or at one point), Excel sheets, rows and columns marked
+ *            hidden, PowerPoint slides and shapes marked hidden, and HTML
+ *            elements that are hidden outright. Retrieved text is prompt input,
+ *            and text a person never sees is the classic way to put
+ *            instructions in front of a model. {@link #defaults()} is on. Not
+ *            applied to a PDF, whose invisible text is also what an OCR'd scan
+ *            keeps its words in
  */
 public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSheet, int maxColumnsPerSheet,
-        long maxUncompressedBytes, Duration maxDuration) {
+        long maxUncompressedBytes, Duration maxDuration, boolean visibleTextOnly) {
 
     private static final long DEFAULT_UNCOMPRESSED_BYTES = 64L * 1024 * 1024;
 
@@ -51,7 +60,7 @@ public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSh
      * Generous enough for a book chapter, small enough to survive a hostile file.
      */
     public static ExtractionLimits defaults() {
-        return new ExtractionLimits(200_000, 500, 5_000, 64, DEFAULT_UNCOMPRESSED_BYTES, DEFAULT_DURATION);
+        return new ExtractionLimits(200_000, 500, 5_000, 64, DEFAULT_UNCOMPRESSED_BYTES, DEFAULT_DURATION, true);
     }
 
     /**
@@ -59,7 +68,13 @@ public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSh
      */
     public ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSheet, int maxColumnsPerSheet,
             long maxUncompressedBytes) {
-        this(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet, maxUncompressedBytes, DEFAULT_DURATION);
+        this(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet, maxUncompressedBytes, DEFAULT_DURATION, true);
+    }
+
+    /** The limits with a time budget, and hidden text left out. */
+    public ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSheet, int maxColumnsPerSheet,
+            long maxUncompressedBytes, Duration maxDuration) {
+        this(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet, maxUncompressedBytes, maxDuration, true);
     }
 
     public ExtractionLimits {
@@ -78,7 +93,13 @@ public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSh
      */
     public ExtractionLimits withMaxCharacters(int characters) {
         return new ExtractionLimits(characters, maxParts, maxRowsPerSheet, maxColumnsPerSheet, maxUncompressedBytes,
-                maxDuration);
+                maxDuration, visibleTextOnly);
+    }
+
+    /** The same limits, with hidden text left out or kept. */
+    public ExtractionLimits withVisibleTextOnly(boolean visibleOnly) {
+        return new ExtractionLimits(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet, maxUncompressedBytes,
+                maxDuration, visibleOnly);
     }
 
     /**
@@ -94,6 +115,6 @@ public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSh
     /** The same limits with a different time budget. */
     public ExtractionLimits withMaxDuration(Duration duration) {
         return new ExtractionLimits(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet,
-                maxUncompressedBytes, duration);
+                maxUncompressedBytes, duration, visibleTextOnly);
     }
 }

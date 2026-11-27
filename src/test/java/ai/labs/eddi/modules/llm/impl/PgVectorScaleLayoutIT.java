@@ -41,6 +41,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -136,8 +137,11 @@ class PgVectorScaleLayoutIT {
     @Test
     @DisplayName("a new knowledge base gets a jsonb table with HNSW and metadata indexes, and its queries use them")
     void newTableIsIndexedAndUsed() throws Exception {
-        EmbeddingStore<TextSegment> store = factory.getOrCreate(KB_ID, kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
-        var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, store);
+        // The write path: a read of a knowledge base whose table does not exist yet
+        // creates nothing.
+        EmbeddingStore<TextSegment> store = factory.getOrCreateForIngestion(KB_ID,
+                kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
+        var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, EmbeddingStoreFactory.unwrap(store));
 
         assertEquals("jsonb", metadataType(TABLE));
         Map<String, String> indexes = indexes(TABLE);
@@ -233,7 +237,7 @@ class PgVectorScaleLayoutIT {
     @DisplayName("layout v1 still creates a new table the old way")
     void explicitV1() throws Exception {
         String id = "65f0aa11bb22cc33dd44ee99";
-        factory.getOrCreate(id, kb("id", "v1", Map.of("layout", "v1")));
+        factory.getOrCreateForIngestion(id, kb("id", "v1", Map.of("layout", "v1")));
         String table = "eddi_kbid_" + id;
         assertEquals("json", metadataType(table));
         assertEquals(Set.of(table + "_pkey"), indexes(table).keySet());
@@ -243,8 +247,14 @@ class PgVectorScaleLayoutIT {
     @DisplayName("knowledge bases on one server share one connection pool")
     void poolIsShared() {
         factory.clearCache();
-        factory.getOrCreate("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()));
-        factory.getOrCreate("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()));
+        // For writing, so both stores are built: a read of an absent table returns
+        // ABSENT_TABLE after a table check, which opens a pool without building a
+        // store.
+        var first = factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()));
+        var second = factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()));
+        assertNotSame(EmbeddingStoreFactory.ABSENT_TABLE, first);
+        assertNotSame(EmbeddingStoreFactory.ABSENT_TABLE, second);
+        assertNotSame(first, second);
         assertEquals(1, factory.pgVectorPoolCount());
     }
 
@@ -257,7 +267,7 @@ class PgVectorScaleLayoutIT {
         String qualifiedId = "65f0aa11bb22cc33dd44ef02";
 
         String firstBuild = ddlLoggedDuring(() -> {
-            EmbeddingStore<TextSegment> store = factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
+            EmbeddingStore<TextSegment> store = factory.getOrCreateForIngestion(unqualifiedId, scopedKb("docs", Map.of()));
             store.add(Embedding.from(new float[]{1f, 0f, 0f}), segment("written through docs"));
         });
 
@@ -305,7 +315,7 @@ class PgVectorScaleLayoutIT {
             assertEquals("json", PgVectorSchema.inspect(c, "public.docs_v2").metadataType());
         }
 
-        factory.getOrCreate("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
+        factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
 
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs_v2"));
         assertEquals(4, indexes(SCOPED_SCHEMA, "docs_v2").size());
@@ -320,7 +330,7 @@ class PgVectorScaleLayoutIT {
         Set<String> expected = Set.of("shared_pkey", "shared_hnsw_idx", "shared_doc_src_idx", "shared_src_run_idx");
 
         // A table outside current_schema(), named with its schema.
-        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of())));
+        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreateForIngestion(qualifiedId, scopedKb("public.shared", Map.of())));
         assertEquals("jsonb", metadataType("public.shared"));
         assertEquals(expected, indexes("public", "shared").keySet());
         assertEquals(3, createIndexStatements(qualifiedBuild), qualifiedBuild);
@@ -328,7 +338,7 @@ class PgVectorScaleLayoutIT {
         // The same name unqualified is myschema.shared. public.shared's indexes are on
         // the search_path under the very names this table's indexes get, and must not
         // be mistaken for them.
-        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of())));
+        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreateForIngestion(unqualifiedId, scopedKb("shared", Map.of())));
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".shared"));
         assertEquals(expected, indexes(SCOPED_SCHEMA, "shared").keySet());
         assertEquals(3, createIndexStatements(unqualifiedBuild), unqualifiedBuild);

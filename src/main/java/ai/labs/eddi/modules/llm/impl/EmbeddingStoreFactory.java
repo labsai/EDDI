@@ -18,7 +18,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.Ticker;
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.exception.UnsupportedFeatureException;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
@@ -47,10 +51,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
@@ -173,6 +181,18 @@ public class EmbeddingStoreFactory {
 
     /** External-store clients only — see the class comment. */
     private final Cache<StoreCacheKey, EmbeddingStore<TextSegment>> cache;
+
+    /**
+     * The column size of a pgvector table, per store key — what the vector-space
+     * check reads on every ingested document and every query, so it reads the
+     * catalogue once and not again until the store is evicted, rebuilt or its table
+     * dropped (and, as a safety net, for a minute). {@link #NO_COLUMN} stands for
+     * "no table, or not an EDDI table".
+     */
+    private final Cache<StoreCacheKey, Integer> columnDimensions = Caffeine.newBuilder().maximumSize(MAX_STORES * 4L)
+            .expireAfterWrite(Duration.ofMinutes(1)).build();
+
+    private static final int NO_COLUMN = -1;
 
     /**
      * In-memory stores, keyed by knowledge base id. Never evicted — the class
@@ -308,6 +328,11 @@ public class EmbeddingStoreFactory {
         this.maxInMemorySegments = maxInMemorySegments;
         this.targetPolicy = targetPolicy;
         this.cache = Caffeine.newBuilder().maximumSize(MAX_STORES)
+                .removalListener((StoreCacheKey key, EmbeddingStore<TextSegment> store, RemovalCause cause) -> {
+                    if (key != null) {
+                        columnDimensions.invalidate(key);
+                    }
+                })
                 .expireAfterAccess(Duration.ofMinutes(30))
                 .ticker(ticker)
                 .build();
@@ -370,6 +395,22 @@ public class EmbeddingStoreFactory {
      *            the RAG configuration's id (the same for every version)
      */
     public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config) {
+        return getOrCreate(ragConfigId, config, false);
+    }
+
+    /**
+     * @param forWrite
+     *            whether the caller is about to write. A read never creates a
+     *            <em>table</em> in the vector database: for pgvector, a knowledge
+     *            base whose table does not exist yet reads as empty
+     *            ({@link #ABSENT_TABLE}) instead of the table being created by a
+     *            search. A read that has to build the store of an existing,
+     *            uncached table (after a restart, say) opens it through the same
+     *            build a write does, which still issues {@code IF NOT EXISTS} DDL —
+     *            a no-op on a table that is complete, and the missing-index repair
+     *            otherwise.
+     */
+    private EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config, boolean forWrite) {
         requireId(ragConfigId);
         if (isInMemory(config)) {
             return inMemoryStores.computeIfAbsent(inMemoryKey(ragConfigId, config), key -> newInMemoryStore(config, key)).store();
@@ -379,7 +420,15 @@ public class EmbeddingStoreFactory {
         // no unambiguous entry boundaries ({a='x, b=y'} renders like {a='x', b='y'}),
         // so two configurations could share one store.
         var cacheKey = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
-        return cache.get(cacheKey, k -> build(ragConfigId, config));
+        if (!forWrite && "pgvector".equals(config.getStoreType()) && cache.getIfPresent(cacheKey) == null
+                && !pgVectorTableExists(ragConfigId, config)) {
+            return ABSENT_TABLE;
+        }
+        return cache.get(cacheKey, k -> {
+            // A store is being (re)built: whatever was known about its table is stale.
+            columnDimensions.invalidate(k);
+            return build(ragConfigId, config);
+        });
     }
 
     /**
@@ -393,7 +442,7 @@ public class EmbeddingStoreFactory {
         if (isInMemory(config)) {
             return inMemoryStoreForWrite(ragConfigId, config).store();
         }
-        return getOrCreate(ragConfigId, config);
+        return getOrCreate(ragConfigId, config, true);
     }
 
     /**
@@ -688,7 +737,8 @@ public class EmbeddingStoreFactory {
                 KnowledgeBaseStorage.usesIdNamespace(config) ? KnowledgeBaseStorage.NAMESPACE_ID : KnowledgeBaseStorage.NAMESPACE_NAME);
 
         return switch (storeType) {
-            case "pgvector" -> buildPgVector(config, ragConfigId);
+            case "pgvector" -> new TableMissingTolerantStore(buildPgVector(config, ragConfigId),
+                    () -> cache.invalidate(new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters())));
             case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId);
             case "elasticsearch" -> buildElasticsearch(config, ragConfigId);
             case "qdrant" -> buildQdrant(config, ragConfigId);
@@ -743,7 +793,11 @@ public class EmbeddingStoreFactory {
         PgVectorSchema.Layout layout;
         try (Connection connection = dataSource.getConnection()) {
             PgVectorSchema.ensureExtension(connection);
-            layout = PgVectorSchema.resolveLayout(settings.layout(), PgVectorSchema.inspect(connection, table), table);
+            var state = PgVectorSchema.inspect(connection, table);
+            if (state.exists() && !PgVectorSchema.layoutMatches(connection, table)) {
+                throw notAPgVectorTable(table);
+            }
+            layout = PgVectorSchema.resolveLayout(settings.layout(), state, table);
         } catch (SQLException e) {
             throw new IllegalStateException("pgvector: could not prepare table " + sanitize(table) + ": " + sanitize(e.getMessage()), e);
         }
@@ -945,6 +999,489 @@ public class EmbeddingStoreFactory {
                 // private address later (DNS rebinding).
                 .httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy))
                 .build();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Removing a knowledge base's vectors, and reads that create nothing
+    // ──────────────────────────────────────────────────
+
+    /**
+     * What a read sees where a pgvector knowledge base has no table yet: nothing.
+     * Not cached, so the first write builds the real store (and creates the table).
+     */
+    static final EmbeddingStore<TextSegment> ABSENT_TABLE = new AbsentTableStore();
+
+    /**
+     * What {@link #removeKnowledgeBaseVectors} did to the place the vectors were
+     * in.
+     */
+    public enum RemovalOutcome {
+        /** An in-memory store, dropped with its data. */
+        STORE_DROPPED,
+        /**
+         * An external store other than pgvector: the chunks were deleted, the
+         * collection stays as it is.
+         */
+        CHUNKS_DELETED,
+        /** pgvector: there was no table, so nothing was removed. */
+        NO_TABLE,
+        /**
+         * pgvector: the table was empty and was dropped; the next write creates it at
+         * the configured size.
+         */
+        TABLE_DROPPED,
+        /**
+         * pgvector: other knowledge bases keep rows in the table, which stays as it is
+         * (its column size too).
+         */
+        TABLE_KEPT_SHARED,
+        /**
+         * pgvector: the table was in use and could not be locked, so it stays as it is
+         * (its column size too).
+         */
+        TABLE_BUSY
+    }
+
+    /**
+     * Removes every vector of one knowledge base, to be made again. For an
+     * in-memory knowledge base the store is dropped; for an external one the chunks
+     * tagged with the knowledge base's id are deleted. A pgvector table that is
+     * then empty is dropped — in one transaction under an exclusive lock — so that
+     * the next write recreates it for the vector size then configured (a table's
+     * column has a fixed size, and the size is exactly what may have changed). A
+     * table that still holds other knowledge bases' rows, or is busy, is left
+     * alone, and a table that is not one EDDI's pgvector layout made is never
+     * touched. A Qdrant, Chroma, Elasticsearch or Atlas collection keeps its vector
+     * size: EDDI deletes chunks from it and cannot recreate it.
+     *
+     * @throws UnsupportedOperationException
+     *             when the store cannot delete by metadata, so nothing was removed
+     * @throws IllegalArgumentException
+     *             when a pgvector table exists but is not an EDDI pgvector table
+     */
+    public RemovalOutcome removeKnowledgeBaseVectors(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
+        if (isInMemory(config)) {
+            dropInMemoryStore(ragConfigId, config);
+            return RemovalOutcome.STORE_DROPPED;
+        }
+        if ("pgvector".equals(config.getStoreType())) {
+            PgVectorTableInfo info = inspectPgVectorColumn(ragConfigId, config);
+            if (info.exists() && !info.layoutMatches()) {
+                throw notAPgVectorTable(pgVectorTarget(ragConfigId, config).table());
+            }
+        }
+        EmbeddingStore<TextSegment> store = getOrCreate(ragConfigId, config, false);
+        if (store != ABSENT_TABLE) {
+            try {
+                store.removeAll(metadataKey(KnowledgeBaseStorage.METADATA_KB_ID)
+                        .isEqualTo(KnowledgeBaseStorage.chunkKbId(ragConfigId, config)));
+            } catch (UnsupportedFeatureException e) {
+                throw new UnsupportedOperationException("This knowledge base's vector store cannot delete by metadata, so its "
+                        + "vectors cannot be removed from here. Empty its "
+                        + KnowledgeBaseStorage.physicalNameParameter(config.getStoreType()) + " by hand, then re-embed.", e);
+            }
+        }
+        return "pgvector".equals(config.getStoreType()) ? dropPgVectorTableIfEmpty(ragConfigId, config) : RemovalOutcome.CHUNKS_DELETED;
+    }
+
+    private static IllegalArgumentException notAPgVectorTable(String table) {
+        return new IllegalArgumentException("The table " + sanitize(table) + " is not a pgvector table EDDI created (it lacks the "
+                + "embedding_id, embedding, text and metadata columns), so EDDI will not read, write, delete from or drop it. Name "
+                + "a table of the knowledge base's own in storeParameters.table.");
+    }
+
+    /**
+     * What is known about a knowledge base's pgvector table.
+     *
+     * @param exists
+     *            the table exists
+     * @param layoutMatches
+     *            it has the columns EDDI's layout creates
+     * @param columnDimension
+     *            the vector size of its {@code embedding} column, or null
+     * @param otherRows
+     *            it holds rows that do not carry this knowledge base's chunk tag;
+     *            only {@link #inspectPgVectorTable} looks, because the probe can
+     *            scan the table
+     */
+    public record PgVectorTableInfo(boolean exists, boolean layoutMatches, Integer columnDimension, boolean otherRows) {
+    }
+
+    /**
+     * The table's catalogue entry only: whether it exists, is an EDDI table, and
+     * its column size. Never reads a row, so it is cheap enough for a re-embed's
+     * pre-check and for the cache below.
+     */
+    public PgVectorTableInfo inspectPgVectorColumn(String ragConfigId, RagConfiguration config) {
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        try (Connection connection = target.dataSource().getConnection()) {
+            if (!PgVectorSchema.inspect(connection, target.table()).exists()) {
+                return new PgVectorTableInfo(false, true, null, false);
+            }
+            if (!PgVectorSchema.layoutMatches(connection, target.table())) {
+                return new PgVectorTableInfo(true, false, null, false);
+            }
+            return new PgVectorTableInfo(true, true, PgVectorSchema.vectorDimension(connection, target.table()), false);
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not inspect table " + sanitize(target.table()) + ": " + sanitize(e.getMessage()), e);
+        }
+    }
+
+    /**
+     * The real vector size of the knowledge base's pgvector table, or {@code null}
+     * when there is no EDDI table yet. Read from the catalogue once per store and
+     * remembered until the store is evicted, rebuilt or its table dropped, because
+     * the vector-space check asks on every document and every query.
+     */
+    public Integer pgVectorColumnDimension(String ragConfigId, RagConfiguration config) {
+        var key = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
+        Integer known = columnDimensions.get(key, k -> {
+            PgVectorTableInfo info = inspectPgVectorColumn(ragConfigId, config);
+            return info.exists() && info.layoutMatches() && info.columnDimension() != null ? info.columnDimension() : NO_COLUMN;
+        });
+        return known == NO_COLUMN ? null : known;
+    }
+
+    /**
+     * {@link #inspectPgVectorColumn} plus whether the table holds rows of other
+     * knowledge bases. That probe can scan the whole table (with one knowledge base
+     * per table nothing differs), so it is for a re-embed only and never for the
+     * path of a document or a query.
+     */
+    public PgVectorTableInfo inspectPgVectorTable(String ragConfigId, RagConfiguration config, String chunkKbId) {
+        PgVectorTableInfo column = inspectPgVectorColumn(ragConfigId, config);
+        if (!column.exists() || !column.layoutMatches()) {
+            return column;
+        }
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        try (Connection connection = target.dataSource().getConnection();
+                PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM " + PgVectorSchema.quotedTable(target.table())
+                        + " WHERE (metadata->>'" + KnowledgeBaseStorage.METADATA_KB_ID + "') IS DISTINCT FROM ? LIMIT 1")) {
+            statement.setString(1, chunkKbId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return new PgVectorTableInfo(true, true, column.columnDimension(), rows.next());
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not inspect table " + sanitize(target.table()) + ": " + sanitize(e.getMessage()), e);
+        }
+    }
+
+    /** A pgvector connection and table, as {@link #buildPgVector} resolves them. */
+    private record PgVectorTarget(DataSource dataSource, String table) {
+    }
+
+    private PgVectorTarget pgVectorTarget(String ragConfigId, RagConfiguration config) {
+        Map<String, String> params = resolveParams(config);
+        String host = requirePlainHost(params.getOrDefault("host", "localhost"), "pgvector");
+        int port = parseIntParam(params, "port", 5432);
+        guardStoreHost(host + ":" + port, "pgvector");
+        String database = params.getOrDefault("database", "eddi");
+        String user = params.getOrDefault("user", "eddi");
+        String password = requireParam(params, "password", "pgvector");
+        // Parsed only to be refused in the same words and the same order as the build
+        // refuses them: a read must not get further with settings a write would reject.
+        parseIntParam(params, "dimension", 1536);
+        String table = physicalName(params, "table", ragConfigId, config);
+        PgVectorSchema.settings(params);
+        return new PgVectorTarget(pgVectorPools.get(host, port, database, user, password, pgVectorPoolMaxSize), table);
+    }
+
+    /**
+     * Whether the knowledge base's pgvector table exists. Looks only; used by reads
+     * so that a search does not run {@code CREATE TABLE} (or {@code CREATE
+     * EXTENSION}, or index DDL) on a database it was only asked to read from.
+     */
+    private boolean pgVectorTableExists(String ragConfigId, RagConfiguration config) {
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        try (Connection connection = target.dataSource().getConnection()) {
+            return PgVectorSchema.inspect(connection, target.table()).exists();
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not look up table " + sanitize(target.table()) + ": " + sanitize(e.getMessage()), e);
+        }
+    }
+
+    /**
+     * Drops the table when nothing is in it, in one transaction that holds an
+     * exclusive lock: a writer that arrives between the check and the drop waits
+     * (and then finds no table, which it recreates) instead of losing its row.
+     * "Busy" is only SQLState {@code 55P03} (lock not available); a table that is
+     * already gone ({@code 42P01}) counts as dropped; anything else — no privilege
+     * to drop, say — is a failure.
+     */
+    private RemovalOutcome dropPgVectorTableIfEmpty(String ragConfigId, RagConfiguration config) {
+        return dropPgVectorTable(ragConfigId, config, null);
+    }
+
+    /**
+     * Drops a knowledge base's whole pgvector table, so the next write recreates it
+     * for the vector size then configured — the one way a pgvector table changes
+     * its size. Atomic: under an exclusive lock, and only when the table holds no
+     * row without this knowledge base's chunk tag; otherwise nothing at all is
+     * removed. Waits up to {@link #DROP_LOCK_TIMEOUT} for searches and writes in
+     * flight to finish.
+     *
+     * @return {@link RemovalOutcome#TABLE_DROPPED} or
+     *         {@link RemovalOutcome#NO_TABLE} when the vectors are gone;
+     *         {@link RemovalOutcome#TABLE_BUSY} or
+     *         {@link RemovalOutcome#TABLE_KEPT_SHARED} when nothing was removed
+     * @throws IllegalArgumentException
+     *             when the table is not an EDDI pgvector table
+     */
+    public RemovalOutcome dropKnowledgeBaseTable(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
+        if (!"pgvector".equals(config.getStoreType())) {
+            throw new IllegalArgumentException("Only a pgvector knowledge base has a table of its own to drop");
+        }
+        return dropPgVectorTable(ragConfigId, config, KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+    }
+
+    /** How long a re-embed waits for the exclusive lock that drops a table. */
+    public static final String DROP_LOCK_TIMEOUT = "5s";
+
+    /**
+     * @param ownChunkKbId
+     *            null: drop only an empty table, without waiting for the lock;
+     *            otherwise drop the table when every row in it carries this tag,
+     *            waiting up to {@link #DROP_LOCK_TIMEOUT} for the lock
+     */
+    private RemovalOutcome dropPgVectorTable(String ragConfigId, RagConfiguration config, String ownChunkKbId) {
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        String quoted = PgVectorSchema.quotedTable(target.table());
+        var key = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
+        try (Connection connection = target.dataSource().getConnection()) {
+            if (!PgVectorSchema.inspect(connection, target.table()).exists()) {
+                invalidateStore(key);
+                return RemovalOutcome.NO_TABLE;
+            }
+            if (!PgVectorSchema.layoutMatches(connection, target.table())) {
+                throw notAPgVectorTable(target.table());
+            }
+            connection.setAutoCommit(false);
+            try {
+                try (Statement statement = connection.createStatement()) {
+                    if (ownChunkKbId == null) {
+                        statement.execute("LOCK TABLE " + quoted + " IN ACCESS EXCLUSIVE MODE NOWAIT");
+                    } else {
+                        // Waits for the searches and writes in flight, then gives up with 55P03.
+                        statement.execute("SET LOCAL lock_timeout = '" + DROP_LOCK_TIMEOUT + "'");
+                        statement.execute("LOCK TABLE " + quoted + " IN ACCESS EXCLUSIVE MODE");
+                    }
+                } catch (SQLException lock) {
+                    connection.rollback();
+                    if (UNDEFINED_TABLE.equals(lock.getSQLState())) {
+                        invalidateStore(key);
+                        return RemovalOutcome.TABLE_DROPPED;
+                    }
+                    if (LOCK_NOT_AVAILABLE.equals(lock.getSQLState())) {
+                        LOGGER.infof("pgvector table %s is in use right now; it is not dropped", sanitize(target.table()));
+                        return RemovalOutcome.TABLE_BUSY;
+                    }
+                    throw lock;
+                }
+                // The layout was checked before the lock was taken. A migration may have
+                // replaced the table under this name in between; the lock now protects the
+                // replacement, so what is dropped must be judged again, under it.
+                if (!PgVectorSchema.layoutMatches(connection, target.table())) {
+                    connection.rollback();
+                    throw notAPgVectorTable(target.table());
+                }
+                if (holdsRows(connection, quoted, ownChunkKbId)) {
+                    connection.rollback();
+                    LOGGER.infof("pgvector table %s still holds rows of other knowledge bases; it is not dropped", sanitize(target.table()));
+                    return RemovalOutcome.TABLE_KEPT_SHARED;
+                }
+                try (Statement statement = connection.createStatement()) {
+                    statement.executeUpdate("DROP TABLE " + quoted);
+                }
+                connection.commit();
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not drop the table " + sanitize(target.table()) + " (SQLState "
+                    + sanitize(String.valueOf(e.getSQLState())) + "; the database user may lack the privilege to drop it): "
+                    + sanitize(e.getMessage()), e);
+        }
+        // The cached store was built over the table that is gone.
+        invalidateStore(key);
+        LOGGER.infof("Dropped the pgvector table %s of knowledge base %s; the next write recreates it", sanitize(target.table()),
+                sanitize(ragConfigId));
+        return RemovalOutcome.TABLE_DROPPED;
+    }
+
+    private void invalidateStore(StoreCacheKey key) {
+        cache.invalidate(key);
+        columnDimensions.invalidate(key);
+    }
+
+    /**
+     * Whether the table holds any row ({@code ownChunkKbId} null), or any row that
+     * does not carry that chunk tag.
+     */
+    private static boolean holdsRows(Connection connection, String quoted, String ownChunkKbId) throws SQLException {
+        if (ownChunkKbId == null) {
+            try (Statement statement = connection.createStatement();
+                    ResultSet rows = statement.executeQuery("SELECT 1 FROM " + quoted + " LIMIT 1")) {
+                return rows.next();
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM " + quoted + " WHERE (metadata->>'"
+                + KnowledgeBaseStorage.METADATA_KB_ID + "') IS DISTINCT FROM ? LIMIT 1")) {
+            statement.setString(1, ownChunkKbId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        }
+    }
+
+    private static final String UNDEFINED_TABLE = "42P01";
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
+
+    /**
+     * Wraps a pgvector store so that a table dropped under it — by a re-embed on
+     * another node, say — reads as empty, as an absent table does, instead of
+     * surfacing "relation does not exist"; the cached store is evicted so the next
+     * write rebuilds it (and recreates the table).
+     */
+    private static final class TableMissingTolerantStore implements EmbeddingStore<TextSegment> {
+
+        private static final String UNDEFINED_TABLE = "42P01";
+
+        private final EmbeddingStore<TextSegment> delegate;
+        private final Runnable evict;
+
+        private TableMissingTolerantStore(EmbeddingStore<TextSegment> delegate, Runnable evict) {
+            this.delegate = delegate;
+            this.evict = evict;
+        }
+
+        private boolean tableIsGone(RuntimeException e) {
+            for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+                if (t instanceof SQLException sql && UNDEFINED_TABLE.equals(sql.getSQLState())) {
+                    evict.run();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public String add(Embedding embedding) {
+            return delegate.add(embedding);
+        }
+
+        @Override
+        public void add(String id, Embedding embedding) {
+            delegate.add(id, embedding);
+        }
+
+        @Override
+        public String add(Embedding embedding, TextSegment embedded) {
+            return delegate.add(embedding, embedded);
+        }
+
+        @Override
+        public List<String> addAll(List<Embedding> embeddings) {
+            return delegate.addAll(embeddings);
+        }
+
+        @Override
+        public List<String> addAll(List<Embedding> embeddings, List<TextSegment> embedded) {
+            return delegate.addAll(embeddings, embedded);
+        }
+
+        @Override
+        public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
+            try {
+                delegate.addAll(ids, embeddings, embedded);
+            } catch (RuntimeException e) {
+                tableIsGone(e);
+                throw e;
+            }
+        }
+
+        @Override
+        public void removeAll(Collection<String> ids) {
+            delegate.removeAll(ids);
+        }
+
+        @Override
+        public void removeAll(Filter filter) {
+            try {
+                delegate.removeAll(filter);
+            } catch (RuntimeException e) {
+                if (!tableIsGone(e)) {
+                    throw e;
+                }
+            }
+        }
+
+        @Override
+        public void removeAll() {
+            delegate.removeAll();
+        }
+
+        @Override
+        public EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request) {
+            try {
+                return delegate.search(request);
+            } catch (RuntimeException e) {
+                if (tableIsGone(e)) {
+                    return new EmbeddingSearchResult<>(List.of());
+                }
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * The store a pgvector wrapper delegates to; any other store as it is. For
+     * tests.
+     */
+    static EmbeddingStore<TextSegment> unwrap(EmbeddingStore<TextSegment> store) {
+        return store instanceof TableMissingTolerantStore wrapper ? wrapper.delegate : store;
+    }
+
+    /** See {@link #ABSENT_TABLE}. */
+    private static final class AbsentTableStore implements EmbeddingStore<TextSegment> {
+
+        private static IllegalStateException noTable() {
+            return new IllegalStateException("The knowledge base's table does not exist yet; it is created by the first ingestion");
+        }
+
+        @Override
+        public String add(Embedding embedding) {
+            throw noTable();
+        }
+
+        @Override
+        public void add(String id, Embedding embedding) {
+            throw noTable();
+        }
+
+        @Override
+        public String add(Embedding embedding, TextSegment embedded) {
+            throw noTable();
+        }
+
+        @Override
+        public List<String> addAll(List<Embedding> embeddings) {
+            throw noTable();
+        }
+
+        @Override
+        public void removeAll(Filter filter) {
+            // Nothing there to remove.
+        }
+
+        @Override
+        public EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request) {
+            return new EmbeddingSearchResult<>(List.of());
+        }
     }
 
     // ──────────────────────────────────────────────────

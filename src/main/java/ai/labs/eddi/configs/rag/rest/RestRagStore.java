@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -25,15 +26,18 @@ import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -107,11 +111,67 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public Response updateRag(String id, Integer version, RagConfiguration ragConfiguration) {
+        return update(id, version, ragConfiguration, true);
+    }
+
+    /**
+     * {@link #updateRag} for a knowledge base that comes from an archive, a sync or
+     * an upgrade, which its owner cannot edit first: settings that older versions
+     * accepted and that the interactive save now refuses are brought into range or
+     * kept, with a WARN naming the knowledge base and the field. Access, storage
+     * rules and everything else are the same.
+     */
+    public Response updateRagLenient(String id, Integer version, RagConfiguration ragConfiguration) {
+        return update(id, version, ragConfiguration, false);
+    }
+
+    private static final Set<RagConfiguration> TOLERATED = Collections.newSetFromMap(new WeakHashMap<>());
+
+    /**
+     * The one update older configurations go through — an import or a sync of an
+     * archive, and an upgrade — whichever way the store was obtained: the lenient
+     * update where the store is this class (it is also true of the CDI client
+     * proxy, which subclasses it), the interactive one for anything else, such as a
+     * test double.
+     */
+    public static Response updateOlderConfig(IRestRagStore store, String id, Integer version, RagConfiguration config) {
+        return store instanceof RestRagStore lenient ? lenient.updateRagLenient(id, version, config) : store.updateRag(id, version, config);
+    }
+
+    /**
+     * Keeps an older configuration usable on the lenient paths: retrieval settings
+     * out of range are clamped, and what the interactive save would refuse (an
+     * unknown store type, a host with a port, a blank name …) is kept, and said at
+     * WARN.
+     */
+    public static void tolerateLegacySettings(RagConfiguration config) {
+        if (config == null) {
+            return;
+        }
+        // Said once per configuration object: a retried or tracked update presents the
+        // same one again.
+        synchronized (TOLERATED) {
+            if (!TOLERATED.add(config)) {
+                return;
+            }
+        }
+        List<String> problems = config.findStrictProblems();
+        if (config.clampRetrievalSettings()) {
+            LOGGER.warnf("Knowledge base '%s': minScore or maxResults were outside the accepted range and were brought into it",
+                    LogSanitizer.sanitize(config.getName()));
+        }
+        for (String problem : problems) {
+            LOGGER.warnf("Knowledge base '%s': %s. Kept as it is: an interactive save would refuse it.", LogSanitizer.sanitize(config.getName()),
+                    LogSanitizer.sanitize(problem));
+        }
+    }
+
+    private Response update(String id, Integer version, RagConfiguration ragConfiguration, boolean interactive) {
         // Before the body is judged: a caller without EDIT should be told that,
         // rather than being handed validation errors about a resource they may not
         // change — and the 400s would also confirm the resource exists.
         restVersionInfo.requireEditAccess(id);
-        prepareForWrite(ragConfiguration);
+        prepareForWrite(ragConfiguration, interactive);
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.
         RagConfiguration previous = readQuietly(id, version);
@@ -124,7 +184,45 @@ public class RestRagStore implements IRestRagStore {
         // gone from the document must not leave its documents answering questions.
         discardRemovedSources(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
-        return response;
+        return withEmbeddingSpaceWarning(response, id, previous, ragConfiguration);
+    }
+
+    /**
+     * What an update answers with when it changes the embedding model of a
+     * knowledge base that keeps its vectors where they are.
+     *
+     * <p>
+     * A warning, not a refusal: the save is the only way to fix a model that was
+     * wrong, a knowledge base that holds nothing yet loses nothing by it, and a
+     * refusal would block imports and scripted updates that do not read response
+     * bodies. The body is {@code {"warnings": [...], "code": ...}} next to the
+     * usual {@code Location} header, and the refusal that follows (search and
+     * ingest answer 409 until the knowledge base is re-embedded) is what makes the
+     * change safe. Nothing is warned when the vectors move too — another store
+     * location starts empty.
+     */
+    private Response withEmbeddingSpaceWarning(Response response, String id, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null || response == null) {
+            return response;
+        }
+        String location = KnowledgeBaseStorage.vectorSpaceLocation(id, updated);
+        if (location == null || !location.equals(KnowledgeBaseStorage.vectorSpaceLocation(id, previous))) {
+            return response;
+        }
+        VectorSpace before = VectorSpace.of(previous, previous.getEmbeddingParameters());
+        VectorSpace after = VectorSpace.of(updated, updated.getEmbeddingParameters());
+        if (!before.conflictsWith(after)) {
+            return response;
+        }
+        IResourceId resourceId = resourceIdOf(response);
+        String reembed = "POST /ragstore/rags/" + id + "/reembed"
+                + (resourceId == null || resourceId.getVersion() == null ? "" : "?version=" + resourceId.getVersion());
+        String warning = "The embedding model of this knowledge base changed from " + before.describe() + " to "
+                + after.describe() + ". If its vector store already holds vectors, they were made by the old model: "
+                + "searching and ingesting are refused until the knowledge base is re-embedded (" + reembed + ").";
+        LOGGER.warnf("Knowledge base %s: %s", LogSanitizer.sanitize(id), LogSanitizer.sanitize(warning));
+        return Response.fromResponse(response).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(Map.of("warnings", List.of(warning), "code", "EMBEDDING_SPACE_CHANGED")).build();
     }
 
     /**
@@ -320,6 +418,10 @@ public class RestRagStore implements IRestRagStore {
      * {@link RagConfiguration#findUnsupportedSettings()}.
      */
     private void prepareForWrite(RagConfiguration ragConfiguration) {
+        prepareForWrite(ragConfiguration, true);
+    }
+
+    private void prepareForWrite(RagConfiguration ragConfiguration, boolean interactive) {
         if (ragConfiguration == null) {
             // RestVersionInfo rejects null with its own error message.
             return;
@@ -336,7 +438,12 @@ public class RestRagStore implements IRestRagStore {
             // a bad request with a 500.
             requireNoNullSources(ragConfiguration);
             assignSourceIds(ragConfiguration);
-            ragConfiguration.validate();
+            if (interactive) {
+                ragConfiguration.validate();
+            } else {
+                tolerateLegacySettings(ragConfiguration);
+                ragConfiguration.validateLenient();
+            }
             requireValidCronExpressions(ragConfiguration);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);

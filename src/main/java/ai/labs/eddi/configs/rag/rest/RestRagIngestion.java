@@ -13,12 +13,18 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
+import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseReembedService;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
+import ai.labs.eddi.modules.rag.OperatorFailureException;
+import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.modules.rag.VectorSpaceGuard;
+import ai.labs.eddi.modules.rag.VectorSpaceMismatchException;
 import ai.labs.eddi.modules.rag.evaluation.RetrievalMetrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -55,6 +61,17 @@ public class RestRagIngestion implements IRestRagIngestion {
 
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceReferenceGuard spaceReferenceGuard;
+
+    /**
+     * Which embedding space a knowledge base's vector store holds. Field-injected
+     * so the constructor keeps its shape; null when built by hand, which skips the
+     * checks and answers the vector-space endpoints with 501.
+     */
+    @Inject
+    VectorSpaceGuard vectorSpaceGuard;
+
+    @Inject
+    KnowledgeBaseReembedService reembedService;
 
     @Inject
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
@@ -157,13 +174,20 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
 
+        // Refused here, with the reason, rather than accepted and failed on a worker
+        // thread: a client that was told 202 would go looking for its document.
+        Response vectorSpaceRefusal = vectorSpaceRefusal(ragConfigId, ragConfig);
+        if (vectorSpaceRefusal != null) {
+            return vectorSpaceRefusal;
+        }
+
         String ingestionId;
         try {
             ingestionId = ragIngestionService.ingest(ragConfigId, documentContent, documentName, ragConfig, replacing);
         } catch (IllegalArgumentException e) {
             // The configuration cannot be addressed (a 6.5.0-layout knowledge base
             // with no name, say).
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", RagFailures.clientMessage(e))).build();
         }
 
         LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(ragConfigId), sanitize(documentName),
@@ -215,7 +239,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         try {
             outcome = ragIngestionService.delete(ragConfigId, documentName, knowledgeBase);
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", RagFailures.clientMessage(e))).build();
         } catch (RuntimeException e) {
             // pgvector wraps its SQLException in a RuntimeException; a store that is
             // down is the client's cue to retry, not a client error.
@@ -290,6 +314,11 @@ public class RestRagIngestion implements IRestRagIngestion {
             return Response.status(Response.Status.CONFLICT)
                     .entity(Map.of("error", "This source is disabled. Enable it to run it.", "sourceId", sourceId))
                     .build();
+        }
+
+        Response vectorSpaceRefusal = vectorSpaceRefusal(ragConfigId, resolved.knowledgeBase());
+        if (vectorSpaceRefusal != null) {
+            return vectorSpaceRefusal;
         }
 
         return sourceIngestionService.runAsync(ragConfigId, resolved.knowledgeBase(), resolved.source())
@@ -378,7 +407,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             LOGGER.errorf(e, "Failed to read the schedule of source %s of RAG config %s", sanitize(sourceId),
                     sanitize(ragConfigId));
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-                    .entity(Map.of("error", "The schedule store could not be read: " + e.getMessage())).build();
+                    .entity(Map.of("error", "The schedule store could not be read. The details are in the server log.")).build();
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -466,14 +495,19 @@ public class RestRagIngestion implements IRestRagIngestion {
             return resolved.error();
         }
         try {
-            var chunks = inspector.documentChunks(ragConfigId, resolved.knowledgeBase(), resolved.source(), documentId,
+            var page = inspector.documentChunkPage(ragConfigId, resolved.knowledgeBase(), resolved.source(), documentId,
                     limit == null ? 100 : limit);
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("documentId", documentId);
-            body.put("chunks", chunks.stream().map(RestRagIngestion::describeChunk).toList());
+            body.put("chunks", page.chunks().stream().map(RestRagIngestion::describeChunk).toList());
+            // The vector stores have no "list everything": the chunks are the best matches
+            // of
+            // a similarity search, cut at the limit. Without this flag a document with more
+            // chunks than that looked complete.
+            body.put("truncated", page.truncated());
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
-            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -514,7 +548,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             body.put("results", hits.stream().map(RestRagIngestion::describeChunk).toList());
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
-            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -587,12 +621,14 @@ public class RestRagIngestion implements IRestRagIngestion {
             try {
                 hits = inspector.search(ragConfigId, knowledgeBase, resolved.source(), golden.query(), k, minScore);
             } catch (UnsupportedOperationException e) {
-                return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+                return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Evaluating knowledge base %s failed at query %d", sanitize(ragConfigId), i);
+                if (e instanceof VectorSpaceMismatchException mismatch) {
+                    return mismatchResponse(mismatch);
+                }
                 return Response.status(Response.Status.BAD_GATEWAY)
-                        .entity(Map.of("error", "The embedding model or vector store failed at query " + i + ": "
-                                + e.getMessage(), "queryIndex", i))
+                        .entity(Map.of("error", "Query " + i + " failed. " + RagFailures.clientMessage(e), "queryIndex", i))
                         .build();
             }
             List<List<String>> ranked = hits.stream().map(chunk -> identifiers(chunk, matchKeys)).toList();
@@ -767,15 +803,221 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     /**
-     * An embedding provider or vector store that failed. Said as a 502 with the
-     * cause, because the cause -- a bad API key, an unreachable store -- is exactly
-     * what the operator opened this view to find out.
+     * An embedding provider or vector store that failed: 502, with a fixed sentence
+     * for the kind of failure (rejected credentials, unknown model, a store error)
+     * and never the provider's or the driver's own text, which can hold SQL and
+     * host names. The whole exception is in the server log under the knowledge
+     * base's id. A refused vector space is the caller's to resolve, so it is a 409
+     * with a stable {@code code}.
      */
     private static Response inspectionFailed(String ragConfigId, RuntimeException e) {
         LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
+        if (e instanceof VectorSpaceMismatchException mismatch) {
+            return mismatchResponse(mismatch);
+        }
+        if (e instanceof OperatorFailureException unresolved) {
+            return unresolvedResponse(unresolved);
+        }
         return Response.status(Response.Status.BAD_GATEWAY)
-                .entity(Map.of("error", "The embedding model or vector store failed: " + e.getMessage()))
+                .entity(Map.of("error", RagFailures.clientMessage(e)))
                 .build();
+    }
+
+    private static Response mismatchResponse(VectorSpaceMismatchException mismatch) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", mismatch.getMessage(), "code", VectorSpaceMismatchException.CODE))
+                .build();
+    }
+
+    /**
+     * The 409 for a knowledge base whose vector store holds another embedding
+     * space, or null when it does not (or when nothing tracks it).
+     */
+    private Response vectorSpaceRefusal(String ragConfigId, RagConfiguration knowledgeBase) {
+        if (vectorSpaceGuard == null) {
+            return null;
+        }
+        try {
+            vectorSpaceGuard.requireCompatible(ragConfigId, knowledgeBase);
+            return null;
+        } catch (VectorSpaceMismatchException e) {
+            return mismatchResponse(e);
+        } catch (OperatorFailureException e) {
+            return unresolvedResponse(e);
+        }
+    }
+
+    private static Response unresolvedResponse(OperatorFailureException e) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", RagFailures.clientMessage(e), "code", "EMBEDDING_SETTINGS_UNRESOLVED")).build();
+    }
+
+    // --- The vector space, and making it again ---
+
+    @Override
+    public Response readVectorSpace(String ragConfigId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+        var resolved = resolveKnowledgeBase(ragConfigId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        if (vectorSpaceGuard == null) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", "Vector spaces are not tracked here"))
+                    .build();
+        }
+        RagConfiguration knowledgeBase = resolved.knowledgeBase();
+        VectorSpaceGuard.Status status;
+        try {
+            status = vectorSpaceGuard.status(ragConfigId, knowledgeBase);
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s", sanitize(ragConfigId));
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", RagFailures.clientMessage(e)))
+                    .build();
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tracked", status.applicable());
+        body.put("storeType", knowledgeBase.getStoreType());
+        if (status.applicable()) {
+            body.put("stored", describeSpace(status.stored()));
+            body.put("configured", describeSpace(status.configured()));
+            body.put("matches", status.matches());
+            body.put("rebuilding", status.rebuilding());
+            if (status.rebuilding()) {
+                body.put("action", "A re-embed is removing and rebuilding the vectors, or one did not finish: search and ingest are refused "
+                        + "until one does. If none of its sources is running, re-embed again: POST /ragstore/rags/" + ragConfigId
+                        + "/reembed?version=" + version);
+            } else if (!status.matches()) {
+                body.put("action", "Search and ingest are refused until the knowledge base is re-embedded: "
+                        + "POST /ragstore/rags/" + ragConfigId + "/reembed?version=" + version);
+            }
+        }
+        return Response.ok(body).build();
+    }
+
+    /**
+     * Agents are bound to the latest version, so a vector space recorded for an
+     * older one would be wrong for them: refused, with the reason.
+     */
+    private Response requireLatestVersion(String ragConfigId, Integer version) {
+        IResourceStore.IResourceId current;
+        try {
+            current = restRagStore.getCurrentResourceId(ragConfigId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
+        if (current == null || current.getVersion() == null || current.getVersion().equals(version)) {
+            return null;
+        }
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", "Version " + version + " is not the latest version of this knowledge base (" + current.getVersion()
+                        + "). Re-embedding records the embedding model of the version it is given, and agents use the latest: re-embed "
+                        + "version " + current.getVersion() + ".", "code", "NOT_LATEST_VERSION", "latestVersion", current.getVersion()))
+                .build();
+    }
+
+    private static Map<String, Object> describeSpace(VectorSpace space) {
+        if (space == null) {
+            // Nothing recorded yet: a knowledge base from before spaces were tracked adopts
+            // the configured one on first use.
+            return null;
+        }
+        Map<String, Object> described = new LinkedHashMap<>();
+        described.put("provider", space.provider());
+        described.put("model", space.model().isEmpty() ? null : space.model());
+        described.put("deployment", space.deployment().isEmpty() ? null : space.deployment());
+        described.put("taskType", space.taskType().isEmpty() ? null : space.taskType());
+        described.put("dimension", space.dimension());
+        described.put("description", space.describe());
+        return described;
+    }
+
+    @Override
+    public Response reembed(String ragConfigId, Integer version) {
+        // EDIT, like every operation that rewrites what the knowledge base answers
+        // from.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+        var resolved = resolveKnowledgeBase(ragConfigId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        if (reembedService == null) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", "Re-embedding is not available here"))
+                    .build();
+        }
+        Response notLatest = requireLatestVersion(ragConfigId, version);
+        if (notLatest != null) {
+            return notLatest;
+        }
+        KnowledgeBaseReembedService.Result result;
+        try {
+            result = reembedService.reembed(ragConfigId, resolved.knowledgeBase());
+        } catch (KnowledgeBaseReembedService.ReembedRefusedException e) {
+            Map<String, Object> refusal = new LinkedHashMap<>();
+            refusal.put("error", e.getMessage());
+            refusal.put("code", e.code());
+            refusal.put("knowledgeBases", e.knowledgeBases());
+            return Response.status(Response.Status.CONFLICT).entity(refusal).build();
+        } catch (KnowledgeBaseStorageGuard.SharerScanIncompleteException e) {
+            // Which knowledge base could not be read is in the log; the client is told that
+            // the
+            // check could not be completed, and that nothing was changed.
+            LOGGER.warnf("Re-embedding knowledge base %s refused: %s (unreadable: %s)", sanitize(ragConfigId), e.getMessage(),
+                    e.unreadable());
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The other knowledge bases could not all be checked, so it cannot be ruled out that one of "
+                            + "them keeps its chunks in the same store; removing this one's vectors might remove theirs. Nothing was "
+                            + "changed. Retry once every knowledge base can be read; the server log names the one that could not.",
+                            "code", "KNOWLEDGE_BASE_SCAN_INCOMPLETE"))
+                    .build();
+        } catch (VectorSpaceMismatchException | OperatorFailureException e) {
+            // An unresolvable variable, say: nothing was changed, and it is worth retrying.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", RagFailures.clientMessage(e), "code", e instanceof VectorSpaceMismatchException
+                            ? VectorSpaceMismatchException.CODE
+                            : "EMBEDDING_SETTINGS_UNRESOLVED"))
+                    .build();
+        } catch (UnsupportedOperationException e) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
+        } catch (KnowledgeBaseReembedService.ReembedIncompleteException e) {
+            LOGGER.errorf(e, "Re-embedding knowledge base %s failed while its vectors were removed", sanitize(ragConfigId));
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The knowledge base's vectors could not all be removed, so no source was run. Some may be "
+                            + "gone already: search and ingest stay refused until a re-embed completes. Re-embed again once the "
+                            + "vector store is reachable. " + RagFailures.clientMessage(e.getCause()), "code", "REEMBED_INCOMPLETE"))
+                    .build();
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Re-embedding knowledge base %s failed before anything was removed", sanitize(ragConfigId));
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The re-embed could not be prepared, so no vector was removed. Try again. "
+                            + RagFailures.clientMessage(e), "code", "REEMBED_NOT_STARTED"))
+                    .build();
+        }
+        if (result.refused()) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run is in flight for source '" + result.busySourceId()
+                            + "'. Nothing was changed; re-embed once it has finished.", "sourceId", result.busySourceId()))
+                    .build();
+        }
+        List<Map<String, Object>> started = new ArrayList<>();
+        for (var outcome : result.sources()) {
+            Map<String, Object> described = new LinkedHashMap<>();
+            described.put("sourceId", outcome.sourceId());
+            described.put("runId", outcome.runId());
+            described.put("note", outcome.note());
+            started.add(described);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "started");
+        body.put("kbId", ragConfigId);
+        // Follow each run with GET /ragstore/rags/{id}/sources/{sourceId}/runs.
+        body.put("sources", started);
+        body.put("notReEmbedded", result.notReEmbedded());
+        // pgvector only: whether the table was dropped to be recreated at the
+        // configured vector size.
+        body.put("tableRecreated", result.tableRecreated());
+        body.put("warnings", result.warnings());
+        return Response.accepted(body).build();
     }
 
     private static Map<String, Object> describeDocument(KnowledgeBaseInspector.DocumentSummary document) {
@@ -983,7 +1225,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             // Answering "not found" sends the caller looking for a knowledge base
             // that is sitting there.
             return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", "Invalid request: " + e.getMessage())).build());
+                    .entity(Map.of("error", "Invalid request: " + RagFailures.clientMessage(e))).build());
         } catch (RuntimeException e) {
             // A store that is down is not a missing knowledge base. Reporting 404 for
             // an outage hides it behind a client error that nobody investigates.

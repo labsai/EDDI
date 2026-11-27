@@ -29,6 +29,7 @@ import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.RestRagStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
@@ -57,6 +58,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.enterprise.inject.Instance;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import java.io.IOException;
 import java.util.logging.Handler;
@@ -1702,6 +1704,54 @@ class UpgradeExecutorTest {
             verifyDispatchUpdate("rag", "ai.labs.rag", "ai.labs.rag",
                     RagConfiguration.class,
                     IRestRagStore.class);
+        }
+
+        /**
+         * An upgrade or sync writes a knowledge base its owner cannot edit first, so it
+         * must reach the store through the lenient update: run through the real
+         * dispatch, against a store whose interactive update refuses what an older
+         * version accepted.
+         */
+        @Test
+        @DisplayName("a RagConfiguration is written through the lenient update, never the interactive one")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void ragUpdateIsLenient() throws Exception {
+            String wfId = "aabbccddeeff112233445566";
+            String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+            String extUri = "eddi://ai.labs.rag/store/resources/" + extId + "?version=2";
+            var sourceWfConfig = workflowWithStep("ai.labs.rag", extUri);
+            String extensionKey = WorkflowExtensions.scan(sourceWfConfig).getFirst().key();
+            var ext = new ExtensionSourceData("src-ext-1", "Config", "rag", "ai.labs.rag", "{}");
+            var source = createSource(List.of(new WorkflowSourceData("src-wf-1", "Workflow 1", 0, sourceWfConfig, Map.of(extensionKey, ext))),
+                    List.of());
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1", DiffAction.UPDATE, wfId, 1, "position", null, null, 0));
+            diffs.add(new ResourceDiff("src-ext-1", "rag", "Config", DiffAction.UPDATE, extId, 2, "type", null, null, -1));
+            setupPreviewAndAgent("target-1", 1, diffs);
+            when(jsonSerialization.deserialize(eq("{}"), any())).thenReturn(new RagConfiguration());
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(workflowWithStep("ai.labs.rag", extUri));
+            when(workflowStore.updateWorkflow(eq(wfId), eq(1), any())).thenReturn(Response.ok().build());
+
+            // The real store's two updates: the interactive one refuses an older config.
+            RestRagStore ragStore = Mockito.mock(RestRagStore.class);
+            when(ragStore.updateRag(anyString(), any(), any())).thenThrow(new BadRequestException("minScore must be between 0 and 1"));
+            when(ragStore.updateRagLenient(anyString(), any(), any())).thenReturn(Response.ok().build());
+
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
+            try (cdiMock) {
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instance = (Instance) Mockito.mock(Instance.class);
+                when(cdiInstance.select(IRestRagStore.class)).thenReturn(instance);
+                when(instance.get()).thenReturn(ragStore);
+
+                UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+                assertFalse(result.hasFailures(), result.failures().toString());
+                verify(ragStore).updateRagLenient(eq(extId), eq(2), any(RagConfiguration.class));
+                verify(ragStore, never()).updateRag(anyString(), any(), any());
+            }
         }
 
         /**
