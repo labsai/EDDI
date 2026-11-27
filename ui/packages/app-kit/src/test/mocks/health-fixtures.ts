@@ -9,7 +9,7 @@ import type {
   PortfolioItem,
   Series,
   SeriesPoint,
-} from "@/components/health/api";
+} from "../../lib/api/health";
 
 /**
  * Fixtures for the Agent Health mocks, shaped like planning/agent-health-api.md.

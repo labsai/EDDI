@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight, GitCompareArrows, HeartPulse, LayoutList, Link2, SlidersHorizontal } from "lucide-react";
-import type { HealthQuery, MeasureUnit } from "./api";
+import type { HealthQuery, MeasureUnit } from "@eddi/app-kit/lib/api/health";
 import { useAgentHealth } from "./use-agent-health";
 import { isApiError, Button, Skeleton, getErrorMessage } from "./deps";
 import { ChecksStrip } from "./checks-strip";

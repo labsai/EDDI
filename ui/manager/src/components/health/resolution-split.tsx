@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Info } from "lucide-react";
-import type { Measure } from "./api";
+import type { Measure } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { formatMeasureValue, resolutionSplit, type ResolutionKey } from "./format";
 

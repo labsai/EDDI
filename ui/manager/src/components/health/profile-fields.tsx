@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
-import { SECTION_IDS, type HealthProfile, type MeasureUnit, type ProfileOverride, type ProfileViolation } from "./api";
+import { SECTION_IDS, type HealthProfile, type MeasureUnit, type ProfileOverride, type ProfileViolation } from "@eddi/app-kit/lib/api/health";
 import { Button, cn } from "./deps";
 import { measureLabel as labelOf, sectionTitle } from "./format";
 import { fromInput, inputClass, toInput, violationsAt } from "./profile-utils";

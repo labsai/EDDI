@@ -1,4 +1,4 @@
-import type { HealthPreset, HealthProfile, MeasureUnit, ProfileViolation } from "./api";
+import type { HealthPreset, HealthProfile, MeasureUnit, ProfileViolation } from "@eddi/app-kit/lib/api/health";
 
 export const inputClass =
   "h-8 w-full rounded-lg border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";

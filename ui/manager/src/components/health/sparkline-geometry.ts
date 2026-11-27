@@ -1,4 +1,4 @@
-import type { HealthMarker, SeriesPoint } from "./api";
+import type { HealthMarker, SeriesPoint } from "@eddi/app-kit/lib/api/health";
 
 /** Width of the sparkline viewBox, in SVG units. */
 export const SPARK_W = 160;

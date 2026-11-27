@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "@/components/health/api";
+import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "../../lib/api/health";
 import {
   HEALTH_AGENTS,
   MARKERS,

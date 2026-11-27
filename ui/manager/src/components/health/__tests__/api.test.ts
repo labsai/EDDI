@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiClientError } from "../deps";
-import { InvalidPathSegmentError } from "@/lib/api/path-segment";
-import { drillDownDenial, healthPaths, normalizeProfile, profileViolations } from "../api";
+import { InvalidPathSegmentError } from "@eddi/app-kit/lib/api/path-segment";
+import { drillDownDenial, healthPaths, normalizeProfile, profileViolations } from "@eddi/app-kit/lib/api/health";
 
 describe("healthPaths", () => {
   it("builds the agent health query from period, version and repeated origins", () => {

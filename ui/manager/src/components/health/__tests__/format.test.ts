@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Measure } from "../api";
+import type { Measure } from "@eddi/app-kit/lib/api/health";
 import {
   allowedReportSections,
   bandMeta,

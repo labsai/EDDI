@@ -18,7 +18,7 @@ import {
   type HealthProfile,
   type HealthQuery,
   type SeriesPoint,
-} from "./api";
+} from "@eddi/app-kit/lib/api/health";
 
 /** Health refreshes with the rollup, not the second: a minute is plenty. */
 const STALE_MS = 60_000;

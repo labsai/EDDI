@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { HEALTH_AGENTS } from "@/test/mocks/health-fixtures";
-import { resetHealthMockState } from "@/test/mocks/health-handlers";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { HEALTH_AGENTS } from "@eddi/app-kit/test/mocks/health-fixtures";
+import { resetHealthMockState } from "@eddi/app-kit/test/mocks/health-handlers";
 import { AgentHealthPanel } from "../agent-health-panel";
 import { api } from "../deps";
 

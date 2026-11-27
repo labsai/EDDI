@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ExternalLink, ShieldAlert } from "lucide-react";
-import { drillDownDenial, type HealthQuery } from "./api";
+import { drillDownDenial, type HealthQuery } from "@eddi/app-kit/lib/api/health";
 import { useHealthSessions } from "./use-agent-health";
 import { AccessibleDialog, Badge, Button, Skeleton, formatUsd, getErrorMessage } from "./deps";
 import type { DrillFilter } from "./drill";

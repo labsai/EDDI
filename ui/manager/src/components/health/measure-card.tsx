@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, Minus, Star } from "lucide-react";
-import type { HealthMarker, Measure, SeriesPoint } from "./api";
+import type { HealthMarker, Measure, SeriesPoint } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { BandBadge } from "./band-badge";
 import {

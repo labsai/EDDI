@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, CircleDashed, OctagonAlert, XCircle } from "lucide-react";
-import type { Band, HealthStatus } from "./api";
+import type { Band, HealthStatus } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { bandMeta, statusLabelKey, STATUS_META } from "./format";
 

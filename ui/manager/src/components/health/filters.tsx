@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "./api";
+import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { enumLabel, formatDays, periodDays, selectClass, versionOptions } from "./format";
 

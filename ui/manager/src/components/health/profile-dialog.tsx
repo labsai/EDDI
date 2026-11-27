@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { HealthProfile, MeasureUnit, ProfileViolation } from "./api";
-import { normalizeProfile, profileViolations } from "./api";
+import type { HealthProfile, MeasureUnit, ProfileViolation } from "@eddi/app-kit/lib/api/health";
+import { normalizeProfile, profileViolations } from "@eddi/app-kit/lib/api/health";
 import { useHealthPresets, useHealthProfile, useResetHealthProfile, useSaveHealthProfile } from "./use-agent-health";
 import { AccessibleDialog, Button, Skeleton, getErrorMessage } from "./deps";
 import { measureLabel } from "./format";

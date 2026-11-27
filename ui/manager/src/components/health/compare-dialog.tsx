@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
-import type { AgentHealth, HealthCompare, Measure } from "./api";
+import type { AgentHealth, HealthCompare, Measure } from "@eddi/app-kit/lib/api/health";
 import { useHealthCompare } from "./use-agent-health";
 import { AccessibleDialog, Skeleton, cn, getErrorMessage } from "./deps";
 import { TONE_CLASS, compareVerdict, formatDays, formatDelta, formatMeasureValue, measureLabel, selectClass, versionOptions } from "./format";

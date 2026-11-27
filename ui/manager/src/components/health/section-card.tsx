@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Lock, ListTree, Wand2 } from "lucide-react";
-import type { HealthQuery, HealthSection } from "./api";
+import type { HealthQuery, HealthSection } from "@eddi/app-kit/lib/api/health";
 import { useHealthSeries } from "./use-agent-health";
 import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "./deps";
 import { drillForMeasure, drillForResolution, type DrillFilter } from "./drill";

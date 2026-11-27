@@ -28,13 +28,15 @@ overview page is empty, and `npm run dev` in mock mode shows the full set of sce
 
 ### Design decisions
 
-- **One feature folder, one seam**: the API client (`api.ts`), the query hooks and the components all live in
-  `components/health/`, and every shared Manager import goes through
-  [`components/health/deps.ts`](../../ui/manager/src/components/health/deps.ts), so the refactor that moves `lib/api`, `components/ui`
-  and `lib/utils` into `@eddi/app-kit` rewrites one file here. The health query keys stay in the feature folder rather than
-  `lib/query-keys.ts` because nothing else reads or invalidates them. Edits to existing files are one-liners (agent page, router,
-  route registry, the two MSW entry points, locale files), plus `ApiClient.getRaw` (a GET that returns the raw response through the
-  same token refresh and 401 retry, used by the export) and the export of `activeLocale` from `lib/utils`.
+- **One feature folder, one seam**: the query hooks and the components live in `components/health/`, and every shared Manager
+  import goes through [`components/health/deps.ts`](../../ui/manager/src/components/health/deps.ts). After the frontend unification
+  the REST client and its types live in `@eddi/app-kit` as
+  [`lib/api/health.ts`](../../ui/packages/app-kit/src/lib/api/health.ts), next to the other feature clients, because the mocks
+  ([`health-handlers.ts`](../../ui/packages/app-kit/src/test/mocks/health-handlers.ts), `health-fixtures.ts`) are typed by it and the
+  mock API both apps run against is app-kit's. The health query keys stay in the feature folder rather than `lib/query-keys.ts`
+  because nothing else reads or invalidates them. Edits to existing files are one-liners (agent page, router, route registry, the
+  two MSW entry points, locale files), plus `ApiClient.getRaw` in `@eddi/app-kit` (a GET that returns the raw response through the
+  same token refresh and 401 retry, used by the export) and the export of `activeLocale` from `@eddi/ui`.
 - **No chart library**: the sparkline is a small SVG. Good/caution/bad use the Manager's existing emerald, `warning` and
   `destructive` colours (not brand tokens), and every band or status also carries an icon and a word.
 - **Every number and date is formatted in the app's language** (`Intl`, through the same `activeLocale` the cost formatter uses),
@@ -52,5 +54,5 @@ overview page is empty, and `npm run dev` in mock mode shows the full set of sce
 - "UI requests" at the end of the REST contract list the few fields the UI would like.
 
 **Files:** [`agent-health-panel.tsx`](../../ui/manager/src/components/health/agent-health-panel.tsx),
-[`health-overview.tsx`](../../ui/manager/src/pages/health-overview.tsx), [`api.ts`](../../ui/manager/src/components/health/api.ts),
-[`use-agent-health.ts`](../../ui/manager/src/components/health/use-agent-health.ts), [`health-handlers.ts`](../../ui/manager/src/test/mocks/health-handlers.ts)
+[`health-overview.tsx`](../../ui/manager/src/pages/health-overview.tsx), [`health.ts`](../../ui/packages/app-kit/src/lib/api/health.ts),
+[`use-agent-health.ts`](../../ui/manager/src/components/health/use-agent-health.ts), [`health-handlers.ts`](../../ui/packages/app-kit/src/test/mocks/health-handlers.ts)

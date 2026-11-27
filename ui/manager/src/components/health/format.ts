@@ -8,7 +8,7 @@ import {
   type HealthStatus,
   type Measure,
   type MeasureUnit,
-} from "./api";
+} from "@eddi/app-kit/lib/api/health";
 
 /**
  * Pure formatting and interpretation for the Health UI — no React, no I/O.

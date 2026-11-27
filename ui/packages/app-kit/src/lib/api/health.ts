@@ -1,4 +1,5 @@
-import { api, ApiClientError, seg } from "./deps";
+import { api, ApiClientError } from "../api-client";
+import { seg } from "./path-segment";
 
 /**
  * Agent Health — the REST contract in planning/agent-health-api.md, section by

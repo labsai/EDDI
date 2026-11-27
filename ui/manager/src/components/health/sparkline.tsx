@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { HealthMarker, MeasureUnit, SeriesPoint } from "./api";
+import type { HealthMarker, MeasureUnit, SeriesPoint } from "@eddi/app-kit/lib/api/health";
 import { cn } from "./deps";
 import { formatMeasureValue } from "./format";
 import { SPARK_H, SPARK_W, sparklineGeometry } from "./sparkline-geometry";
