@@ -1,0 +1,321 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.integrations.channels;
+
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
+import ai.labs.eddi.integrations.channels.types.WebhookChannelType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class ChannelTypeRegistryTest {
+
+    private static Map<String, String> fakeConfig() {
+        var pc = new HashMap<String, String>();
+        pc.put("connection", "fakechat-bot");
+        pc.put("appId", "app-1");
+        return pc;
+    }
+
+    @Nested
+    @DisplayName("Discovery")
+    class Discovery {
+
+        @Test
+        @DisplayName("the built-ins are slack, webhook and email, found case-insensitively")
+        void builtIns() {
+            var registry = ChannelTypeRegistry.builtIns();
+            assertEquals(Set.of("email", "slack", "webhook"), registry.ids());
+            assertTrue(registry.find("SLACK").isPresent());
+            assertTrue(registry.find("teams").isEmpty());
+            assertTrue(registry.find(null).isEmpty());
+            assertTrue(registry.find(" email").isEmpty(), "not trimmed: the stored string is what everything downstream compares");
+        }
+
+        @Test
+        @DisplayName("two descriptors with one id fail fast")
+        void duplicateId() {
+            var ex = assertThrows(IllegalStateException.class,
+                    () -> new ChannelTypeRegistry(List.of(new SlackChannelType(), new SlackChannelType())));
+            assertTrue(ex.getMessage().contains("registered twice"));
+        }
+
+        @Test
+        @DisplayName("an id that is not lower-case fails fast")
+        void upperCaseId() {
+            ChannelTypeDescriptor bad = () -> "Teams";
+            assertThrows(IllegalStateException.class, () -> new ChannelTypeRegistry(List.of(bad)));
+        }
+
+        @Test
+        @DisplayName("a connection-backed type without an allow-list fails fast")
+        void connectionBackedWithoutAllowList() {
+            ChannelTypeDescriptor bad = new ChannelTypeDescriptor() {
+                @Override
+                public String id() {
+                    return "bad";
+                }
+
+                @Override
+                public boolean connectionBacked() {
+                    return true;
+                }
+            };
+            assertThrows(IllegalStateException.class, () -> new ChannelTypeRegistry(List.of(bad)));
+        }
+    }
+
+    @Nested
+    @DisplayName("platformConfig validation")
+    class Validation {
+
+        private final ChannelTypeDescriptor fake = new FakeChatChannelType();
+
+        @Test
+        @DisplayName("allowed keys and a connection pass")
+        void valid() {
+            assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(fake, fakeConfig()));
+        }
+
+        @Test
+        @DisplayName("a plaintext token under an unknown key is refused, pointing to connections")
+        void plaintextToken() {
+            var pc = fakeConfig();
+            pc.put("botToken", "xoxb-not-a-real-token");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(fake, pc);
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).contains("platformConfig.botToken is not a fakechat setting"));
+            assertTrue(errors.get(0).contains("platformConfig.connection"));
+            assertTrue(errors.get(0).contains("Allowed:"));
+        }
+
+        @Test
+        @DisplayName("a vault reference under an unknown key is refused too")
+        void vaultReference() {
+            var pc = fakeConfig();
+            pc.put("appPassword", "${vault:teams-app-password}");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(fake, pc);
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).contains("not even as a vault reference"));
+        }
+
+        @Test
+        @DisplayName("a missing connection is refused")
+        void missingConnection() {
+            var pc = fakeConfig();
+            pc.remove("connection");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(fake, pc);
+            assertTrue(errors.stream().anyMatch(e -> e.contains("requires platformConfig.connection")), errors.toString());
+        }
+
+        @Test
+        @DisplayName("a malformed connection name is refused; ${connection:name} is accepted")
+        void connectionName() {
+            var pc = fakeConfig();
+            pc.put("connection", "not a name!");
+            assertFalse(ChannelTypeRegistry.validatePlatformConfig(fake, pc).isEmpty());
+            pc.put("connection", "${connection:fakechat-bot}");
+            assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(fake, pc));
+        }
+
+        @Test
+        @DisplayName("a channelId that looks like an application key is refused")
+        void channelIdLikeApplicationKey() {
+            var pc = fakeConfig();
+            pc.put("channelId", "@app:someone-elses-app");
+            assertEquals(List.of("platformConfig.channelId must not start with '@'."), ChannelTypeRegistry.validatePlatformConfig(fake, pc));
+        }
+
+        @Test
+        @DisplayName("the type's own rules run as well")
+        void ownRules() {
+            var pc = fakeConfig();
+            pc.remove("appId");
+            assertEquals(List.of("A fakechat integration requires platformConfig.appId."),
+                    ChannelTypeRegistry.validatePlatformConfig(fake, pc));
+        }
+
+        @Test
+        @DisplayName("a legacy type accepts keys it does not know, so stored Slack documents stay valid")
+        void legacyTypeAcceptsAnyKey() {
+            var pc = Map.of("channelId", "C1", "botToken", "${vault:slack-bot}", "somethingOld", "x");
+            assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(new SlackChannelType(), pc));
+        }
+    }
+
+    @Nested
+    @DisplayName("Routing keys")
+    class RoutingKeys {
+
+        @Test
+        @DisplayName("channelId wins; without one the application key; without both nothing")
+        void defaults() {
+            var fake = new FakeChatChannelType();
+            assertEquals(List.of("C1"), fake.routingKeys(null, Map.of("appId", "a", "channelId", "C1")));
+            assertEquals(List.of("@app:a"), fake.routingKeys(null, Map.of("appId", "a")));
+            assertEquals(List.of(), fake.routingKeys(null, Map.of()));
+            assertEquals(List.of(), new SlackChannelType().routingKeys(null, Map.of("botToken", "x")));
+        }
+
+        @Test
+        @DisplayName("a webhook is routed by its resource id, an email integration not at all")
+        void webhookAndEmail() {
+            var registry = ChannelTypeRegistry.builtIns();
+            assertEquals(List.of("abc"), registry.routingKeys("webhook", "abc", Map.of()));
+            assertEquals(List.of(), new WebhookChannelType().routingKeys(null, Map.of()));
+            assertEquals(List.of(), registry.routingKeys("email", "abc", Map.of("channelId", "C1")));
+        }
+
+        @Test
+        @DisplayName("a type no descriptor claims is routed by channelId, as before descriptors")
+        void unknownType() {
+            assertEquals(List.of("C9"), ChannelTypeRegistry.builtIns().routingKeys("gone", null, Map.of("channelId", "C9")));
+            assertEquals(List.of(), ChannelTypeRegistry.builtIns().routingKeys("gone", null, Map.of()));
+        }
+
+        @Test
+        @DisplayName("error messages describe application keys and channel keys differently")
+        void describe() {
+            assertEquals("application id 'a'", ChannelTypeDescriptor.describeRoutingKey("@app:a"));
+            assertEquals("channelId 'C1'", ChannelTypeDescriptor.describeRoutingKey("C1"));
+            assertThrows(IllegalArgumentException.class, () -> ChannelTypeDescriptor.applicationKey(null));
+            assertThrows(IllegalArgumentException.class, () -> ChannelTypeDescriptor.applicationKey(" "));
+            assertEquals(Optional.empty(), new SlackChannelType().applicationId(Map.of("appId", "x")));
+        }
+    }
+
+    @Nested
+    @DisplayName("Review fixes")
+    class ReviewFixes {
+
+        /** Routed by a conversation id, like a Teams channel. */
+        private final ChannelTypeDescriptor byConversation = new FakeChatChannelType() {
+            @Override
+            public Optional<Set<String>> allowedPlatformConfigKeys() {
+                return Optional.of(Set.of("connection", "appId", "conversationId"));
+            }
+
+            @Override
+            public List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
+                String conversationId = platformConfig.get("conversationId");
+                return conversationId != null
+                        ? List.of(conversationId)
+                        : List.of(ChannelTypeDescriptor.applicationKey(platformConfig.get("appId")));
+            }
+        };
+
+        @Test
+        @DisplayName("a routing key other than channelId in the application namespace is refused too")
+        void otherRoutingKeyInApplicationNamespace() {
+            var pc = fakeConfig();
+            pc.put("conversationId", "@app:someone-elses-app");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(byConversation, pc);
+            assertEquals(1, errors.size(), errors.toString());
+            assertTrue(errors.get(0).contains("routing key must not start with '@'"));
+        }
+
+        @Test
+        @DisplayName("the integration's own application key is fine")
+        void ownApplicationKey() {
+            assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(byConversation, fakeConfig()));
+        }
+
+        @Test
+        @DisplayName("a channel-bound integration may not be routed by its own application key")
+        void ownApplicationKeyOnChannel() {
+            ChannelTypeDescriptor bothKeys = new FakeChatChannelType() {
+                @Override
+                public List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
+                    return List.of(platformConfig.get("channelId"), ChannelTypeDescriptor.applicationKey(platformConfig.get("appId")));
+                }
+            };
+            var pc = fakeConfig();
+            pc.put("channelId", "C1");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(bothKeys, pc);
+            assertEquals(1, errors.size(), errors.toString());
+            assertTrue(errors.get(0).contains("must not be routed by its application key"), errors.toString());
+        }
+
+        @Test
+        @DisplayName("a missing appId is reported as such, not as a routing-key exception")
+        void typeErrorsBeforeRoutingKeys() {
+            var pc = new HashMap<String, String>();
+            pc.put("connection", "fakechat-bot");
+            var errors = assertDoesNotThrow(() -> ChannelTypeRegistry.validatePlatformConfig(byConversation, pc));
+            assertEquals(List.of("A fakechat integration requires platformConfig.appId."), errors);
+        }
+
+        @Test
+        @DisplayName("an allowed key holding a vault reference is refused: nothing resolves it")
+        void vaultReferenceInAllowedKey() {
+            var pc = fakeConfig();
+            pc.put("appId", "${vault:app}");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(new FakeChatChannelType(), pc);
+            assertTrue(errors.stream().anyMatch(e -> e.contains("platformConfig.appId must not be a vault reference")), errors.toString());
+        }
+
+        @Test
+        @DisplayName("a workspace's connection may be named as tenant/name")
+        void tenantQualifiedConnection() {
+            var pc = fakeConfig();
+            pc.put("connection", "space-a/fakechat-bot");
+            assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(new FakeChatChannelType(), pc));
+            pc.put("connection", "a/b/c");
+            assertFalse(ChannelTypeRegistry.validatePlatformConfig(new FakeChatChannelType(), pc).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a type id containing ':' fails fast: it separates type and key in the router's index")
+        void colonInId() {
+            ChannelTypeDescriptor bad = () -> "acme:chat";
+            assertThrows(IllegalStateException.class, () -> new ChannelTypeRegistry(List.of(bad)));
+        }
+
+        @Test
+        @DisplayName("a connection-backed type whose allow-list lacks 'connection' fails fast")
+        void allowListWithoutConnection() {
+            ChannelTypeDescriptor bad = new FakeChatChannelType() {
+                @Override
+                public Optional<Set<String>> allowedPlatformConfigKeys() {
+                    return Optional.of(Set.of("appId"));
+                }
+            };
+            var ex = assertThrows(IllegalStateException.class, () -> new ChannelTypeRegistry(List.of(bad)));
+            assertTrue(ex.getMessage().contains("'connection'"));
+        }
+
+        @Test
+        @DisplayName("refusals are counted with bounded tags; without a meter registry counting is a no-op")
+        void metrics() {
+            var meters = new SimpleMeterRegistry();
+            var registry = new ChannelTypeRegistry(List.of(new FakeChatChannelType()), meters);
+            registry.recordRejected("fakechat", "platform_config");
+            registry.recordRejected("Not A Type!", "platform_config");
+            registry.recordRejected("teamz", "platform_config");
+            registry.recordRejected("fakechat", "Not A Reason!");
+            registry.recordDroppedKey("fakechat");
+            assertEquals(1, meters.find("eddi_channel_config_rejected_total").tags("type", "fakechat", "reason", "platform_config")
+                    .counter().count());
+            assertEquals(2, meters.find("eddi_channel_config_rejected_total").tags("type", "other").counter().count(),
+                    "an unregistered type collapses to 'other', lower-case or not");
+            assertEquals(1, meters.find("eddi_channel_config_rejected_total").tags("type", "fakechat", "reason", "other").counter().count());
+            assertEquals(1, meters.find("eddi_channel_config_keys_dropped_total").tags("type", "fakechat").counter().count());
+            ChannelTypeRegistry.builtIns().recordRejected("slack", "x");
+        }
+    }
+}

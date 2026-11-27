@@ -68,6 +68,7 @@ public class AlertMetrics {
             }
         }
         dropped0(AlertDispatcher.REASON_QUEUE_FULL);
+        dropped0(AlertDeliveryStage.REASON_DELIVERY_QUEUE_FULL);
     }
 
     /** The queue-depth gauge of the alert worker. */

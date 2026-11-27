@@ -353,9 +353,13 @@ public class ConverseWithAgentTool {
             }
 
             String response = extractResponse(snapshot);
-            if (response == null && snapshot != null
+            if ((response == null || response.isEmpty()) && snapshot != null
                     && snapshot.getConversationState() == ConversationState.ERROR) {
-                response = "[Agent failed to produce output — conversation entered ERROR state]";
+                // A failure, reported as one — never as text the delegating model
+                // could take for the other agent's answer.
+                LOGGER.warnf("[CONVERSE] Agent '%s' ended in ERROR without an answer in conversation '%s'", agentId, convId);
+                return "❌ Agent '%s' failed to produce an answer: its conversation (%s) ended in ERROR. This is not the agent's "
+                        .formatted(agentId, convId) + "answer; retry later or proceed without it.";
             }
 
             LOGGER.debugf("[CONVERSE] Agent '%s' responded in conversation '%s'", agentId, convId);
