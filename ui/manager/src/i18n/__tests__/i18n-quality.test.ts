@@ -27,8 +27,15 @@ describeI18nQuality({
     ar: 73, hi: 76, ja: 77, ko: 77, pt: 81, th: 79, zh: 78,
   },
   // The version line is two placeholders ("{{productName}} {{version}}"), the
-  // same in every language — not a translation left undone.
+  // same in every language — not a translation left undone. "Google Drive" is
+  // the product's own name in these languages (ja, ko, th and zh localise it).
   deliberatelyIdentical: Object.fromEntries(
-    (["fr", "ar", "hi", "ja", "ko", "th", "zh"] as const).map((code) => [code, ["nav.versionLabel"]]),
+    (["de", "es", "fr", "pt", "ar", "hi", "ja", "ko", "th", "zh"] as const).map((code) => [
+      code,
+      [
+        ...(["de", "es", "pt"].includes(code) ? [] : ["nav.versionLabel"]),
+        ...(["ja", "ko", "th", "zh"].includes(code) ? [] : ["ragEditor.sources.typeGoogleDrive"]),
+      ],
+    ]),
   ),
 });

@@ -244,8 +244,9 @@ describe("RAG upload source", () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("ingestion-source-0-dropzone")).toBeInTheDocument();
 
-    // The radiogroup's arrow keys took the same unguarded path.
-    fireEvent.keyDown(screen.getByRole("radiogroup", { name: "Source" }), { key: "ArrowRight" });
+    // The radiogroup's arrow keys took the same unguarded path. Left from Files is
+    // Website; right is Google Drive since that type exists.
+    fireEvent.keyDown(screen.getByRole("radiogroup", { name: "Source" }), { key: "ArrowLeft" });
     expect(await screen.findByText("Turn this into a website source?")).toBeInTheDocument();
     expect(screen.getByTestId("ingestion-source-0-dropzone")).toBeInTheDocument();
   });

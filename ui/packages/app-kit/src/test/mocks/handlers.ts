@@ -812,6 +812,46 @@ export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "E
 /** The reason the mocked failed turn reports. */
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
+/**
+ * A knowledge base fed by a Google Shared Drive (`IngestionSource.TYPE_GOOGLE_DRIVE`),
+ * served for this one id so every other knowledge base keeps its web source. Its
+ * connection is the `google-drive-sa` service account in the connections mock.
+ */
+export const MOCK_GOOGLE_DRIVE_KB_ID = "6a1f2e3d4c5b6a7f8e9d0c1b";
+
+export const MOCK_GOOGLE_DRIVE_KB = {
+  name: "handbook",
+  storeNamespace: "id",
+  embeddingProvider: "ollama",
+  embeddingParameters: { model: "nomic-embed-text", baseUrl: "http://localhost:11434" },
+  storeType: "in-memory",
+  chunkStrategy: "recursive",
+  chunkSize: 512,
+  chunkOverlap: 64,
+  maxResults: 5,
+  minScore: 0.6,
+  sources: [
+    {
+      id: "src-drive-1",
+      name: "support-handbook",
+      type: "googleDrive",
+      enabled: true,
+      cron: null,
+      googleDrive: {
+        connection: "google-drive-sa",
+        sharedDriveId: "0AmockSharedDriveId",
+        folderIds: ["1mockHandbookFolder"],
+        includeSubfolders: true,
+        mimeTypes: ["google-docs", "google-sheets", "pdf"],
+        excludeNamePatterns: ["*DRAFT*"],
+        maxFiles: 2000,
+        maxFileBytes: 26214400,
+      },
+      settings: { tombstoneAfterMissedRuns: 2, maxSegmentsPerRun: 20000, timeBudgetMinutes: 10 },
+    },
+  ],
+};
+
 /** What the mocked ingestion status says for a `replace=true` ingestion. */
 export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
 
@@ -2808,10 +2848,13 @@ export const handlers = [
   }),
 
   // RAG Knowledge Base mock data (BEFORE generic handlers)
-  http.get("*/ragstore/rags/:id", ({ request }) => {
+  http.get("*/ragstore/rags/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (isNotAnId(url.pathname) || includePrevious) return;
+    if (params.id === MOCK_GOOGLE_DRIVE_KB_ID) {
+      return HttpResponse.json(MOCK_GOOGLE_DRIVE_KB);
+    }
     return HttpResponse.json({
       name: "product-docs",
       embeddingProvider: "openai",
@@ -2908,7 +2951,30 @@ export const handlers = [
     return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
   }),
 
-  http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () => {
+  http.post("*/ragstore/rags/:id/sources/:sourceId/preview", ({ params }) => {
+    if (params.id === MOCK_GOOGLE_DRIVE_KB_ID) {
+      // A Drive preview lists without downloading, and describes the listing.
+      return HttpResponse.json({
+        runId: "preview",
+        sourceId: params.sourceId,
+        outcome: "PREVIEW",
+        documentsSeen: 12,
+        documentsIngested: 12,
+        documentsUnchanged: 0,
+        documentsSkipped: 3,
+        documentsFailed: 0,
+        documentsTombstoned: 0,
+        segmentsStored: 0,
+        costUsd: 0,
+        replaceUnsupported: false,
+        tombstoningSkipped: false,
+        stopReason: "COMPLETED",
+        message:
+          "Google Drive listing: 12 file(s) to read (8 google-docs, 1 google-sheets, 3 pdf), 2.4 MB in 3 stored " +
+          "file(s) — Google Docs, Sheets and Slides have no size before export; 4 folder(s), 6 API request(s). " +
+          "Skipped 3: 2 unsupported type (2 image/png); 1 excluded by name",
+      });
+    }
     return HttpResponse.json({
       runId: "preview",
       sourceId: "src-1",
@@ -6146,6 +6212,30 @@ const mockConnections: Record<string, Record<string, unknown>> = {
       passwordRef: "${vault:legacy-crm-password}",
     },
     baseUrlAllowlist: ["https://crm.internal.example.com:8443"],
+    timeoutMs: null,
+  },
+  // A Google service account: a signed JWT assertion, never a client secret. What
+  // a googleDrive ingestion source names (MOCK_GOOGLE_DRIVE_KB).
+  conn7: {
+    name: "google-drive-sa",
+    description: "Service account reading the support Shared Drive",
+    authType: "OAUTH2_JWT_BEARER",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: null,
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: null,
+      clientSecret: null,
+      privateKey: "${vault:google-drive-sa-key}",
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      extraAuthParams: {},
+      usePkce: false,
+      clientAuthMethod: null,
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://www.googleapis.com"],
     timeoutMs: null,
   },
   // EDDI stores nothing for this one: the calling system attaches each user's

@@ -7,6 +7,7 @@ import {
   Eye,
   FolderUp,
   Globe,
+  HardDrive,
   Loader2,
   Play,
   Plus,
@@ -32,6 +33,7 @@ import { RunHistory, RunProgress } from "@/components/editors/ingestion-run-hist
 import { CronField, ScheduleStatus } from "@/components/editors/ingestion-schedule";
 import { SourceContents } from "@/components/editors/ingestion-source-contents";
 import { describeCron } from "@/lib/ingestion-schedule";
+import { GOOGLE_DRIVE_FORMATS } from "@/lib/api/ingestion-sources";
 import type { IngestionReport, IngestionSource } from "@/lib/api/ingestion-sources";
 
 export interface IngestionSourcesPanelProps {
@@ -99,6 +101,17 @@ export function IngestionSourcesPanel({
     );
   };
 
+  const updateGoogleDrive = (
+    index: number,
+    patch: Partial<NonNullable<IngestionSource["googleDrive"]>>,
+  ) => {
+    onChange(
+      sources.map((source, i) =>
+        i === index ? { ...source, googleDrive: { ...source.googleDrive, ...patch } } : source,
+      ),
+    );
+  };
+
   const updateUpload = (index: number, patch: Partial<NonNullable<IngestionSource["upload"]>>) => {
     onChange(
       sources.map((source, i) =>
@@ -147,6 +160,7 @@ export function IngestionSourcesPanel({
             onChange={(patch) => update(index, patch)}
             onChangeWeb={(patch) => updateWeb(index, patch)}
             onChangeUpload={(patch) => updateUpload(index, patch)}
+            onChangeGoogleDrive={(patch) => updateGoogleDrive(index, patch)}
             onRemove={() => removeSource(index)}
             kbId={kbId}
             version={version}
@@ -174,6 +188,7 @@ function SourceCard({
   onChange,
   onChangeWeb,
   onChangeUpload,
+  onChangeGoogleDrive,
   onRemove,
   kbId,
   version,
@@ -187,6 +202,7 @@ function SourceCard({
   onChange: (patch: Partial<IngestionSource>) => void;
   onChangeWeb: (patch: Partial<NonNullable<IngestionSource["web"]>>) => void;
   onChangeUpload: (patch: Partial<NonNullable<IngestionSource["upload"]>>) => void;
+  onChangeGoogleDrive: (patch: Partial<NonNullable<IngestionSource["googleDrive"]>>) => void;
   onRemove: () => void;
   kbId?: string;
   version: number;
@@ -197,7 +213,8 @@ function SourceCard({
   const { t } = useTranslation();
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [confirmTypeSwitch, setConfirmTypeSwitch] = useState(false);
+  /** The type an upload source is to become, once the operator confirms. */
+  const [pendingType, setPendingType] = useState<IngestionSource["type"] | null>(null);
   const [preview, setPreview] = useState<IngestionReport | null>(null);
   // A preview describes the configuration it ran against. Once that changes, it is
   // a claim about something that no longer exists.
@@ -208,6 +225,9 @@ function SourceCard({
   }, [hasUnsavedChanges]);
 
   const isUpload = source.type === "upload";
+  const isDrive = source.type === "googleDrive";
+  // An absent type is a website: the server's default.
+  const isWeb = !isUpload && !isDrive;
 
   // Runtime actions need a saved source: the id is what the endpoints address.
   const isSaved = Boolean(kbId && source.id);
@@ -221,11 +241,24 @@ function SourceCard({
   const requestType = (next: IngestionSource["type"]) => {
     if (next === source.type) return;
     if (isUpload && source.id) {
-      setConfirmTypeSwitch(true);
+      setPendingType(next);
       return;
     }
-    onChange({ type: next });
+    applyType(next);
   };
+
+  const applyType = (next: IngestionSource["type"]) => {
+    // A Drive source cannot be saved without its block, so it starts with one —
+    // empty fields the server names when they are left that way.
+    onChange(
+      next === "googleDrive" && !source.googleDrive
+        ? { type: next, googleDrive: { connection: "", sharedDriveId: "", includeSubfolders: true } }
+        : { type: next },
+    );
+  };
+
+  const typeOrder: NonNullable<IngestionSource["type"]>[] = ["web", "upload", "googleDrive"];
+  const currentType = isUpload ? "upload" : isDrive ? "googleDrive" : "web";
 
   // Not `isSaved && isOpen`: a disabled query keeps its cached data, so collapsing
     // a card froze its "Running" badge for ever and a scheduled run never showed one.
@@ -261,6 +294,8 @@ function SourceCard({
         >
           {isUpload ? (
             <FolderUp className="h-4 w-4 shrink-0 text-sky-500" />
+          ) : isDrive ? (
+            <HardDrive className="h-4 w-4 shrink-0 text-sky-500" />
           ) : (
             <Globe className="h-4 w-4 shrink-0 text-sky-500" />
           )}
@@ -309,7 +344,9 @@ function SourceCard({
             hint={
               isUpload
                 ? t("ragEditor.sources.typeUploadHint", "Read files you upload here")
-                : t("ragEditor.sources.typeWebHint", "Crawl a website")
+                : isDrive
+                  ? t("ragEditor.sources.typeGoogleDriveHint", "Read a Google Shared Drive with a service account")
+                  : t("ragEditor.sources.typeWebHint", "Crawl a website")
             }
           >
             <div
@@ -322,14 +359,16 @@ function SourceCard({
                 if (readOnly) return;
                 if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
                   event.preventDefault();
-                  requestType(isUpload ? "web" : "upload");
+                  const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+                  const at = typeOrder.indexOf(currentType);
+                  requestType(typeOrder[(at + step + typeOrder.length) % typeOrder.length]);
                 }
               }}
             >
               <TypeChoice
                 label={t("ragEditor.sources.typeWeb", "Website")}
                 icon={Globe}
-                selected={!isUpload}
+                selected={isWeb}
                 disabled={readOnly}
                 onSelect={() => requestType("web")}
                 testId={`${testId}-type-web`}
@@ -341,6 +380,14 @@ function SourceCard({
                 disabled={readOnly}
                 onSelect={() => requestType("upload")}
                 testId={`${testId}-type-upload`}
+              />
+              <TypeChoice
+                label={t("ragEditor.sources.typeGoogleDrive", "Google Drive")}
+                icon={HardDrive}
+                selected={isDrive}
+                disabled={readOnly}
+                onSelect={() => requestType("googleDrive")}
+                testId={`${testId}-type-google-drive`}
               />
             </div>
           </Field>
@@ -369,7 +416,7 @@ function SourceCard({
               }
               testId={testId}
             />
-            {!isUpload && (
+            {isWeb && (
               <>
                 <Field label={t("ragEditor.sources.startUrl", "Start URL")}>
                   <Input
@@ -468,6 +515,70 @@ function SourceCard({
                 </Field>
               </>
             )}
+            {isDrive && (
+              <>
+                <Field
+                  label={t("ragEditor.sources.driveConnection", "Connection")}
+                  hint={t(
+                    "ragEditor.sources.driveConnectionHint",
+                    "A SERVICE-bound connection holding the service account's key (OAUTH2_JWT_BEARER)",
+                  )}
+                >
+                  <Input
+                    value={source.googleDrive?.connection ?? ""}
+                    onChange={(e) => onChangeGoogleDrive({ connection: e.target.value })}
+                    disabled={readOnly}
+                    placeholder="google-drive-sa"
+                    data-testid={`${testId}-drive-connection`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.driveId", "Shared Drive ID")}
+                  hint={t(
+                    "ragEditor.sources.driveIdHint",
+                    "From the drive's URL: drive.google.com/drive/folders/<id>",
+                  )}
+                >
+                  <Input
+                    value={source.googleDrive?.sharedDriveId ?? ""}
+                    onChange={(e) => onChangeGoogleDrive({ sharedDriveId: e.target.value.trim() })}
+                    disabled={readOnly}
+                    placeholder="0AB…"
+                    data-testid={`${testId}-drive-id`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.maxFiles", "Max files")}
+                  hint={t("ragEditor.sources.driveMaxFilesHint", "Files one run reads at most")}
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50000}
+                    value={source.googleDrive?.maxFiles ?? 2000}
+                    onChange={(e) => onChangeGoogleDrive({ maxFiles: numberOrUndefined(e.target.value) })}
+                    disabled={readOnly}
+                    data-testid={`${testId}-drive-max-files`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.maxFileMb", "Max file size (MB)")}
+                  hint={t("ragEditor.sources.maxFileMbHint", "Per file")}
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={megabytesOf(source.googleDrive?.maxFileBytes) ?? 25}
+                    onChange={(e) =>
+                      onChangeGoogleDrive({ maxFileBytes: bytesFromMegabytes(e.target.value) })
+                    }
+                    disabled={readOnly}
+                    data-testid={`${testId}-drive-max-file-mb`}
+                  />
+                </Field>
+              </>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-4">
@@ -478,7 +589,16 @@ function SourceCard({
               disabled={readOnly}
               testId={`${testId}-enabled`}
             />
-            {!isUpload && (
+            {isDrive && (
+              <Toggle
+                label={t("ragEditor.sources.driveIncludeSubfolders", "Include subfolders")}
+                checked={source.googleDrive?.includeSubfolders !== false}
+                onChange={(checked) => onChangeGoogleDrive({ includeSubfolders: checked })}
+                disabled={readOnly}
+                testId={`${testId}-drive-include-subfolders`}
+              />
+            )}
+            {isWeb && (
               <>
                 <Toggle
                   label={t("ragEditor.sources.respectRobots", "Respect robots.txt")}
@@ -502,7 +622,61 @@ function SourceCard({
             )}
           </div>
 
-          {!isUpload && (
+          {isDrive && (
+            <>
+              <Field
+                label={t("ragEditor.sources.driveFolderIds", "Folders")}
+                hint={t(
+                  "ragEditor.sources.driveFolderIdsHint",
+                  "Folder IDs of this drive to read, comma separated. Empty reads the whole drive",
+                )}
+              >
+                <PatternListInput
+                  patterns={source.googleDrive?.folderIds ?? []}
+                  onCommit={(folderIds) => onChangeGoogleDrive({ folderIds })}
+                  disabled={readOnly}
+                  testId={`${testId}-drive-folder-ids`}
+                />
+              </Field>
+              <Field
+                label={t("ragEditor.sources.driveFormats", "Formats")}
+                hint={t("ragEditor.sources.driveFormatsHint", "Comma separated. Empty reads all of: {{formats}}", {
+                  formats: GOOGLE_DRIVE_FORMATS.join(", "),
+                })}
+              >
+                <PatternListInput
+                  patterns={source.googleDrive?.mimeTypes ?? []}
+                  onCommit={(mimeTypes) => onChangeGoogleDrive({ mimeTypes })}
+                  disabled={readOnly}
+                  testId={`${testId}-drive-formats`}
+                />
+              </Field>
+              <Field
+                label={t("ragEditor.sources.excludePatterns", "Exclude patterns")}
+                hint={t(
+                  "ragEditor.sources.driveExcludeHint",
+                  "File-name globs to skip, comma separated and case-insensitive — for example *DRAFT*",
+                )}
+              >
+                <PatternListInput
+                  patterns={source.googleDrive?.excludeNamePatterns ?? []}
+                  onCommit={(excludeNamePatterns) => onChangeGoogleDrive({ excludeNamePatterns })}
+                  disabled={readOnly}
+                  testId={`${testId}-drive-exclude`}
+                />
+              </Field>
+              <StatusLine
+                tone="warning"
+                text={t(
+                  "ragEditor.sources.driveAudienceWarning",
+                  "Every conversation of an agent that uses this knowledge base can retrieve what this source indexes, whatever each file's sharing says. Scope it to folders meant for that audience.",
+                )}
+                testId={`${testId}-drive-audience`}
+              />
+            </>
+          )}
+
+          {isWeb && (
             <Field
               label={t("ragEditor.sources.excludePatterns", "Exclude patterns")}
               hint={t(
@@ -519,7 +693,7 @@ function SourceCard({
             </Field>
           )}
 
-          {!isUpload && (
+          {isWeb && (
             <Field
               label={t("ragEditor.sources.sitemapUrls", "Sitemaps")}
               hint={t(
@@ -742,19 +916,28 @@ function SourceCard({
       />
 
       <AlertDialog
-        open={confirmTypeSwitch}
-        onOpenChange={setConfirmTypeSwitch}
-        title={t("ragEditor.sources.switchTypeTitle", "Turn this into a website source?")}
+        open={pendingType != null}
+        onOpenChange={(open) => !open && setPendingType(null)}
+        title={
+          pendingType === "googleDrive"
+            ? t("ragEditor.sources.switchTypeDriveTitle", "Turn this into a Google Drive source?")
+            : t("ragEditor.sources.switchTypeTitle", "Turn this into a website source?")
+        }
         description={t(
           "ragEditor.sources.switchTypeDescription",
           "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
         )}
-        confirmLabel={t("ragEditor.sources.switchTypeConfirm", "Switch to website")}
+        confirmLabel={
+          pendingType === "googleDrive"
+            ? t("ragEditor.sources.switchTypeDriveConfirm", "Switch to Google Drive")
+            : t("ragEditor.sources.switchTypeConfirm", "Switch to website")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         variant="destructive"
         onConfirm={() => {
-          setConfirmTypeSwitch(false);
-          onChange({ type: "web" });
+          const next = pendingType ?? "web";
+          setPendingType(null);
+          applyType(next);
         }}
       />
 
@@ -821,6 +1004,13 @@ function PreviewResult({
         />
         <Stat label={t("ragEditor.sources.statFailed", "Failed")} value={report.documentsFailed} />
       </dl>
+      {report.message && (
+        // The source's own description of what it listed — counts, sizes, types,
+        // what it skipped. Written by the server, so not translated.
+        <p className="mt-2 break-words text-muted-foreground" data-testid={`${testId}-preview-summary`}>
+          {report.message}
+        </p>
+      )}
       {report.tombstoningSkipped && (
         <StatusLine
           tone="warning"
