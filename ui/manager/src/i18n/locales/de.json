@@ -3692,6 +3692,7 @@
       "previous": "Vorherige Seite"
     },
     "noTrend": "Zu wenige Tage mit Daten für einen Trend.",
+    "seriesError": "Einige Trends konnten nicht geladen werden.",
     "sparklineLabel": "{{label}} im Zeitraum, von {{min}} bis {{max}}",
     "noReasons": "Kein Messwert braucht Aufmerksamkeit.",
     "overview": {

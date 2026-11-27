@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http } from "msw";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { HealthOverviewPage } from "../health-overview";
 
 describe("HealthOverviewPage", () => {
@@ -43,6 +45,27 @@ describe("HealthOverviewPage", () => {
     const row = screen.getAllByTestId("health-overview-row").find((r) => r.getAttribute("data-agent-id") === "health-preh4")!;
     expect(within(row).queryByTestId("health-status-badge")).toBeNull();
     expect(within(row).getByTestId("health-row-no-status")).toBeInTheDocument();
+  });
+
+  it("shows no rows of the previous period while the new one loads", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get("*/health/agents", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("period") !== "30d") return;
+        await gate;
+      }),
+    );
+    try {
+      renderWithProviders(<HealthOverviewPage />);
+      expect(await screen.findAllByTestId("health-overview-row")).toHaveLength(3);
+      await userEvent.selectOptions(screen.getByTestId("health-overview-period"), "30d");
+      await waitFor(() => expect(screen.queryAllByTestId("health-overview-row")).toHaveLength(0));
+      release();
+      expect(await screen.findAllByTestId("health-overview-row")).toHaveLength(3);
+    } finally {
+      release();
+    }
   });
 
   it("filters by status", async () => {

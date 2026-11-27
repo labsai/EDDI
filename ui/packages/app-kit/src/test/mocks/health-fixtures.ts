@@ -264,20 +264,57 @@ export function seriesFor(measureId: string, base: number, unit: Series["unit"],
 
 // ── Compare, portfolio, sessions ──────────────────────────────────
 
+/** Replaces the value of one measure, wherever it sits in the sections. */
+function withValue(h: AgentHealth, measureId: string, value: number): void {
+  for (const section of Object.values(h.sections)) {
+    if (!section) continue;
+    section.measures = section.measures.map((m) => (m.id === measureId ? { ...m, value } : m));
+  }
+}
+
+/** The value of one measure in the sections, or null when it is absent. */
+export function measureValue(sections: AgentHealth["sections"], measureId: string): number | null {
+  for (const section of Object.values(sections)) {
+    const m = section?.measures.find((x) => x.id === measureId);
+    if (m) return m.value;
+  }
+  return null;
+}
+
+/**
+ * The compared measures with the verdict the backend would give. Significance
+ * and direction stay explicit (they are the backend's statistics); the values
+ * are read from the two sides, so a row never contradicts its section.
+ */
+const COMPARED: Array<{ measureId: string; significant: boolean; better: boolean | null }> = [
+  { measureId: "resolutionRate", significant: true, better: false },
+  { measureId: "agentFailureRate", significant: true, better: false },
+  { measureId: "costPerSession", significant: true, better: true },
+  { measureId: "turnDurationP95", significant: false, better: null },
+  { measureId: "sessions", significant: true, better: null },
+];
+
 export function compareFor(agentId: string, from: number, to: number): HealthCompare {
+  // The older version: the healthy agent, with the figures it had before the change.
   const a = healthFor(HEALTH_AGENTS.healthy);
+  withValue(a, "resolutionRate", 0.53);
+  withValue(a, "costPerSession", 0.034);
+  withValue(a, "turnDurationP95", 3100);
+  withValue(a, "sessions", 900);
+  // The newer version: the agent that needs attention.
   const b = healthFor(HEALTH_AGENTS.attention);
+  withValue(b, "sessions", 920);
   return {
     agentId,
     from: { version: from, window: { from: "2026-10-12", to: "2026-10-25" }, sections: a.sections },
     to: { version: to, window: { from: "2026-10-26", to: "2026-11-10" }, sections: b.sections },
-    deltas: [
-      { measureId: "resolutionRate", from: 0.53, to: 0.41, delta: -0.12, significant: true, better: false },
-      { measureId: "agentFailureRate", from: 0.004, to: 0.012, delta: 0.008, significant: true, better: false },
-      { measureId: "costPerSession", from: 0.034, to: 0.031, delta: -0.003, significant: true, better: true },
-      { measureId: "turnDurationP95", from: 3100, to: 3200, delta: 100, significant: false, better: null },
-      { measureId: "sessions", from: 900, to: 920, delta: 20, significant: true, better: null },
-    ],
+    deltas: COMPARED.map(({ measureId, significant, better }) => {
+      const f = measureValue(a.sections, measureId);
+      const t = measureValue(b.sections, measureId);
+      // Rounded, so 0.012 - 0.004 reads 0.008 and not 0.008000000000000002.
+      const delta = f === null || t === null ? null : Number((t - f).toFixed(9));
+      return { measureId, from: f, to: t, delta, significant, better };
+    }),
   };
 }
 

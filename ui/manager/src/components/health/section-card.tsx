@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Lock, ListTree, Wand2 } from "lucide-react";
 import type { HealthQuery, HealthSection } from "@eddi/app-kit/lib/api/health";
 import { useHealthSeries } from "./use-agent-health";
-import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "./deps";
+import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, Skeleton } from "./deps";
 import { drillForMeasure, drillForResolution, type DrillFilter } from "./drill";
 import { formatMeasureValue, formatShortDate, sectionTitle } from "./format";
 import { MeasureCard } from "./measure-card";
@@ -77,6 +77,12 @@ export function SectionCard({ agentId, sectionId, section, query, onDrill, onMap
           })
         )}
         {!section.restricted && series.isLoading && measures.length > 0 && <Skeleton className="h-6 w-full" />}
+        {/* A failed trend call is said, not hidden: its sparklines are missing, the ones that loaded stay. */}
+        {!section.restricted && series.isError && measures.length > 0 && (
+          <div data-testid="health-series-error">
+            <ErrorState message={t("health.seriesError", "Some trends could not be loaded.")} error={series.error} onRetry={series.retry} />
+          </div>
+        )}
         {/* The dashed lines on the trends, in words: reachable by keyboard and touch, not just a tooltip. */}
         {!section.restricted && series.markers.length > 0 && measures.length > 0 && (
           <div className="text-xs text-muted-foreground" data-testid="health-marker-list">

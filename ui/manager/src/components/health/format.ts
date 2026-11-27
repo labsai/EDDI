@@ -31,11 +31,21 @@ export function formatDays(days: number): string {
 /** The number of days a period id stands for ("30d" is 30). */
 export const periodDays = (p: string): number => Number.parseInt(p, 10);
 
-/** A date as the person reads it in their language ("3 Nov", "3. Nov."). */
+/** A calendar day without a time (`YYYY-MM-DD`), as the contract sends period bounds and `dataThrough`. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A date as the person reads it in their language ("3 Nov", "3. Nov.").
+ * A calendar day (`2026-11-10`) is a UTC day in the contract and is shown as
+ * that day everywhere; `new Date` reads it as UTC midnight, so formatting it in
+ * the local zone would show 9 Nov west of UTC. An instant keeps the local zone.
+ */
 export function formatShortDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(activeLocale(), { day: "numeric", month: "short" }).format(d);
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (DATE_ONLY.test(iso)) opts.timeZone = "UTC";
+  return new Intl.DateTimeFormat(activeLocale(), opts).format(d);
 }
 
 /** A date-time in the app's language. */
@@ -261,11 +271,19 @@ export function enumLabel(t: TFunction, group: "outcome" | "evidence" | "origin"
   return t(`health.enums.${group}.${value.replace(/[^A-Za-z0-9_]/g, "_")}`, value);
 }
 
-/** The version options: newest first, capped so a 200-version agent stays usable. */
-export function versionOptions(latest: number, cap = 25): number[] {
+/**
+ * The version options: newest first, capped so a 200-version agent stays usable.
+ * `keep` lists versions that must stay selectable although the cap cut them off
+ * (a chosen version that new saves pushed past the cap): a controlled select
+ * needs an option for its value. They are merged in descending order.
+ */
+export function versionOptions(latest: number, cap = 25, keep: ReadonlyArray<number | null | undefined> = []): number[] {
   const out: number[] = [];
   for (let v = latest; v >= 1 && out.length < cap; v--) out.push(v);
-  return out;
+  for (const v of keep) {
+    if (v !== null && v !== undefined && Number.isInteger(v) && v >= 1 && v <= latest && !out.includes(v)) out.push(v);
+  }
+  return out.sort((a, b) => b - a);
 }
 
 /** Known sections first, in the contract's order; any section the backend adds follows. */

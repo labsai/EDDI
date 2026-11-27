@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, CircleDashed, OctagonAlert, XCircle } from "lucide-react";
 import type { Band, HealthStatus } from "@eddi/app-kit/lib/api/health";
-import { cn } from "./deps";
+import { Badge, cn } from "./deps";
 import { bandMeta, statusLabelKey, STATUS_META } from "./format";
 
 const BAND_ICON = { GREEN: CheckCircle2, AMBER: AlertTriangle, RED: XCircle, GREY: CircleDashed } as const;
@@ -18,14 +18,10 @@ export function BandBadge({ band, className }: { band: Band | string; className?
   const meta = bandMeta(band);
   const Icon = BAND_ICON[band as Band] ?? CircleDashed;
   return (
-    <span
-      className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium", meta.classes, className)}
-      data-testid="health-band"
-      data-band={band}
-    >
+    <Badge variant="outline" className={cn("gap-1 px-2 font-medium", meta.classes, className)} data-testid="health-band" data-band={band}>
       <Icon className="h-3 w-3" aria-hidden="true" />
       {t(`health.band.${meta.key}`, meta.fallback)}
-    </span>
+    </Badge>
   );
 }
 
@@ -36,14 +32,10 @@ export function StatusBadge({ status, className }: { status: HealthStatus; class
   const Icon = STATUS_ICON[status] ?? CircleDashed;
   const [key, fallback] = statusLabelKey(status);
   return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", meta.classes, className)}
-      data-testid="health-status-badge"
-      data-status={status}
-    >
+    <Badge variant="outline" className={cn("gap-1.5 py-1", meta.classes, className)} data-testid="health-status-badge" data-status={status}>
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       {t(key, fallback)}
-    </span>
+    </Badge>
   );
 }
 

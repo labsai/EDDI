@@ -146,11 +146,12 @@ export function OverrideRows({
               className={inputClass}
               value={o.measure}
               onChange={(e) => patch(i, { measure: e.target.value })}
+              data-testid="health-override-target"
             >
               <option value="">—</option>
               <optgroup label={t("health.profile.overrideSections", "Sections")}>
                 {SECTION_IDS.map((id) => (
-                  <option key={id} value={id}>{sectionTitle(t, id)}</option>
+                  <option key={id} value={id} data-testid={`health-override-section-${id}`}>{sectionTitle(t, id)}</option>
                 ))}
               </optgroup>
               <optgroup label={t("health.profile.overrideMeasures", "Measures")}>

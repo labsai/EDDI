@@ -5,6 +5,7 @@ import {
   MARKERS,
   SESSION_ROWS,
   compareFor,
+  days,
   healthFor,
   portfolioFixture,
   seriesFor,
@@ -80,11 +81,13 @@ export const healthHandlers = [
   http.get("*/agents/:agentId/health/series", ({ request, params }) => {
     const url = new URL(request.url);
     const measures = url.searchParams.getAll("measure");
-    const days = { "7d": 7, "30d": 30, "90d": 90 }[url.searchParams.get("period") ?? "30d"] ?? 30;
+    const count = { "7d": 7, "30d": 30, "90d": 90 }[url.searchParams.get("period") ?? "30d"] ?? 30;
+    // The bounds are the first and last of the days the series covers.
+    const covered = days(count);
     return HttpResponse.json({
       agentId: params.agentId,
-      period: { from: "2026-10-12", to: "2026-11-10", days },
-      series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", days)),
+      period: { from: covered[0], to: covered[covered.length - 1], days: count },
+      series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", count)),
       markers: MARKERS,
     });
   }),
@@ -118,8 +121,13 @@ export const healthHandlers = [
     const url = new URL(request.url);
     const outcomes = url.searchParams.getAll("outcome");
     const evidence = url.searchParams.getAll("evidence");
+    // No `version` means every version, as on the real endpoint.
+    const version = url.searchParams.get("version");
     const items = SESSION_ROWS.filter(
-      (r) => (outcomes.length === 0 || outcomes.includes(r.outcome)) && (evidence.length === 0 || evidence.includes(r.evidence)),
+      (r) =>
+        (version === null || String(r.agentVersion) === version) &&
+        (outcomes.length === 0 || outcomes.includes(r.outcome)) &&
+        (evidence.length === 0 || evidence.includes(r.evidence)),
     );
     if (id === HEALTH_AGENTS.paged) {
       // One row per page; the cursor is the index of the next row.

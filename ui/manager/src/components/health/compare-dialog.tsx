@@ -103,7 +103,8 @@ export function CompareDialog({
   const defaultFrom = to !== null && to > 1 ? to - 1 : null;
   const from = chosenFrom !== null && to !== null && chosenFrom < to ? chosenFrom : defaultFrom;
   const compare = useHealthCompare(agentId, open ? from : null, open ? to : null, days);
-  const options = versionOptions(latestVersion);
+  // Both resolved sides stay selectable even when the cap cut them off (v1 against v2 of a 26-version agent).
+  const options = versionOptions(latestVersion, undefined, [from, to]);
 
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.compare.title", "Compare versions")} maxWidth="max-w-3xl" testId="health-compare-dialog">

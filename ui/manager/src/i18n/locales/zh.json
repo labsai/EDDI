@@ -3692,6 +3692,7 @@
       "previous": "上一页"
     },
     "noTrend": "有数据的天数不足，无法显示趋势。",
+    "seriesError": "部分趋势无法加载。",
     "sparklineLabel": "{{label}}在该时间段内，从 {{min}} 到 {{max}}",
     "noReasons": "没有需要关注的指标。",
     "overview": {

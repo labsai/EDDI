@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Info } from "lucide-react";
 import type { Measure } from "@eddi/app-kit/lib/api/health";
-import { cn } from "./deps";
+import { Button, cn } from "./deps";
 import { formatMeasureValue, resolutionSplit, type ResolutionKey } from "./format";
 
 const SEGMENT: Record<ResolutionKey, { label: [string, string]; bar: string; hint: [string, string] }> = {
@@ -73,9 +73,16 @@ export function ResolutionSplit({ measure, onDrill }: { measure: Measure; onDril
           return (
             <li key={p.key}>
               {onDrill ? (
-                <button type="button" className="flex w-full items-start gap-1.5 rounded px-1 text-start hover:bg-secondary/60" onClick={() => onDrill(p.key)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  // Two lines (label and share), left-aligned: not the primitive's centred one-line box.
+                  className="h-auto w-full items-start justify-start gap-1.5 whitespace-normal rounded px-1 py-0 text-start text-xs font-normal hover:bg-secondary/60 active:scale-100"
+                  onClick={() => onDrill(p.key)}
+                >
                   {content}
-                </button>
+                </Button>
               ) : (
                 <span className="flex items-start gap-1.5 px-1">{content}</span>
               )}
@@ -83,15 +90,17 @@ export function ResolutionSplit({ measure, onDrill }: { measure: Measure; onDril
           );
         })}
       </ul>
-      <button
+      <Button
         type="button"
-        className="text-xs text-brand-700 hover:underline dark:text-brand-300"
+        variant="link"
+        size="sm"
+        className="h-auto px-0 py-0 text-xs font-normal text-brand-700 dark:text-brand-300"
         aria-expanded={showHints}
         aria-controls={hintsId}
         onClick={() => setShowHints((v) => !v)}
       >
         {t("health.resolution.whatMeans", "What do these mean?")}
-      </button>
+      </Button>
       {showHints && (
         <dl id={hintsId} className="space-y-1 text-xs text-muted-foreground" data-testid="resolution-hints">
           {split.parts.map((p) => (

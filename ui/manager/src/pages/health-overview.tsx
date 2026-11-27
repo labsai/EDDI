@@ -100,19 +100,19 @@ export function HealthOverviewPage() {
         </select>
         <div role="group" aria-label={t("health.overview.statusFilter", "Status")} className="flex flex-wrap gap-1.5">
           {STATUS_ORDER.map((s) => (
-            <button
+            <Button
               key={s}
               type="button"
+              size="sm"
+              variant="outline"
               aria-pressed={status.includes(s)}
               onClick={() => toggleStatus(s)}
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-                status.includes(s) ? STATUS_META[s].classes : "border-input bg-background text-muted-foreground hover:bg-secondary",
-              )}
+              // A pill in the status colour when chosen, a plain outline otherwise.
+              className={cn("h-auto rounded-full px-2.5 py-1 shadow-none", status.includes(s) ? STATUS_META[s].classes : "text-muted-foreground")}
               data-testid={`health-status-filter-${s}`}
             >
               {t(`health.status.${STATUS_META[s].key}`, STATUS_META[s].fallback)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

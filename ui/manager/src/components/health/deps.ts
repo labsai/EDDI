@@ -17,5 +17,6 @@ export { Button, Badge, activeLocale } from "@eddi/ui";
 export { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 export { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+export { ErrorState } from "@/components/shared/error-state";
 export { cn, formatDuration, formatUsd } from "@eddi/app-kit/lib/utils";
 export { api, ApiClientError, getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";

@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   createReportLink,
   deleteHealthProfile,
@@ -57,8 +57,10 @@ export const healthKeys = {
     [...healthKeys.agent(agentId), "sessions", normalize(f), f.outcome, f.evidence, cursor] as const,
   suggestions: (agentId: string) => [...healthKeys.agent(agentId), "suggestions"] as const,
   reports: (agentId: string) => [...healthKeys.agent(agentId), "reports"] as const,
+  /** Every portfolio page, whatever its period, sort and status filter. */
+  portfolioAll: () => [...healthKeys.all, "portfolio"] as const,
   portfolio: (period: string, sort: string, status: readonly string[]) =>
-    [...healthKeys.all, "portfolio", period, sort, status] as const,
+    [...healthKeys.portfolioAll(), period, sort, status] as const,
   presets: () => [...healthKeys.all, "presets"] as const,
 };
 
@@ -85,6 +87,12 @@ export interface HealthSeriesResult {
   byMeasure: Map<string, SeriesPoint[]>;
   markers: HealthMarker[];
   isLoading: boolean;
+  /** True when at least one series call failed; the trends of the calls that worked are still in `byMeasure`. */
+  isError: boolean;
+  /** The first failure, for the error message. */
+  error: unknown;
+  /** Repeats only the series calls that failed. */
+  retry: () => void;
 }
 
 /**
@@ -108,7 +116,18 @@ export function useHealthSeries(agentId: string, measures: readonly string[], qu
     for (const s of r.data?.series ?? []) if (!s.group) byMeasure.set(s.measure, s.points);
     for (const m of r.data?.markers ?? []) markers.set(m.id, m);
   }
-  return { byMeasure, markers: [...markers.values()], isLoading: results.some((r) => r.isLoading) };
+  const failed = results.filter((r) => r.isError);
+  return {
+    byMeasure,
+    markers: [...markers.values()],
+    isLoading: results.some((r) => r.isLoading),
+    isError: failed.length > 0,
+    error: failed[0]?.error ?? null,
+    // A failed call is retried on its own: the calls that worked keep their data and are not re-sent.
+    retry: () => {
+      for (const r of failed) void r.refetch();
+    },
+  };
 }
 
 /**
@@ -132,7 +151,8 @@ export function useHealthPortfolio(period: HealthPeriod, sort: "attention" | "na
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: STALE_MS,
-    placeholderData: keepPreviousData,
+    // No `keepPreviousData`: the rows of the previous period, sort or status must
+    // not stand under the new selection while it loads (same rule as the sessions).
     retry: false,
   });
 }
@@ -147,22 +167,32 @@ export function useHealthPresets(enabled = true) {
   return useQuery({ queryKey: healthKeys.presets(), queryFn: getHealthPresets, enabled, staleTime: 10 * STALE_MS, retry: false });
 }
 
-/** Saves a profile and invalidates every health query of the agent on success, since bands and status derive from it. */
+/**
+ * What a changed profile makes stale: every health query of the agent, and the
+ * portfolio, whose rows carry the agent's status, bands and attention order.
+ */
+function invalidateAfterProfileChange(qc: QueryClient, agentId: string) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: healthKeys.agent(agentId) }),
+    qc.invalidateQueries({ queryKey: healthKeys.portfolioAll() }),
+  ]);
+}
+
+/** Saves a profile and, on success, invalidates the agent's health queries and the portfolio, since bands and status derive from it. */
 export function useSaveHealthProfile(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (profile: HealthProfile) => putHealthProfile(agentId, profile),
-    // A saved profile changes bands and status, so the whole agent view is stale.
-    onSuccess: () => qc.invalidateQueries({ queryKey: healthKeys.agent(agentId) }),
+    onSuccess: () => invalidateAfterProfileChange(qc, agentId),
   });
 }
 
-/** Deletes the stored profile (back to the preset defaults) and invalidates the agent's health queries. */
+/** Deletes the stored profile (back to the preset defaults) and invalidates the agent's health queries and the portfolio. */
 export function useResetHealthProfile(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => deleteHealthProfile(agentId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: healthKeys.agent(agentId) }),
+    onSuccess: () => invalidateAfterProfileChange(qc, agentId),
   });
 }
 

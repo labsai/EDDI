@@ -3733,6 +3733,7 @@
       "previous": "Previous page"
     },
     "noTrend": "Not enough days with data for a trend.",
+    "seriesError": "Some trends could not be loaded.",
     "sparklineLabel": "{{label}} over the period, from {{min}} to {{max}}",
     "noReasons": "No measure needs attention.",
     "overview": {

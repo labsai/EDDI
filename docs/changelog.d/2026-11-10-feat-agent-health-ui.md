@@ -45,6 +45,13 @@ overview page is empty, and `npm run dev` in mock mode shows the full set of sce
   which does not list these operations until the backend phases land. They are registered in `server.ts` and `browser-handlers.ts`
   and move into `handlers.ts` with the snapshot refresh.
 - The `health` locale block is one contiguous object in all 11 locale files (plus `nav.health`).
+- **Review follow-ups (2026-11-27):** a `#health` link opens a mounted, closed panel; while a new filter loads, the trends and
+  the drill-down stay on the query of the summary still shown (no 30-day figures beside 7-day trends); a selected version
+  beyond the 25-version cap stays an option; calendar days (`period`, `dataThrough`) are formatted as their UTC day; an
+  isolated sparkline day is drawn as a dot; a failed series call shows an error with a retry of just that call; a profile
+  change also invalidates the portfolio, whose query no longer keeps the previous selection's rows; Save and Reset never
+  overlap. The mocks now derive compare rows from their two sides, report series bounds from the days served, and filter
+  sessions by `version`.
 
 ### Open items
 

@@ -3692,6 +3692,7 @@
       "previous": "이전 페이지"
     },
     "noTrend": "추세를 보여 줄 만큼 데이터가 있는 날이 충분하지 않습니다.",
+    "seriesError": "일부 추세를 불러오지 못했습니다.",
     "sparklineLabel": "기간 중 {{label}}, {{min}}에서 {{max}}까지",
     "noReasons": "주의가 필요한 지표가 없습니다.",
     "overview": {

@@ -3726,6 +3726,7 @@
       "previous": "Page précédente"
     },
     "noTrend": "Pas assez de jours avec des données pour une tendance.",
+    "seriesError": "Certaines tendances n'ont pas pu être chargées.",
     "sparklineLabel": "{{label}} sur la période, de {{min}} à {{max}}",
     "noReasons": "Aucune mesure ne demande d'attention.",
     "overview": {

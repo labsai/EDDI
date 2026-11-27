@@ -65,6 +65,15 @@ export function AgentHealthPanel({
   // `#health` (the overview's link) opens the section and brings it into view.
   const linked = hash === "#health";
   const [open, setOpen] = useState(() => linked || readOpen(defaultOpen));
+  // The initializer runs once, so a mounted, closed panel would otherwise only
+  // scroll when the hash becomes `#health`: open it on that transition, during
+  // render (React's "adjusting state when a prop changes"). The toggle is
+  // unaffected while the hash stays the same.
+  const [prevLinked, setPrevLinked] = useState(linked);
+  if (linked !== prevLinked) {
+    setPrevLinked(linked);
+    if (linked) setOpen(true);
+  }
   useEffect(() => {
     if (linked) sectionRef.current?.scrollIntoView?.({ block: "start" });
   }, [linked]);
@@ -79,6 +88,12 @@ export function AgentHealthPanel({
   // Nothing is requested while the section is collapsed.
   const health = useAgentHealth(agentId, query, open);
   const data = health.data;
+  // The query the shown summary belongs to. While a new selection loads, the
+  // summary is the previous one (`keepPreviousData`), so the trends and the
+  // drill-down must stay on the previous query too, or 30-day figures would sit
+  // beside 7-day trends. It moves on once the new summary has arrived.
+  const [settledQuery, setSettledQuery] = useState<HealthQuery>(query);
+  if (data && !health.isPlaceholderData && settledQuery !== query) setSettledQuery(query);
 
   const info = useMemo(() => {
     const units: Record<string, MeasureUnit> = {};
@@ -172,7 +187,7 @@ export function AgentHealthPanel({
                     agentId={agentId}
                     sectionId={id}
                     section={data.sections[id]!}
-                    query={query}
+                    query={settledQuery}
                     onDrill={setDrill}
                     onMapOutcomes={() => setDialog("suggestions")}
                   />
@@ -183,7 +198,7 @@ export function AgentHealthPanel({
         </div>
       )}
 
-      <SessionsDialog open={drill !== null} onClose={() => setDrill(null)} agentId={agentId} query={query} filter={drill} />
+      <SessionsDialog open={drill !== null} onClose={() => setDrill(null)} agentId={agentId} query={settledQuery} filter={drill} />
       <OutcomeSuggestionsDialog open={dialog === "suggestions"} onClose={() => setDialog(null)} agentId={agentId} />
       <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} agentId={agentId} latestVersion={latestVersion} />
       {canEdit && <ProfileDialog open={dialog === "profile"} onClose={() => setDialog(null)} agentId={agentId} info={info} />}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { drillForMeasure, drillForResolution } from "../drill";
-import { formatAge, formatDays, formatDelta, formatSignedPercent, resolutionSplit } from "../format";
+import { formatAge, formatDays, formatDelta, formatShortDate, formatSignedPercent, resolutionSplit } from "../format";
 import { chunkMeasures } from "../use-agent-health";
 import { fromInput, parseDecimal, toInput, unmatchedViolations } from "../profile-utils";
 
@@ -8,6 +8,40 @@ describe("formatDelta with a translated unit", () => {
   it("uses the given percentage-point label", () => {
     expect(formatDelta(-0.12, "ratio", "Prozentpunkte")).toBe("−12 Prozentpunkte");
     expect(formatDelta(0.008, "ratio")).toBe("+0.8 pp");
+  });
+});
+
+describe("formatShortDate", () => {
+  // West of UTC, UTC midnight of 10 Nov is still 9 Nov locally.
+  const withZone = (tz: string, run: () => void) => {
+    const before = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+      run();
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  };
+
+  it("shows a calendar day as that day in every time zone", () => {
+    withZone("America/Los_Angeles", () => {
+      expect(formatShortDate("2026-11-10")).toMatch(/\b10\b/);
+    });
+    withZone("Pacific/Kiritimati", () => {
+      expect(formatShortDate("2026-11-10")).toMatch(/\b10\b/);
+    });
+  });
+
+  it("shows an instant in the viewer's own zone", () => {
+    withZone("America/Los_Angeles", () => {
+      // 03:00 UTC on 10 Nov is the evening of 9 Nov in Los Angeles.
+      expect(formatShortDate("2026-11-10T03:00:00Z")).toMatch(/\b9\b/);
+    });
+  });
+
+  it("returns what it cannot read unchanged", () => {
+    expect(formatShortDate("not a date")).toBe("not a date");
   });
 });
 
