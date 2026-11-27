@@ -293,7 +293,7 @@ eddi_tool_costs_total{tool="weather"}       # Cost per tool
 
 ```text
 eddi_group_discussion_count_total           # Discussions started
-eddi_group_discussion_failure_count_total   # Rounds that failed with an error (a later round of an answered discussion counts although the discussion stays COMPLETED)
+eddi_group_discussion_failure_count_total   # Rounds that failed with an error or that no member answered (a later round of an answered discussion counts although the discussion stays COMPLETED)
 eddi_group_discussion_duration_seconds      # Duration (timer)
 eddi_group_cost_dollars                     # Cumulative discussion cost (gauge)
 eddi_group_cost_ceiling_hit_total           # maxCostPerDiscussion reached
