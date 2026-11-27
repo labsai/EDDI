@@ -38,10 +38,11 @@ final class SwaggerUiBranding {
     /** A declaration that paints an accent fill behind text. */
     private static final Pattern ACCENT_FILL = Pattern.compile("background(?:-color)?:\\s*(?:#f59e0b|#d97706|#b45309)",
             Pattern.CASE_INSENSITIVE);
+    /** A CSS block comment. */
+    private static final Pattern COMMENT = Pattern.compile("/\\*[\\s\\S]*?\\*/");
     /**
      * The text colour declaration of a rule — not border-color or background-color.
      */
-    private static final Pattern COMMENT = Pattern.compile("/\\*[\\s\\S]*?\\*/");
     private static final Pattern TEXT_COLOR = Pattern.compile("(?<![-\\w])color:\\s*#[0-9a-fA-F]{3,6}");
 
     private SwaggerUiBranding() {

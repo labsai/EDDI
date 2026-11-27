@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import type { ReactElement } from "react";
 import { TaskGuardrailsSection } from "../task-guardrails-section";
-import type { GuardrailConfig, LlmTask } from "../types";
+import type { GuardrailConfig, LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 function Harness({
   initial,

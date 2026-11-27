@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -70,7 +71,8 @@ class RestAgentStoreCredentialRedactionTest {
         workflowStore = mock(IRestWorkflowStore.class);
         rest = new RestAgentStore(agentStore, workflowStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
                 mock(IScheduleStore.class), mock(CapabilityRegistryService.class), mock(IDeploymentStore.class), accessGuard,
-                mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
+                mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class),
+                mock(VaultGrantService.class));
     }
 
     private AgentConfiguration stored() throws Exception {

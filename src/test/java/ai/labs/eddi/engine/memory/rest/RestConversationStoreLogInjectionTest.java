@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -101,6 +102,7 @@ class RestConversationStoreLogInjectionTest {
         store = new RestConversationStore(mock(IDocumentDescriptorStore.class), conversationDescriptorStore,
                 conversationMemoryStore, mock(IConversationService.class), mock(IUserMemoryStore.class),
                 mock(IRuntime.class), guard, mock(ResourceAccessGuard.class), 30, 90, attachmentStorageInstance);
+        store.erasureGuard = TestErasureGuards.withoutWriters();
     }
 
     /** A descriptor the listing picks up and tries to populate. */

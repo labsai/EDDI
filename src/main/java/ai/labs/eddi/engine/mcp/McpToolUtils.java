@@ -38,6 +38,9 @@ final class McpToolUtils {
     /**
      * Check that the current caller has the required role. When authorization is
      * disabled ({@code authEnabled=false}), no check is performed.
+     * <p>
+     * No MCP tool gate uses this any more: each tool calls {@link #requireAnyRole}
+     * with its tier from {@link McpToolTiers}.
      *
      * @param identity
      *            the current security identity
@@ -377,8 +380,8 @@ final class McpToolUtils {
      * caller, describing what the caller got wrong. A 5xx entity is not written to
      * that contract and can carry endpoint, datastore or configuration detail, so
      * it falls through to the message below and is never lifted verbatim. Every MCP
-     * tool that reaches this point is already behind {@code requireRole}, but "the
-     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * tool that reaches this point is already behind its role gate, but "the caller
+     * is an admin" is a reason to answer usefully, not a reason to stop
      * distinguishing the two.
      */
     static String describe(Throwable cause) {

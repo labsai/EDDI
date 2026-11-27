@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConsolidationConfig;
 import ai.labs.eddi.datastore.IResourceStorage;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -54,6 +56,7 @@ class AgentGroupStoreConsolidationCredentialTest {
     private static AgentGroupConfiguration withParameters(Map<String, String> parameters) {
         var config = new AgentGroupConfiguration();
         config.setName("team");
+        config.setMembers(List.of(new GroupMember("a", "A", 1, null)));
         config.setLessonConfig(new LessonConfig(null, null, null,
                 new LessonConsolidationConfig("openai", "gpt-5-mini", parameters, null, null, null, null, null, null, null)));
         return config;

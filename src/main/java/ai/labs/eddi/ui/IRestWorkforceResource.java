@@ -29,6 +29,18 @@ public interface IRestWorkforceResource {
     @Operation(hidden = true)
     Response viewDefault();
 
+    /**
+     * The web app manifest that makes Workforce installable, in the current brand
+     * ({@link WorkforceManifest}). A literal path, so it wins over the catch-all
+     * below, which would otherwise answer it with the HTML shell.
+     */
+    @GET
+    @Cache(noCache = true, mustRevalidate = true)
+    @Path("manifest.webmanifest")
+    @Produces("application/manifest+json")
+    @Operation(hidden = true)
+    Response manifest();
+
     @GET
     @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")

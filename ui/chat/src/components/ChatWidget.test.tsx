@@ -329,6 +329,27 @@ describe("ChatWidget — stop generating", () => {
 
     await waitFor(() => expect(cancelled).toBe(true));
   });
+
+  it("Esc stops the running turn as the Stop button does (T1.10)", async () => {
+    let cancelled = false;
+    mockHangingStream(() => {
+      cancelled = true;
+    });
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    // Nothing runs yet: Esc is the composer's, and nothing is cancelled.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(cancelled).toBe(false);
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByTestId("chat-stop");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(cancelled).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("chat-stop")).not.toBeInTheDocument());
+  });
 });
 
 describe("ChatWidget — a turn that pauses vs a turn that is dropped", () => {
@@ -1099,6 +1120,23 @@ describe("ChatWidget — live tool calls", () => {
     expect(screen.getByTestId("chat-transcript")).toHaveAttribute("aria-busy", "true");
     // The visual copy stays put but is not a second announcement.
     expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("keeps tool_result's payload off the page: the tool line clears, nothing of it is rendered", async () => {
+    // tool_result (B6) only ends the call on screen: the controller clears the
+    // tool line and goes back to "Thinking…" (see "clears the tool status when
+    // its tool_result arrives"). The widget shows no tool cards, so whatever
+    // the payload carries — even a summary of the tool's output, which a
+    // non-conforming server might send — must never appear as page text.
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: tool_result\ndata: {"tool":"calculator","ok":true,"summary":"SUMMARY-MARKER 4"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() => expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument());
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/SUMMARY-MARKER/);
   });
 
   it("gives way to the escalation hint when the cascade escalates", async () => {

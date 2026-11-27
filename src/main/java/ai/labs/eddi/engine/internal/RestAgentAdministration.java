@@ -537,11 +537,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
                     .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
             // With undeployThisAndAllPreviousAgentVersions one failing version used to
-            // abort
-            // the loop and leave every lower version deployed — and the caller with a 500
-            // that said nothing of the versions it never reached. Each version is now
-            // attempted, and the failures and refusals are reported together at the end. A
-            // single-version call has nothing to continue to, and fails as it always did.
+            // abort the loop and leave every lower version deployed — and the caller with
+            // a 500 that said nothing of the versions it never reached. Each version is
+            // now attempted, and the failures and refusals are reported together at the
+            // end. A single-version call has nothing to continue to, and fails as it
+            // always did.
             final boolean continueOnFailure = lowestUndeployed < highestUndeployed;
             final List<String> failures = new ArrayList<>();
             final List<String> refusals = new ArrayList<>();
@@ -604,8 +604,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             var deployed = lookup.versions();
             if (deployed.isEmpty() && !lookup.complete()) {
                 // "None found" and "could not look" are different answers: a 404 here would
-                // tell
-                // the operator the agent has nothing deployed while versions may still be.
+                // tell the operator the agent has nothing deployed while versions may still
+                // be.
                 throw new InternalServerErrorException("Could not read the deployed versions of Agent " + sanitize(agentId)
                         + "; retry once the deployment records are readable");
             }
@@ -618,8 +618,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         }
         if (version > currentVersion && !ceilingIsAuthoritative) {
             // A partial lookup can only have missed versions: the requested one may exist,
-            // so this is the
-            // lookup's failure to report, not a 400 about the caller's input.
+            // so this is the lookup's failure to report, not a 400 about the caller's
+            // input.
             throw new InternalServerErrorException("Could not read every deployed version of Agent " + sanitize(agentId)
                     + "; retry once the deployment records are readable");
         }
@@ -922,8 +922,24 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     private void undeploy(Deployment.Environment environment, String agentId, Integer version, boolean disableSchedules) {
         Callable<Void> undeployAgentCallable = () -> {
             try {
-                agentFactory.undeployAgent(environment, agentId, version);
+                // The record first, the registry second. The deployment sweep reads the
+                // registry and then the records, and deploys what is recorded deployed
+                // but not served; with the registry dropped first, a sweep whose two
+                // reads both fell between the drop and the record write deployed the
+                // agent again, and on a single node it then stayed served under an
+                // undeployed record until a restart.
+                boolean wasRecordedDeployed = recordedDeployed(environment, agentId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
+                try {
+                    agentFactory.undeployAgent(environment, agentId, version);
+                } catch (RuntimeException e) {
+                    // Still served: put the record back, or it says undeployed for an agent
+                    // that answers — which nothing reconciles on a single node.
+                    if (wasRecordedDeployed) {
+                        restoreDeployedRecord(environment, agentId, version);
+                    }
+                    throw e;
+                }
 
                 // Lifecycle hook: auto-disable the agent's schedules once no version of
                 // it is left to run them — see undeployAgent.
@@ -939,6 +955,31 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         };
 
         runtime.submitCallable(undeployAgentCallable, ThreadContext.getResources());
+    }
+
+    /**
+     * Whether the record of this version says deployed. A read that fails answers
+     * false: the undeploy goes ahead, and only the compensation for a failed
+     * registry removal is skipped.
+     */
+    private boolean recordedDeployed(Deployment.Environment environment, String agentId, Integer version) {
+        try {
+            DeploymentInfo info = deploymentStore.getDeploymentInfo(environment.toString(), agentId, version);
+            return info != null && info.getDeploymentStatus() == DeploymentInfo.DeploymentStatus.deployed;
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            log.debugf("Could not read the deployment record of Agent %s v%d before undeploying it: %s", sanitize(agentId), version,
+                    sanitize(e.getMessage()));
+            return false;
+        }
+    }
+
+    private void restoreDeployedRecord(Deployment.Environment environment, String agentId, Integer version) {
+        try {
+            deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
+        } catch (RuntimeException e) {
+            log.errorf("Agent %s v%d is still deployed in %s, but its deployment record now says undeployed: %s", sanitize(agentId), version,
+                    environment, sanitize(e.getMessage()));
+        }
     }
 
     @Override
@@ -962,8 +1003,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         var body = new LinkedHashMap<String, Object>();
         body.put("status", status);
         // The failure names secrets (never values) and the agent's grant situation, so
-        // it goes only to someone who may edit, and so deploy, the agent. This
-        // endpoint itself is open to any editor, for any agent id.
+        // it goes only to someone who may edit, and so deploy, the agent. The endpoint
+        // itself needs only USE on the agent (checked above).
         if ("detailed".equalsIgnoreCase(format) && deployed != null && deployed.getDeploymentStatus() == ERROR
                 && deployed.getDeploymentFailure() != null && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
             body.put("failure", deployed.getDeploymentFailure());

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceFilter.ContainsIgnoreCase;
 import ai.labs.eddi.datastore.IResourceFilter.NotMatching;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
@@ -19,6 +20,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
@@ -122,6 +124,7 @@ public class RestConversationStore implements IRestConversationStore {
     private static final String FIELD_AGENT_RESOURCE = "agentResource";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_VIEW_STATE = "viewState";
+    private static final String FIELD_GROUP_CONVERSATION_ID = "groupConversationId";
 
     /**
      * Matches a field holding anything but whitespace — so a {@link NotMatching} of
@@ -191,9 +194,22 @@ public class RestConversationStore implements IRestConversationStore {
      * Field-injected like the vault above, so constructing the resource directly
      * (tests) still works — {@link #purgeService()} then builds one over the same
      * collaborators.
+     * <p>
+     * That hand-built service gets {@link #erasureGuard}. It cannot be reached in
+     * the running application: the field is a plain {@code @Inject}, which CDI
+     * always satisfies or fails startup, so only a test that constructs this
+     * resource with {@code new} ever sees null.
      */
     @Inject
     ConversationPurgeService conversationPurgeService;
+
+    /**
+     * The erasure guarantee, handed to a {@link #purgeService()} built by hand. A
+     * test that constructs this resource with {@code new} and leaves it null gets a
+     * purge service that refuses every permanent delete, rather than one that
+     * deletes without the guarantee.
+     */
+    ErasureGuard erasureGuard;
 
     /**
      * Field-injected like the other late additions, so the unit tests that build
@@ -260,7 +276,8 @@ public class RestConversationStore implements IRestConversationStore {
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
                                                                     String agentId, Integer agentVersion, ConversationState conversationState,
-                                                                    ConversationDescriptor.ViewState viewState, Boolean mine) {
+                                                                    ConversationDescriptor.ViewState viewState, Boolean mine,
+                                                                    Boolean excludeGroupMembers) {
         // A negative index or a limit above the deployment-wide page ceiling is
         // refused, not normalised (this used to clamp the limit silently at 100 and
         // turn a negative index into 0): a client that asked for more than a page can
@@ -313,13 +330,16 @@ public class RestConversationStore implements IRestConversationStore {
         // `mine` narrows any caller, an admin included, to the conversations they own:
         // a client choosing one to continue must not be handed somebody else's.
         // Without a named caller, or with authorization disabled, there is no owner
-        // to narrow to, and it does nothing.
+        // to narrow to, and it does nothing. excludeGroupMembers=true leaves out the
+        // member threads a group discussion started (their descriptor records a
+        // groupConversationId).
+        final boolean withoutMembers = Boolean.TRUE.equals(excludeGroupMembers);
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
         final String onlyOwner = Boolean.TRUE.equals(mine) ? conversationAccessGuard.ownConversationsOwner() : null;
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
-        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, agentId, viewState);
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, withoutMembers, agentId, viewState);
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -368,8 +388,8 @@ public class RestConversationStore implements IRestConversationStore {
                     // after rows nobody examined. A batch may therefore run past the
                     // budget by its own size; its foreign rows cost no conversation read.
                     scannedDescriptors++;
-                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, onlyOwner, agentId,
-                            reviewable);
+                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, onlyOwner, withoutMembers,
+                            agentId, reviewable);
                     if (candidateId != null) {
                         candidates.add(conversationDescriptor);
                         candidateIds.add(candidateId);
@@ -450,6 +470,115 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
+    @Override
+    public List<ConversationDescriptor> searchConversations(String query, Integer index, Integer limit) {
+        PageBounds.require(index, limit);
+        String text = ConversationTitles.requireValidSearchQuery(query);
+        if (index == null) {
+            index = 0;
+        }
+        if (limit == null || limit < 1) {
+            limit = 20;
+        }
+        if ((long) index * limit > MAX_RESULT_OFFSET) {
+            throw new BadRequestException(format("index * limit must not exceed %d. Search with more of the title instead.",
+                    MAX_RESULT_OFFSET));
+        }
+
+        // "My conversations": the caller's own, for an administrator too. The owner is
+        // an exact match in the query, so the page the store returns is a page of
+        // results — no foreign row is read, so there is no owner-scan budget and no
+        // back-fill as in the listing. A legacy descriptor that records no owner is
+        // not searched: it predates titles (v5.1.6 started recording owners).
+        // With authorization off there is no owner: every caller sees everything.
+        final boolean authorizationEnabled = conversationAccessGuard.authorizationEnabled();
+        final String caller = authorizationEnabled ? conversationAccessGuard.callerActor(null) : null;
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        List<QueryFilters> restrictions = new ArrayList<>();
+        if (caller != null) {
+            restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_USER_ID, caller))));
+        } else if (authorizationEnabled) {
+            // No named caller and authorization on: nobody to scope to, nothing to find.
+            return List.of();
+        }
+        // Titles only — see IRestConversationStore#searchConversations for why.
+        restrictions.add(new QueryFilters(List.of(new QueryFilter(ConversationDescriptor.FIELD_TITLE, new ContainsIgnoreCase(text)))));
+
+        try {
+            // A page of results is a page of rows that can be opened, so rows with no
+            // readable memory (orphans) are counted out before the offset is applied:
+            // descriptor batches are read until the page is full or the matches end,
+            // and an empty page therefore always means "no more matches".
+            final long toSkip = (long) index * limit;
+            long skipped = 0;
+            List<ConversationDescriptor> results = new ArrayList<>(limit);
+            Map<String, String> agentNames = new HashMap<>();
+            for (int descriptorPage = 0; results.size() < limit && (long) descriptorPage * limit <= MAX_RESULT_OFFSET; descriptorPage++) {
+                List<ConversationDescriptor> matches = conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, null, descriptorPage, limit,
+                        false, restrictions);
+                List<ConversationDescriptor> candidates = new ArrayList<>();
+                List<String> candidateIds = new ArrayList<>();
+                for (var descriptor : matches) {
+                    // The query is the scope; this is the authority, as in the listing — a
+                    // row that is not the caller's is never returned, whatever the store did.
+                    if (caller != null && !caller.equals(descriptor.getUserId())) {
+                        continue;
+                    }
+                    String id = searchableConversationId(descriptor);
+                    if (id == null) {
+                        continue;
+                    }
+                    candidates.add(descriptor);
+                    candidateIds.add(id);
+                }
+
+                Set<String> unreadable = new HashSet<>();
+                Map<String, ConversationListingSummary> summaries = readListingSummaries(candidateIds, unreadable);
+                for (int i = 0; i < candidates.size() && results.size() < limit; i++) {
+                    var summary = summaries.get(candidateIds.get(i));
+                    // No memory: an orphan (or unreadable) — nothing to open, so not listed.
+                    if (summary == null) {
+                        continue;
+                    }
+                    var descriptor = candidates.get(i);
+                    if (!conversationAdmits(descriptor, summary, seesAllConversations, null, null, null, null)) {
+                        continue;
+                    }
+                    if (skipped < toSkip) {
+                        skipped++;
+                        continue;
+                    }
+                    fillAgentName(descriptor, summary, agentNames);
+                    results.add(descriptor);
+                }
+                if (matches.size() < limit) {
+                    break;
+                }
+            }
+            return results;
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * The conversation id a search match names, or {@code null} for a row that
+     * cannot be opened: no resource, or one that does not parse. A corrupt row
+     * costs only itself, never the page.
+     */
+    private static String searchableConversationId(ConversationDescriptor descriptor) {
+        if (descriptor.getResource() == null) {
+            return null;
+        }
+        try {
+            var resourceId = extractResourceId(descriptor.getResource());
+            return resourceId == null ? null : resourceId.getId();
+        } catch (IllegalArgumentException e) {
+            log.warn(format("Skipping a search match with an unparsable resource (%s)", descriptor.getResource()));
+            return null;
+        }
+    }
+
     /**
      * The checks the descriptor alone can make: it names a conversation, it records
      * {@code onlyOwner} as its owner when the listing asked for the caller's own
@@ -464,12 +593,16 @@ public class RestConversationStore implements IRestConversationStore {
      * @return the conversation's id, or {@code null} when the row is not listed
      */
     private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, String onlyOwner,
-                                       String agentId, Map<URI, Boolean> reviewable) {
+                                       boolean withoutMembers, String agentId, Map<URI, Boolean> reviewable) {
         try {
             URI resourceUri = conversationDescriptor.getResource();
             var conversationResourceId = extractResourceId(resourceUri);
             if (conversationResourceId == null || conversationResourceId.getId() == null) {
                 log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
+                return null;
+            }
+
+            if (withoutMembers && !isNullOrEmpty(conversationDescriptor.getGroupConversationId())) {
                 return null;
             }
 
@@ -621,14 +754,16 @@ public class RestConversationStore implements IRestConversationStore {
      * not own (see {@link #mayReview}), and the agent group narrows the query
      * instead. With {@code onlyOwner} ({@code mine}) it is that owner exactly, for
      * every caller and with or without an agent.</li>
+     * <li><b>Group members</b> ({@code excludeGroupMembers}) — no recorded
+     * {@code groupConversationId}.</li>
      * <li><b>View state</b> — equality; a descriptor without one never
      * matched.</li>
      * </ul>
      * The conversation state is not here: it is read from the conversation memory,
      * not from the descriptor.
      */
-    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String onlyOwner, String agentId,
-                                                   ConversationDescriptor.ViewState viewState) {
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String onlyOwner, boolean withoutMembers,
+                                                   String agentId, ConversationDescriptor.ViewState viewState) {
         List<QueryFilters> restrictions = new LinkedList<>();
         if (!isNullOrEmpty(agentId)) {
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
@@ -637,6 +772,9 @@ public class RestConversationStore implements IRestConversationStore {
         }
         if (onlyOwner != null || isNullOrEmpty(agentId)) {
             restrictions.addAll(ownerScope(seesAllConversations, onlyOwner));
+        }
+        if (withoutMembers) {
+            restrictions.add(new QueryFilters(List.of(new QueryFilter(FIELD_GROUP_CONVERSATION_ID, new NotMatching(NOT_BLANK)))));
         }
         if (viewState != null) {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
@@ -1056,24 +1194,19 @@ public class RestConversationStore implements IRestConversationStore {
         var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
         var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
 
+        // First decide what goes, then give all of it the erasure guarantee in one
+        // pass — one tombstone write and one drain barrier on every node, then the
+        // delete and verification of each conversation's async-written rows (alert
+        // events) — and only then delete. A conversation the guarantee could not be
+        // given for is kept, whole, for the next run, as a failed vault or dependent
+        // delete keeps it below. (An orphaned snapshot has no age to go by, so "ended
+        // long ago, nothing can still be queued" would not cover it.)
+        Map<String, ArchiveRetention> toDelete = new LinkedHashMap<>();
         for (var endedConversationId : endedConversationIds) {
             try {
                 var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, CONVERSATION_DESCRIPTOR_VERSION);
                 if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
-                    if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
-                        continue; // kept, with its secret references, for the next run
-                    }
-                    // The dependent data before anything that makes the conversation
-                    // findable: the descriptors and the snapshot are what the next run
-                    // (and a user erasure) find it by, so a failed delete keeps them.
-                    if (!deleteDependentDataForConversation(endedConversationId)) {
-                        continue;
-                    }
-                    deleteChannelMappingsForConversation(endedConversationId);
-                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
-                    conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
-                    conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    amountOfEndedConversations++;
+                    toDelete.put(endedConversationId, null);
                 }
             } catch (ResourceNotFoundException e) {
                 // No live descriptor. A soft-deleted conversation still has its
@@ -1083,10 +1216,38 @@ public class RestConversationStore implements IRestConversationStore {
                 // however recently it was active. Only a snapshot with no descriptor
                 // at all (live or archived) is an orphan to remove straight away.
                 var archive = archiveRetention(endedConversationId, deleteOlderThanThisDate);
+                if (archive != ArchiveRetention.WITHIN_RETENTION) {
+                    toDelete.put(endedConversationId, archive);
+                }
+            }
+        }
+        Map<String, String> notErased = purgeService().eraseAsyncWrittenData(toDelete.keySet());
+
+        for (var entry : toDelete.entrySet()) {
+            var endedConversationId = entry.getKey();
+            if (notErased.containsKey(endedConversationId)) {
+                continue; // kept for the next run; the reason was logged
+            }
+            var archive = entry.getValue();
+            if (archive == null) {
+                if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
+                    continue; // kept, with its secret references, for the next run
+                }
+                // The dependent data before anything that makes the conversation
+                // findable: the descriptors and the snapshot are what the next run
+                // (and a user erasure) find it by, so a failed delete keeps them.
+                if (!deleteDependentDataForConversation(endedConversationId)) {
+                    continue;
+                }
+                deleteChannelMappingsForConversation(endedConversationId);
+                documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                amountOfEndedConversations++;
+            } else {
                 // The vault slots go first: the snapshot about to be deleted holds the
                 // only references to them.
-                if (archive == ArchiveRetention.WITHIN_RETENTION || !deleteAutoVaultedSecretsForConversation(endedConversationId)
-                        || !deleteDependentDataForConversation(endedConversationId)) {
+                if (!deleteAutoVaultedSecretsForConversation(endedConversationId) || !deleteDependentDataForConversation(endedConversationId)) {
                     continue;
                 }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
@@ -1379,8 +1540,10 @@ public class RestConversationStore implements IRestConversationStore {
         if (conversationPurgeService != null) {
             return conversationPurgeService;
         }
-        return new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore, conversationService,
+        var handBuilt = new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore, conversationService,
                 autoVaultedSecretsInstance, attachmentStorageInstance);
+        handBuilt.useErasureGuard(erasureGuard);
+        return handBuilt;
     }
 
     /**

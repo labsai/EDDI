@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, ArrowDown, ArrowUp, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { GuardrailSheet } from "./guardrail-sheet";
 import { ACTION_TEXT, TYPE_TEXT, effectiveAction, isKnownGuardrailType, summarizeGuardrail, typesForPhase } from "./guardrails";
 import {
@@ -19,7 +19,7 @@ import {
   withTools,
 } from "./tool-call-guardrails";
 import type { TaskSectionProps } from "./task-section-props";
-import type { ToolCallGuardrailConfig } from "./types";
+import type { ToolCallGuardrailConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Model-backed types: without `fields` they make one model call per string. */
 const MODEL_BACKED = new Set(["judge", "classifier"]);

@@ -2,8 +2,8 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 export interface EditableTitleProps {
   /** The stored name; empty when none was ever given. */

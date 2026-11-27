@@ -37,8 +37,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * Validation happens here, at the write boundary, because this is where the
  * administrator who made the mistake is still looking at the response. The
- * startup guard used to refuse a bad base URL at boot instead, which turned a
- * typo into an outage and required a restart to fix.
+ * startup guard used to refuse a bad stored base URL at boot instead, which
+ * turned a typo into an outage and required a restart to fix; it now refuses
+ * only a bad <em>pinned</em> value.
  */
 @ApplicationScoped
 public class RestConnectionSettings implements IRestConnectionSettings {

@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+*.log
+
+# Test output
+playwright-report/
+test-results/
+test-results.json
+vitest-results.json
+
+# Mutation testing sandbox
+.stryker-tmp/

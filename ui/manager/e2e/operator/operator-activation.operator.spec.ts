@@ -1,6 +1,7 @@
 import { test, expect, type Request } from "@playwright/test";
 import { navigateTo, API_BASE } from "../fullstack/fullstack-helpers";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { readFileSync } from "node:fs";
 
 /**
  * Operator activation E2E — the Platform Operator activated through the
@@ -42,6 +43,16 @@ import { endpointsForScope } from "@/lib/operator/tool-scopes";
  * compose file (see that file). `OPERATOR_E2E_LLM_BASE_URL` is the address
  * EDDI — not this browser — reaches the stub at.
  */
+
+/**
+ * The revision this Manager provisions. Read from the JSON rather than through
+ * operator-revision.ts, whose imports pull in the browser API client.
+ */
+const OPERATOR_REVISION = (
+  JSON.parse(readFileSync(new URL("../../src/lib/operator/operator-revision.json", import.meta.url), "utf8")) as {
+    revision: number;
+  }
+).revision;
 
 const LLM_BASE_URL = process.env.OPERATOR_E2E_LLM_BASE_URL ?? "http://llm-stub:8089/v1";
 const MODEL = "operator-e2e-stub";
@@ -251,5 +262,134 @@ test.describe("Platform Operator activation against a real backend", () => {
       (operatorStatus!.warnings ?? []).filter((warning) => warning.includes("TEMPLATE_DOES_NOT_PARSE")),
       "the deploy-time compatibility check found a template that does not parse",
     ).toEqual([]);
+  });
+
+  /**
+   * The upgrade of an operator from an older revision, as it happened in the
+   * field: its instructions had been trimmed to fit 6.7.0's 100k setup-api cap
+   * (so `promptBodyIsDefault: false`), and its agent held the model key's vault
+   * grant. Four things went wrong there, and each is asserted here against the
+   * real backend:
+   *
+   *   (a) the dialog preselected KEEP for a body that only removed lines;
+   *   (b) the new agent did not inherit the grant, so the upgrade stopped on a
+   *       grant prompt offering "allow every agent";
+   *   (c) the deleted predecessor stayed on the grant;
+   *   (d) the page showed "switched on, but its agent is not deployed" until a
+   *       reload.
+   *
+   * Runs after the activation test above, on the operator it activated: the
+   * stored config is rewritten to look like an older revision's, which is
+   * exactly what an older Manager would have left behind.
+   */
+  test("upgrades an older, trimmed operator holding a vault grant without a prompt or a stale banner", async ({
+    page,
+    request,
+  }) => {
+    const VAR = `${API_BASE}/variablestore/variables/default/platform.operator`;
+    const KEY = "operator-e2e-model-key";
+    const SECRET = `${API_BASE}/secretstore/secrets/default/${KEY}`;
+
+    const stored = await request.get(VAR);
+    expect(stored.ok(), "the activation test above must have left an operator configured").toBe(true);
+    const variable = (await stored.json()) as { key: string; value: string; description?: string; exportable?: boolean };
+    const current = JSON.parse(variable.value) as Record<string, unknown> & { agentId: string; promptBody: string };
+    const oldAgentId = current.agentId;
+    expect(oldAgentId).toBeTruthy();
+
+    // ── The grant the old operator holds ──
+    // The model stub ignores credentials; what matters is that the key is
+    // restricted to the old agent, so the new one cannot deploy without it.
+    const created = await request.put(SECRET, {
+      data: {
+        value: "fixturefixturefixture",
+        description: "operator upgrade E2E",
+        allowedAgents: [oldAgentId],
+        allowedHosts: ["llm-stub:8089", "llm-stub"],
+      },
+    });
+    expect(created.ok(), `could not create the vault secret: ${created.status()} ${await created.text()}`).toBe(true);
+
+    // ── What an older Manager left behind ──
+    // An older revision, instructions cut down to fit the cap (every third line
+    // gone, nothing added), and the vault key name the upgrade carries over.
+    const trimmed = current.promptBody
+      .split("\n")
+      .filter((_, i) => i % 3 !== 0)
+      .join("\n");
+    const older = {
+      ...current,
+      provisionedRevision: OPERATOR_REVISION - 1,
+      promptBody: trimmed,
+      promptBodyIsDefault: false,
+      credentialKey: KEY,
+    };
+    const rewritten = await request.put(VAR, { data: { ...variable, value: JSON.stringify(older) } });
+    expect(rewritten.ok(), `could not rewrite platform.operator: ${rewritten.status()}`).toBe(true);
+
+    // ── The upgrade, watched continuously from the first click ──
+    await navigateTo(page, "/manage/operator");
+    await expect(page.getByTestId("operator-upgrade-notice")).toBeVisible({ timeout: 30_000 });
+    // A point-in-time check after the upgrade would miss a banner that showed for
+    // a few seconds, so every appearance is recorded as it happens.
+    await page.evaluate(() => {
+      const seen = new Set<string>();
+      const watched = [
+        "operator-registered-undeployed",
+        "operator-registered-missing",
+        "grant-required-dialog",
+        "grant-required-allow-all",
+      ];
+      const record = () => {
+        for (const id of watched) if (document.querySelector(`[data-testid="${id}"]`)) seen.add(id);
+      };
+      new MutationObserver(record).observe(document.body, { childList: true, subtree: true, attributes: true });
+      (window as unknown as { __operatorUpgradeSeen: Set<string> }).__operatorUpgradeSeen = seen;
+    });
+
+    await page.getByTestId("operator-upgrade-start").click();
+    // (a) A body that only removes lines is replaced, and the dialog says why.
+    await expect(page.getByTestId("operator-upgrade-use-default")).toBeChecked();
+    await expect(page.getByTestId("operator-upgrade-lineage")).toHaveAttribute("data-lineage", "only-removes");
+    await page.getByRole("button", { name: /upgrade now/i }).click();
+
+    // (d) The page settles on the new agent, deployed, with no reload.
+    const errorBox = page.getByTestId("operator-upgrade-error");
+    await expect
+      .poll(
+        async () => {
+          if (await errorBox.isVisible()) return `failed: ${await errorBox.innerText()}`;
+          return (await page.getByTestId("operator-upgrade-notice").count()) === 0 ? "upgraded" : "running";
+        },
+        { message: "the upgrade did not finish", timeout: ACTIVATION_TIMEOUT },
+      )
+      .toBe("upgraded");
+    await expect(page.getByTestId("operator-status-ready")).toBeVisible({ timeout: 60_000 });
+
+    const after = JSON.parse(((await (await request.get(VAR)).json()) as { value: string }).value) as {
+      agentId: string;
+      provisionedRevision: number;
+      promptBodyIsDefault: boolean;
+    };
+    expect(after.agentId, "the upgrade did not replace the agent").not.toBe(oldAgentId);
+    expect(after.provisionedRevision).toBe(OPERATOR_REVISION);
+    expect(after.promptBodyIsDefault, "the trimmed instructions were kept instead of replaced").toBe(true);
+
+    // Let the background probes and any late refetch run before reading the record.
+    await page.waitForTimeout(3_000);
+    const seen = await page.evaluate(() =>
+      [...(window as unknown as { __operatorUpgradeSeen: Set<string> }).__operatorUpgradeSeen],
+    );
+    // (b) No grant prompt, so no "allow every agent".
+    expect(seen.filter((id) => id.startsWith("grant-required")), "the upgrade asked for the vault grant").toEqual([]);
+    // (d) No stale banner at any point.
+    expect(seen.filter((id) => id.startsWith("operator-registered")), "a stale operator banner was shown").toEqual([]);
+
+    // (b) + (c) The grant names the new agent, and not the deleted one.
+    const secret = (await (await request.get(SECRET)).json()) as { allowedAgents: string[] };
+    expect(secret.allowedAgents, "the new operator agent was not added to the grant").toContain(after.agentId);
+    expect(secret.allowedAgents, "the deleted operator agent is still on the grant").not.toContain(oldAgentId);
+    const gone = await request.get(`${API_BASE}/agentstore/agents/${oldAgentId}/currentversion`);
+    expect(gone.status(), "the old operator agent was not deleted by the upgrade").toBe(404);
   });
 });

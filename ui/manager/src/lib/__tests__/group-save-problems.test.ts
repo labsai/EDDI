@@ -4,8 +4,8 @@ import {
   groupSaveProblems,
   groupSaveProblemMessage,
   normalizeGroupTaskConfig,
-} from "@/lib/group-config";
-import { getStylePhases } from "@/lib/hitl-config";
+} from "@eddi/app-kit/lib/group-config";
+import { getStylePhases } from "@eddi/app-kit/lib/hitl-config";
 import type { TFunction } from "i18next";
 
 const agent = (id: string, role: string | null = null) => ({

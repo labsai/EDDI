@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -47,8 +48,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * raw-body signature has been verified.
  * <p>
  * Handles {@code block_actions} with action ids {@code hitl_approve} /
- * {@code hitl_reject}. The button value carries the owning integration name,
- * the subject and the id of the card it was posted on:
+ * {@code hitl_reject}, plus {@code hitl_edit} / {@code hitl_reject_reason}
+ * (which open a modal) and the modals' {@code view_submission} (see
+ * {@link SlackHitlEditModal}). The button value carries the owning integration
+ * name, the subject and the id of the card it was posted on:
  * {@code <integrationName>|<conversationId>|<cardId>} for a single conversation
  * resume, or {@code <integrationName>|group:<gcId>|<cardId>} for a group
  * discussion resume. Legacy bare values (no integration name) are treated as
@@ -558,6 +561,12 @@ public class SlackInteractivityHandler {
             LOGGER.debugf("HITL conversation %s already resolved: %s",
                     sanitize(conversationId), e.getMessage());
             finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call of this pause needs a mandatory approval (the conversation user's
+            // consent) that a Slack click cannot give: Slack does not authenticate the
+            // clicker as an EDDI user. Nothing ran; the pause and the card stay as they
+            // are, for a decision in the Manager.
+            LOGGER.infof("Slack HITL decision for %s refused: %s", sanitize(conversationId), e.getMessage());
         } catch (IllegalArgumentException e) {
             // A modal decision the engine refused before consuming the pause (checked
             // synchronously at submission; this is the rare race after it).

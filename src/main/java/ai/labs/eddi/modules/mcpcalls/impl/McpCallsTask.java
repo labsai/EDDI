@@ -82,8 +82,8 @@ public class McpCallsTask implements ILifecycleTask {
 
     /**
      * Provenance tag used when matching {@code hitlConfig.toolApprovals} patterns —
-     * the same {@code "mcp"} source {@code AgentOrchestrator} reports for remote
-     * MCP tools, so one pattern governs both doors.
+     * the same {@code "mcp"} source {@code McpToolsProvider} reports for remote MCP
+     * tools, so one pattern governs both doors.
      */
     private static final String TOOL_SOURCE_MCP = "mcp";
 

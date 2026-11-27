@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -82,8 +81,6 @@ class GroupConversationServiceHitlCoverageTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -102,7 +99,7 @@ class GroupConversationServiceHitlCoverageTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -324,6 +321,23 @@ class GroupConversationServiceHitlCoverageTest {
         verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         // wasPaused → schedule deleted
         verify(scheduleStore).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    @DisplayName("cancel: a stored cancel clears the outcome a continuation's claim had not cleared yet")
+    void cancelStored_clearsAPreviousRoundsOutcome() throws Exception {
+        var gc = pausedPhaseGc("gc-claimed-continuation");
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setPausedAt(null);
+        gc.setOutcome(GroupConversation.DiscussionOutcome.ANSWERED);
+        gc.setOutcomeReason("TURN_LIMIT_REACHED");
+        doReturn(gc).when(conversationStore).read("gc-claimed-continuation");
+
+        assertTrue(service.cancelDiscussion("gc-claimed-continuation", ControlSignal.CANCEL_GRACEFUL));
+
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+        assertNull(gc.getOutcome(), "outcome is null after a cancel");
+        assertNull(gc.getOutcomeReason());
     }
 
     @Test
@@ -669,7 +683,7 @@ class GroupConversationServiceHitlCoverageTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
 
         var gc = pausedPhaseGc("gc-audit-disabled");
         var m = GroupConversationService.class.getDeclaredMethod(
@@ -689,7 +703,7 @@ class GroupConversationServiceHitlCoverageTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
 
         var gc = pausedPhaseGc("gc-audit-enabled");
         var m = GroupConversationService.class.getDeclaredMethod(
@@ -709,7 +723,7 @@ class GroupConversationServiceHitlCoverageTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, ledger, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
 
         var gc = pausedPhaseGc("gc-audit-null-mode");
         var m = GroupConversationService.class.getDeclaredMethod(

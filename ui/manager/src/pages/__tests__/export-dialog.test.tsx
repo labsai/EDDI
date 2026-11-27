@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 
 function renderDialog(props: Partial<React.ComponentProps<typeof ExportAgentDialog>> = {}) {

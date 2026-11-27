@@ -3,16 +3,15 @@ import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-li
 import { http, HttpResponse } from "msw";
 import { MemoryRouter } from "react-router-dom";
 import { type ReactNode } from "react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { AboutDialog } from "@/components/layout/about-dialog";
-import { WorkforceSidebar } from "@/components/workforce/workforce-sidebar";
 import { LandingPage } from "@/pages/landing-page";
 import { App } from "@/app";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { setBrand } from "@/lib/brand";
+import { setBrand } from "@eddi/app-kit/lib/brand";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
 /**
@@ -125,32 +124,6 @@ describe("sidebar logo", () => {
     expect(document.querySelector('img[src*="logo_eddi"], img[src^="data:"]')).toBeNull();
   });
 
-  it("unbranded: a failed icon falls back to the bundled wordmark once, visible in both themes", () => {
-    renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
-    const icon = screen.getByTestId("workforce-sidebar-icon") as HTMLImageElement;
-    expect(icon).toHaveAttribute("src", "/branding/icon");
-    fireEvent.error(icon);
-    const fallback = icon.getAttribute("src");
-    expect(fallback).not.toContain("/branding/icon");
-    expect(icon.className).toContain("invert");
-    expect(icon.className).toContain("dark:invert-0");
-    fireEvent.error(icon);
-    expect(icon.getAttribute("src")).toBe(fallback);
-  });
-
-  it("a later brand revision gets its own attempt after an earlier failure", () => {
-    setBrand(ZEBRA);
-    renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
-    fireEvent.error(screen.getByTestId("workforce-sidebar-icon"));
-    expect(screen.getByTestId("workforce-sidebar-icon").tagName).toBe("SPAN");
-    act(() => setBrand({ ...ZEBRA, revision: 4 }));
-    const icon = screen.getByTestId("workforce-sidebar-icon");
-    expect(icon.tagName).toBe("IMG");
-    expect(icon).toHaveAttribute("src", "/branding/icon?r=4");
-    fireEvent.error(icon);
-    expect(screen.getByTestId("workforce-sidebar-icon").tagName).toBe("SPAN");
-  });
-
   it("branded: a failed logo shows the product name as text, never the EDDI wordmark", () => {
     setBrand(ZEBRA);
     renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
@@ -167,19 +140,10 @@ describe("sidebar logo", () => {
   });
 });
 
-describe("workforce sidebar and landing page", () => {
-  it("name the brand on the wordmark, the icon and the welcome heading", () => {
-    setBrand(ZEBRA);
-    const { unmount } = renderWithProviders(<WorkforceSidebar collapsed={false} onToggle={() => {}} />);
-    expect(screen.getByTestId("workforce-sidebar-logo")).toHaveAttribute("alt", "Zebra Labs");
-    unmount();
-
-    renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
-    expect(screen.getByRole("link", { name: "Zebra Labs" })).toBeInTheDocument();
-    expect(screen.getByTestId("workforce-sidebar-icon")).toHaveAttribute("src", "/branding/icon?r=3");
-  });
-
-  it("landing page", () => {
+// Workforce's sidebar under a brand is tested in ui/workforce
+// (src/components/workforce/__tests__/workforce-branding.test.tsx).
+describe("landing page", () => {
+  it("names the brand on the welcome heading and the icon", () => {
     setBrand(ZEBRA);
     renderWithProviders(<LandingPage />, { initialRoute: "/welcome" });
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Welcome to Zebra Labs");

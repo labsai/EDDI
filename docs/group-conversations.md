@@ -61,7 +61,7 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
-**Save-time limits** (a config over any of them is rejected with `400`): at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5.
+**Save-time limits** (a config over any of them is rejected with `400`): at least one and at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5. A group stored with no members by an older version still loads; starting a discussion on it is refused before anything runs: REST answers **`422`**, the stream sends a `group_error` event, the MCP tools return an error. A group whose members cannot take a turn (every member an undeployed or unknown agent) still runs, records each turn `SKIPPED`, and ends `COMPLETED` with `outcome: NO_ANSWER`, `outcomeReason: NO_MEMBER_ANSWERED` (see [Discussion outcomes](#discussion-outcomes)).
 
 **One agent, one seat.** A member is addressed everywhere by its `agentId` —
 its member conversation, display name, vote weight, `participants` lists and
@@ -183,7 +183,11 @@ tools.
 Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
-exhaust it. A rejected call does not consume the per-turn budget.
+exhaust it. It counts what members file with the task tool in this discussion,
+not tasks the run starts with, so a standing team's backlog task another team's
+agent handed off does not count although the run keeps that agent as its creator
+(see [Signed contributions](#signed-contributions)). A rejected call does not
+consume the per-turn budget.
 
 **No claim or complete tools.** The wave loop owns every task-state transition;
 a second writer racing it would corrupt the state machine that decides what runs
@@ -195,7 +199,8 @@ next. Filing is the only agent-side write.
 A `FULL`- or `ANONYMOUS`-scope discussion phase re-feeds the transcript to every
 member every turn, so a long discussion grows roughly quadratically in prompt
 tokens. `contextWindow` bounds what each turn *renders* — the stored transcript
-is never modified, and signing verification still runs on the raw entries:
+is never modified, and [peer verification](#signed-contributions) still runs on
+the raw entries:
 
 ```json
 "contextWindow": {
@@ -393,6 +398,11 @@ roster like any agent, but their turn **pauses the discussion**
 - **PARALLEL phases**: agents fan out first; humans are then prompted one at a
   time against the *pre-fan-out* snapshot, so an independent round stays
   independent — a human answering after the agents cannot read their answers.
+- **In Workforce** the board shows the pending turn with its rendered prompt and a box to answer
+  ([Workforce guide](workforce-guide.md#a-team)). It says "It's your turn" to the member and whose
+  turn it is to anyone else, and a refused submission (`403`) is explained in those words. The
+  client compares the signed-in username or e-mail with the member's `agentId` only to choose the
+  wording; whether a submission is accepted is the server's check above.
 - **Task forces**: a HUMAN member may execute task-force tasks it is explicitly
   assigned — one pause per task, after the agents' waves — but may not plan or
   verify; see [Group Human Decisions](group-human-decisions.md#humans-as-task-force-executors).
@@ -588,8 +598,14 @@ nothing. It also means a fire's `COMPLETED` status says the discussion was
 *started*, not that its tasks are done: backlog statuses change only once that
 writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
-reviewer's feedback appended to the description — **the cross-run retry
-loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
+reviewer's feedback kept for it — **the cross-run retry loop**. The next run
+quotes that feedback after the task's description (the workspace's
+`backlogFeedback`, each item with the agent that wrote it, capped at the last 8
+runs per task). Once a member, the moderator or an enabled facilitator requires
+peer verification, a run quotes only feedback no agent wrote, or feedback that
+verified when it was kept from an agent that still signs verifiably; the rest is
+counted as withheld. Feedback a workspace from before this field appended to the
+description stays part of the description. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
 **Human approval as done.** A team gated by a person instead of a VERIFY phase —
@@ -710,9 +726,22 @@ should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
-artifact — FINAL artifacts accept no further updates. Artifacts are deleted
+artifact — FINAL artifacts accept no further updates. Artifacts are not signed,
+so a member with `security.requirePeerVerification` (or whose setting cannot be
+read) is not given the artifact tools: they would hand it any member's text as
+stored ([Signed contributions](#signed-contributions)). Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
+
+People read artifacts in Workforce's side panel on the team board, with each
+version the `history` still holds (current first, then up to
+`ARTIFACT_HISTORY_CAP` = 10 earlier ones, each with its editor and time); the
+Manager's discussion view lists them too. Both are read-only, since no REST
+endpoint lets a person write an artifact. Content is rendered by type: MARKDOWN
+through the shared markdown renderer with raw HTML escaped, JSON pretty-printed,
+TEXT as plain text. The panel follows a running discussion through the polled
+status read, which carries `artifacts`; the `artifact_updated` event itself has
+metadata only.
 
 ## Preset Templates (I10)
 
@@ -788,6 +817,14 @@ create_group(
 Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3).
 A group that would contain itself through its GROUP members (directly or via
 other groups) is rejected when it is saved.
+
+A sub-group runs inside its parent's budgets, not beside them. It gets the turns
+the parent has left (`min(its own maxTurns, the parent's remaining turns)`), and
+the turns it spends are charged back to the parent's count; a GROUP member whose
+parent has no turn left is recorded `SKIPPED` ("Turn budget exhausted") without
+starting a sub-discussion. A cancel of the parent reaches the sub-group too: it
+stops before its next member turn. A sub-group that fails, or ends without any
+member answering, is a `FAILED` turn of its GROUP member — not an answer.
 
 ## Custom Phases
 
@@ -999,12 +1036,20 @@ same wave once its dependency completes, and is verified with it.
   `requiresApproval`), `maxReworks` is not applied (a warning is logged): the human's decision on each task is
   the check, and `onTaskRejection: RETRY` is how a person asks for another attempt.
 - **Records.** Every return is a `VERIFICATION` transcript entry, *"Returned for rework (1/2): <subject> —
-  <feedback>"*, and is counted by `eddi_group_task_reworks_total`. The per-task counts are stored with the
+  the verifier's feedback is on the task"*, and is counted by `eddi_group_task_reworks_total`. The note does not
+  quote the feedback: it is the engine's, and every member is shown it, including one that requires peer
+  verification of a verifier whose entry does not verify. The per-task counts are stored with the
   discussion (`taskList.reworkCounts`), so the bound holds across a pause.
 - **Feedback is model text.** The verifier's feedback reaches the member as part of its input, as every group
   member already reads its peers' contributions. It is never template source.
 
-**An unparseable verdict** (the verifier did not return the JSON array) still auto-verifies every task of that
+**A verifier that does not answer** — not deployed, skipped, failed (its provider is down) or timed out —
+verifies nothing: every task of that pass is failed with the note *"Not verified: the verifier did not answer"*
+(and reworked, within `maxReworks`, unless the verifier's turn was `SKIPPED` — not deployed, a pause the group
+cannot honour — which would be skipped again, so the tasks are failed once and no rework starts). A missing
+verdict is never a pass.
+
+**An unparseable verdict** (the verifier answered, but not with the JSON array) still auto-verifies every task of that
 pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
 including bracketed asides such as `Checked [details]: [...]` — no longer makes it unparseable. It is no longer silent: it is logged as a warning naming the group and counted by
 `eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
@@ -1190,6 +1235,15 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
 
+**Dynamic agents cannot sign.** `create_sub_agent` creates an agent with no
+identity, and a new agent cannot be created with `signInterAgentMessages` on.
+In a group where any member, the moderator or the facilitator requires peer
+verification, a created agent's contributions are therefore withheld from the
+verifying readers as `UNSIGNED`, and its ballots, proposals, lessons and task
+results count for nothing in the group's records ([Signed contributions](#signed-contributions)).
+In such a group, leave `dynamicAgents.allowCreation` off and recruit existing
+agents that have keys instead.
+
 **What the tools may touch.**
 
 - `teardown_agent` undeploys (and optionally deletes) only an agent that is both
@@ -1294,6 +1348,95 @@ summarizer's.
 
 > **Timeout guidance**: 180s covers thinking models (e.g. `claude-sonnet-5`) and synthesis phases comfortably. For tool-calling agents with multiple tool loops, consider `300`–`600`. The timeout is per agent turn, not per phase.
 
+**`RETRY` after a timeout** first asks the timed-out turn to stop (its member
+conversation is cancelled) and waits up to 5 seconds for it to end; only then is the
+turn asked again. The cancel is cooperative: it takes effect at the turn's next task
+boundary, and a model call that is already running is not interrupted. So a retry after
+a timeout happens only when the first attempt stops within that wait; otherwise the turn
+is recorded `TIMED_OUT` and not retried — a second request would queue behind the first
+in the same member conversation and be billed twice. A timed-out turn may still finish
+later: its reply then lands in the member's private conversation history, where the
+member's next turn sees it as earlier context (it is not a transcript entry). A parallel
+phase's one deadline covers that wait for every retry it allows, and a cancel during the
+wait ends it at once.
+
+### Turn outcomes
+
+Every member turn ends with an `outcome`, stored on its transcript entry and checked by
+everything that reads the transcript — a peer's prompt, the vote tally, stances, the
+convergence judge, the synthesized answer:
+
+| `outcome` | Meaning | Content |
+|---|---|---|
+| `ANSWERED` | The member answered (an abstention is an answer without content) | the answer |
+| `SKIPPED` | The turn did not run by design: agent not deployed or unavailable, a HUMAN member in an automated sub-round, a member pause the group cannot honour, the turn or depth limit, a cancel (`errorReason` "Cancelled"), a sub-group that was cancelled | none |
+| `FAILED` | The turn ran and failed: the member's provider or pipeline failed (its conversation ended in `ERROR` without output), an exception, a sub-group that failed or ended without an answer | none |
+| `TIMED_OUT` | The turn exceeded `agentTimeoutSeconds` | none |
+
+A turn that is not `ANSWERED` never carries content, so it cannot be quoted as a
+position, counted as a vote or taken as the answer. A `FAILED` turn counts against
+`onAgentFailure` like any failure: `RETRY` asks again, `ABORT` fails the discussion.
+In a `PARALLEL` phase, `ABORT` does not fail the discussion: the failed turn is recorded
+as `FAILED`, and the phase continues with its other speakers. A quota refusal still
+fails the discussion there.
+Its `errorReason` is a short fixed text (for example *"Agent failed to produce an
+answer (its conversation ended in ERROR)"*); provider, driver and exception text goes
+to the server log only. Entries stored by an older version carry no `outcome` and
+read as `ANSWERED` (or `SKIPPED`/`FAILED` for `SKIPPED`/`ERROR` entries) — except an
+entry holding the old failure placeholder text, which reads as `FAILED` without
+content; a stored `synthesizedAnswer` holding that text reads as no answer.
+
+### Discussion outcomes
+
+`COMPLETED` alone does not mean the group answered. When a round ends, the
+discussion records `outcome` and `outcomeReason` (REST, MCP, and the `group_complete`
+event). Both describe the **latest round**: a continued discussion reports how its last
+round ended, not the discussion as a whole.
+
+| `outcome` | State | When |
+|---|---|---|
+| `ANSWERED` | `COMPLETED` | A synthesized answer, or a decision record of a deciding type (a vote with a winner, a verdict, an agreement); for a style without a synthesis phase, at least one member's answered contribution. `outcomeReason` is `null`, or `TURN_LIMIT_REACHED` / `COST_CEILING_REACHED` when the round was cut short on its way to the answer. A decision record of type `NONE` (dissents only, no quorum, a tie, an unreadable verdict) is not an answer |
+| `NO_ANSWER` | `COMPLETED` | `SYNTHESIS_FAILED` (the synthesizer's turn did not answer, also when every member was skipped), `TURN_LIMIT_REACHED` (the turn limit, or a nested group's inherited budget, cut the round — also when it skipped every member), `COST_CEILING_REACHED`, `SYNTHESIS_NOT_RUN`, `NO_DECISION` (a vote or verdict ended without a decision — a tie, no quorum — in a style with no synthesis phase), `NO_MEMBER_ANSWERED` (every member turn was skipped: agents not deployed or unknown). A cut-short round keeps what cut it: `COST_CEILING_REACHED` is not reported as `TURN_LIMIT_REACHED` |
+| `NO_ANSWER` | `REJECTED` | `REJECTED_BY_HUMAN` (a person rejected the result at an approval gate), `APPROVAL_TIMED_OUT` (the gate timed out and `AUTO_REJECT` rejected it) |
+| `FAILED` | `FAILED`, or `COMPLETED` | `NO_MEMBER_ANSWERED` — member turns failed or timed out and nobody answered (a provider outage); `DISCUSSION_ERROR` — the run failed with an error; `NO_PROGRESS` — a TASK approval cycle made no progress. The state is `FAILED` only when no round of the discussion ever answered; a later round (`continue`) that fails leaves it `COMPLETED`, so it can be continued once the provider is back, and its created and retained agents are kept |
+
+`outcome` is `null` while a round runs or is paused, after a cancel, and on
+discussions stored by an older version. A run that reaches its end returns its document
+whatever the outcome — `POST …/conversations` answers `201`, `continue` `200`, even
+when `outcome` is `FAILED`; an error that stops a run (an `ABORT` policy, an engine
+failure) answers `5xx` as before.
+
+### The turn limit keeps the synthesis turn
+
+`maxTurns` counts every member turn. One turn per remaining `SYNTHESIS` phase is
+reserved: the phases before it stop one turn earlier, so a 10-member `ROUND_TABLE`
+with `maxRounds: 5` (50 turns, the default limit) still ends with its synthesis. A
+parallel batch is counted before it runs, so nested GROUP members in it share what
+really remains. When the limit cuts a discussion short, a `System` `SKIPPED` entry says
+so in the transcript (*"Turn limit (protocol.maxTurns) reached — …"*) and
+`outcomeReason` is `TURN_LIMIT_REACHED`.
+
+### Cancel
+
+A cancel is checked before every member or engine turn — phase speakers, the
+convergence judge, the facilitator, dissent and vote tie-break turns, task-force
+planning, verification and bids — and before every phase repeat.
+`POST …/cancel` (and the MCP `cancel_group_discussion`) sends `CANCEL_GRACEFUL`: the
+turn already running finishes, nothing new starts, and the discussion becomes
+`CANCELLED` once that turn returns. A discussion deleted while it runs is stopped with
+`CANCEL_IMMEDIATE`: the running turns are released at once (each closed with a
+`SKIPPED` "Cancelled" entry and `speaker_complete`), their member conversations are
+cancelled, and no fresh member conversation is started for a deleted discussion. A
+nested sub-group receives the cancel of its parent.
+
+The cancel response tells the truth: **`202 Accepted`** with the conversation (still
+`IN_PROGRESS` or `SYNTHESIZING`) while the running discussion is stopping — watch for
+the `cancelled` event or poll; **`200`** with the conversation once it is no longer
+running — read `state`: `CANCELLED`, or `COMPLETED`/`FAILED` if it finished before the
+cancel landed. The MCP tool answers `{"status":"CANCELLING"}` while it stops — also when the
+state cannot be read, since an accepted cancel does not prove the run has stopped — otherwise
+the state it ended in (`CANCELLED`, `COMPLETED`, `FAILED`, …).
+
 ## REST API
 
 | Method | Path | Description |
@@ -1307,7 +1450,7 @@ summarizer's.
 | `GET` | `/groupstore/groups/styles` | List discussion styles |
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
-| `GET` | `/groups/{groupId}/conversations` | List conversations |
+| `GET` | `/groups/{groupId}/conversations` | List conversations (`index`, `limit`). A non-admin sees their own; `mine=true` restricts an admin to their own as well (since 6.7.0). Each member's private conversation records the discussion as `groupConversationId` on its conversation descriptor, and `GET /conversationstore/conversations?excludeGroupMembers=true` leaves those out |
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
@@ -1315,7 +1458,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
-| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
+| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion: `202` while a running discussion is stopping, `200` once it is no longer running — read `state` (see [Cancel](#cancel)). A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
 | `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{groupConversationId, accepted, state}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
@@ -1345,7 +1488,7 @@ speaker and phase pairs.
 | `group_start` | The discussion begins (carries group id and question) |
 | `phase_start` / `phase_complete` | A phase opens / closes |
 | `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
-| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn produced none — no content and an `outcome` of `TIMEOUT`, `SKIPPED` or `ERROR`. Every started turn is closed, including a parallel member released by the batch deadline |
+| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn did not answer — no content and an `outcome` of `TIMEOUT` (turn outcome `TIMED_OUT`), `SKIPPED` or `ERROR` (turn outcome `FAILED`), on sequential, peer-targeted and parallel phases alike. Every started turn is closed, including a parallel member released by the batch deadline |
 | `token` | Declared but never emitted today: member turns are not streamed, so a client sees a member's answer whole in `speaker_complete`. Do not build on it |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
 | `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |
@@ -1361,8 +1504,16 @@ speaker and phase pairs.
 | `awaiting_approval` / `hitl_resume` | A HITL pause was committed / released |
 | `member_pause_skipped` | A member turn was skipped rather than paused |
 | `cancelled` | The discussion was cancelled |
-| `group_complete` | Terminal — carries the final state and the synthesized answer |
+| `group_complete` | Terminal — carries the final `state`, `outcome` and `outcomeReason` (see [Discussion outcomes](#discussion-outcomes)); `state` is `FAILED` with `outcome` `FAILED` when no member answered. The REST stream leaves `synthesizedAnswer` out: read it from the conversation |
 | `group_error` | Terminal failure, with a curated (never raw) message |
+
+These events belong to the stream of the request that started or continued the
+discussion. To learn about a discussion without holding that stream open — it
+started, it ended, it waits for a human member (`yourTurn: true` for the person
+it waits for), or it paused at an approval gate — the owner and the `HUMAN`
+members can hold the per-user stream [`GET /me/events`](user-events.md) instead:
+`team.started`, `team.waiting_for_human`, `team.ended` and `approval.pending`,
+with ids only.
 
 ## MCP Tools
 
@@ -1392,7 +1543,7 @@ split is internal.
 | `get_group_approval_status` | Pause coordinates for one discussion — HITL tool set |
 | `submit_group_human_input` | Submit a HUMAN member's turn (I6) — HITL tool set |
 | `approve_group_phase` | Approve or reject a HITL pause — HITL tool set |
-| `cancel_group_discussion` | Cancel a running discussion — HITL tool set |
+| `cancel_group_discussion` | Cancel a running discussion — HITL tool set. `{"status":"CANCELLING"}` while a running discussion finishes its current turn, otherwise the state it ended in |
 | `add_team_task` | File a task on a standing team's backlog (I13) |
 | `list_team_backlog` | Read a standing team's backlog |
 | `list_group_templates` | List the preset group templates (I10) |
@@ -1445,6 +1596,216 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
 
+## Signed contributions
+
+An agent with `security.signInterAgentMessages` signs every transcript entry it
+writes, once an admin has generated its signing key
+([architecture → Cryptographic Agent Identity](architecture.md#cryptographic-agent-identity)).
+A member with `security.requirePeerVerification` checks those signatures before
+each of its turns:
+
+```json
+"security": {
+  "signInterAgentMessages": true,
+  "requirePeerVerification": true
+}
+```
+
+- The signature covers the entry's content, type, speaker id and display
+  name, target, error reason, round, phase index and name, and key version,
+  the group conversation it belongs to, and its own nonce and signing time. An
+  entry with any of those changed in the store (edited or retyped), copied into
+  another discussion, moved to another phase, or repeated does not verify. The
+  entry's stored `timestamp` is not covered: changing it is not detected, and
+  the changed value is what `groupTranscript` carries.
+- Round placement is checked in two ways: an entry of the current round must
+  sit after the round's start, and an earlier round's entry before it, and
+  signed rounds may never go backwards along the transcript. Within the earlier
+  rounds nothing more is checked, so a store writer can move a signed round-1
+  entry past the round-2 question (but not past a signed round-2 entry) and it
+  still verifies. Moving an entry between repeats of one phase within a round
+  is not detected either.
+- **Withheld for a member that verifies.** Every entry another agent wrote
+  that does not verify, or that carries no signature or names a key its
+  speaker does not declare, reaches a member with `requirePeerVerification`
+  as `[withheld: this message could not be verified, because ...]` in its
+  phase prompt and its `groupTranscript` context, named by the speaker's agent
+  id and with no phase name, since the stored display name and phase name are
+  unverified text too; the engine's other prompts for it read the transcript
+  the same way (next item). It is not a blanket fail-closed: a member without
+  the setting (the default) is shown the stored transcript with nothing
+  checked and nothing logged, entries no agent wrote are shown to a verifying
+  member too, unauthenticated (labelled, below), and the texts that still
+  reach it without a signature of their own are listed under
+  [Not yet supported](#not-yet-supported). So every agent
+  that writes to the
+  discussion should sign: each member, and the moderator or synthesizer too
+  when it is not a member, or its synthesis is withheld from verifying
+  members.
+- **Every prompt, not only phase turns.** The prompts the engine writes for a
+  role turn read the transcript the same way, as the agent taking the turn may
+  see it: the convergence judge (the moderator; the `SERVICE` judge is no agent
+  and reads the round as the engine's own records count it, below), a
+  dissenter, the facilitator's briefing, a
+  follow-up's `groupTranscript`, and a nested group's question, which is
+  filtered when any agent of the nested group verifies (a member, its
+  moderator or its facilitator, or one of a group nested in it), since that
+  prompt becomes the question each of them works from; a nested group that
+  cannot be read counts as verifying. A
+  dissenter that verifies is not asked to react to a synthesis that does not
+  verify for it.
+- **Task forces.** The task records are agent text too: a verifying executor,
+  verifier or bidder is shown a task's result only when a verified entry of
+  the assignee holds exactly that text (an unsigned result, or one edited in
+  the store, reads `[withheld: this text could not be verified]`). Its own
+  results are checked the same way when it signs; one that does not sign is
+  shown its own results as its entries hold them. A result an approver edited when approving it is the
+  reviewer's text, not the agent's, and is shown, as a reviewer's synthesis
+  edit is. A task's subject and description are withheld when they come
+  from a plan that does not verify, or from another member's task tool while
+  that member does not sign verifiably (it has no key, signing is off, or its
+  key is revoked or outside its window). The engine records a tool-filed task
+  under the member whose turn filed it, so a signing member's task is shown
+  as its text and done by a verifying assignee. A standing team's backlog task
+  another team's agent handed off (a `handoff_to_team` call with `AUTO`
+  intake) is that agent's text the same way: the cadence keeps the agent as
+  the run's task's creator, so it is shown, and done, only while that agent
+  signs verifiably. A team with such a member therefore never runs one it
+  could not verify: an `AUTO` handoff from an agent that does not sign
+  verifiably goes to the intake inbox for a person to accept, and a backlog
+  task whose agent stops signing waits on the backlog, not pulled, so no
+  member fails it, is charged for it or is quoted it. Such a task stays
+  `PENDING`; a cadence fire that it leaves with nothing to run records why
+  in the schedule's fire history, naming the agents. To free it, give the
+  agent a signing key again (or turn its signing back on), or delete the
+  task and file it again. Configured tasks and
+  the user's own are shown, and so is a handoff a person accepted from the
+  intake inbox. A store edit to a task's subject or description is not
+  detected, here or for configured tasks. A verification note is withheld
+  when it comes from a verifier entry that does not verify. A verifying member
+  whose own task's text does not verify is not asked to do it: the task fails
+  with "Its task text could not be verified". That uses no turn and is no
+  failure of the member, so under `onAgentFailure: ABORT` the discussion goes
+  on. A verifying verifier judges only
+  the tasks whose text and result it may see: the others stay `COMPLETED`,
+  unverified, with a note giving their count, and with none left it gets no
+  turn, so a verdict that cannot be parsed never auto-verifies work it was not
+  shown. A bidder is announced, and can win, only the tasks whose text it may
+  see, and `listGroupTasks` lists each subject as the calling member may see it.
+- **The engine's own records.** Once any member, the moderator or the
+  facilitator (an enabled one: a facilitator that is switched off reads
+  nothing and counts for nothing) requires verification, what the engine
+  records for everyone
+  counts only entries that verify for all of them: the `SERVICE` convergence
+  judge's input, the negotiation table (proposals and concessions), the vote (its options and ballots: a synthesis
+  that does not verify offers no options, so the vote does not run, and an
+  unsigned ballot is not counted, also when a `HUMAN_DECIDES` tie is resumed
+  by the person or, on timeout, by the moderator), an arbitration verdict, the lessons a
+  retrospective stores in team memory, and the feedback a standing team's
+  cadence carries into a backlog task's description, which the next run shows
+  as configured task text. A facilitator's `CALL_VOTE` options are its own
+  text, so in such a group the move is refused unless the facilitator signs
+  verifiably.
+- **User memories.** A group- or global-visible user memory whose value
+  another agent wrote carries no signature, so an agent that requires
+  verification neither loads it as a `{properties.key}` at conversation start
+  nor gets it from the memory tool's recall or search, in any conversation.
+  What counts is who last wrote the value, since a global entry keeps its
+  creator as owner when another agent writes it; the store leaves these
+  entries out before the recall limit, so its own memories, the ones the user
+  or an admin wrote and the team's lessons are all shown. A `longTerm`
+  property it sets for a global key is written as any agent's is, replacing
+  such a value, and makes it the value's writer, so it is shown the value
+  again (see [User Memory](user-memory.md)). (The flag is read from the
+  deployed agent version.)
+- **Entries the engine writes for an agent are signed for it.** A follow-up
+  answer, the readable summary of a task-force verification, the
+  facilitator's notes (an escalation dropped for an approval gate or a
+  tie-break included) and a recruitment note are signed with the agent's key
+  when it signs, so a verifying member sees them, and are named by the agent:
+  each carries the agent's own text, which recorded as the engine's would pass
+  for engine text. A task-failure note is the engine's own and is
+  recorded as such, with the member as its target.
+- A record with no content (a skipped turn, an error, a pass) is written by
+  the engine unsigned, so nothing vouches for its text either. A verifying
+  member's `groupTranscript` keeps it in place with its speaker id, type,
+  phase index and target, named like a withheld entry, but without its
+  reason, display name or phase name. Its own such records are no exception.
+- A member that signs has its own entries checked like a peer's, since every
+  honest one is signed: an answer planted under its id, or its own answer
+  edited in the store, is withheld rather than quoted back to it as the answer
+  it revises or defends. So is its own entry that went out unsigned (a signing
+  failure, or an answer from before signing was switched on), as it already is
+  for every verifying peer. A verifying member that does not sign has nothing
+  to check its own entries against: it is shown them as stored, unchecked.
+  They are still unsigned for the engine's records, so once anyone verifies,
+  its proposals, ballots and (as moderator) synthesis do not count there: a
+  verifying moderator that does not sign leaves a vote on its synthesis without
+  options.
+  An agent that verifies should sign too.
+- A revoked key vouches for nothing, whenever an entry claims to have been
+  signed. A key's `validFromMs`/`validUntilMs` window is checked against the
+  time the signer wrote into the entry, so it limits honest use but does not
+  stop a leaked key: revoke that one. Revocation applies to every prompt built
+  after it. An entry a member was already shown while the key was valid stays
+  in that member's own conversation history, which its model is shown again on
+  later turns until the history window drops it; to keep a leaked key's text
+  away from the members, start a new discussion.
+- An agent that has been deleted vouches for nothing either, whether it was
+  deleted for good or can still be restored. An entry under its id is withheld
+  from a verifying member, signed or not, when the discussion shows an agent
+  wrote it: the entry carries a signature, which only agents give, or an agent
+  turn of this discussion ran under its speaker id. Its placeholder is named
+  by that id followed by `(not an agent, unverified)`, since no agent store
+  vouches for the id any more. Other ids that name no agent (a human member,
+  a nested group, a reviewer) are shown labelled as below. So revoking a compromised agent's key and then deleting the agent
+  keeps its entries withheld. A facilitator's notes are recognised by their
+  type, since only the facilitator, or a member recruiting someone, records a
+  `FACILITATION` note under an agent id: a facilitator that is not a member
+  runs its turns under a conversation of their own.
+- Entries no agent wrote are not signed: the user's question and follow-ups, a
+  human member's turn, a reviewer's edit, the engine's own notes and a nested
+  group's answer. They are not authenticated: whoever can write the
+  group-conversation store can add one, or re-attribute an agent's entry to a
+  non-agent speaker id. A verifying member is therefore shown them under a
+  name no member agent has: `User`, `System`, or the stored name followed by
+  `(not an agent, unverified)`. Under `ANONYMOUS` scope, where every speaker
+  is `Anonymous`, such an entry is `Anonymous (not an agent, unverified)`. A
+  group save refuses those names for an agent member (400, ignoring case).
+  Member display names must also be unique within a group (a save with two
+  equal names, ignoring case, is refused with 400), and an agent member may not
+  be named `Moderator` while the moderator is not a member, nor `Facilitator`
+  while an enabled facilitator is another agent: the engine signs those roles'
+  entries under these names. So two verified voices never share one name
+  either, with one exception: a group saved before these checks still loads
+  with the names it has, so its two members can share a name until the group
+  is corrected and saved again.
+- A synthesis under the engine's or the user's name (speaker id `system`,
+  `user` or none) is withheld from a verifying member: the engine never
+  records one there, and a synthesis is quoted by its type, without its
+  speaker. Other unsigned syntheses (a reviewer's edit, a human or nested-group
+  moderator's) are shown, labelled as above, and stay unauthenticated.
+- The stored window summary is free text no signature covers, so a verifying
+  member never gets it: in a windowed discussion it is shown the truncation
+  marker instead.
+- A ballot lists the options in the latest synthesis as the voter sees it, so
+  a verifying voter is offered none from a synthesis that does not verify for
+  it.
+- If a member's configuration cannot be read, the setting this node last read
+  for it applies; if it never read one, the member's turn is recorded
+  `SKIPPED`.
+- The stored transcript is unchanged. Members that do not verify, the Manager,
+  SSE and the REST and MCP readers see every entry as stored.
+- Each withheld entry is logged at ERROR the first time, with its index and
+  the reason (`UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`, `OUT_OF_WINDOW`,
+  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`,
+  `NO_SUCH_AGENT`).
+- **Cost.** A verifying member checks every agent entry before each turn, but
+  each Ed25519 check is remembered on the node, so an entry costs one check
+  per node, not one per turn. Each pass still reads each distinct speaker's
+  current agent version from the store, and every member, verifying or not,
+  reads its own once per pass (two passes per turn: prompt and context).
+
 ## Restarts
 
 A discussion's leg runs in the JVM that started or resumed it, and nothing
@@ -1469,6 +1830,7 @@ Known bounds, so they are not discovered at runtime:
 | **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
 | **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
 | **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
+| **Peer verification: what is not signed** | Every prompt a verifying member receives is filtered (see [Signed contributions](#signed-contributions)), but some texts reach it without a signature of their own. The engine's notes are shown to it as the engine's, unauthenticated: a rework or task-failure note names a task's subject only as the group's records count it (`[withheld: this text could not be verified]` once a reader verifies and the subject comes from a plan or task tool that does not verify for every reader), and a verifying facilitator's briefing leaves out the convergence check's reason, which is the judge's reply; the note that a human-assigned task is not reworked still quotes its subject as stored. A task a member files with its task tools, or another team's agent hands off, is not signed: its text is that agent's as the engine recorded it, shown when that agent signs verifiably. A handoff an `onDecision` rule files renders the source team's decision record and names no agent, and one a person accepted from the intake inbox is the reviewer's to vouch for: both reach the run as configured task text. The cadence question quotes the pulled tasks under the user's name, marked as handed off where they were; a handed-off one a verifying member could not take as its agent's is not pulled (it goes to the intake inbox when filed, and waits on the backlog if its agent stops signing). So a team whose members require verification should accept handoffs with `REVIEW` intake, where a person approves the text first. Shared artifacts are not signed, so a member that requires verification gets no artifact tools. Lessons are read back as stored: a team's own lessons stored while none of its readers required verification, the lessons other teams share with it (quoted in its RETRO prompt), and the lessons the team scorecard tool returns for the team and the teams it oversees, which were checked only against the storing team's records rule; reading another team's lessons trusts that team's verification setting. A nested group's answer is shown relabelled, not verified. An agent `create_sub_agent` creates has no signing key and cannot be given one while it runs, so with any verifying reader its contributions are withheld as `UNSIGNED` and count for nothing in the group's records (see [Dynamic Agents](#dynamic-agents)). |
 | **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
 
 ## Configuration

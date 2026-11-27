@@ -18,8 +18,9 @@ import org.jboss.logging.Logger;
 import java.util.Map;
 
 /**
- * Registers the OutputTemplate lifecycle task. Template engine and extensions
- * are handled by Qute CDI auto-discovery.
+ * Registers the OutputTemplate lifecycle task. The template engine itself is
+ * the {@code TemplatingEngine} bean, which builds its restricted Qute engine
+ * from the extensions Quarkus discovers; nothing is registered for it here.
  *
  * @author ginccc
  */

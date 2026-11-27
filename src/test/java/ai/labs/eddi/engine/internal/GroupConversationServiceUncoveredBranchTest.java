@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -103,8 +102,6 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private MeterRegistry meterRegistry;
     @Mock
     private Timer timer;
@@ -126,7 +123,7 @@ class GroupConversationServiceUncoveredBranchTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
+                org.mockito.Mockito.mock(IScheduleStore.class), null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     // === Helpers ===
@@ -1075,7 +1072,11 @@ class GroupConversationServiceUncoveredBranchTest {
             stubAgent("mod", "Synthesis");
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // K1: the only member's ERROR-state turn is FAILED, so no member answered and
+            // the moderator's synthesis of nothing is not the discussion's answer
+            assertEquals(GroupConversationState.FAILED, result.getState());
+            assertEquals(GroupConversation.DiscussionOutcome.FAILED, result.getOutcome());
+            assertNull(result.getSynthesizedAnswer());
         }
     }
 

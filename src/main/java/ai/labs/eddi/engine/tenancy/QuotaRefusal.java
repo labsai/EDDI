@@ -14,10 +14,10 @@ package ai.labs.eddi.engine.tenancy;
  * quota refusal as non-retryable and affecting every member, so they abort the
  * whole discussion instead of recording a SKIPPED turn. When
  * {@link QuotaAccountingUnavailableException} was added beside
- * {@link QuotaExceededException} — which had to extend
+ * {@link QuotaExceededException} — it had to extend
  * {@link java.util.concurrent.RejectedExecutionException}, so it could not
- * simply subclass it — the six {@code instanceof QuotaExceededException} guards
- * in {@code MemberTurnExecutor}, {@code TaskForceEngine} and
+ * simply subclass the other — the six {@code instanceof QuotaExceededException}
+ * guards in {@code MemberTurnExecutor}, {@code TaskForceEngine} and
  * {@code PhaseExecutionEngine} silently stopped matching, and a quota-store
  * outage degraded into per-member retries against a dead store or a transcript
  * full of SKIPPED entries with the discussion reported complete.

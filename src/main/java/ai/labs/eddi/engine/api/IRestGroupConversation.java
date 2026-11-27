@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -135,7 +136,18 @@ public interface IRestGroupConversation {
     List<GroupConversation> listGroupConversations(@PathParam("groupId") String groupId, @QueryParam("index")
     @DefaultValue("0") Integer index,
                                                    @QueryParam("limit")
-                                                   @DefaultValue("20") Integer limit);
+                                                   @DefaultValue("20") Integer limit,
+                                                   @Parameter(description = "Only the caller's own sessions, for an admin too (since 6.7.0)")
+                                                   @QueryParam("mine")
+                                                   @DefaultValue("false") Boolean mine);
+
+    /**
+     * The listing without {@code mine}, for in-process callers. Not a resource
+     * method.
+     */
+    default List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
+        return listGroupConversations(groupId, index, limit, false);
+    }
 
     @POST
     @Path("/{groupId}/conversations/{groupConversationId}/followup")
@@ -222,7 +234,10 @@ public interface IRestGroupConversation {
                description = "Cancels an in-progress or paused group discussion. The owner and admins may cancel either; "
                        + "a caller who is only an approver may cancel only a discussion that is awaiting a decision, and "
                        + "receives the resulting state rather than the conversation.")
-    @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    @APIResponse(responseCode = "200", description = "The discussion is no longer running; read 'state' in the body: CANCELLED, "
+            + "or COMPLETED/FAILED when it finished before the cancel landed.")
+    @APIResponse(responseCode = "202", description = "Running discussion signalled: it stops before its next member or engine turn "
+            + "(the body still shows IN_PROGRESS or SYNTHESIZING; poll for its final state).")
     @APIResponse(responseCode = "403", description = "Approver-only caller and the discussion is not awaiting a decision.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Already in a terminal state.")

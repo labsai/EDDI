@@ -385,6 +385,8 @@ The answer has the same shape as the replacing `PUT …/grant` below, plus `chan
 - **safe under concurrency** — the write is a compare-and-set on the stored grant, retried on a conflict, so two administrators granting two new agents at the same moment both land. With the replacing `PUT` that is a read-modify-write in the client, and one of the two grants would be lost;
 - **audited** — each change writes an audit-ledger entry (`taskType: vault`, `taskId: vault.grant.append`) with the actor, the secret, the agent, the previous and the new grant, and where it came from (`rest` or `setup`).
 
+The reverse happens on its own. When an agent is **permanently** deleted (`DELETE /agentstore/agents/{id}?permanent=true`), its id is removed from every grant that lists it, in every vault tenant, with the same compare-and-set. Each removal is audited (`taskType: vault`, `taskId: vault.grant.revoke-deleted-agent`, origin `agent-delete`). A soft delete keeps the grants, so an agent that is restored is still granted. A grant is never widened by this: when the deleted agent is the only id on a grant, the id stays, because an empty list means every agent. Narrow or delete such a secret yourself if nothing should use it. Ids left on grants by agents deleted before this existed are not removed.
+
 ### Changing a grant without the secret's value
 
 Use **`PUT /secretstore/secrets/{tenantId}/{keyName}/grant`**. It replaces `allowedAgents` (and optionally the description) and **never touches the encrypted value** — no plaintext is accepted, and none is required:
@@ -1065,7 +1067,11 @@ When the previous master key is **gone for good**:
      every sealed system value (the audit ledger pins a new key — see
      [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation)), and likewise the
      keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
-     created on the next store);
+     created on the next store). The GDPR erasure tombstone key is derived from that
+     key, so a reset changes it too: guarded writes, erasures and permanent
+     conversation deletes then fail closed until it is resolved as
+     [The tombstone key](gdpr-compliance.md#the-tombstone-key) describes, and the
+     answer's `message` says so;
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
 3. `POST /secretstore/secrets/{tenantId}/reset?confirm=true` for each of them, then store the
    secrets again.

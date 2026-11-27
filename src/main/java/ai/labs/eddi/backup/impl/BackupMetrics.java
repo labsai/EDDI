@@ -11,12 +11,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 /**
- * Counters for the export/import/upgrade flows.
+ * Counters for the export/import/upgrade flows, exposed at {@code /q/metrics}.
  * <p>
- * The whole backup package emitted no metrics, so there was no way to alert on
- * export or sync failure rates and no number showing how many resources a sync
- * had skipped versus updated — the exact questions an operator asks when a sync
- * "did nothing".
+ * They answer the questions an operator asks when a sync "did nothing": the
+ * export, import and upgrade attempt and failure rates, and how many resources
+ * an upgrade updated, created, skipped or failed on. An upgrade counts every
+ * sync and every import with the {@code upgrade} strategy.
  *
  * @since 6.3.0
  */

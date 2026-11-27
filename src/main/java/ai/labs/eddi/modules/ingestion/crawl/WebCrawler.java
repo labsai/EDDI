@@ -744,8 +744,7 @@ public class WebCrawler {
 
     /**
      * What one sitemap lists: pages, or — for a sitemap index — further sitemaps.
-     */
-    /**
+     *
      * @param complete
      *            false when this sitemap may list more than was read — it was cut
      *            at a cap, or could not be read for a reason that says nothing
@@ -1117,7 +1116,10 @@ public class WebCrawler {
 
     /** Why a crawl stopped. */
     public enum StopReason {
-        /** The queue emptied — the whole scope was covered. */
+        /**
+         * The queue emptied — the whole scope was covered. Also the reason reported for
+         * an unusable seed URL (see {@link CrawlSummary#coveredWholeSource()}).
+         */
         COMPLETED, PAGE_LIMIT, FETCH_LIMIT, BYTE_LIMIT, TIME_LIMIT, CANCELLED
     }
 
