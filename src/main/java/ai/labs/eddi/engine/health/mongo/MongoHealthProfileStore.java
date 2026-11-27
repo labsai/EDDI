@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthProfileStore;
 import ai.labs.eddi.engine.health.model.HealthProfile;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -110,7 +112,11 @@ public class MongoHealthProfileStore implements IHealthProfileStore {
         }
         long changed = 0;
         try {
-            for (Document d : profiles.find(eq(FIELD_UPDATED_BY, userId))) {
+            // Read what has committed, on the primary: a lagging secondary (the client
+            // default is nearest) could miss a profile the person saved a moment ago,
+            // and the erasure would leave their name on it.
+            for (Document d : profiles.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY)
+                    .find(eq(FIELD_UPDATED_BY, userId))) {
                 HealthProfile p = profile(d);
                 HealthProfile blanked = p.withMeta(p.agentId(), p.stored(), p.updatedAt(), null);
                 // Compare-and-set on the document read: a save in between (a new author,

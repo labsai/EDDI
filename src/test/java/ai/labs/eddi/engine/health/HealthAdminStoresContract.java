@@ -133,7 +133,10 @@ public interface HealthAdminStoresContract {
         assertTrue(reportLinks().findByTokenHash("a".repeat(64)).isEmpty());
 
         assertEquals(2, reportLinks().clearCreator("alice") + reportLinks().clearCreator("bob"));
-        assertNull(reportLinks().listByAgent("x").get(0).createdBy());
+        HealthReportLink erased = reportLinks().listByAgent("x").get(0);
+        assertNull(erased.createdBy());
+        assertEquals(List.of(), erased.creatorTeams(), "the creator's team snapshot is erased with them");
+        assertFalse(erased.creatorAdmin(), "and so is their admin flag, which would still authorise the link");
 
         assertEquals(1, reportLinks().deleteExpiredBefore(AT));
         assertTrue(reportLinks().listByAgent("a").isEmpty());

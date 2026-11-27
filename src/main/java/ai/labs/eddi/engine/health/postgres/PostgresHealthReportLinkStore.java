@@ -197,7 +197,8 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
             return 0;
         }
         try (Connection c = connection();
-                PreparedStatement s = c.prepareStatement("UPDATE health_report_links SET created_by = NULL WHERE created_by = ?")) {
+                PreparedStatement s = c.prepareStatement(
+                        "UPDATE health_report_links SET created_by = NULL, creator_teams = '{}', creator_admin = FALSE WHERE created_by = ?")) {
             s.setString(1, userId);
             return s.executeUpdate();
         } catch (SQLException e) {

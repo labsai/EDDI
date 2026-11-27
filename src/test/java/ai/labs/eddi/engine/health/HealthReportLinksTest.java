@@ -222,6 +222,13 @@ class HealthReportLinksTest {
         when(guard.checkPrincipalLevel("a", "alice", List.of("team:ops"), false, AccessLevel.EDIT)).thenReturn(UseCheck.ALLOWED);
         assertEquals(UseCheck.ALLOWED, links.authorized(link));
 
+        // An erased creator's admin flag authorises nothing: the check runs as a
+        // non-admin without a principal (DENIED wherever access is enforced).
+        HealthReportLink creatorless = new HealthReportLink("r-2", "a", "h2", List.of("reliability"), "30d", NOW, null, NOW.plusSeconds(60),
+                List.of(), true);
+        when(guard.checkPrincipalLevel("a", null, List.of(), false, AccessLevel.EDIT)).thenReturn(UseCheck.DENIED);
+        assertEquals(UseCheck.DENIED, links.authorized(creatorless));
+
         // Creation snapshots the creator's teams and admin flag and is audited without
         // the token.
         when(guard.currentTeamSubjects()).thenReturn(List.of("team:ops"));

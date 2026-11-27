@@ -271,7 +271,11 @@ public class HealthReportLinks {
         if (accessGuard == null) {
             return UseCheck.ALLOWED;
         }
-        return accessGuard.checkPrincipalLevel(link.agentId(), link.createdBy(), link.creatorTeams(), link.creatorAdmin(), AccessLevel.EDIT);
+        // The admin flag stands for its creator: with the creator erased it stands for
+        // nobody, so it never authorises a creatorless link (a row blanked before the
+        // erasure also cleared the flag).
+        boolean creatorAdmin = link.creatorAdmin() && link.createdBy() != null && !link.createdBy().isBlank();
+        return accessGuard.checkPrincipalLevel(link.agentId(), link.createdBy(), link.creatorTeams(), creatorAdmin, AccessLevel.EDIT);
     }
 
     /**

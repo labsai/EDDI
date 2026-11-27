@@ -77,6 +77,29 @@ business owner without Manager access can read a **branded, read-only report** t
 - Docs and the Platform Operator now say the owner report page and link screens are **not yet in the Manager — REST
   only for now** (operator revision 65). Auth E2E spec `health-report.spec.ts` checks the permit rule over HTTP.
 
+### Rebuilt on the rebuilt h3 (2026-11-27)
+
+- Merged `feat/agent-health-h3` at `3d7ceeb` (the `HealthErasureWriter` erasure redesign, `McpToolTiers`).
+- **MCP**: the three profile tools are filed in `McpToolTiers` (`read_agent_health_profile` and `list_health_presets`
+  under `HEALTH_READ`, `update_agent_health_profile` under `AUTHOR`) and each gate calls `McpToolTiers.of(...)`.
+  128 tools; README, AGENTS.md, docs/README.md, docs/mcp-client.md, docs/mcp-server.md and `McpToolContractTest`
+  restated. The Health Tools table in docs/mcp-server.md lists the three tools. `list_alert_events` names the `HEALTH`
+  source.
+- **Erasure decisions per store.** None of the four H4 stores is written by an async writer, so none joins
+  `HealthErasureWriter`: health profiles and report links are agent-level administration written synchronously by an
+  authenticated admin or editor, and hold only that person's account name (`updatedBy`, `createdBy`), which
+  `HealthAdminGdprParticipant` blanks (as the alert rules' authors are); `HEALTH` alert states hold rule, agent,
+  status and condition names only; `HEALTH` alert events carry no conversation id and no subject user, so the alert
+  writer's guard has nothing to withhold.
+- **Fixed while there**: erasing a link's creator left their `creatorAdmin` flag, and `checkPrincipalLevel` admits
+  an admin before it looks at the principal, so a link an erased administrator created kept answering. Erasure now
+  blanks the team snapshot and the admin flag with the name (MongoDB and PostgreSQL), and `HealthReportLinks.authorized`
+  ignores the flag of a link without a creator. On MongoDB the profiles to blank are found on the primary at majority
+  read concern, so a lagging secondary cannot hide one just saved. The profile cache is invalidated on the erasing
+  node only; other nodes' cached profiles still carry the old `updatedBy` until their TTL ends (the stored row is
+  blank).
+- **Platform Operator**: revision 85 (h3 is at 84).
+
 ### Design decisions
 
 - Quality is left out of the status everywhere, so the report, the portfolio and the alerts agree and no rating leaks

@@ -13,6 +13,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -136,7 +137,10 @@ public class MongoHealthReportLinkStore implements IHealthReportLinkStore {
             return 0;
         }
         try {
-            return links.updateMany(eq("createdBy", userId), set("createdBy", null)).getModifiedCount();
+            // The creator's team snapshot and admin flag go with the name: they describe
+            // the person, and an admin flag left behind would still authorise the link.
+            return links.updateMany(eq("createdBy", userId),
+                    Updates.combine(set("createdBy", null), set("creatorTeams", List.of()), set("creatorAdmin", false))).getModifiedCount();
         } catch (MongoException e) {
             throw new HealthStoreException("Could not clear the creator of health report links", e);
         }
