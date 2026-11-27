@@ -159,7 +159,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: keycloak
-          image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
+          image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}{{ with .Values.keycloak.image.digest }}@{{ . }}{{ end }}"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -197,6 +197,11 @@ spec:
             # /health/* stay disabled unless this is set, whatever port you probe.
             - name: KC_HEALTH_ENABLED
               value: "true"
+            # Java4Shell (CVE-2026-114938) interim mitigation: Keycloak decodes Base64
+            # before any login. The pinned image carries the fixed JDK (21.0.13.1, confirmed with
+            # `java -version`); the flag stays as a safeguard for an overridden or earlier image.
+            - name: JAVA_OPTS_APPEND
+              value: "-XX:-UseBASE64Intrinsics"
             {{- if .Values.eddi.oidc.publicUrl }}
             # Must equal the URL the BROWSER uses for KEYCLOAK, because it is
             # what Keycloak embeds as the token issuer. (Where the Manager SPA

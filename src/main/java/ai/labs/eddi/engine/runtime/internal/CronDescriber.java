@@ -38,7 +38,8 @@ public final class CronDescriber {
      *
      * @param cronExpression
      *            5-field cron (min hour dom month dow)
-     * @return human-readable description
+     * @return human-readable description; "Invalid cron expression" (with a reason
+     *         or the offending text) instead of an exception when it cannot be read
      */
     public static String describe(String cronExpression) {
         try {

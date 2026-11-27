@@ -147,8 +147,9 @@ than sampling conversations:
 - `compare_agent_versions_health` — after a promotion: the new version since its first
   turn against the old one's last days; `deltas` say `better` and `significant`.
 - `list_agent_health` — every agent you may view, the ones needing attention first, and
-  the platform incidents of the period: if the agent's failures fall on such a day, the provider is the
-  likely cause, not the agent.
+  the platform incidents of the period. Attribute an agent's failures by its own failure classes in
+  `read_agent_health` (agent failures vs provider/platform failures); an incident on the same day is
+  supporting context only, never the evidence on its own.
 - `suggest_outcome_mappings` — the actions that end most sessions and are not mapped in
   `healthConfig.outcomes`, with a suggested outcome; propose a mapping, never apply it unasked.
 - `list_agent_health_sessions` — the sessions behind a rate (filter by `outcomes` and

@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -35,7 +36,7 @@ import {
   useRotateDek,
   useRotateKek,
   useResetTenant,
-} from "@/hooks/use-secrets";
+} from "@eddi/app-kit/hooks/use-secrets";
 import {
   grantsAllAgents,
   ALL_AGENTS,
@@ -47,11 +48,11 @@ import {
   resolveAllowedHostsDraft,
   type AllowedHostsDraft,
   type SecretMetadata,
-} from "@/lib/api/secrets";
-import { AllowedHostsField } from "@/components/secrets/allowed-hosts-field";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+} from "@eddi/app-kit/lib/api/secrets";
+import { AllowedHostsField } from "@eddi/app-kit/components/secrets/allowed-hosts-field";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useAgentNames } from "@/hooks/use-agent-names";
 
 const DEFAULT_TENANT = "default";
@@ -564,7 +565,7 @@ export function SecretsPage() {
                       {t("secrets.allowedAgents", "Allowed Agents")}
                     </span>
                   </th>
-                  <th className="px-4 py-3 text-end font-semibold text-foreground">
+                  <th className="sticky end-0 bg-card px-4 py-3 text-end font-semibold text-foreground">
                     {t("secrets.actions", "Actions")}
                   </th>
                 </tr>
@@ -667,13 +668,14 @@ export function SecretsPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-end">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="sticky end-0 bg-card px-4 py-3 text-end w-px whitespace-nowrap">
+                      <RowActions className="flex-nowrap">
                         <button
                           type="button"
                           onClick={() => setGrantTarget(s)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                           data-testid={`edit-grant-action-${s.keyName}`}
+                          title={t("secrets.access", "Access")}
                           aria-label={t("secrets.editGrantKey", { key: s.keyName, defaultValue: `Edit access for ${s.keyName}` })}
                         >
                           <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
@@ -683,6 +685,7 @@ export function SecretsPage() {
                           onClick={() => openRotate(s)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-warn-600 dark:text-warn-400 transition-colors hover:bg-warn-500/10"
                           data-testid={`rotate-${s.keyName}`}
+                          title={t("secrets.rotate", "Rotate")}
                           aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
                         >
                           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
@@ -692,6 +695,7 @@ export function SecretsPage() {
                           onClick={() => setDeleteTarget(s)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
                           data-testid={`delete-${s.keyName}`}
+                          title={t("common.delete", "Delete")}
                           aria-label={t("secrets.deleteKey", {
                             key: s.keyName,
                             defaultValue: `Delete ${s.keyName}`,
@@ -703,7 +707,7 @@ export function SecretsPage() {
                           />
                           {t("common.delete", "Delete")}
                         </button>
-                      </div>
+                      </RowActions>
                     </td>
                   </tr>
                 ))}

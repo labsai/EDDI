@@ -550,7 +550,7 @@ class ConversationServiceSayHitlTest {
             assertEquals(CONVERSATION_ID, announced.getValue().conversationId());
             assertEquals(HitlDecision.pauseIdOf(memoryRef.get().getHitlPausedAt()), announced.getValue().pauseId());
             // Agent Health sees a committed pause: settled.
-            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(true));
+            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(true), eq(true));
         }
     }
 
@@ -647,7 +647,7 @@ class ConversationServiceSayHitlTest {
             verify(scheduleStore, never()).createSchedule(any());
             verify(pauseCommittedEvent, never()).fireAsync(any());
             // (d) Agent Health is told the pause was not stored: recorded unsettled.
-            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(false));
+            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(false), eq(true));
         }
 
         @Test

@@ -10,7 +10,10 @@ import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.AggregateIterable;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.UpdateOneModel;
@@ -31,6 +34,8 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -68,7 +73,53 @@ class MongoHealthTurnStoreTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         collection = mock(MongoCollection.class);
+        // The committed reads (primary, majority) see the same collection here.
+        when(collection.withReadPreference(any())).thenReturn(collection);
+        when(collection.withReadConcern(any())).thenReturn(collection);
         store = new MongoHealthTurnStore(collection);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the erasure- and rollup-relevant reads go to the primary at majority, never the client default")
+    void erasureRelevantReadsAreCommitted() {
+        MongoCollection<Document> primary = mock(MongoCollection.class);
+        MongoCollection<Document> committed = mock(MongoCollection.class);
+        when(collection.withReadPreference(ReadPreference.primary())).thenReturn(primary);
+        when(primary.withReadConcern(ReadConcern.MAJORITY)).thenReturn(committed);
+        AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(committed.aggregate(anyList())).thenReturn(aggregate);
+        when(aggregate.allowDiskUse(anyBoolean())).thenReturn(aggregate);
+        when(aggregate.iterator()).thenReturn(cursor);
+        when(cursor.hasNext()).thenReturn(true, false, true, false);
+        when(cursor.next()).thenReturn(new Document("_id", new Document("a", "agent").append("d", "2026-11-10")));
+        FindIterable<Document> found = mock(FindIterable.class);
+        MongoCursor<Document> rows = mock(MongoCursor.class);
+        when(committed.find(any(Bson.class))).thenReturn(found);
+        when(found.iterator()).thenReturn(rows);
+        when(found.projection(any())).thenReturn(found);
+        when(committed.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
+        when(collection.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
+
+        assertEquals(Map.of("agent", Set.of(LocalDate.of(2026, 11, 10))), store.agentDaysOfConversation("conv"));
+        assertTrue(store.deleteConversationReturningDays("conv").daysKnown());
+        store.forEachByAgentAndDay("agent", LocalDate.of(2026, 11, 10), turn -> {
+        });
+        // The days a write touched, and the rollup's and orphan sweep's window scans.
+        store.daysOf("conv", List.of("exec"));
+        Instant since = Instant.parse("2026-11-08T00:00:00Z");
+        store.forEachAgentDayUpdatedSince(since, since.plusSeconds(3600), 10, (agent, day) -> {
+        });
+        store.forEachConversationAgentUpdatedSince(since, 10, (conversation, agent) -> {
+        });
+        store.forEachConversationUpdatedSince(since, 10, conversation -> {
+        });
+
+        verify(committed, times(5)).aggregate(anyList());
+        verify(committed, times(2)).find(any(Bson.class));
+        verify(collection, never()).aggregate(anyList());
+        verify(collection, never()).find(any(Bson.class));
     }
 
     @Test

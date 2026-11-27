@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   useResourceDescriptors,
   useResource,

@@ -24,9 +24,9 @@ import java.util.Set;
  * pauses the conversation, so neither check may ever reject a save or a
  * deployment.
  * <p>
- * Reuses {@link ToolApprovalPatterns#levenshtein(String, String)} (Task 2) as
- * the single Levenshtein implementation in the codebase — this class does not
- * duplicate it.
+ * Reuses {@link ToolApprovalPatterns#levenshtein(String, String)} as the single
+ * Levenshtein implementation in the codebase — this class does not duplicate
+ * it.
  */
 public final class ReservedActionLint {
 

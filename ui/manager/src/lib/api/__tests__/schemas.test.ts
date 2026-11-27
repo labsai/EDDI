@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getJsonSchema,
 } from "../schemas";
-import type { ResourceTypeConfig } from "../resources";
+import type { ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
 
 // We need to clear the internal schema cache between tests to avoid stale data
 // The schemas module uses a module-level Map cache that persists between tests.

@@ -138,7 +138,7 @@ class ConversationServiceHealthStartTest {
 
         conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of());
 
-        verify(recorder, times(1)).record(eq(memory), eq(CONVERSATION_ID), isNull(), anyLong(), eq(false), eq(true));
+        verify(recorder, times(1)).record(eq(memory), eq(CONVERSATION_ID), isNull(), anyLong(), eq(false), eq(true), eq(true));
     }
 
     @Test
@@ -148,6 +148,6 @@ class ConversationServiceHealthStartTest {
 
         assertThrows(RuntimeException.class, () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of()));
 
-        verify(recorder, never()).record(any(), any(), any(), any(), anyBoolean(), anyBoolean());
+        verify(recorder, never()).record(any(), any(), any(), any(), anyBoolean(), anyBoolean(), anyBoolean());
     }
 }

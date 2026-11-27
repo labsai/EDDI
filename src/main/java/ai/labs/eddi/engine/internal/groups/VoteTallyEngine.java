@@ -395,7 +395,7 @@ public final class VoteTallyEngine {
 
     /**
      * A tiebreaker's free-text choice, resolved by the same exact-scan rule as
-     * ballot tier 2: exactly one option named, or no choice at all.
+     * ballot tier 3: exactly one option named, or no choice at all.
      */
     public static String resolveChoice(String reply, List<String> options) {
         if (reply == null || reply.isBlank()) {

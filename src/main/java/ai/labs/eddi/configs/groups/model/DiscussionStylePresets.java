@@ -37,11 +37,12 @@ public final class DiscussionStylePresets {
 
     /**
      * The anti-sycophancy directive (I4). Added only to the templates where a
-     * member can see what others said — {@link #TEMPLATE_OPINION_WITH_CONTEXT} and
-     * {@link #TEMPLATE_CRITIQUE}. {@link #TEMPLATE_OPINION_INDEPENDENT} shows no
-     * peers, so there is nobody to agree with, and
-     * {@link #TEMPLATE_OPINION_ANONYMOUS} already instructs independent judgment;
-     * adding it there would be noise that dilutes the instruction where it counts.
+     * member can see what others said — {@link #TEMPLATE_OPINION_WITH_CONTEXT},
+     * {@link #TEMPLATE_CRITIQUE} and {@link #TEMPLATE_CRITIQUE_PANEL}.
+     * {@link #TEMPLATE_OPINION_INDEPENDENT} shows no peers, so there is nobody to
+     * agree with, and {@link #TEMPLATE_OPINION_ANONYMOUS} already instructs
+     * independent judgment; adding it there would be noise that dilutes the
+     * instruction where it counts.
      * <p>
      * The failure it addresses is well documented in multi-agent LLM setups: shown
      * prior responses, models converge on them regardless of merit, which turns a
@@ -529,7 +530,8 @@ public final class DiscussionStylePresets {
      * @param style
      *            the preset style
      * @param maxRounds
-     *            used by ROUND_TABLE and DELPHI for the number of opinion repeats
+     *            used by ROUND_TABLE and DELPHI for the number of opinion rounds,
+     *            and by NEGOTIATION for the number of bargaining repeats
      * @return ordered list of phases
      */
     public static List<DiscussionPhase> expand(DiscussionStyle style, int maxRounds) {

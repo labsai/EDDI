@@ -50,12 +50,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * request's HMAC signature, checked against that ONE integration's secret, is
  * its authentication, and the check fails closed. Order of operations:
  * <ol>
+ * <li>Read at most {@code eddi.webhook.max-body-bytes} raw bytes (413 beyond;
+ * default 262144). The body is taken as a stream of bytes, not a
+ * {@code String}: the MAC covers the bytes the sender signed, and a charset
+ * decode/re-encode round trip could change them (an invalid UTF-8 sequence
+ * would be replaced).</li>
  * <li>Look up the integration (an unknown id answers 401, exactly like a bad
  * signature, so ids cannot be probed).</li>
- * <li>Read at most {@code eddi.webhook.max-body-bytes} raw bytes (413 beyond).
- * The body is taken as a stream of bytes, not a {@code String}: the MAC covers
- * the bytes the sender signed, and a charset decode/re-encode round trip could
- * change them (an invalid UTF-8 sequence would be replaced).</li>
  * <li>Verify the signature over those bytes (401). Nothing is parsed before
  * this — an unsigned body never reaches a JSON parser.</li>
  * <li>Parse CloudEvents structured / binary or plain JSON (400 / 415).</li>

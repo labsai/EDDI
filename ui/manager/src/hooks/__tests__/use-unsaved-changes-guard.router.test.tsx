@@ -10,8 +10,8 @@ import {
   createMemoryRouter,
   useNavigate,
 } from "react-router-dom";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { NavigationGuardDialog } from "@eddi/app-kit/components/shared/navigation-guard-dialog";
 
 /**
  * In-app navigation under a DATA router — the layer `beforeunload` cannot cover.

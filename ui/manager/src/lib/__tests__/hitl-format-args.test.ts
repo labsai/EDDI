@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatToolArguments, minifyJson } from "@/lib/hitl-format-args";
+import { formatToolArguments, minifyJson } from "@eddi/app-kit/lib/hitl-format-args";
 
 describe("formatToolArguments", () => {
   it("pretty-prints plain JSON with two-space indent", () => {

@@ -13,27 +13,27 @@ import {
   Sparkles,
   CircleDashed,
 } from "lucide-react";
-import { cn, formatRelativeTime } from "@/lib/utils";
-import { useDeploymentStatuses, useUndeployAgent } from "@/hooks/use-agents";
-import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
+import { useDeploymentStatuses, useUndeployAgent } from "@eddi/app-kit/hooks/use-agents";
+import { useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { useQueryClient } from "@tanstack/react-query";
 import { DeploymentEnvironmentBadge } from "./deployment-environments";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { accessFor, type ResourceAccess } from "@/lib/access";
 import { useEnvironmentLabel } from "@/hooks/use-environment-label";
-import { deployedEnvironments, isAnyEnvironmentBusy, isLiveAtRequestedVersion } from "@/lib/deployment-environments";
+import { deployedEnvironments, isAnyEnvironmentBusy, isLiveAtRequestedVersion } from "@eddi/app-kit/lib/deployment-environments";
 
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
-import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { useChatStore, useStartConversation } from "@eddi/app-kit/hooks/use-chat";
 import { useOperatorConfig } from "@/hooks/use-operator";
-import { getErrorMessage } from "@/lib/api-client";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 import { useState, useCallback, useId, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { agentDeploymentQueries } from "@/lib/query-keys";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { agentDeploymentQueries } from "@eddi/app-kit/lib/query-keys";
 
 interface AgentCardProps {
   agent: AgentDescriptor & { id: string; version: number };

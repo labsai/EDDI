@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.gdpr.erasure.DrainBarrier;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFeedCursor;
@@ -106,10 +109,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * one outside it. When every turn of the range was undone, the previous stored
  * session is judged again instead.
  * <p>
- * GDPR: nothing is written for a user an erasure is fencing
- * ({@link HealthErasureFence}), and a conversation whose user became fenced
- * while it was evaluated has its rows deleted again; a conversation deleted
- * meanwhile is caught by the daily orphan sweep, which covers outcome rows.
+ * GDPR: the evaluation is part of Agent Health's async writer of the erasure
+ * guarantee ({@link HealthErasureWriter}). Every evaluation runs through a
+ * {@link DrainBarrier} ({@link #awaitDrained}), so an erasure or a permanent
+ * conversation delete waits for the ones in flight; before writing it asks
+ * {@link ErasureGuard#beforeWrite} and writes nothing of a tombstoned
+ * conversation, or of an erased user's turns captured before the erasure; right
+ * after the write (also a failed one) it calls {@link ErasureGuard#afterWrite}
+ * for each session written, which removes it again — or records a durable
+ * pending removal — when an erasure started meanwhile.
  */
 @ApplicationScoped
 public class HealthOutcomeEvaluator {
@@ -153,7 +161,13 @@ public class HealthOutcomeEvaluator {
     private final IHealthOutcomeStore outcomeStore;
     private final HealthConfigPolicy configPolicy;
     private final IConversationRatingStore ratingStore;
-    private final HealthErasureFence fence;
+    /** The erasure guarantee; null only in tests (everything is allowed). */
+    private final ErasureGuard erasureGuard;
+    /**
+     * Every evaluation runs through it: the drain barrier of
+     * {@link HealthErasureWriter}.
+     */
+    private final DrainBarrier barrier = new DrainBarrier();
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
@@ -210,8 +224,8 @@ public class HealthOutcomeEvaluator {
 
     @Inject
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
-            IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics) {
-        this(turnStore, outcomeStore, configPolicy, ratingStore, fence, settings, metrics, Clock.systemUTC());
+            IConversationRatingStore ratingStore, ErasureGuard erasureGuard, HealthSettings settings, HealthMetrics metrics) {
+        this(turnStore, outcomeStore, configPolicy, ratingStore, erasureGuard, settings, metrics, Clock.systemUTC());
         ThreadPoolExecutor executor = newRatingExecutor(RATING_QUEUE);
         this.ownedExecutor = executor;
         this.ratingExecutor = executor;
@@ -231,12 +245,12 @@ public class HealthOutcomeEvaluator {
     }
 
     HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
-            IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics, Clock clock) {
+            IConversationRatingStore ratingStore, ErasureGuard erasureGuard, HealthSettings settings, HealthMetrics metrics, Clock clock) {
         this.turnStore = turnStore;
         this.outcomeStore = outcomeStore;
         this.configPolicy = configPolicy;
         this.ratingStore = ratingStore;
-        this.fence = fence;
+        this.erasureGuard = erasureGuard;
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
@@ -568,13 +582,30 @@ public class HealthOutcomeEvaluator {
     }
 
     /**
+     * Waits until every evaluation started before the call has finished — the
+     * evaluation's part of the drain barrier of {@link HealthErasureWriter}.
+     *
+     * @return {@code false} on timeout
+     */
+    public boolean awaitDrained(Duration timeout) throws InterruptedException {
+        return barrier.awaitDrained(timeout);
+    }
+
+    /**
      * Judges one range of a conversation: one stored session's own steps (up to the
      * next stored session) when {@code fromSession} names it, else every step from
-     * the latest stored session on.
+     * the latest stored session on. Runs on the caller's thread, tracked by the
+     * drain barrier.
      *
      * @return the session rows written
      */
     int evaluate(String conversationId, Integer fromSession) {
+        int[] written = {0};
+        barrier.execute(Runnable::run, () -> written[0] = evaluateTracked(conversationId, fromSession));
+        return written[0];
+    }
+
+    private int evaluateTracked(String conversationId, Integer fromSession) {
         Instant evaluatedAt = clock.instant();
         TreeMap<Integer, HealthOutcome> stored = new TreeMap<>();
         for (HealthOutcome o : outcomeStore.findByConversation(conversationId)) {
@@ -604,8 +635,13 @@ public class HealthOutcomeEvaluator {
         }
         HealthTurn newest = live.get(live.size() - 1);
         String userId = newest.userId();
-        if (fence.covers(userId)) {
-            return 0;
+        Admission admission = admit(conversationId, userId, live);
+        if (admission != null && !admission.allowed()) {
+            // The user or the conversation was erased — or the tombstones could not be
+            // read (fail closed): nothing of it is written. A failure, so the feed and
+            // the due pass retry it: once the erasure deleted the turn rows, a retry
+            // finds none and leaves nothing behind; after an outage it writes them.
+            throw new HealthStoreException("The erasure guard refused the sessions of a conversation", null);
         }
         String origin = origin(stored.values(), from, live);
         String agentId = newest.agentId();
@@ -634,7 +670,17 @@ public class HealthOutcomeEvaluator {
             HealthOutcome partial = sessions.remove(sessions.size() - 1);
             deleteBefore = partial.sessionNo();
         }
-        outcomeStore.upsert(sessions);
+        try {
+            outcomeStore.upsert(sessions);
+        } catch (RuntimeException e) {
+            // Part of the bulk write may have landed.
+            guardWritten(conversationId, sessions, admission);
+            throw e;
+        }
+        if (guardWritten(conversationId, sessions, admission)) {
+            // An erasure started while this conversation was evaluated.
+            return 0;
+        }
         recheckRatings(conversationId, stored.keySet(), sessions, ratings);
         Set<Integer> stale = new HashSet<>();
         for (Integer sessionNo : inRange) {
@@ -646,12 +692,47 @@ public class HealthOutcomeEvaluator {
             stale.remove(s.sessionNo());
         }
         outcomeStore.deleteSessions(conversationId, stale);
-        if (fence.covers(userId)) {
-            // An erasure started while this conversation was evaluated.
-            outcomeStore.deleteByConversationId(conversationId);
-            return 0;
-        }
         return sessions.size();
+    }
+
+    /**
+     * The guard's admission of the sessions about to be written; {@code null}
+     * without a guard (everything allowed). Captured at the <em>earliest</em> of
+     * the turns they are derived from: a session holding anything of a turn
+     * captured before the user's erasure is refused (the user's later
+     * conversations, all captured after it, are not).
+     */
+    private Admission admit(String conversationId, String userId, List<HealthTurn> live) {
+        if (erasureGuard == null) {
+            return null;
+        }
+        Instant capturedAt = null;
+        for (HealthTurn turn : live) {
+            Instant at = turn.timestamp() != null ? turn.timestamp() : turn.updatedAt();
+            if (at != null && (capturedAt == null || at.isBefore(capturedAt))) {
+                capturedAt = at;
+            }
+        }
+        return erasureGuard.beforeWrite(userId, conversationId, capturedAt);
+    }
+
+    /**
+     * The post-write check of every session just written: one an erasure started on
+     * meanwhile is removed again, or its removal recorded as pending.
+     *
+     * @return whether any was withheld
+     */
+    private boolean guardWritten(String conversationId, List<HealthOutcome> sessions, Admission admission) {
+        if (admission == null) {
+            return false;
+        }
+        boolean withheld = false;
+        for (HealthOutcome session : sessions) {
+            int sessionNo = session.sessionNo();
+            withheld |= erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.sessionRowId(conversationId, sessionNo), admission,
+                    () -> outcomeStore.deleteSessions(conversationId, List.of(sessionNo)));
+        }
+        return withheld;
     }
 
     /**
