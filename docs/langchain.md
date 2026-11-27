@@ -116,7 +116,7 @@ This is the standard way to use the LLM task - just connect to an LLM and start 
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
-| `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
+| `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none). Read after templating, surrounding whitespace ignored; a blank value, a non-integer or a number below `-1` is ignored with a WARN and the fallback applies | falls back to `conversationHistoryLimit` (default 10) |
 | `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |

@@ -7,14 +7,18 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -135,6 +139,57 @@ class InMemoryConversationCoordinatorTest {
         DeadLetterEntry entry = coordinator.getDeadLetters().get(0);
         assertEquals("conv-fail", entry.conversationId());
         assertTrue(entry.error().contains("Test failure"));
+    }
+
+    /**
+     * The payload was built with a String.format that escaped only double quotes: a
+     * backslash or a newline produced invalid JSON, and a message ending in a
+     * backslash could add fields of its own.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deadLetterPayloadIsValidJsonWhateverTheErrorMessageHolds() throws Exception {
+        String message = "bad \"quote\" back\\slash\nnew line\\\",\"injected\":\"x";
+        Callable<Void> task = mock(Callable.class);
+        coordinator.submitInOrder("conv-\"json\"", task);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());
+
+        callbackCaptor.getValue().onFailure(new RuntimeException(message));
+
+        DeadLetterEntry entry = coordinator.getDeadLetters().get(0);
+        JsonNode payload = new ObjectMapper().readTree(entry.payload());
+        assertEquals(Set.of("conversationId", "error", "timestamp"), Set.copyOf(iteratorToList(payload.fieldNames())));
+        assertEquals("conv-\"json\"", payload.get("conversationId").asText());
+        assertEquals(message, payload.get("error").asText());
+        assertEquals(entry.timestamp(), payload.get("timestamp").asLong());
+        assertTrue(payload.get("timestamp").isIntegralNumber());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deadLetterRedactsCredentialsInTheErrorMessage() throws Exception {
+        // Assembled at runtime: a literal in this shape trips the repository's secret
+        // scan, which cannot tell a fixture from a credential.
+        String key = "sk-" + "abcdefghij" + "1234567890" + "abcdef";
+        Callable<Void> task = mock(Callable.class);
+        coordinator.submitInOrder("conv-secret", task);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());
+
+        callbackCaptor.getValue().onFailure(new RuntimeException("401 calling provider with key " + key));
+
+        DeadLetterEntry entry = coordinator.getDeadLetters().get(0);
+        assertFalse(entry.error().contains(key), entry.error());
+        assertFalse(entry.payload().contains(key), entry.payload());
+        assertEquals(entry.error(), new ObjectMapper().readTree(entry.payload()).get("error").asText());
+        assertTrue(entry.error().startsWith("401 calling provider with key "), entry.error());
+    }
+
+    private static List<String> iteratorToList(Iterator<String> names) {
+        List<String> list = new ArrayList<>();
+        names.forEachRemaining(list::add);
+        return list;
     }
 
     /**
