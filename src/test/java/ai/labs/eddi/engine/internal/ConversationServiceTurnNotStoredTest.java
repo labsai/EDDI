@@ -497,6 +497,36 @@ class ConversationServiceTurnNotStoredTest {
 
     @Test
     @Timeout(30)
+    @DisplayName("a lost conditional write still answers false when the diagnostic state read fails")
+    void conditionalStoreMissSurvivesAFailedDiagnosticRead() throws Exception {
+        var memory = convertConversationMemorySnapshot(storedSnapshot(1));
+        memory.setConversationState(ConversationState.READY);
+        when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS))).thenReturn(false);
+        when(conversationMemoryStore.getConversationState(memory.getConversationId())).thenThrow(new IllegalStateException("db down"));
+        double conflictsBefore = meterRegistry.counter("eddi_conversation_store_conflict_count").count();
+
+        assertFalse(conversationService.storeConversationMemoryIfState(memory, ENV, ConversationState.IN_PROGRESS));
+
+        assertEquals(conflictsBefore, meterRegistry.counter("eddi_conversation_store_conflict_count").count());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a lost conditional write whose state is unchanged is counted as a revision conflict")
+    void conditionalStoreMissWithUnchangedStateCountsAConflict() throws Exception {
+        var memory = convertConversationMemorySnapshot(storedSnapshot(1));
+        memory.setConversationState(ConversationState.READY);
+        when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS))).thenReturn(false);
+        when(conversationMemoryStore.getConversationState(memory.getConversationId())).thenReturn(ConversationState.IN_PROGRESS);
+        double conflictsBefore = meterRegistry.counter("eddi_conversation_store_conflict_count").count();
+
+        assertFalse(conversationService.storeConversationMemoryIfState(memory, ENV, ConversationState.IN_PROGRESS));
+
+        assertEquals(conflictsBefore + 1, meterRegistry.counter("eddi_conversation_store_conflict_count").count());
+    }
+
+    @Test
+    @Timeout(30)
     @DisplayName("resume: the commit is recorded once the write lands, before the deferred long-term write that may outlast the watchdog")
     void conditionalStoreRecordsTheCommitBeforeTheDeferredWrite() throws Exception {
         var memory = convertConversationMemorySnapshot(storedSnapshot(1));

@@ -2172,13 +2172,25 @@ class ConversationStepRunner {
      * the expected one, the revision is what failed. (The state can move between
      * the miss and this read; the diagnosis then errs towards "state changed",
      * which is the pre-existing message, never towards inventing a conflict.)
+     * <p>
+     * Best effort: the read only labels the miss. If it fails, the caller still
+     * gets {@code false} and takes its lost-race path; an exception here would
+     * instead send that path to the failed-write handling, which can overwrite the
+     * winning writer's state (e.g. its {@code AWAITING_HUMAN}) with {@code ERROR}.
      */
     private void diagnoseConditionalStoreMiss(IConversationMemory conversationMemory, ConversationState expectedState) {
         String conversationId = conversationMemory.getConversationId();
         if (conversationId == null || expectedState == null) {
             return;
         }
-        ConversationState storedState = conversationMemoryStore.getConversationState(conversationId);
+        ConversationState storedState;
+        try {
+            storedState = conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Conditional write of conversation %s was NOT persisted; reading its state to tell a state change "
+                    + "from a revision conflict failed: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            return;
+        }
         if (storedState == expectedState) {
             conversationService.counterConversationStoreConflict.increment();
             LOGGER.warnf("Conditional write of conversation %s was NOT persisted: the state is still %s, but the document "
