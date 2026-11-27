@@ -73,7 +73,10 @@ class HealthPortfolioServiceTest {
 
         assertEquals(List.of("worse", "busy", "idle"), p.items().stream().map(PortfolioItem::agentId).toList());
         PortfolioItem worse = p.items().get(0);
-        assertNull(worse.status());
+        assertEquals("NEEDS_ATTENTION", worse.status(), "8 % agent-caused failures: the critical measure is red");
+        assertEquals("agentFailureRate", worse.topReason().measureId());
+        assertEquals("HEALTHY", p.items().get(1).status());
+        assertEquals("NOT_ENOUGH_DATA", p.items().get(2).status());
         assertEquals(-0.1, worse.sessionsDelta(), 1e-12);
         assertEquals(3, worse.keyMeasures().size());
         assertEquals("RED", worse.keyMeasures().get(0).band());
@@ -85,7 +88,9 @@ class HealthPortfolioServiceTest {
         assertEquals(List.of("busy", "idle"), byName.items().stream().map(PortfolioItem::agentId).toList());
         assertEquals("2", byName.nextCursor());
         assertTrue(service.portfolio(List.of(new AgentRef("busy", "Busy")), WINDOW, "attention", List.of("WATCH"), 100, 0).items().isEmpty(),
-                "no agent has a status before H4");
+                "busy is HEALTHY, not WATCH");
+        assertEquals(List.of("worse"), service.portfolio(List.of(new AgentRef("busy", "Busy"), new AgentRef("worse", "Worse")), WINDOW,
+                "attention", List.of("NEEDS_ATTENTION"), 100, 0).items().stream().map(PortfolioItem::agentId).toList());
     }
 
     @Test
@@ -129,6 +134,8 @@ class HealthPortfolioServiceTest {
                 .thenReturn(List.of(row("small", TODAY, 10, 0, 0, Map.of()), row("big", TODAY, 500, 0, 0, Map.of())));
         when(reports.portfolioSessions(any(), any())).thenReturn(Map.of("small", HealthPortfolioSessions.UNCOUNTED, "big",
                 HealthPortfolioSessions.UNCOUNTED));
+        // Past the retention the outcomes cannot be counted either.
+        when(reports.outcomeCountsByAgent(any(), any())).thenReturn(null);
         Portfolio p = service.portfolio(List.of(new AgentRef("small", "Small"), new AgentRef("big", "Big")), WINDOW, "traffic", List.of(), 100, 0);
         assertEquals(List.of("big", "small"), p.items().stream().map(PortfolioItem::agentId).toList());
         PortfolioItem big = p.items().get(0);

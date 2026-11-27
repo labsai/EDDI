@@ -422,6 +422,18 @@ public class ResourceAccessGuard {
      * {@link UseCheck#UNKNOWN}, which a transient database error produces.
      */
     public UseCheck checkPrincipalUse(String resourceId, String principal, Collection<String> teamSubjects, boolean principalIsAdmin) {
+        return checkPrincipalLevel(resourceId, principal, teamSubjects, principalIsAdmin, AccessLevel.USE);
+    }
+
+    /**
+     * {@link #checkPrincipalUse} for any level - may the named principal, with the
+     * team snapshot taken from their own earlier request, still hold
+     * {@code required} on the resource. For engine work that acts on a principal's
+     * authority without their request: an owner report link re-checks its creator's
+     * {@code EDIT} on every read.
+     */
+    public UseCheck checkPrincipalLevel(String resourceId, String principal, Collection<String> teamSubjects, boolean principalIsAdmin,
+                                        AccessLevel required) {
         if (!settings.isEnforcing() || principalIsAdmin) {
             return UseCheck.ALLOWED;
         }
@@ -445,7 +457,7 @@ public class ResourceAccessGuard {
         }
         CallerSpaces caller = new CallerSpaces(Set.of(principal.trim()), subjects, subjects);
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, caller, settings.admitsLegacy());
-        return granted != null && granted.includes(AccessLevel.USE) ? UseCheck.ALLOWED : UseCheck.DENIED;
+        return granted != null && granted.includes(required) ? UseCheck.ALLOWED : UseCheck.DENIED;
     }
 
     /**

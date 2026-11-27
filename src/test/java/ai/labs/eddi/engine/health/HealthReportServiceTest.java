@@ -103,7 +103,7 @@ class HealthReportServiceTest {
     }
 
     @Test
-    @DisplayName("the report: interactive default origins, both periods counted, quality read only when permitted, no status yet")
+    @DisplayName("the report: interactive default origins, both periods counted, quality read only when permitted, a status")
     void report() {
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 2, "api", 50), row(TODAY, 2, "schedule", 500)));
 
@@ -111,7 +111,7 @@ class HealthReportServiceTest {
 
         assertEquals("support", report.preset());
         assertEquals(HealthOrigins.INTERACTIVE, report.origins());
-        assertNull(report.status());
+        assertEquals(HealthDefaults.STATUS_HEALTHY, report.status(), "50 clean interactive turns: nothing to flag");
         assertTrue(report.reasons().isEmpty());
         assertEquals(TODAY.toString(), report.dataThrough());
         assertEquals(TODAY.minusDays(59).toString(), report.baseline().from());
@@ -128,6 +128,37 @@ class HealthReportServiceTest {
         // A fixed 30-day look-back before each window.
         assertEquals(List.of(TODAY.minusDays(59), TODAY.minusDays(89)), lookback.getAllValues());
         assertEquals(HealthOrigins.INTERACTIVE, query.getAllValues().get(0).origins());
+    }
+
+    @Test
+    @DisplayName("shared report: status and reasons over the link's sections only; no hints, no marker ids; checks only with reliability")
+    void sharedReportJudgesOnlyItsSections() {
+        List<Long> buckets = new ArrayList<>();
+        for (int i = 0; i <= HealthTurnAggregator.DURATION_BOUNDS_MS.length; i++) {
+            buckets.add(0L);
+        }
+        // 500 turns, a quarter failed by the agent: reliability is RED and critical.
+        HealthTurnAggregate failing = new HealthTurnAggregate("agent", 2, "api", TODAY, 500, 500, 500, 125, Map.of(), 0, 0, Map.of(), 0, 0.0, 0, 0,
+                0, 0, 0, 0, 0, 125, 0, 0, 0, buckets, 4000, 0, 0);
+        when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(failing));
+        Scope scope = new Scope("agent", last(30), null, null);
+
+        AgentHealth full = service.report(scope, "Support", false);
+        assertEquals(HealthDefaults.STATUS_NEEDS_ATTENTION, full.status(), "the full report sees the failures");
+
+        AgentHealth adoptionOnly = service.sharedReport(scope, "Support", List.of(HealthDefaults.ADOPTION));
+        assertEquals(List.of(HealthDefaults.ADOPTION), List.copyOf(adoptionOnly.sections().keySet()));
+        assertTrue(!HealthDefaults.STATUS_NEEDS_ATTENTION.equals(adoptionOnly.status()), "a link without reliability does not leak its status");
+        assertTrue(adoptionOnly.reasons().stream().noneMatch(r -> "agentFailureRate".equals(r.measureId())));
+        assertTrue(adoptionOnly.checks().isEmpty());
+
+        AgentHealth reliability = service.sharedReport(scope, "Support", List.of(HealthDefaults.RELIABILITY));
+        assertEquals(HealthDefaults.STATUS_NEEDS_ATTENTION, reliability.status());
+        assertEquals(1, reliability.checks().size());
+        assertTrue(reliability.reasons().stream().allMatch(r -> r.markerId() == null));
+        for (Object section : reliability.sections().values()) {
+            assertTrue(((Section) section).measures().stream().allMatch(m -> m.hint() == null), "no free-text hints");
+        }
     }
 
     @Test
@@ -258,6 +289,23 @@ class HealthReportServiceTest {
         assertEquals(3, failures.points().size());
         assertTrue(failures.points().stream().allMatch(p -> p.value() == null && p.n() == 0));
         verify(daily, never()).find("agent", window.from(), TODAY);
+    }
+
+    @Test
+    @DisplayName("the session views default to the report's origins: the preset from the window and baseline rows")
+    void effectiveOriginsMatchTheReport() {
+        Window window = last(3);
+        LocalDate inBaseline = window.baseline().from();
+        // Interactive traffic in the baseline only, automated traffic in the window.
+        when(daily.find("agent", inBaseline, TODAY)).thenReturn(List.of(row(inBaseline, 1, "api", 10), row(TODAY, 1, "schedule", 30)));
+        // The window's rows alone would make it a task agent.
+        when(daily.find("agent", window.from(), TODAY)).thenReturn(List.of(row(TODAY, 1, "schedule", 30)));
+
+        AgentHealth report = service.report(new Scope("agent", window, null, null), "Support", false);
+
+        assertEquals("support", report.preset());
+        assertEquals(HealthPeriods.defaultOrigins(report.preset()), service.effectiveOrigins("agent", window, null));
+        assertEquals(List.of("schedule"), service.effectiveOrigins("agent", window, List.of("schedule")), "asked-for origins win");
     }
 
     @Test

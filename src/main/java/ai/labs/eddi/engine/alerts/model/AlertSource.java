@@ -18,5 +18,12 @@ public enum AlertSource {
      */
     CONVERSATION_ERROR,
     /** A turn completed and a value in its result matches the rule's constant. */
-    OUTPUT_MATCH
+    OUTPUT_MATCH,
+    /**
+     * Agent Health changed for the worse: the status entered one of the rule's
+     * statuses, the error budget burns too fast, or a critical measure got
+     * significantly worse. Evaluated after each health rollup pass, never in a
+     * turn; it only alerts, never acts.
+     */
+    HEALTH
 }

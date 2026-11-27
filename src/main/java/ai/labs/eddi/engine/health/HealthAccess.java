@@ -85,6 +85,24 @@ public class HealthAccess {
         }
     }
 
+    /**
+     * Requires {@code EDIT} on the agent — the health profile and the owner report
+     * links — and answers its name; 403 without, 404 for an unknown agent.
+     */
+    public String requireEdit(String agentId) {
+        String name = requireView(agentId);
+        accessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+        return name;
+    }
+
+    /** The caller's user name, or {@code anonymous}. */
+    public String callerName() {
+        if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
+            return "anonymous";
+        }
+        return identity.getPrincipal().getName();
+    }
+
     private static Response notFound(String message) {
         return Response.status(Response.Status.NOT_FOUND).type(MediaType.APPLICATION_JSON_TYPE)
                 .entity(ErrorResponses.body("not_found", message)).build();

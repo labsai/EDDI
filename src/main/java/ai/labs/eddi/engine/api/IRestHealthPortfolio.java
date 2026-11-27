@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.api;
 
+import ai.labs.eddi.engine.health.HealthDefaults.Preset;
 import ai.labs.eddi.engine.health.report.HealthReports.Portfolio;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.GET;
@@ -30,19 +31,28 @@ public interface IRestHealthPortfolio {
     @GET
     @Path("/agents")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Health of every agent you may view", description = "One row per agent with sessions, their change and up to three "
-            + "key measures, sorted by attention (significant worsening, then band, then traffic), name or traffic; and the days on which "
-            + "platform failures hit several agents at once.")
+    @Operation(summary = "Health of every agent you may view",
+               description = "One row per agent with its status, top reason, sessions, their change and up to three "
+                       + "key measures, sorted by attention (status, then significant worsening, then traffic), name or traffic; and the days on which "
+                       + "platform failures hit several agents at once.")
     @APIResponse(responseCode = "200", description = "One page of the portfolio.")
     @APIResponse(responseCode = "400", description = "A query parameter is invalid; the message names it.")
     Portfolio listAgentHealth(@Parameter(description = "7d, 30d or 90d (default 7d)")
     @QueryParam("period") String period,
                               @Parameter(description = "attention, name or traffic (default attention)")
                               @QueryParam("sort") String sort,
-                              @Parameter(description = "Only agents with this status (repeatable); no agent has a status before H4")
+                              @Parameter(description = "Only agents with this status (repeatable): HEALTHY, WATCH, NEEDS_ATTENTION, NOT_ENOUGH_DATA")
                               @QueryParam("status") List<String> statuses,
                               @Parameter(description = "Page size, default 100, at most 500")
                               @QueryParam("limit") Integer limit,
                               @Parameter(description = "The nextCursor of the previous page")
                               @QueryParam("cursor") String cursor);
+
+    @GET
+    @Path("/presets")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "The health presets", description = "support, sales, assistant and task: each with its critical measures and the "
+            + "band limits of the measures it scores. A health profile picks one and overrides any of it.")
+    @APIResponse(responseCode = "200", description = "The presets.")
+    List<Preset> listPresets();
 }

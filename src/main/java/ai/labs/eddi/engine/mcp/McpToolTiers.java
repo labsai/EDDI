@@ -110,7 +110,10 @@ final class McpToolTiers {
                 "list_alert_events", "acknowledge_alert_event",
                 // McpPricingTools: the catalog read only. Prices are a budget lever an
                 // administrator changes in the Manager (update_model_prices is ADMIN_ONLY)
-                "read_model_prices");
+                "read_model_prices",
+                // McpHealthTools: the health-profile write, EDIT on the agent per call,
+                // like the REST PUT /agents/{agentId}/health/profile
+                "update_agent_health_profile");
 
         // Operator-only
         put(tiers, McpRoles.ADMIN_ONLY,
@@ -156,7 +159,8 @@ final class McpToolTiers {
         // Agent Health reads (McpHealthTools): the REST /agents/{agentId}/health and
         // /health/agents tier. VIEW on the agent still applies per call
         put(tiers, McpRoles.HEALTH_READ, "read_agent_health", "list_agent_health", "compare_agent_versions_health",
-                "list_agent_health_sessions", "suggest_outcome_mappings");
+                "list_agent_health_sessions", "suggest_outcome_mappings", "read_agent_health_profile",
+                "list_health_presets");
 
         return Collections.unmodifiableMap(tiers);
     }

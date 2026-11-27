@@ -168,7 +168,7 @@ class McpRoleTierParityTest {
 
     /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
     private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health",
-            "list_agent_health_sessions", "suggest_outcome_mappings");
+            "list_agent_health_sessions", "suggest_outcome_mappings", "read_agent_health_profile", "list_health_presets");
 
     /**
      * Authoring: McpAdminTools minus schedules, config reads, group configuration,
@@ -194,7 +194,9 @@ class McpRoleTierParityTest {
             // McpAgentTestTools, McpRatingTools, McpAlertTools, McpPricingTools
             "run_agent_tests", "get_agent_test_run", "list_agent_test_runs", "cancel_agent_test_run", "list_conversation_ratings",
             "summarize_conversation_ratings", "count_ratings_needing_attention", "review_conversation_rating", "list_alert_events",
-            "acknowledge_alert_event", "read_model_prices");
+            "acknowledge_alert_event", "read_model_prices",
+            // McpHealthTools: the profile write
+            "update_agent_health_profile");
 
     private static final Map<List<String>, Set<String>> RECORD = recordByTier();
 

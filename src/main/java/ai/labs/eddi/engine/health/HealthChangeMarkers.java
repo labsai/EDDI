@@ -68,6 +68,17 @@ public class HealthChangeMarkers {
                 "v" + version + " deployed (" + (environment == null ? "production" : environment) + ")", version));
     }
 
+    /**
+     * The agent's health profile was saved or deleted — its thresholds, critical
+     * measures or overrides may have changed what the bands and the status say.
+     */
+    public void profileChanged(String agentId) {
+        if (agentId == null) {
+            return;
+        }
+        append(new HealthMarker(newId(), agentId, clock.instant(), HealthMarker.KIND_PROFILE_CHANGE, "Health profile changed", null));
+    }
+
     /** A global variable of {@code tenantId} was written or deleted. */
     public void globalVariableChanged(String tenantId) {
         appendCoalesced(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, tenantId, "Global variables changed");

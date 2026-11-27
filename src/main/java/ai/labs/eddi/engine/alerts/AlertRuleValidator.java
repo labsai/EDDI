@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.alerts;
 
 import ai.labs.eddi.engine.alerts.model.AlertCondition;
+import ai.labs.eddi.engine.alerts.model.AlertCondition.HealthTrigger;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -60,7 +62,7 @@ public final class AlertRuleValidator {
         }
         validateScope(rule.scope(), problems);
         if (rule.source() == null) {
-            problems.add("source is required: RATING, CONVERSATION_ERROR or OUTPUT_MATCH");
+            problems.add("source is required: RATING, CONVERSATION_ERROR, OUTPUT_MATCH or HEALTH");
         } else {
             validateCondition(rule, problems);
         }
@@ -112,7 +114,16 @@ public final class AlertRuleValidator {
         if (rule.source() != AlertSource.OUTPUT_MATCH && condition.hasOutputMatchFields()) {
             problems.add("condition.path, op, value and includeValue belong to OUTPUT_MATCH rules");
         }
+        if (rule.source() != AlertSource.HEALTH && condition.hasHealthFields()) {
+            problems.add("condition.healthTriggers and healthStatuses belong to HEALTH rules");
+        }
         switch (rule.source()) {
+            case HEALTH -> {
+                if (ratingFields || errorFields) {
+                    problems.add("condition.maxNormalizedScore, onComment, tags and errorKinds do not belong to HEALTH rules");
+                }
+                validateHealth(condition, problems);
+            }
             case OUTPUT_MATCH -> {
                 if (ratingFields || errorFields) {
                     problems.add("condition.maxNormalizedScore, onComment, tags and errorKinds do not belong to OUTPUT_MATCH rules");
@@ -151,6 +162,40 @@ public final class AlertRuleValidator {
                 } else if (new HashSet<>(condition.errorKinds()).size() != condition.errorKinds().size()) {
                     problems.add("condition.errorKinds must not repeat a kind");
                 }
+            }
+        }
+    }
+
+    /** The statuses a HEALTH rule's STATUS_CHANGE may fire on. */
+    public static final List<String> HEALTH_STATUSES = List.of("WATCH", "NEEDS_ATTENTION");
+
+    private static void validateHealth(AlertCondition condition, List<String> problems) {
+        List<HealthTrigger> triggers = condition.healthTriggers();
+        if (triggers == null || triggers.isEmpty()) {
+            problems.add("a HEALTH rule needs condition.healthTriggers (one or more of " + List.of(HealthTrigger.values()) + ")");
+            return;
+        }
+        if (triggers.stream().anyMatch(Objects::isNull)) {
+            problems.add("condition.healthTriggers must not contain null");
+        } else if (new HashSet<>(triggers).size() != triggers.size()) {
+            problems.add("condition.healthTriggers must not repeat a trigger");
+        }
+        List<String> statuses = condition.healthStatuses();
+        if (statuses != null) {
+            if (!triggers.contains(HealthTrigger.STATUS_CHANGE)) {
+                problems.add("condition.healthStatuses applies only with the STATUS_CHANGE trigger");
+            }
+            if (statuses.isEmpty()) {
+                problems.add("condition.healthStatuses must list at least one status, or be left out for " + HEALTH_STATUSES);
+            }
+            for (String status : statuses) {
+                if (status == null || !HEALTH_STATUSES.contains(status)) {
+                    problems.add("condition.healthStatuses: each status is one of " + HEALTH_STATUSES);
+                    break;
+                }
+            }
+            if (new HashSet<>(statuses).size() != statuses.size()) {
+                problems.add("condition.healthStatuses must not repeat a status");
             }
         }
     }
