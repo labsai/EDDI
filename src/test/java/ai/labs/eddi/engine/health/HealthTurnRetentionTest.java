@@ -8,7 +8,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
@@ -257,24 +256,21 @@ class HealthTurnRetentionTest {
     }
 
     /**
-     * The race the post-write check cannot close on its own: a row queued on a
-     * node's health worker lands after its conversation was deleted, and the
-     * worker's clean-up of it fails. The next daily sweep removes it.
+     * The one delete the erasure guard does not cover: an agent-test conversation
+     * is purged without a tombstone or a drain (its user is synthetic), so a row
+     * queued on a node's health worker can land after it. The next daily sweep
+     * removes it.
      */
     @Nested
-    @DisplayName("a delayed write whose clean-up fails")
+    @DisplayName("a delayed write after an unguarded purge")
     class DelayedWriteRace {
 
         @Test
-        @DisplayName("the row survives the write's own clean-up, and the next sweep removes it")
+        @DisplayName("the row lands after the purge, and the next sweep removes it")
         void sweepRemovesTheSurvivor() throws Exception {
             InMemoryHealthTurnStore store = new InMemoryHealthTurnStore();
             Map<String, Boolean> stored = new ConcurrentHashMap<>(Map.of("conv-1", true));
             IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
-            when(conversations.getStateAndRevision(anyString()))
-                    .thenAnswer(inv -> stored.containsKey(inv.<String>getArgument(0))
-                            ? new StateAndRevision(null, 1L)
-                            : new StateAndRevision(null, null));
             when(conversations.loadListingSummaries(any())).thenAnswer(inv -> {
                 Map<String, ConversationListingSummary> found = new HashMap<>();
                 for (Object id : (Collection<?>) inv.getArgument(0)) {
@@ -289,8 +285,7 @@ class HealthTurnRetentionTest {
             Instance<IHealthTurnStore> storeInstance = mock(Instance.class);
             when(storeInstance.get()).thenReturn(store);
             Clock writeClock = Clock.fixed(Instant.parse("2026-11-10T10:00:00Z"), ZoneOffset.UTC);
-            HealthTurnRecorder recorder = new HealthTurnRecorder(storeInstance, instance(conversations), new HealthErasureFence(),
-                    HealthSettings.defaults(), new HealthMetrics(registry), writeClock);
+            HealthTurnRecorder recorder = new HealthTurnRecorder(storeInstance, HealthSettings.defaults(), new HealthMetrics(registry), writeClock);
             try {
                 // The worker is held up, so the turn's row waits in the queue.
                 store.holdWrites();
@@ -300,15 +295,13 @@ class HealthTurnRetentionTest {
                 // The purge: the conversation goes first, then its rows (none yet).
                 stored.remove("conv-1");
                 store.deleteByConversationId("conv-1");
-                // The worker's own clean-up will fail.
-                store.failDeletes.set(1);
                 store.releaseWrites();
 
-                assertTrueEventually(() -> store.failDeletes.get() == 0);
+                assertTrueEventually(() -> store.rows("conv-1") == 1);
             } finally {
                 recorder.shutdown();
             }
-            assertEquals(1, store.rows("conv-1"), "the post-write clean-up failed, so the row is still there");
+            assertEquals(1, store.rows("conv-1"), "nothing guarded the write, so the row is there");
 
             Clock nextDay = Clock.fixed(Instant.parse("2026-11-11T00:15:00Z"), ZoneOffset.UTC);
             long removed = retention(store, conversations, HealthSettings.defaults(), nextDay).removeOrphans();
@@ -411,6 +404,21 @@ class HealthTurnRetentionTest {
                 rows.values().removeIf(turn -> conversationId.equals(turn.conversationId()));
                 return before - rows.size();
             }
+        }
+
+        @Override
+        public long deleteRow(String conversationId, String executionId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long countByUserId(String userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long countByConversationId(String conversationId) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

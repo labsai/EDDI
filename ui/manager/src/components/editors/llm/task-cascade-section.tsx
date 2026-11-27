@@ -1,9 +1,9 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Layers, Plus, ArrowDown } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import type { TaskSectionProps } from "./task-section-props";
-import type { ModelCascadeConfig, CascadeStep } from "./types";
+import type { ModelCascadeConfig, CascadeStep } from "@eddi/app-kit/components/editors/llm/types";
 import {
   validateCascade,
   cascadeLevelIssues,

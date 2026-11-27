@@ -139,6 +139,20 @@ public final class HealthTurnFactory {
      */
     public static Capture capture(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, Instant now,
                                   boolean abandoned, boolean committed) {
+        return capture(memory, conversationId, kind, durationMs, now, abandoned, committed, true);
+    }
+
+    /**
+     * As above.
+     *
+     * @param discards
+     *            {@code false} when the turn's own snapshot was not stored although
+     *            its outcome is recorded (a turn that failed before its store): the
+     *            row is written, but the executions its step lists as discarded are
+     *            still what the conversation keeps, so none is marked
+     */
+    public static Capture capture(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, Instant now,
+                                  boolean abandoned, boolean committed, boolean discards) {
         if (memory == null) {
             return null;
         }
@@ -180,7 +194,7 @@ public final class HealthTurnFactory {
             if (executionId == null && predatesExecutionIds(memory, step, stepIndex)) {
                 executionId = HealthTurn.LEGACY_EXECUTION_PREFIX + stepIndex;
             }
-            discarded = TurnExecutions.discardedBy(step);
+            discarded = discards ? TurnExecutions.discardedBy(step) : List.of();
             Integer stepVersion = integer(value(step, MemoryKeys.AGENT_VERSION.key()));
             if (stepVersion != null) {
                 version = stepVersion;

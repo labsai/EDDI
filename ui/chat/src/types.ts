@@ -2,31 +2,11 @@
    EDDI Chat — Shared Types
    ────────────────────────────────────────────── */
 
-/** A single chat message (user or agent). */
-export interface ChatMessage {
-  id: string;
-  role: "user" | "agent";
-  content: string;
-  timestamp: number;
-  /** True while the agent is still streaming tokens. */
-  isStreaming?: boolean;
-  /**
-   * `"notice"` marks text the WIDGET wrote (a failed send, an undo that did
-   * not work, a cancelled request) as opposed to something the agent said. It
-   * renders as a system notice, not as an agent bubble.
-   */
-  kind?: "notice";
-  /** `image` output items, rendered by the widget rather than as markdown. */
-  images?: { uri: string; alt?: string }[];
-  /**
-   * The conversation step this message belongs to, when the source said so —
-   * set for transcripts rebuilt from a full snapshot. Messages of a live turn
-   * leave it unset and are counted from the nearest one that has it (see
-   * `stepIndexes` in @eddi/core). Rating a reply needs it: the server
-   * keys reply ratings by step.
-   */
-  stepIndex?: number;
-}
+/**
+ * A single chat message (user, agent or a notice the widget wrote) — the shared
+ * conversation message of @eddi/conversation.
+ */
+export type { ConversationMessage as ChatMessage } from "@eddi/conversation";
 
 /*
  * The backend contract types live in @eddi/core and are re-exported here, so

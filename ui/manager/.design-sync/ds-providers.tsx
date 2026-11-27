@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@radix-ui/react-tooltip";
 import { I18nextProvider } from "react-i18next";
 import i18n from "i18next";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 // Side-effect: initializes the global i18next instance + loads resources.
 import "@/i18n/config";
 

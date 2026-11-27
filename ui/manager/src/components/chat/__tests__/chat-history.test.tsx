@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChatHistory } from "../chat-history";
-import { useChatStore } from "@/hooks/use-chat";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChatHistory } from "@eddi/app-kit/components/chat/chat-history";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("ChatHistory", () => {
@@ -86,6 +86,26 @@ describe("ChatHistory", () => {
     // Check states
     expect(screen.getByText("READY")).toBeInTheDocument();
     expect(screen.getByText("IN_PROGRESS")).toBeInTheDocument();
+  });
+
+  it("shows a conversation's title (B2) instead of its id once it has one", async () => {
+    useChatStore.getState().setSelectedAgent("agent-1", "Agent 1");
+    server.use(
+      http.get("*/conversationstore/conversations", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv-titled",
+            conversationState: "READY",
+            lastModifiedOn: new Date("2026-06-01").getTime(),
+            title: "Where is order 1042?",
+            titleSource: "AUTO",
+          },
+        ]),
+      ),
+    );
+    renderWithProviders(<ChatHistory open={true} onNewConversation={() => {}} />);
+    expect(await screen.findByText("Where is order 1042?")).toBeInTheDocument();
+    expect(screen.queryByText(/conv-titled/)).toBeNull();
   });
 
   it("triggers loadConversation when clicking a conversation item", async () => {

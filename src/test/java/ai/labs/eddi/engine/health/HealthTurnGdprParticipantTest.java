@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +21,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -46,6 +49,19 @@ class HealthTurnGdprParticipantTest {
         assertEquals(0L, participant.erase(null));
         verify(store).deleteByUserId("user-1");
         assertEquals("agentHealthTurns", participant.name());
+    }
+
+    @Test
+    @DisplayName("with the erasure guard, erasure verifies: rows or markers left fail the step")
+    void eraseVerifies() {
+        ErasureGuard guard = TestErasureGuards.withoutWriters();
+        HealthTurnGdprParticipant guarded = new HealthTurnGdprParticipant(store, guard);
+        when(store.deleteByUserId("user-1")).thenReturn(2L);
+        when(store.countByUserId("user-1")).thenReturn(0L);
+        assertEquals(2L, guarded.erase("user-1"));
+
+        when(store.countByUserId("user-2")).thenReturn(1L);
+        assertThrows(IllegalStateException.class, () -> guarded.erase("user-2"));
     }
 
     @Test

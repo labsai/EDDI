@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { AuditPage } from "@/pages/audit";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import type { AuditEntry } from "@/lib/api/audit";
+import type { AuditEntry } from "@eddi/app-kit/lib/api/audit";
 
 function renderAudit() {
   return renderWithProviders(<AuditPage />, {

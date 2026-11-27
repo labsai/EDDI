@@ -12,7 +12,7 @@ import {
   Info,
 } from "lucide-react";
 import { useSpaces } from "@/hooks/use-spaces";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";

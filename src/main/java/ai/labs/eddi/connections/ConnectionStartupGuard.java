@@ -32,13 +32,18 @@ import java.util.List;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Refuses to start when connections are enabled in a configuration that would
- * make them unsafe or non-functional.
+ * Startup checks for a deployment with connections enabled.
  * <p>
- * Follows the {@code OpenAiStartupGuard} precedent: a misconfiguration that
- * silently stores refresh tokens under self-asserted identities is far more
- * costly than a failed boot, because nothing about the running system looks
- * wrong afterwards.
+ * Refuses to start only for a <em>pinned</em> public base URL that a provider
+ * could not match (see {@link #requirePublicBaseUrl}). Everything about the
+ * connections already stored is reported in the log and not refused: every
+ * unsafe combination fails closed per request instead (see
+ * {@link #requireStoredConnectionsAreSupportable}).
+ * <p>
+ * Follows the {@code OpenAiStartupGuard} precedent for the part that does
+ * refuse: a misconfiguration that silently stores refresh tokens under
+ * self-asserted identities is far more costly than a failed boot, because
+ * nothing about the running system looks wrong afterwards.
  */
 @ApplicationScoped
 public class ConnectionStartupGuard {

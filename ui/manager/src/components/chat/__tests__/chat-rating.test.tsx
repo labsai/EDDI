@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders } from "@/test/test-utils";
-import type { ChatMessage } from "@/lib/api/chat";
-import type { RatingProfile } from "@/lib/api/ratings";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import type { ChatMessage } from "@eddi/app-kit/lib/api/chat";
+import type { RatingProfile } from "@eddi/app-kit/lib/api/ratings";
 import { agentReplyCount, lastStepIndex, ratableSteps, stepIndexes } from "@eddi/core";
-import { useChatRatings } from "@/hooks/use-chat-ratings";
-import { ChatRatingCard, ChatStepRating } from "../chat-rating";
+import { useChatRatings } from "@eddi/app-kit/hooks/use-chat-ratings";
+import { ChatRatingCard, ChatStepRating } from "@eddi/app-kit/components/chat/chat-rating";
 
 const profile = (extra: Partial<RatingProfile> = {}): RatingProfile => ({
   scale: "FIVE_STAR",

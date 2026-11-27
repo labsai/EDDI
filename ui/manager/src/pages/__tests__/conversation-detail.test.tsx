@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 function renderConvDetail(id = "conv1") {

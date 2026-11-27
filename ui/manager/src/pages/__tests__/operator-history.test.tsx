@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { OperatorPage } from "../operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
@@ -16,7 +16,7 @@ import { serveTrustedOperator } from "@/test/operator-trust";
  * away and back lost the transcript — an investigation still running on the
  * server became unreachable from the UI.
  */
-vi.mock("@/hooks/use-auth", () => ({
+vi.mock("@eddi/app-kit/hooks/use-auth", () => ({
   useAuth: () => ({
     authenticated: true,
     loading: false,

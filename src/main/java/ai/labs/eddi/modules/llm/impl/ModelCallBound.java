@@ -98,7 +98,8 @@ final class ModelCallBound {
     }
 
     /**
-     * {@code rounds} calls, each with the opening prompt plus the tool context cap.
+     * {@code rounds} calls: the first with the opening prompt, each later one with
+     * the tool context cap added to it.
      */
     static double usd(ModelPrices prices, String modelName, int rounds, long promptTokens, long toolTokens, int maxOutputTokens) {
         double total = 0.0;

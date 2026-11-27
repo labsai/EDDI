@@ -1,7 +1,8 @@
 /* ──────────────────────────────────────────────
    Package boundaries (frontend unification plan §3.1)
    Apps may import packages; packages never import apps; @eddi/core imports
-   neither React nor @eddi/ui; and no import cycle, inside a package or across
+   neither React nor @eddi/ui; @eddi/ui makes no API call (no @eddi/core, no
+   fetch, no window.__EDDI_*__); and no import cycle, inside a package or across
    packages. ESLint (`sharedPackage` in ui/eslint.config.base.js) catches the
    first three at edit time; only this test sees a cycle.
 
@@ -10,7 +11,7 @@
    ────────────────────────────────────────────── */
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Vitest runs from ui/packages/core.
@@ -93,6 +94,37 @@ function findCycles(graph: Map<string, string[]>): string[][] {
   return cycles;
 }
 
+/** The app directories under ui/. */
+const APP_DIRS = ["manager", "chat", "workforce"].map((app) => join(PACKAGES_ROOT, "..", app) + sep);
+const APP_PACKAGES = /^(eddi-manager|eddi-chat-ui|eddi-workforce)(\/|$)/;
+
+/** Whether `spec`, imported from `file`, reaches an app: `@/…`, an app's npm name, or a path into its directory. */
+function importsApp(file: string, spec: string): boolean {
+  if (spec.startsWith("@/") || APP_PACKAGES.test(spec)) return true;
+  if (!spec.startsWith(".")) return false;
+  const target = resolve(dirname(file), spec);
+  return APP_DIRS.some((dir) => target.startsWith(dir));
+}
+
+/** What an `exports` subpath resolves to: the exact key, else the longest matching `*` pattern (Node's rule). */
+function exportTarget(exports: Record<string, string>, subpath: string): string[] {
+  const key = `./${subpath}`;
+  if (exports[key]) return [exports[key]];
+  const patterns = Object.keys(exports)
+    .filter((k) => k.includes("*"))
+    .map((k) => ({ k, prefix: k.slice(0, k.indexOf("*")), suffix: k.slice(k.indexOf("*") + 1) }))
+    .filter(({ prefix, suffix }) => key.startsWith(prefix) && key.endsWith(suffix) && key.length >= prefix.length + suffix.length)
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+  const best = patterns[0];
+  if (!best) return [];
+  const star = key.slice(best.prefix.length, key.length - best.suffix.length);
+  // Every "*" in the target takes the match, as in Node — not just the first.
+  return [exports[best.k]!.split("*").join(star)];
+}
+
+/** A network call from source: fetch(), sendBeacon(), an XHR, EventSource or WebSocket. */
+const API_CALL = /\b(?:fetch|sendBeacon)\s*\(|\bnew\s+(?:XMLHttpRequest|EventSource|WebSocket)\b/;
+
 const { modules, entries } = loadPackages();
 const known = new Set(modules.map((m) => m.file));
 
@@ -103,12 +135,46 @@ describe("package boundaries", () => {
   });
 
   it("never imports an app", () => {
+    // Relative specifiers are resolved, not pattern-matched: @eddi/app-kit has
+    // components/chat/ and components/workforce/ directories of its own, which
+    // are not the apps of those names.
     const offenders = modules.flatMap((m) =>
       m.imports
-        .filter((spec) => spec.startsWith("@/") || /(^|\/)(manager|chat|workforce)\//.test(spec))
+        .filter((spec) => importsApp(m.file, spec))
         .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps @eddi/core, @eddi/ui and @eddi/conversation below @eddi/app-kit", () => {
+    // app-kit is the signed-in apps' shared layer on top of the three: it may
+    // use all of them, none of them may use it.
+    const offenders = modules
+      .filter((m) => m.pkg !== "@eddi/app-kit")
+      .flatMap((m) =>
+        m.imports
+          .filter((spec) => /^@eddi\/app-kit(\/|$)/.test(spec))
+          .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
+      );
+    expect(modules.some((m) => m.pkg === "@eddi/app-kit")).toBe(true);
+    expect(offenders).toEqual([]);
+  });
+
+  it("exports every module of @eddi/app-kit", () => {
+    // Its `exports` map patterns per directory (`./hooks/*` → `*.ts`); a .tsx in
+    // a .ts directory, or the reverse, needs an explicit entry, or an app's
+    // import of it fails to resolve only at build time.
+    const root = join(PACKAGES_ROOT, "app-kit");
+    const { exports } = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      exports: Record<string, string>;
+    };
+    const unexported = modules
+      .filter((m) => m.pkg === "@eddi/app-kit")
+      .map((m) => relative(join(root, "src"), m.file).split(sep).join("/"))
+      // Ambient declarations are referenced, never imported.
+      .filter((file) => !file.endsWith(".d.ts"))
+      .filter((file) => !exportTarget(exports, file.replace(/\.tsx?$/, "")).some((t) => t === `./src/${file}`));
+    expect(unexported).toEqual([]);
   });
 
   it("keeps @eddi/core free of React and the UI packages", () => {
@@ -120,6 +186,55 @@ describe("package boundaries", () => {
           .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
       );
     expect(offenders).toEqual([]);
+  });
+
+  it("finds @eddi/ui", () => {
+    expect([...entries.keys()]).toContain("@eddi/ui");
+  });
+
+  it("keeps @eddi/ui free of API calls and server globals", () => {
+    // @eddi/ui sits below @eddi/core's callers and @eddi/conversation: what
+    // the server says reaches it as props or options from the app.
+    const ui = modules.filter((m) => m.pkg === "@eddi/ui");
+    const offenders = ui.flatMap((m) => {
+      const found = m.imports
+        .filter((spec) => /^@eddi\/(core|conversation)(\/|$)/.test(spec))
+        .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`);
+      const source = readFileSync(m.file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      const call = API_CALL.exec(source);
+      if (call) found.push(`${relative(PACKAGES_ROOT, m.file)}: ${call[0]}`);
+      if (/__EDDI_\w*__/.test(source)) found.push(`${relative(PACKAGES_ROOT, m.file)}: window.__EDDI_*__`);
+      return found;
+    });
+    expect(ui.length).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps @eddi/conversation router-free, off server globals and unimported by core and ui", () => {
+    // Hosts pass ids and callbacks; what the server says reaches it as options.
+    const conversation = modules.filter((m) => m.pkg === "@eddi/conversation");
+    const offenders = conversation.flatMap((m) => {
+      const found = m.imports
+        .filter((spec) => /^react-router(-dom)?(\/|$)/.test(spec))
+        .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`);
+      const source = readFileSync(m.file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      if (/__EDDI_\w*__/.test(source)) found.push(`${relative(PACKAGES_ROOT, m.file)}: window.__EDDI_*__`);
+      return found;
+    });
+    const importers = modules
+      .filter((m) => m.pkg === "@eddi/core" || m.pkg === "@eddi/ui")
+      .flatMap((m) =>
+        m.imports
+          .filter((spec) => /^@eddi\/conversation(\/|$)/.test(spec))
+          .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
+      );
+    expect(conversation.length).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+    expect(importers).toEqual([]);
   });
 
   it("has no import cycle", () => {
@@ -155,6 +270,9 @@ describe("package boundaries", () => {
 
     expect(findCycles(new Map([[a, [b]], [b, [a]], [c, [a]]]))).toEqual([[a, b, a]]);
     expect(findCycles(new Map([[a, [b]], [b, [c]], [c, []]]))).toEqual([]);
+    expect(API_CALL.test("const r = await fetch(url);")).toBe(true);
+    expect(API_CALL.test("new EventSource(u)")).toBe(true);
+    expect(API_CALL.test("prefetch the font")).toBe(false);
     expect(specifiers('import type { X } from "./b";\nexport * from "./c";\nconst m = import("./d");')).toEqual([
       "./b",
       "./c",

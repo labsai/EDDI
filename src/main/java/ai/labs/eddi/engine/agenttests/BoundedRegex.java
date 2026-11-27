@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * Suite authors write the patterns and agents write the text they run against,
  * and {@link java.util.regex} backtracks without limit: {@code (a+)+$} against
  * thirty {@code a}s and a {@code b} takes longer than the age of the universe.
- * Two bounds make that impossible here:
+ * Three bounds make that impossible here:
  * <ul>
  * <li>the pattern is at most {@code AgentTestSuiteValidator.MAX_PATTERN_LENGTH}
  * characters, checked when the suite is saved, and the text at most

@@ -67,7 +67,8 @@ class McpToolSchemaValidationTest {
 
             // MCP tools (use @ToolArg — Java parameter names become keys)
             McpConversationTools.class, McpAdminTools.class, McpSetupTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,};
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class,};
 
     /**
      * The langchain4j built-ins must never be discovered by the MCP server.

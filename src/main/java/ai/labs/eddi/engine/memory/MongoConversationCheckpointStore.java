@@ -24,7 +24,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * MongoDB implementation of {@link IConversationCheckpointStore}.
  * <p>
  * Stores checkpoints in a dedicated {@code conversation_checkpoints} collection
- * with indices on {@code conversationId} and {@code createdAt}.
+ * with one compound index on {@code conversationId} (ascending) and
+ * {@code createdAt} (descending). Lookups by {@code checkpointId} are not
+ * indexed.
  *
  * @since 6.0.0
  */

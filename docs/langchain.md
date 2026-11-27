@@ -1426,7 +1426,7 @@ Tokens already streamed to a client cannot be taken back. A task with an output 
 Every guardrail that fires produces:
 
 - an audit record under the step key `audit:guardrail:<phase>:<type>` (`{phase, type, action, reason, retryCount, taskId}`), collected into the [audit ledger](audit-ledger.md) entry as `output.guardrails`. The `reason` is EDDI's (e.g. `pii:email`, `prompt_injection_pattern`) — never the screened text;
-- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
+- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer. The Manager's chat and the Chat UI show it under the reply it explains ("Guardrail (output): pii redacted"), and while the reply is still being written their activity line reads "Checking the reply…";
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
 Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
@@ -1793,6 +1793,51 @@ The LLM task supports advanced pre-request and post-response processing for fine
 
 - **responseObjectName**: Name for storing the full response object in memory
 - **responseMetadataObjectName**: Name for storing response metadata (token usage, finish reason) in memory
+
+## Documents (`documents`)
+
+An LLM task can carry a `documents` block that says how the agent treats PDF documents: their structure, splitting them into chapters ("units"), handing files to other agents, a personal or team library, and documents too large to forward whole. It ships one capability at a time.
+
+**Nothing in the block is available yet.** The block exists in the configuration model so that the shape is stable, but every key is refused when the configuration is saved:
+
+```
+langchain.task[0].documents.sharing.delegation is not available in this version
+```
+
+An absent block, `{}` and empty nested blocks (`"split": {}`) are accepted and change nothing. An agent that configures nothing behaves exactly as before, including for large PDFs.
+
+How values resolve, once keys become available:
+
+- **Every key is optional.** Unset means the deployment default, `eddi.documents.defaults.<path>` (for example `eddi.documents.defaults.split.maxUnitTokens=8000`), and without one the built-in default.
+- **Operator bounds.** Some numbers (counts, bytes, depth, dollars) have an operator bound. A value above it is refused when the configuration is saved, with the bound named. A stored value above it (a bound tightened after the save) is clamped with a warning when the agent is deployed: a bound never un-deploys an agent.
+- **Stored keys that are not available do not stop a deploy.** Every save path — the REST API, JSON patch, ZIP import, agent setup and upgrade — refuses them, so they reach a stored configuration only by being written directly to the database or saved by a newer EDDI. At deploy such a key is ignored, and the deploy log names it at WARN.
+
+The full shape, with every key at its default:
+
+```json
+"documents": {
+  "structure": "OFF",
+  "split":   { "strategy": "AUTO", "pagesPerUnit": 10, "maxUnitTokens": 12000, "minUnitTokens": 500, "maxUnits": 60 },
+  "unitForm": "AUTO",
+  "images":  { "mode": "EMBEDDED", "pageRender": "NEVER", "maxPerUnit": 20, "maxEdgePx": 1568, "minEdgePx": 48, "renderDpi": 110 },
+  "tables":  { "image": "NEVER", "format": "MARKDOWN", "maxInlineRows": 60 },
+  "audio":   { "extract": false, "maxFiles": 10, "maxPerUnit": 2, "maxDurationSeconds": 600 },
+  "embeddedFiles": { "extract": "NONE", "mimeTypes": [] },
+  "derived": { "maxPerSource": 200, "maxBytesPerSource": 52428800 },
+  "sharing": { "delegation": false, "handoff": false, "maxFilesPerShare": 5, "maxSharesPerTurn": 10, "maxDepth": 3 },
+  "library": { "enabled": false, "promote": "TOOL", "scopes": ["self"], "teams": [], "memoryCard": true,
+               "maxCardsRecalled": 5, "retentionDays": null },
+  "index":   { "rag": null },
+  "large":   { "thresholdPages": 80, "thresholdBytes": 10485760, "processOnUpload": false, "onReady": "NOTE",
+               "summary": { "llm": null, "leafOutputTokens": 300, "reduceFanIn": 12, "maxLevels": 4,
+                            "maxParallelUnits": 4, "maxCostPerDocument": 5.00, "images": "CAPTIONS" } },
+  "bridge":  null
+}
+```
+
+| Key | Available since |
+|---|---|
+| *(none yet)* | — |
 
 ## Conversation Window Management
 

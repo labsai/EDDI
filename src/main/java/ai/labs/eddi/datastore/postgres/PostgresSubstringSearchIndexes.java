@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * five fields. They are built with {@code CREATE INDEX CONCURRENTLY}, which
  * does not block writes to the shared {@code resources} table, on a background
  * thread, so a large deployment neither waits at boot nor stops writing while
- * they are built. Until all of them are valid, {@link #isReady()} is
+ * they are built. Until all of them are valid, {@link #isReady(Connection)} is
  * {@code false} and the search runs exactly as it would without them.
  *
  * <h3>Why readiness matters to the query</h3> PostgreSQL only uses these

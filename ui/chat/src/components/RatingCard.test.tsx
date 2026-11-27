@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { RatingCard } from "./RatingCard";
+import { RatingCard } from "@eddi/conversation";
 import { parseRatingProfile, type RatingProfile } from "@eddi/core";
 
 const stars = (extra: Record<string, unknown> = {}): RatingProfile =>

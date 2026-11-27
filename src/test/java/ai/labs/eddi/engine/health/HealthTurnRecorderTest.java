@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -27,6 +29,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -35,13 +38,14 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -95,7 +99,7 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("a turn is written on the health worker as a replace-upsert of its row")
-    void writesTheRow() {
+    void writesTheRow() throws Exception {
         recorder.record(memory(), null, ErrorKind.TURN_ERROR, 42L, false);
 
         ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
@@ -103,7 +107,9 @@ class HealthTurnRecorderTest {
         assertEquals("conv-1", row.getValue().conversationId());
         assertEquals("TURN_ERROR", row.getValue().errorKind());
         assertEquals(42L, row.getValue().durationMs());
-        verify(store, after(300).never()).markDiscarded(any(), any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).markDiscarded(any(), any());
         verify(store, never()).insertIfAbsent(any());
     }
 
@@ -182,20 +188,22 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("an abandoned wait is inserted only if absent and discards nothing — it never replaces a row")
-    void abandonedIsInsertOnly() {
+    void abandonedIsInsertOnly() throws Exception {
         ConversationMemory memory = memory();
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
 
         recorder.record(memory, null, ErrorKind.TURN_DEADLINE, 60_000L, true);
 
         verify(store, timeout(5_000)).insertIfAbsent(any());
-        verify(store, after(300).never()).upsert(any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).upsert(any());
         verify(store, never()).markDiscarded(any(), any());
     }
 
     @Test
     @DisplayName("a cancelled say after an undo leaves the undone execution alone")
-    void cancelledDoesNotDiscard() {
+    void cancelledDoesNotDiscard() throws Exception {
         ConversationMemory memory = memory();
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
         memory.setCancelled(true);
@@ -203,7 +211,9 @@ class HealthTurnRecorderTest {
         recorder.record(memory, null, ErrorKind.TURN_INTERRUPTED, null, false);
 
         verify(store, timeout(5_000)).insertIfAbsent(any());
-        verify(store, after(300).never()).markDiscarded(any(), any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).markDiscarded(any(), any());
     }
 
     @Test
@@ -225,7 +235,7 @@ class HealthTurnRecorderTest {
 
     @Test
     @DisplayName("a turn whose snapshot was not stored is inserted only if absent, never as paused, and discards nothing")
-    void uncommittedIsUnsettled() {
+    void uncommittedIsUnsettled() throws Exception {
         ConversationMemory memory = memory();
         memory.setConversationState(ConversationState.AWAITING_HUMAN);
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
@@ -235,7 +245,9 @@ class HealthTurnRecorderTest {
         ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
         verify(store, timeout(5_000)).insertIfAbsent(row.capture());
         assertFalse(row.getValue().paused());
-        verify(store, after(300).never()).upsert(any());
+        // The write is complete, its erasure check included: nothing more can happen.
+        assertTrue(recorder.awaitDrained(Duration.ofSeconds(5)));
+        verify(store, never()).upsert(any());
         verify(store, never()).markDiscarded(any(), any());
     }
 
@@ -255,27 +267,28 @@ class HealthTurnRecorderTest {
 
     /**
      * A row waiting in the health queue, or being written, while its user is erased
-     * or its conversation deleted must not survive the delete.
+     * or its conversation deleted must not survive the delete — the erasure
+     * guarantee ({@link ErasureGuard}), with a real guard over in-memory
+     * tombstones.
      */
     @Nested
-    @DisplayName("erasure and conversation delete against queued writes")
+    @DisplayName("erasure and conversation delete against queued writes (the erasure guard)")
     class ErasureAndPurge {
 
-        private IConversationMemoryStore conversations;
-        private HealthErasureFence fence;
+        private InMemoryErasureTombstoneStore tombstones;
+        private ErasureGuard guard;
         private HealthTurnRecorder guarded;
+        private HealthErasureWriter writer;
 
         @BeforeEach
-        @SuppressWarnings("unchecked")
         void setUp() {
-            conversations = mock(IConversationMemoryStore.class);
-            when(conversations.getStateAndRevision(any())).thenReturn(new StateAndRevision(ConversationState.READY, 3L));
-            Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
-            when(conversationInstance.isResolvable()).thenReturn(true);
-            when(conversationInstance.get()).thenReturn(conversations);
-            fence = new HealthErasureFence();
-            guarded = new HealthTurnRecorder(instance(store), conversationInstance, fence, HealthSettings.defaults(), new HealthMetrics(registry),
-                    CLOCK);
+            tombstones = new InMemoryErasureTombstoneStore();
+            List<AsyncErasureWriter> writers = new ArrayList<>();
+            guard = new ErasureGuard(tombstones, writers, new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400), Duration.ofSeconds(5),
+                    Duration.ofMinutes(5), CLOCK);
+            guarded = new HealthTurnRecorder(instance(store), guard, HealthSettings.defaults(), new HealthMetrics(registry), CLOCK);
+            writer = new HealthErasureWriter(guarded, store);
+            writers.add(writer);
         }
 
         @AfterEach
@@ -299,18 +312,20 @@ class HealthTurnRecorderTest {
             return busy;
         }
 
-        @Test
-        @DisplayName("erasure while the row is queued: neither the row nor its discard markers are written")
-        void erasedWhileQueued() throws Exception {
-            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+        private ConversationMemory memoryWithDiscard() {
             ConversationMemory memory = memory();
             memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
-            guarded.record(memory, null, null, null, false);
+            return memory;
+        }
+
+        @Test
+        @DisplayName("user erased while the row is queued: neither the row nor its discard markers are written")
+        void erasedWhileQueued() throws Exception {
+            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+            guarded.record(memoryWithDiscard(), null, null, null, false);
             assertEquals(1, guarded.queued());
 
-            // The erasure's step 0, then its delete of the user's rows.
-            fence.stopInFlightWork("user-1");
-            store.deleteByUserId("user-1");
+            guard.tombstoneUser("user-1", List.of());
             release.countDown();
 
             assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
@@ -320,7 +335,21 @@ class HealthTurnRecorderTest {
         }
 
         @Test
-        @DisplayName("erasure while the row is being written: it is deleted again right after the write")
+        @DisplayName("conversation deleted while the row is queued: nothing is written")
+        void purgedWhileQueued() throws Exception {
+            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+            guarded.record(memoryWithDiscard(), null, null, null, false);
+
+            guard.tombstoneConversation("conv-1");
+            release.countDown();
+
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
+            verify(store, never()).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
+            verify(store, never()).markDiscarded(any(), any());
+        }
+
+        @Test
+        @DisplayName("erasure while the row is being written: the row and each marker are deleted again right after the write")
         void erasedWhileWriting() throws Exception {
             CountDownLatch writing = new CountDownLatch(1);
             doAnswer(inv -> {
@@ -328,68 +357,122 @@ class HealthTurnRecorderTest {
                 release.await(30, TimeUnit.SECONDS);
                 return null;
             }).when(store).upsert(any());
+            guarded.record(memoryWithDiscard(), null, null, null, false);
+            assertTrue(writing.await(5, TimeUnit.SECONDS));
+
+            // The erasure starts while the write is in flight.
+            guard.tombstoneUser("user-1", List.of("conv-1"));
+            release.countDown();
+
+            ArgumentCaptor<HealthTurn> written = ArgumentCaptor.forClass(HealthTurn.class);
+            InOrder order = inOrder(store);
+            order.verify(store, timeout(5_000)).upsert(written.capture());
+            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
+            order.verify(store, timeout(5_000)).deleteRow("conv-1", written.getValue().executionId());
+            order.verify(store, timeout(5_000)).deleteRow("conv-1", "old-exec");
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
+            assertEquals(0, tombstones.pendingCount());
+        }
+
+        @Test
+        @DisplayName("a failed write is still checked: a row it may have stored is removed")
+        void failedWriteStillGuarded() {
+            doAnswer(inv -> {
+                // Part of the write landed, then the store failed; the erasure started
+                // meanwhile.
+                guard.tombstoneConversation("conv-1");
+                throw new HealthStoreException("timeout", null);
+            }).when(store).upsert(any());
+            guarded.record(memory(), null, null, null, false);
+
+            verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_STORE_ERROR) == 1.0);
+        }
+
+        @Test
+        @DisplayName("a removal that fails is recorded as pending and keeps the user's erasure failing until a retry removes the row")
+        void failedRemovalKeepsErasureFailing() throws Exception {
+            CountDownLatch writing = new CountDownLatch(1);
+            doAnswer(inv -> {
+                writing.countDown();
+                release.await(30, TimeUnit.SECONDS);
+                return null;
+            }).when(store).upsert(any());
+            when(store.deleteRow(any(), any())).thenThrow(new HealthStoreException("store down", null));
             guarded.record(memory(), null, null, null, false);
             assertTrue(writing.await(5, TimeUnit.SECONDS));
 
-            // The erasure runs (and finds nothing yet) while the write is in flight.
-            fence.stopInFlightWork("user-1");
+            guard.tombstoneUser("user-1", List.of("conv-1"));
             release.countDown();
+            assertTrueEventually(() -> tombstones.pendingCount() == 1);
 
-            InOrder order = inOrder(store);
-            order.verify(store, timeout(5_000)).upsert(any());
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            // The erasure's own delete reports the rows gone, but the pending removal is
+            // still there and its retry fails: the step fails.
+            HealthTurnGdprParticipant participant = new HealthTurnGdprParticipant(store, guard);
+            when(store.countByUserId("user-1")).thenReturn(0L);
+            assertThrows(IllegalStateException.class, () -> participant.erase("user-1"));
+
+            // The store recovers: the retry removes the row, and a re-run completes.
+            doReturn(1L).when(store).deleteRow(any(), any());
+            assertDoesNotThrow(() -> participant.erase("user-1"));
+            assertEquals(0, tombstones.pendingCount());
         }
 
         @Test
-        @DisplayName("conversation deleted while the row was queued (on any node): the row and its markers are removed after the write")
-        void purgedWhileQueued() throws Exception {
-            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
-            ConversationMemory memory = memory();
-            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
-            guarded.record(memory, null, null, null, false);
+        @DisplayName("a turn captured after the user's erasure (a reused id) is stored")
+        void capturedAfterErasureIsStored() throws Exception {
+            // The tombstone is an hour older than the capture: beyond the clock skew.
+            ErasureGuard earlier = new ErasureGuard(tombstones, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(5), Duration.ofMinutes(5), Clock.offset(CLOCK, Duration.ofHours(-1)));
+            earlier.tombstoneUser("user-1", List.of());
 
-            // The purge deletes the snapshot, then the conversation's health rows.
-            when(conversations.getStateAndRevision("conv-1")).thenReturn(new StateAndRevision(null, null));
-            store.deleteByConversationId("conv-1");
-            release.countDown();
-
-            InOrder order = inOrder(store);
-            order.verify(store).deleteByConversationId("conv-1");
-            order.verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
-            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
-            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
-        }
-
-        @Test
-        @DisplayName("normal writes are unaffected: a live conversation keeps its row, and a store that cannot answer deletes nothing")
-        void normalWrites() {
             guarded.record(memory(), null, null, null, false);
-            verify(store, timeout(5_000)).upsert(any());
-            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
 
-            when(conversations.getStateAndRevision(any())).thenReturn(null);
-            guarded.record(new ConversationMemory("conv-2", "agent-1", 2, "user-2"), null, null, null, false);
-            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 2.0);
-
-            verify(store, after(300).never()).deleteByConversationId(any());
+            verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
+            // The write is complete, its erasure check included: nothing more can happen.
+            assertTrue(guarded.awaitDrained(Duration.ofSeconds(5)));
+            verify(store, never()).deleteRow(any(), any());
             assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
 
         @Test
-        @DisplayName("a failing cleanup never reaches the worker's caller")
-        void cleanupFailure() {
-            when(conversations.getStateAndRevision(any())).thenThrow(new IllegalStateException("db down"));
-            assertDoesNotThrow(() -> guarded.record(memory(), null, null, null, false));
+        @DisplayName("tombstones that cannot be read refuse the write (fail closed)")
+        void unreadableTombstonesRefuse() {
+            tombstones.failReads = true;
+            guarded.record(memory(), null, null, null, false);
+
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
+            verify(store, never()).upsert(any());
+        }
+
+        @Test
+        @DisplayName("the drain barrier waits for a write in progress")
+        void drainBarrier() throws Exception {
+            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+            assertFalse(writer.awaitDrained(Duration.ofMillis(100)), "the blocked write is outstanding");
+            release.countDown();
+            assertTrue(writer.awaitDrained(Duration.ofSeconds(5)));
+        }
+
+        @Test
+        @DisplayName("normal writes are unaffected: no tombstone, nothing deleted")
+        void normalWrites() throws Exception {
+            guarded.record(memory(), null, null, null, false);
+            verify(store, timeout(5_000)).upsert(any());
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
-            verify(store, after(300).never()).deleteByConversationId(any());
+
+            // The write is complete, its erasure check included: nothing more can happen.
+            assertTrue(guarded.awaitDrained(Duration.ofSeconds(5)));
+            verify(store, never()).deleteRow(any(), any());
+            assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
     }
 
     private static void assertTrueEventually(BooleanSupplier condition) {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             while (!condition.getAsBoolean()) {
-                Thread.onSpinWait();
+                // Interruptible: the timeout's interrupt ends the loop.
+                Thread.sleep(1);
             }
         });
     }
