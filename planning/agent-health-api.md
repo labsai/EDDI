@@ -227,7 +227,7 @@ confirm or change them, and update this file when it does.
    path into the body (`thresholds.resolutionRate.red`, `slo.agentTurnSuccess`) and `overrides[0].reason` for list
    items; the UI shows a violation under the field whose path it equals or starts.
 4. **Drill-down evidence for "confirmed".** The UI opens the sessions list for the *confirmed* part of the resolution
-   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED` and `evidence=external_event|conversation_id_event|agent_action`;
+   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED&evidence=external_event&evidence=conversation_id_event&evidence=agent_action` (`outcome` and `evidence` are **repeated** query parameters, one value each, never a delimited list);
    *self-reported* is `evidence=self_reported` (same outcomes); *agent closed* is `evidence=agent_closed` and *silence*
    is `evidence=silence`, both with `outcome=ASSUMED_RESOLVED`. The abandonment drill-down asks for `outcome=ABANDONED`
    only (`ENDED_QUIETLY` is a separate outcome).
@@ -332,3 +332,23 @@ What the H3 backend does where this contract leaves room. Nothing above changed 
 - **Series** of the effectiveness measures are per **session end day**; a day without closed sessions is `value: null, n: 0`.
 - Not done in H3: the "mostly assumed from silence" **reason** (H4 status rules; the breakdown carries what it needs), and
   `healthConfig` interactive-origin overrides (plan §4.5) — which origins are judged is fixed for now.
+
+## 14. How the Manager UI reads §12 and §13
+
+Not a contract: a record of what the UI does with the backend's precisions, so a later change here knows what to check.
+
+- Portfolio `sessions: null` renders "—" with the item's `hint`; `sessionsDelta: null` renders nothing. Key measures
+  without a value show their own `hint`.
+- `platformIncidents[].from/to` and every `period`, `baseline`, `dataThrough` and compare `window` value are UTC days.
+- A rate with `value: null` shows "—" and its `hint`; the resolution split lists each part's `n` instead of shares when
+  the measure and every part are `null`. A `hint` is shown whether or not there is a value.
+- `significant: false` on `turnDurationP95`, `costPerSession`, `tokensPerTurn`, `turnsPerSession`, `guardrailTripRate`,
+  `returningUserShare` and `outcomeCoverage` reads "not tested for significance" (the UI keeps the list of ids).
+- The Apdex label's `T = …` is parsed and put into the translated label.
+- The drill-down is not requested without EDIT (`canEdit` on the panel); a 403's `reason` picks the explanation.
+  `outcome`/`evidence` `null` render "—"; `sessionNo` is only part of the row key.
+- Statuses stay hidden while `status` is `null` (until H4). The profile, presets, export and report-link controls are
+  offered only while the Manager's mock worker answers them: in a development build, when the backend is unreachable or
+  mocks are forced (`eddi-force-mocks`). Against a real backend, and in every production build, they are hidden until
+  H4, H4b and H5 land, so those calls are never made there (they would only answer 404).
+- `significant: false` can also mean too few sessions in either period, not only an untestable measure; the UI reads it as "not significant, or too little data" (never "normal variation", which would claim a test that may not have run) unless the measure is known untestable (by the optional `tested: false` flag, else by id).
