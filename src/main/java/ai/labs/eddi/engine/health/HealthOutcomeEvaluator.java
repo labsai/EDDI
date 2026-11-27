@@ -638,9 +638,12 @@ public class HealthOutcomeEvaluator {
         Admission admission = admit(conversationId, userId, live);
         if (admission != null && !admission.allowed()) {
             // The user or the conversation was erased — or the tombstones could not be
-            // read (fail closed): nothing of it is written. A failure, so the feed and
-            // the due pass retry it: once the erasure deleted the turn rows, a retry
-            // finds none and leaves nothing behind; after an outage it writes them.
+            // read (fail closed): nothing of it is written. A failure, so it is retried:
+            // by the feed for at most MAX_RETRY (then given up with a WARN), by the due
+            // pass with a back-off. Once the erasure deleted the turn rows a retry finds
+            // none and leaves nothing behind. After a tombstone-store outage longer than
+            // MAX_RETRY the sessions are written only with the conversation's next change
+            // or due time.
             throw new HealthStoreException("The erasure guard refused the sessions of a conversation", null);
         }
         String origin = origin(stored.values(), from, live);

@@ -772,8 +772,11 @@ Turn rows are personal data about a user's use of an agent:
   (`agentHealthTurns`, below): an erasure or a permanent conversation delete
   waits for every node's outcome evaluations in flight; the evaluation writes no
   session of a tombstoned conversation, or derived from an erased user's turns
-  captured before the erasure (a refusal is a failed evaluation, retried until
-  the turn rows are gone); and right after its write it asks again and deletes
+  captured before the erasure (a refusal is a failed evaluation: the feed
+  retries it for up to an hour, then gives up with a WARN, and a due session is
+  retried with a growing back-off; so after a tombstone-store outage longer than
+  that, the sessions are written once the conversation changes or a session
+  falls due); and right after its write it asks again and deletes
   each session it wrote, or records a pending removal. The `agentHealthOutcomes`
   step then verifies that no session of the user is left, and a conversation
   delete that none of the conversation is. Their deletes re-roll no day: the

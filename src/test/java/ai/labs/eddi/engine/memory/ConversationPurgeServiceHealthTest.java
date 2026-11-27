@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.health.HealthDirtyDays;
 import ai.labs.eddi.engine.health.HealthErasureWriter;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.HealthTurnRecorder;
+import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -171,5 +172,21 @@ class ConversationPurgeServiceHealthTest {
 
         service.healthTurnStore = null;
         assertDoesNotThrow(() -> service.deleteHealthTurns("conv"));
+    }
+
+    @Test
+    @DisplayName("unguarded (agent test): the conversation's sessions are deleted with its turn rows, best effort")
+    void agentTestPurgeDeletesSessions() throws Exception {
+        IHealthTurnStore healthStore = mock(IHealthTurnStore.class);
+        when(healthStore.deleteConversationReturningDays("conv")).thenReturn(new HealthDeletedRows(1L, null));
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        ConversationPurgeService service = service(mock(IConversationMemoryStore.class), healthStore);
+        service.healthOutcomeStore = instance(outcomes);
+
+        service.deleteHealthTurns("conv", "agent");
+        verify(outcomes).deleteByConversationId("conv");
+
+        when(outcomes.deleteByConversationId("conv")).thenThrow(new HealthStoreException("down", null));
+        assertDoesNotThrow(() -> service.deleteHealthTurns("conv", "agent"));
     }
 }
