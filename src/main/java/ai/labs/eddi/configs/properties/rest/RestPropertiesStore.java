@@ -58,7 +58,7 @@ public class RestPropertiesStore implements IRestPropertiesStore {
         ownershipValidator.validateUserAccess(identity, userId);
         if (properties != null) {
             for (String key : properties.keySet()) {
-                if (IUserMemoryStore.isReservedKey(key)) {
+                if (IUserMemoryStore.isRefusedWriteKey(key)) {
                     // A merge is a global upsert keyed on (userId, key): "false" here
                     // overwrote an admin's Art. 18 restriction in place.
                     return Response.status(Response.Status.BAD_REQUEST)

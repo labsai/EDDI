@@ -932,7 +932,11 @@ class ConversationHitlService {
                         }
                         boolean persisted;
                         try {
-                            persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                            // Committed is recorded as soon as the write lands, before the
+                            // long-term writes it deferred: a watchdog that expires during
+                            // them must not mark the stored resume interrupted.
+                            persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS,
+                                    () -> committedResumeState.set(memory.getConversationState()));
                         } catch (ConversationFencedException e) {
                             // A6: another node holds the conversation now and has started on
                             // it. Not an ERROR (the document is the newer holder's): the resume

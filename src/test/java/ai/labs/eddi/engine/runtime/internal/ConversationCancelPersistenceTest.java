@@ -89,6 +89,18 @@ class ConversationCancelPersistenceTest {
     }
 
     /**
+     * What the committer does for a stored turn: runs its deferred long-term write
+     * (A5). A cancelled or abandoned turn defers none, so this changes nothing for
+     * it.
+     */
+    private void commit() throws Exception {
+        var afterCommit = memory.takeAfterCommit();
+        if (afterCommit != null) {
+            afterCommit.run();
+        }
+    }
+
+    /**
      * Wires the pipeline to behave exactly like the fixed {@code LifecycleManager}
      * under a cancel: it runs, observes the flag, and aborts with
      * {@link ConversationStopException}. The flag itself is set by a second thread
@@ -177,6 +189,7 @@ class ConversationCancelPersistenceTest {
             canceller.join(10_000);
         }
 
+        commit();
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
 
@@ -192,6 +205,7 @@ class ConversationCancelPersistenceTest {
         doThrow(new ConversationStopException()).when(lifecycleManager).executeLifecycle(any(), any());
 
         conversation.say("I am vegan", new LinkedHashMap<>());
+        commit();
 
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
     }
@@ -238,6 +252,7 @@ class ConversationCancelPersistenceTest {
 
         assertFalse(memory.isCancelled(), "abandonment must not be confused with a cooperative cancel");
         assertTrue(interruptFlagSurvived, "the guard must only read the interrupt flag, never clear it");
+        commit();
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
 
@@ -277,6 +292,7 @@ class ConversationCancelPersistenceTest {
 
         // The cancel wins the outcome, and nothing may reach the user-memory store.
         assertEquals(ConversationState.ENDED, memory.getConversationState());
+        commit();
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
 
@@ -293,6 +309,7 @@ class ConversationCancelPersistenceTest {
                 .when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
 
         conversation.resume(approved());
+        commit();
 
         assertEquals(ConversationState.ENDED, memory.getConversationState());
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
@@ -325,6 +342,7 @@ class ConversationCancelPersistenceTest {
         assertEquals(ConversationState.READY, memory.getConversationState());
         assertFalse(memory.isCancelled(), "abandonment must not be confused with a cooperative cancel");
         assertTrue(interruptFlagSurvived, "the guard must only read the interrupt flag, never clear it");
+        commit();
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
 }

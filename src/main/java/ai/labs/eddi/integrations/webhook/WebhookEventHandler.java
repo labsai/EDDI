@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -654,6 +655,13 @@ public class WebhookEventHandler {
                 new IConversationService.ConversationResponseHandler() {
                     @Override
                     public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        if (snapshot != null && TurnNotStored.isNotStored(snapshot.getError())) {
+                            // A turn whose write failed is completed with an ERROR snapshot; the
+                            // sender gets nothing back, so the log is the only place it shows.
+                            LOGGER.warnf("Webhook turn in conversation %s ran but was not stored (%s)", sanitize(conversationId),
+                                    TurnNotStored.reasonOf(snapshot.getError()));
+                            return;
+                        }
                         LOGGER.debugf("Webhook turn completed in conversation %s", sanitize(conversationId));
                     }
 

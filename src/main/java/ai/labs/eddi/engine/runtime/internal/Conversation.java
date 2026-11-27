@@ -68,8 +68,8 @@ public class Conversation implements IConversation {
 
     /**
      * The longTerm properties as they stood when this turn started — the baseline
-     * {@link #storePropertiesPermanently()} diffs against so untouched memories are
-     * not rewritten on every turn. A new {@code Conversation} is built per turn
+     * {@link #storePropertiesPermanently(Set)} diffs against so untouched memories
+     * are not rewritten on every turn. A new {@code Conversation} is built per turn
      * ({@code Agent#continueConversation}), so the constructor snapshot is exactly
      * "state at the start of this turn"; {@code init()} re-captures after the store
      * load.
@@ -82,6 +82,15 @@ public class Conversation implements IConversation {
      * are persisted regardless of the diff.
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
+
+    /**
+     * The longTerm properties as they were when this turn started — whether or not
+     * the document they came from is trusted as persisted
+     * ({@link #longTermBaseline} stays empty after a pause or an error). It tells a
+     * key this turn changed from one it merely carries over, which only the first
+     * may overwrite a newer stored value with.
+     */
+    private final Map<String, Property> longTermAtTurnStart = new HashMap<>();
 
     /** Serialized properties at the start of this turn — the undo baseline. */
     private Map<String, Map<String, Object>> propertiesAtTurnStart;
@@ -226,18 +235,19 @@ public class Conversation implements IConversation {
      * pre-diff behaviour, which is safe because {@code upsert} is idempotent.
      */
     private void captureRestoredLongTermBaseline() {
-        longTermBaseline.clear();
+        captureLongTermBaseline();
         if (conversationMemory == null) {
             return;
         }
         ConversationState restoredState = conversationMemory.getConversationState();
         if (!priorTurnPersistedLongTermProperties(restoredState)) {
+            // Not trusted as persisted: only the turn-start values stay (see
+            // longTermAtTurnStart).
+            longTermBaseline.clear();
             LOGGER.debugf("[MEMORY] Conversation %s restored in state %s — the previous turn never ran "
                     + "storePropertiesPermanently(), so its longTerm properties are treated as unpersisted.",
                     sanitize(conversationMemory.getConversationId()), restoredState);
-            return;
         }
-        captureLongTermBaseline();
     }
 
     private static boolean priorTurnPersistedLongTermProperties(ConversationState restoredState) {
@@ -252,6 +262,7 @@ public class Conversation implements IConversation {
      */
     private void captureLongTermBaseline() {
         longTermBaseline.clear();
+        longTermAtTurnStart.clear();
         if (conversationMemory == null) {
             return;
         }
@@ -264,6 +275,7 @@ public class Conversation implements IConversation {
                 longTermBaseline.put(key, valueCopy(property));
             }
         });
+        longTermAtTurnStart.putAll(longTermBaseline);
     }
 
     /**
@@ -442,6 +454,14 @@ public class Conversation implements IConversation {
 
             Map<String, Object> contested = new LinkedHashMap<>();
             for (UserMemoryEntry entry : entries) {
+                if (IUserMemoryStore.isEngineKey(entry.key())) {
+                    // Stored before such keys were refused (A6): loaded, it would replace
+                    // the engine's own property — a planted summary_through_step hid the
+                    // whole history from the model. Ignored, never deleted here.
+                    LOGGER.warnf("[MEMORY] Ignoring the memory '%s' of user '%s': keys starting with '%s' belong to the engine",
+                            sanitize(entry.key()), sanitize(userId), IUserMemoryStore.ENGINE_KEY_PREFIX);
+                    continue;
+                }
                 Property prop = entryToProperty(entry);
                 if (entry.assessment() == UserMemoryEntry.Assessment.CONTESTED) {
                     contested.put(entry.key(), true);
@@ -616,7 +636,63 @@ public class Conversation implements IConversation {
                     conversationMemory.getConversationId());
             return;
         }
-        storePropertiesPermanently();
+        commitLongTermPropertiesAfterTheTurn();
+    }
+
+    /**
+     * Writes the turn's long-term properties to the user memory store — but only
+     * once the turn itself is stored (A5).
+     * <p>
+     * They used to be written here, inside the pipeline, before the conversation
+     * write; when that write then failed (a document over MongoDB's 16 MB, a
+     * PostgreSQL data error, a fence, a conflict) the turn did not exist, yet the
+     * memories it set did. Now the write is handed to the turn's committer
+     * ({@link IConversationMemory#deferUntilCommitted}), which runs it right after
+     * a successful store (every path that stores a turn does, see
+     * {@code ConversationStepRunner#commitDeferredWork}). The stored document still
+     * names the keys owed ({@code pendingLongTermWrites}, recorded on every exit of
+     * the turn): if the write fails, or the node dies before it, the next turn
+     * finds them and writes them — upserts are idempotent. After a successful write
+     * the committer clears them. A memory that cannot defer (none in production) is
+     * written at once, as before.
+     */
+    private void commitLongTermPropertiesAfterTheTurn() throws IResourceStore.ResourceStoreException {
+        if (propertiesHandler.getUserMemoryStore() == null) {
+            return;
+        }
+        Set<String> owed = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        if (!conversationMemory.deferUntilCommitted(() -> {
+            if (conversationMemory.isLeaseLost()) {
+                LOGGER.warnf("Not writing the long-term properties of conversation %s: this node's lease on it is lost",
+                        conversationMemory.getConversationId());
+                return;
+            }
+            storePropertiesPermanently(owed);
+        })) {
+            storePropertiesPermanently(owed);
+            return;
+        }
+        // The keys the deferred write rewrites are no longer contested (it records them
+        // as ACCEPTED); decided now so the stored document agrees. The owed markers
+        // stay
+        // in the stored document until the write has succeeded (S5).
+        liftContestedMarkers(longTermKeysToWrite(owed));
+    }
+
+    /**
+     * The longTerm properties {@link #storePropertiesPermanently} writes: those
+     * changed since the baseline or owed by an earlier turn, except the keys the
+     * user memory store refuses.
+     */
+    private Set<String> longTermKeysToWrite(Set<String> owed) {
+        Set<String> keys = new LinkedHashSet<>();
+        conversationMemory.getConversationProperties().forEach((key, property) -> {
+            if (property != null && property.getScope() == Scope.longTerm && !IUserMemoryStore.isRefusedWriteKey(key)
+                    && (owed.contains(key) || !property.equals(longTermBaseline.get(key)))) {
+                keys.add(key);
+            }
+        });
+        return keys;
     }
 
     /**
@@ -828,10 +904,10 @@ public class Conversation implements IConversation {
         }
         // A turn whose outcome is discarded must not commit its side effects.
         // ConversationService discards the snapshot of a cancelled or abandoned turn,
-        // but storePropertiesPermanently() writes straight to the user-memory store,
-        // so without this guard such a turn still upserts whatever longTerm properties
-        // it managed to set before stopping — the same "a failed turn must not persist
-        // partial state" rule the ERROR path already follows.
+        // and the longTerm write only happens once the snapshot is stored (see
+        // commitLongTermPropertiesAfterTheTurn) — this guard also keeps such a turn
+        // from deferring one: the same "a failed turn must not persist partial state"
+        // rule the ERROR path already follows.
         if (!paused && !isTurnDiscarded()) {
             try {
                 postConversationLifecycleTasks();
@@ -964,7 +1040,7 @@ public class Conversation implements IConversation {
      * travels with the conversation document, and the next turn that completes
      * cleanly writes it even though the value now equals its baseline.
      */
-    private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
+    private void storePropertiesPermanently(Set<String> owed) throws IResourceStore.ResourceStoreException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
             return;
@@ -980,26 +1056,31 @@ public class Conversation implements IConversation {
         // marker instead. Entries are removed one by one as the store accepts them,
         // and whatever is left is written back — a store failure halfway through the
         // loop therefore retries only the keys that were not written.
-        Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        Set<String> pending = new LinkedHashSet<>(owed);
         // The groups this conversation belongs to — a group-visible property must
         // carry them, or no reader (the writer included) can ever match it.
         List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory, propertiesHandler.getGroupMembershipCheck());
         Set<String> written = new LinkedHashSet<>();
+        Map<String, Long> owedSince = new LinkedHashMap<>(conversationMemory.getPendingLongTermWritesSince());
+        // Read once, and only when a make-up write needs it (rare): see
+        // isNewerElsewhere.
+        List<UserMemoryEntry> stored = null;
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
                 if (property == null || property.getScope() != Scope.longTerm) {
                     continue;
                 }
-                if (IUserMemoryStore.isReservedKey(propertyEntry.getKey())) {
+                if (IUserMemoryStore.isRefusedWriteKey(propertyEntry.getKey())) {
                     // GDPR bookkeeping (the Art. 18 flag is loaded like any global entry)
-                    // is never written back from a turn: the store refuses it, and a
-                    // property setter naming such a key would otherwise fail every turn
-                    // of the agent instead of just this one write.
+                    // and the engine's own conversation:* properties are never written
+                    // back from a turn: the store refuses them, and a property setter
+                    // naming such a key would otherwise fail every turn of the agent
+                    // instead of just this one write.
                     if (!property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
-                        LOGGER.warnf("Not persisting longTerm property '%s' of conversation %s: keys starting with '%s' are reserved "
-                                + "for GDPR bookkeeping", sanitize(propertyEntry.getKey()), sanitize(conversationId),
-                                IUserMemoryStore.RESERVED_KEY_PREFIX);
+                        LOGGER.warnf("Not persisting longTerm property '%s' of conversation %s: keys starting with '%s' or '%s' are "
+                                + "reserved for GDPR bookkeeping and the engine", sanitize(propertyEntry.getKey()), sanitize(conversationId),
+                                IUserMemoryStore.RESERVED_KEY_PREFIX, IUserMemoryStore.ENGINE_KEY_PREFIX);
                     }
                     pending.remove(propertyEntry.getKey());
                     continue;
@@ -1012,6 +1093,23 @@ public class Conversation implements IConversation {
                 }
                 // Apply visibility at persistence boundary only
                 Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
+                if (writeOwed && property.equals(longTermAtTurnStart.get(propertyEntry.getKey()))) {
+                    // A make-up write: owed by an earlier turn (its write failed, or the node
+                    // stopped before it), not changed in this one. The value may have been
+                    // written since by another conversation of this user — then that newer
+                    // value stands (F4). A key this turn changed keeps last-writer-wins.
+                    if (stored == null) {
+                        stored = store.getAllEntries(userId);
+                    }
+                    if (isNewerElsewhere(stored, propertyEntry.getKey(), property, vis, groupIds, agentId,
+                            owedSince.get(propertyEntry.getKey()))) {
+                        LOGGER.infof("[MEMORY] Not making up the owed write of '%s' in conversation %s: the stored value is newer or "
+                                + "already the same", sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                        propertiesHandler.countLongTermWrite("skipped_newer");
+                        pending.remove(propertyEntry.getKey());
+                        continue;
+                    }
+                }
                 if (vis == Visibility.self && property.getVisibility() == Visibility.group) {
                     LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
                             + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
@@ -1030,12 +1128,75 @@ public class Conversation implements IConversation {
             pending.clear();
         } finally {
             conversationMemory.setPendingLongTermWrites(pending);
+            owedSince.keySet().retainAll(pending);
+            conversationMemory.setPendingLongTermWritesSince(owedSince);
             liftContestedMarkers(written);
         }
 
         // The turn's writes are now the new baseline — a resume that persists twice
         // within the same Conversation must not rewrite them a second time.
         captureLongTermBaseline();
+    }
+
+    /**
+     * Whether an owed make-up write of {@code key} must not be made: the user
+     * memory store already holds this value, or a value updated after this
+     * conversation changed the key ({@code changedAt}; a marker without a time
+     * counts as old). Only the entry the write would replace is compared — the
+     * global one for a global write, this agent's own otherwise. "Already holds
+     * this value" means the same value with the same visibility (and, for a
+     * {@code group} write, the same groups): a row with the right value that the
+     * owed write would move from {@code self} to {@code group} is not yet written,
+     * since its intended readers still cannot see it.
+     */
+    static boolean isNewerElsewhere(List<UserMemoryEntry> stored, String key, Property property, Visibility visibility,
+                                    List<String> groupIds, String agentId, Long changedAt) {
+        if (stored == null) {
+            return false;
+        }
+        long since = changedAt != null ? changedAt : 0L;
+        for (UserMemoryEntry entry : stored) {
+            if (entry == null || !key.equals(entry.key())) {
+                continue;
+            }
+            boolean sameSlot = visibility == Visibility.global
+                    ? entry.visibility() == Visibility.global
+                    : entry.visibility() != Visibility.global && Objects.equals(agentId, entry.sourceAgentId());
+            if (!sameSlot) {
+                continue;
+            }
+            // Scalars are compared as text (the stores decode numbers to whatever type
+            // they like); lists and maps as decoded values, since ["a, b"] and
+            // ["a", "b"] print alike.
+            Object owedValue = PropertyValues.valueOf(property);
+            boolean container = owedValue instanceof Collection<?> || owedValue instanceof Map<?, ?>
+                    || entry.value() instanceof Collection<?> || entry.value() instanceof Map<?, ?>;
+            boolean sameValue = container
+                    ? Objects.equals(entry.value(), owedValue)
+                    : String.valueOf(entry.value()).equals(String.valueOf(owedValue));
+            if (sameValue && sameDestination(entry, visibility, groupIds)) {
+                return true;
+            }
+            return entry.updatedAt() != null && entry.updatedAt().toEpochMilli() > since;
+        }
+        return false;
+    }
+
+    /**
+     * Whether {@code entry} already sits where an owed write of {@code visibility}
+     * would put it: the same visibility and, for {@code group}, the same groups in
+     * any order.
+     */
+    private static boolean sameDestination(UserMemoryEntry entry, Visibility visibility, List<String> groupIds) {
+        if (entry.visibility() != visibility) {
+            return false;
+        }
+        if (visibility != Visibility.group) {
+            return true;
+        }
+        Set<String> owedGroups = groupIds != null ? new HashSet<>(groupIds) : Set.of();
+        Set<String> storedGroups = entry.groupIds() != null ? new HashSet<>(entry.groupIds()) : Set.of();
+        return owedGroups.equals(storedGroups);
     }
 
     /**
@@ -1053,9 +1214,9 @@ public class Conversation implements IConversation {
      * write the user-memory store is still owed, unioned with whatever was already
      * owed. Called on EVERY exit of a turn (see
      * {@link #executeConversationStep}/{@link #resume}) — on the clean path
-     * {@link #storePropertiesPermanently()} immediately consumes and clears the
-     * marker; on a pause/error/cancel it survives on the conversation document and
-     * the next completed turn honours it.
+     * {@link #commitLongTermPropertiesAfterTheTurn} hands the marker to the write
+     * that runs once the turn is stored and clears it; on a pause/error/cancel it
+     * survives on the conversation document and the next completed turn honours it.
      */
     private void recordPendingLongTermWrites() {
         if (conversationMemory == null) {
@@ -1066,12 +1227,29 @@ public class Conversation implements IConversation {
             return;
         }
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        Map<String, Long> since = new LinkedHashMap<>(conversationMemory.getPendingLongTermWritesSince());
+        long now = System.currentTimeMillis();
         properties.forEach((key, property) -> {
             if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
-                pending.add(key);
+                boolean newlyOwed = pending.add(key);
+                // When this conversation changed it: a later make-up write yields to a
+                // value another conversation wrote after this time (F4). A key this turn
+                // merely carries over (the baseline is empty after a pause or an error)
+                // keeps the time it was first owed.
+                if (property.equals(longTermAtTurnStart.get(key))) {
+                    // An older marker without a time (saved before the times were kept)
+                    // stays without one, which counts as old.
+                    if (newlyOwed) {
+                        since.putIfAbsent(key, now);
+                    }
+                } else {
+                    since.put(key, now);
+                }
             }
         });
+        since.keySet().retainAll(pending);
         conversationMemory.setPendingLongTermWrites(pending);
+        conversationMemory.setPendingLongTermWritesSince(since);
     }
 
     /**

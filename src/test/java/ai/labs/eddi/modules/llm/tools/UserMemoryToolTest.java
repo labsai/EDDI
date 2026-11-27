@@ -76,6 +76,30 @@ class UserMemoryToolTest {
     }
 
     /**
+     * A6: a memory named after the engine's own conversation property replaced it
+     * in every conversation of the user — summary_through_step=99999 hid the whole
+     * history from the model.
+     */
+    @Test
+    void rememberFact_refusesAnEngineKey() {
+        String result = tool.rememberFact(" conversation:summary_through_step ", "99999", "fact", "global");
+
+        assertTrue(result.contains("conversation:"), result);
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void storeLevelRefusalCoversEngineAndGdprKeys() {
+        assertTrue(IUserMemoryStore.isRefusedWriteKey("conversation:running_summary"));
+        assertTrue(IUserMemoryStore.isRefusedWriteKey("_gdpr_processing_restricted"));
+        assertFalse(IUserMemoryStore.isRefusedWriteKey("conversationTopic"));
+        assertFalse(IUserMemoryStore.isReservedKey("conversation:running_summary"), "GDPR bookkeeping semantics are unchanged");
+        var refusal = assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class,
+                () -> IUserMemoryStore.rejectReservedKey("conversation:running_summary"));
+        assertTrue(refusal.getMessage().contains("engine"), refusal.getMessage());
+    }
+
+    /**
      * H9b: the tool writes straight to the store mid-turn, so a turn cancelled by a
      * GDPR erasure would otherwise recreate memories while its tool loop wound
      * down.

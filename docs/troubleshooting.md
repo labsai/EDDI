@@ -324,7 +324,7 @@ See [Deployment management](deployment-management-of-agents.md).
 - **Response:** `404` with `Agent is not deployed or not ready`, from `POST /agents/{agentId}/start` or when sending input.
 - **Log:** `Agent not ready: No version of agent (agentId=...) ready for interaction (environment=production)!`
 - **Cause:** No version of the agent is `READY` in the requested environment. Conversations start in `production` unless `?environment=test` is passed, so an agent deployed only to `test` is not found.
-- **Fix:** Check `GET /administration/production/deploymentstatus/{agentId}?version={n}`. A `NOT_FOUND` status means the version is not deployed: deploy it with `POST /administration/production/deploy/{agentId}?version={n}` (add `&waitForCompletion=true` to wait for the result). `ERROR` means the deployment failed; the server log has the reason, for example a refused vault grant ([above](#agent-deployment-refused-because-of-a-secret-grant)).
+- **Fix:** Check `GET /administration/production/deploymentstatus/{agentId}?version={n}`. A `NOT_FOUND` status means the version is not deployed: deploy it with `POST /administration/production/deploy/{agentId}?version={n}` (add `&waitForCompletion=true` to wait for the result). `ERROR` means the deployment failed; the server log has the reason, for example a refused vault grant ([above](#agent-deployment-refused-because-of-a-secret-grant)). Only a refused grant answers a message with this `404`: any other failed deployment answers `503` `agent_deployment_failed`.
 
 ### Readiness DOWN with `agentsInErrorCount`
 

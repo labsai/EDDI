@@ -26,6 +26,7 @@ import org.mockito.InOrder;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -37,6 +38,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -389,6 +391,21 @@ class ConversationStepRunnerLeaseTest {
     }
 
     @Test
+    @DisplayName("F2: a turn the runtime refuses keeps the remembered fence for the queued turn that still needs it")
+    void refusedTurnDoesNotConsumeTheRaisedFence() throws Exception {
+        IConversationMemory abandoned = mock(IConversationMemory.class);
+        when(abandoned.getFenceToken()).thenReturn(4L);
+        runner.fenceAbandonedWrite(ID, abandoned);
+        when(memory.getStoredFence()).thenReturn(3L);
+        when(runtime.submitCallable(any(), any(), any())).thenThrow(new RejectedExecutionException("pool saturated"));
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, m -> {
+        }, null);
+
+        assertEquals(5L, runner.rememberedFence(ID), "the refused turn did not run, the entry stays for the next one");
+    }
+
+    @Test
     @DisplayName("A1/A3: a turn whose lease is already lost when it starts does not run and does not raise the fence")
     void lostBeforeStartAnswersBusy() throws Exception {
         TestLease lease = new TestLease(42L);
@@ -437,11 +454,46 @@ class ConversationStepRunnerLeaseTest {
     }
 
     @Test
-    @DisplayName("without a lease (single node) nothing is fenced and the store is not touched")
+    @DisplayName("without a lease (single node) the turn writes with the loaded fence as its token, and nothing is raised")
     void noLeaseNoFence() throws Exception {
         runTurn(null);
-        verify(memory, never()).setFenceToken(any());
+        // F2: the token of the document it loaded (none stored: 0), so a write the
+        // watchdog abandons can be fenced off; the happy path costs no store call.
+        verify(memory).setFenceToken(0L);
         verify(store, never()).raiseFence(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("F2: a fence raised over an abandoned write is kept (highest wins) and used by every queued turn until it expires")
+    void raisedFenceIsUsedByQueuedTurns() throws Exception {
+        IConversationMemory abandoned = mock(IConversationMemory.class);
+        when(abandoned.getFenceToken()).thenReturn(4L);
+        runner.fenceAbandonedWrite(ID, abandoned);
+        verify(store).raiseFence(ID, 5L);
+        when(abandoned.getFenceToken()).thenReturn(1L);
+        runner.fenceAbandonedWrite(ID, abandoned);
+        assertEquals(5L, runner.rememberedFence(ID), "merge keeps the highest raised fence");
+
+        // The next turn was loaded before the raise (its stored fence is older).
+        when(memory.getStoredFence()).thenReturn(3L);
+        runTurn(null);
+
+        // A second turn queued before the raise: the first one wrote nothing (the
+        // revision
+        // is unchanged), so this one is not reloaded and still needs the remembered
+        // fence.
+        runTurn(null);
+
+        verify(memory, times(2)).setFenceToken(5L);
+        assertEquals(5L, runner.rememberedFence(ID), "kept until retention expires it");
+    }
+
+    @Test
+    @DisplayName("F2: raised fences are remembered for 25 watchdog periods, at least ten minutes")
+    void raisedFenceRetentionFollowsTheWatchdog() {
+        assertEquals(Duration.ofMinutes(25), ConversationStepRunner.raisedFenceRetention(60));
+        assertEquals(Duration.ofMinutes(10), ConversationStepRunner.raisedFenceRetention(10));
+        assertEquals(Duration.ofMinutes(10), ConversationStepRunner.raisedFenceRetention(0));
     }
 
     @Test

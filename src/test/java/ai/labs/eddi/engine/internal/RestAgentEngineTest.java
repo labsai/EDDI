@@ -154,6 +154,38 @@ class RestAgentEngineTest {
             // unauthenticated mock identity here) via the 2-arg overload.
             verify(conversationService).endConversation("conv-1", null);
         }
+
+        @Test
+        @DisplayName("A11: an unknown conversation id answers 404 and ends nothing")
+        void unknownConversationIsNotFound() {
+            when(conversationService.getStoredConversationState("missing"))
+                    .thenThrow(new IConversationService.ConversationNotFoundException("No conversation found! (conversationId=missing)"));
+
+            assertThrows(IConversationService.ConversationNotFoundException.class, () -> restAgentEngine.endConversation("missing"));
+            verify(conversationService, never()).endConversation(eq("missing"), any());
+        }
+
+        @Test
+        @DisplayName("an end checks the store, not this node's cached state: a conversation deleted elsewhere answers 404")
+        void endOfAConversationDeletedElsewhereIsNotFound() {
+            // This node still caches READY; the store no longer has the conversation.
+            lenient().when(conversationService.getConversationState("gone")).thenReturn(ConversationState.READY);
+            when(conversationService.getStoredConversationState("gone"))
+                    .thenThrow(new IConversationService.ConversationNotFoundException("No conversation found! (conversationId=gone)"));
+
+            assertThrows(IConversationService.ConversationNotFoundException.class, () -> restAgentEngine.endConversation("gone"));
+            verify(conversationService, never()).endConversation(eq("gone"), any());
+        }
+
+        @Test
+        @DisplayName("A11: the sync timeout's 408 carries a JSON error body")
+        void requestTimeoutHasABody() {
+            Response timeout = RestAgentEngine.requestTimeout();
+
+            assertEquals(408, timeout.getStatus());
+            assertNotNull(timeout.getEntity());
+            assertTrue(timeout.getEntity().toString().contains(RestAgentEngine.REQUEST_TIMEOUT_CODE));
+        }
     }
 
     @Nested
@@ -232,6 +264,29 @@ class RestAgentEngineTest {
             Response response = restAgentEngine.undo("conv-1");
 
             assertEquals(409, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("A9: undo and redo on an ENDED conversation answer 410, like say and rerun")
+        void undoRedoOnEndedConversationIsGone() throws Exception {
+            when(conversationService.undo("conv-1")).thenReturn(false);
+            when(conversationService.redo("conv-1")).thenReturn(false);
+            when(conversationService.getStoredConversationState("conv-1")).thenReturn(ConversationState.ENDED);
+
+            assertEquals(410, restAgentEngine.undo("conv-1").getStatus());
+            assertEquals(410, restAgentEngine.redo("conv-1").getStatus());
+        }
+
+        @Test
+        @DisplayName("a refused undo/redo reads the store's state: ENDED by another node answers 410 although this node caches READY")
+        void undoRedoRefusedOverAStaleCachedStateIsGone() throws Exception {
+            when(conversationService.undo("conv-1")).thenReturn(false);
+            when(conversationService.redo("conv-1")).thenReturn(false);
+            lenient().when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+            when(conversationService.getStoredConversationState("conv-1")).thenReturn(ConversationState.ENDED);
+
+            assertEquals(410, restAgentEngine.undo("conv-1").getStatus());
+            assertEquals(410, restAgentEngine.redo("conv-1").getStatus());
         }
 
         @Test
@@ -389,6 +444,24 @@ class RestAgentEngineTest {
                     List.of(), inputData, asyncResponse);
 
             verify(asyncResponse).resume(any(NotFoundException.class));
+        }
+
+        @Test
+        @DisplayName("a deployment that failed on the server answers 503 agent_deployment_failed, not the 404 of a missing deployment")
+        void agentDeploymentFailedIsServiceUnavailable() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new IConversationService.AgentDeploymentFailedException("deployment failed"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            assertEquals(503, captor.getValue().getStatus());
+            assertTrue(String.valueOf(captor.getValue().getEntity()).contains(RestAgentEngine.AGENT_DEPLOYMENT_FAILED));
         }
 
         @Test

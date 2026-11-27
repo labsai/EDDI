@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -212,6 +214,22 @@ class SlackHitlSupportTest {
     @Test
     void extractSlackResponseText_nullSnapshot_placeholder() {
         assertEquals("_No response from agent._", SlackHitlSupport.extractSlackResponseText(null));
+    }
+
+    @Test
+    void extractSlackResponseText_turnNotStored_postsTheErrorNotAnAnswer() {
+        // S4: a turn that ran but was not stored has no answer to post.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        var output = new ConversationOutput();
+        output.put("output", List.of(Map.of("type", "text", "text", "the unstored answer")));
+        snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+        TurnNotStored.withoutAnswer(snapshot, TurnNotStored.Reason.CONVERSATION_TOO_LARGE.error());
+
+        String text = SlackHitlSupport.extractSlackResponseText(snapshot);
+
+        assertTrue(text.startsWith("⚠️"), text);
+        assertFalse(text.contains("the unstored answer"), text);
+        assertTrue(text.contains("size limit"), text);
     }
 
     @Test

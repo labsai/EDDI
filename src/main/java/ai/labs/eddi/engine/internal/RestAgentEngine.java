@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
@@ -253,6 +254,12 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     static final String AGENT_MISCONFIGURED = "agent_misconfigured";
 
+    /**
+     * The {@code error} code of a turn on an agent whose deployment failed on the
+     * server ({@code 503}).
+     */
+    static final String AGENT_DEPLOYMENT_FAILED = "agent_deployment_failed";
+
     /** Longest refusal message a 422 carries; the full one is in the server log. */
     static final int MAX_REFUSAL_MESSAGE_CHARS = 1000;
 
@@ -288,9 +295,19 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** RFC 9110's 422; {@link Response.Status} has no constant for it. */
     private static final int UNPROCESSABLE_CONTENT = 422;
 
+    /** RFC 4918's 507; no {@link Response.Status} constant either. */
+    private static final int INSUFFICIENT_STORAGE = 507;
+
     @Override
     public Response endConversation(String conversationId) {
         validateConversationOwnership(conversationId);
+        // A11: the store's end is an update that matches nothing for an unknown id, and
+        // the owner guard admits an admin (and everyone with auth off) for a
+        // conversation with no descriptor — so an unknown id was answered 200. Every
+        // sibling endpoint answers 404; so does this one now (ConversationNotFound is
+        // mapped to 404). Read from the store, not this node's cache: another node may
+        // have deleted the conversation since this one cached its state.
+        conversationService.getStoredConversationState(conversationId);
         // G4: attribute a pause-terminating end to the calling principal so it lands
         // in the hitl.approval audit trail (null-safe for anonymous callers).
         String endedBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
@@ -442,9 +459,21 @@ public class RestAgentEngine implements IRestAgentEngine {
                 .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build();
     }
 
-    private static Response requestTimeout() {
-        return Response.status(Response.Status.REQUEST_TIMEOUT).build();
+    /**
+     * The caller's wait ran out (A11: it used to be an empty body). The turn may
+     * still finish and be stored, so the body says to read the conversation before
+     * sending the message again.
+     */
+    static Response requestTimeout() {
+        return Response.status(Response.Status.REQUEST_TIMEOUT).type(MediaType.APPLICATION_JSON)
+                .entity(errorBody(new TurnError(REQUEST_TIMEOUT_CODE, false, null,
+                        "The turn did not finish within the time this request waits (systemRuntime.agentTimeoutInSeconds). It may still "
+                                + "complete: read the conversation before sending the message again.")))
+                .build();
     }
+
+    /** The {@code error.code} of a request whose wait for its turn ran out. */
+    static final String REQUEST_TIMEOUT_CODE = "REQUEST_TIMEOUT";
 
     /**
      * The answer for a turn that was dropped without consuming its input (say) or a
@@ -514,6 +543,11 @@ public class RestAgentEngine implements IRestAgentEngine {
                 // always had); the structured reason rides along under `error`, and the
                 // provider's own wait, when it gave one, as Retry-After.
                 TurnError error = snapshot.getError();
+                if (TurnNotStored.isNotStored(error)) {
+                    // The turn ran but its write failed: never a 200 for it (A1).
+                    response.resume(notStoredResponse(error));
+                    return;
+                }
                 Long retryAfterSeconds = error != null ? error.retryAfterSeconds() : null;
                 if (retryAfterSeconds != null) {
                     response.resume(Response.ok(snapshot).header("Retry-After", retryAfterSeconds).build());
@@ -541,6 +575,12 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (AgentMismatchException e) {
             LOGGER.warn("Agent mismatch for conversation " + conversationId + ": " + e.getMessage());
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity("Agent version mismatch").build());
+        } catch (AgentDeploymentFailedException e) {
+            // Before its superclass: a deployment that failed on the server is a server
+            // fault (503), not a missing deployment (404).
+            LOGGER.warnf("Agent deployment failed for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.APPLICATION_JSON)
+                    .entity(Map.of("error", AGENT_DEPLOYMENT_FAILED, "message", "The agent's deployment failed on the server")).build());
         } catch (AgentNotReadyException e) {
             LOGGER.warn("Agent not ready for conversation " + conversationId + ": " + e.getMessage());
             response.resume(new NotFoundException("Agent is not deployed or not ready"));
@@ -550,6 +590,12 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(InputTooLargeExceptionMapper.responseOf(e));
         } catch (ConversationEndedException e) {
             response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+        } catch (ConversationTooLargeException e) {
+            // S6: refused before it ran — the stored conversation is already over
+            // eddi.conversations.max-document-bytes, so no further turn can be stored.
+            LOGGER.warnf("Turn refused for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(INSUFFICIENT_STORAGE).type(MediaType.APPLICATION_JSON)
+                    .entity(errorBody(TurnNotStored.conversationFull())).build());
         } catch (ConversationAwaitingApprovalException e) {
             // docs/hitl.md: say() into a paused conversation is REJECTED — promptly
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());
@@ -654,6 +700,23 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     /**
+     * The answer to a turn that ran but was not stored: the status of its
+     * {@linkplain TurnNotStored.Reason reason} (507 too large, 422 data rejected,
+     * 409 conflict or fenced, 503 store failure), the error under {@code error}
+     * with the reason as {@code errorType}, and {@code Retry-After} when retrying
+     * can succeed. No snapshot: the conversation does not contain this turn.
+     */
+    static Response notStoredResponse(TurnError error) {
+        TurnNotStored.Reason reason = TurnNotStored.reasonOf(error);
+        var builder = Response.status(reason.httpStatus()).type(MediaType.APPLICATION_JSON).entity(errorBody(error));
+        Long retryAfterSeconds = error.retryAfterSeconds();
+        if (retryAfterSeconds != null) {
+            builder.header("Retry-After", retryAfterSeconds);
+        }
+        return builder.build();
+    }
+
+    /**
      * Refuses client context with an entry that has no {@code type} (or a null
      * entry): a {@code 400 INVALID_CONTEXT} naming the key, instead of the
      * {@code 500} the pipeline produced when it switched on the missing type. The
@@ -693,7 +756,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.undo(conversationId);
-            return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
+            return performed ? Response.ok().build() : historyEditRefused(conversationId);
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
@@ -720,13 +783,27 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.redo(conversationId);
-            return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
+            return performed ? Response.ok().build() : historyEditRefused(conversationId);
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to redo");
         }
+    }
+
+    /**
+     * An undo or redo that changed nothing: {@code 410} when the conversation has
+     * ended (A9 — the same answer say and rerun give), otherwise {@code 409} as
+     * before (nothing to undo/redo, paused, running, or a concurrent writer won).
+     */
+    private Response historyEditRefused(String conversationId) {
+        // The store's state, not this node's cache: the edit read ENDED from the store,
+        // and another node may have ended the conversation since this one cached READY.
+        if (conversationService.getStoredConversationState(conversationId) == ConversationState.ENDED) {
+            return Response.status(Response.Status.GONE).entity("Conversation has ended").build();
+        }
+        return Response.status(Response.Status.CONFLICT).build();
     }
 
     @Override
@@ -788,7 +865,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // Same budget and timeout answer as say. The resumed turn keeps running past a
         // timeout, exactly as a say turn does; only this request stops waiting.
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
-        response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+        response.setTimeoutHandler(asyncResp -> asyncResp.resume(requestTimeout()));
 
         // Opt-in: without any of the say flags the answer is the empty 200 it has
         // always been, and the service is called without a handler.

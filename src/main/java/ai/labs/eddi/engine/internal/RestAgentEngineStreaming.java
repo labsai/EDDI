@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -542,8 +543,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             public void onError(Throwable error) {
                 stream.markTerminal();
                 try {
-                    stream.send("error", logAndBuildOpaqueErrorEvent(
-                            "Streaming error for conversation " + safeConversationId, error));
+                    stream.send("error", error instanceof TurnNotStored.TurnNotStoredException notStored
+                            ? notStoredErrorEvent(notStored)
+                            : logAndBuildOpaqueErrorEvent("Streaming error for conversation " + safeConversationId, error));
                 } finally {
                     stream.close();
                 }
@@ -606,6 +608,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } else if (e instanceof ConversationEndedException) {
             code = "conversation_ended";
             message = "Conversation has ended";
+        } else if (e instanceof ConversationTooLargeException) {
+            // S6: refused before it ran — the twin answers 507. A fixed text: the
+            // exception's own message names sizes and the property, not secrets, but
+            // the client needs only the decision.
+            code = "conversation_too_large";
+            message = TurnNotStored.conversationFull().message();
         } else if (e instanceof AgentNotReadyException) {
             code = "agent_not_ready";
             message = "Agent is not deployed or not ready";
@@ -668,6 +676,21 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         LOGGER.errorf(error, "%s [correlationId=%s]: %s", context, correlationId,
                 error != null ? error.getMessage() : "null");
         return String.format("{\"message\":\"Internal server error\",\"correlationId\":\"%s\"}", correlationId);
+    }
+
+    /**
+     * The terminal event of a streamed turn that ran but was not stored (A1): its
+     * tokens are already on the wire, so instead of {@code done} the stream ends
+     * with {@code {"message":…,"code":"turn_not_stored","reason":…,"retryable":…}}.
+     * The message is the reason's fixed text, never the driver's. Not one of the
+     * pre-turn refusal codes: the turn did run, so a client keeps the user's
+     * message and shows the error in place of the answer.
+     */
+    String notStoredErrorEvent(TurnNotStored.TurnNotStoredException notStored) {
+        TurnNotStored.Reason reason = TurnNotStored.reasonOf(notStored.getError());
+        TurnError error = notStored.getError() != null ? notStored.getError() : reason.error();
+        return String.format("{\"message\":\"%s\",\"code\":\"turn_not_stored\",\"reason\":\"%s\",\"retryable\":%s}",
+                escapeJson(error.message()), reason.tag(), error.retryable());
     }
 
     /**
