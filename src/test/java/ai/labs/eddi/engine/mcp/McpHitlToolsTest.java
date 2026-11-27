@@ -354,6 +354,9 @@ class McpHitlToolsTest {
     @Test
     void cancelGroup_happyPath_delegates() throws Exception {
         when(groupConversationService.cancelDiscussion(eq("gc1"), any())).thenReturn(true);
+        var cancelled = new GroupConversation();
+        cancelled.setState(GroupConversation.GroupConversationState.CANCELLED);
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(cancelled);
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("CANCELLED"), out);
     }
@@ -475,6 +478,16 @@ class McpHitlToolsTest {
         when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
         String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
         assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+    }
+
+    @Test
+    void cancelGroupDiscussion_unreadableStatusAfterTheCancel_isNotReportedAsCancelled() throws Exception {
+        when(groupConversationService.cancelDiscussion(eq("gc1"), any())).thenReturn(true);
+        when(groupConversationService.readGroupConversation("gc1")).thenThrow(new RuntimeException("store down"));
+
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+
+        assertTrue(out.contains("\"status\":\"CANCELLING\""), "the signal does not prove the run stopped: " + out);
     }
 
     @Test

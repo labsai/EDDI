@@ -73,7 +73,7 @@ public class McpAlertTools {
                                   @ToolArg(description = "To this ISO-8601 instant, exclusive, or date, inclusive", required = false) String to,
                                   @ToolArg(description = "Page start, default 0", required = false) Integer index,
                                   @ToolArg(description = "Page size, default 20, max 100", required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_alert_events"));
         try {
             AlertEventQueryParams query = new AlertEventQueryParams();
             query.agentId = agentId;
@@ -94,7 +94,7 @@ public class McpAlertTools {
             + "time. Needs EDIT permission on the event's agent; a digest over several agents is an administrator's. Acknowledging twice "
             + "changes nothing. Acknowledge only what the person you act for has looked at.")
     public String acknowledgeAlertEvent(@ToolArg(description = "Event id, from list_alert_events (required)") String eventId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("acknowledge_alert_event"));
         if (eventId == null || eventId.isBlank()) {
             return errorJson("eventId is required", "BAD_REQUEST", null);
         }

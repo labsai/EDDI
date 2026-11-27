@@ -6,11 +6,15 @@ package ai.labs.eddi.engine.setup;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
@@ -34,13 +38,19 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.core.Response;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -775,6 +785,139 @@ class AgentSetupServiceTest {
             wiredService.setupAgent(request);
 
             assertNull(agentCaptor.getValue().getHitlConfig());
+        }
+    }
+
+    // ==================== setupAgent records and describes what it creates
+    // ====================
+
+    /**
+     * Every document setupAgent creates has to be recorded for rollback and named
+     * after the agent, on the full path: parser, behaviour, LLM, an MCP calls
+     * config, an output set, the workflow and the agent. Each used to be written
+     * out by hand at its own call site, so a step added later could miss either
+     * half without any test noticing.
+     */
+    @Nested
+    @DisplayName("setupAgent records and describes every created resource")
+    class SetupAgentWritesTests {
+
+        private static final String AGENT_NAME = "Billing Agent";
+        private static final String PARSER_ID = "000000000000000000000001";
+        private static final String RULES_ID = "000000000000000000000002";
+        private static final String LLM_ID = "000000000000000000000003";
+        private static final String MCP_ID = "000000000000000000000004";
+        private static final String OUTPUT_ID = "000000000000000000000005";
+        private static final String WORKFLOW_ID = "000000000000000000000006";
+        private static final String AGENT_ID = "000000000000000000000007";
+
+        private IRestParserStore parserStore;
+        private IRestRuleSetStore ruleSetStore;
+        private IRestLlmStore llmStore;
+        private IRestMcpCallsStore mcpCallsStore;
+        private IRestOutputStore outputStore;
+        private IRestWorkflowStore workflowStore;
+        private IRestAgentStore agentStore;
+        private IRestDocumentDescriptorStore descriptorStore;
+        private AgentSetupService wiredService;
+
+        private Response located(String location) {
+            var response = mock(Response.class);
+            when(response.getHeaderString("Location")).thenReturn(location);
+            return response;
+        }
+
+        @BeforeEach
+        void wireStores() throws Exception {
+            var factory = mock(IRestInterfaceFactory.class);
+            parserStore = mock(IRestParserStore.class);
+            ruleSetStore = mock(IRestRuleSetStore.class);
+            llmStore = mock(IRestLlmStore.class);
+            mcpCallsStore = mock(IRestMcpCallsStore.class);
+            outputStore = mock(IRestOutputStore.class);
+            workflowStore = mock(IRestWorkflowStore.class);
+            agentStore = mock(IRestAgentStore.class);
+            descriptorStore = mock(IRestDocumentDescriptorStore.class);
+            when(factory.get(IRestParserStore.class)).thenReturn(parserStore);
+            when(factory.get(IRestRuleSetStore.class)).thenReturn(ruleSetStore);
+            when(factory.get(IRestLlmStore.class)).thenReturn(llmStore);
+            when(factory.get(IRestMcpCallsStore.class)).thenReturn(mcpCallsStore);
+            when(factory.get(IRestOutputStore.class)).thenReturn(outputStore);
+            when(factory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
+            when(factory.get(IRestAgentStore.class)).thenReturn(agentStore);
+            when(factory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+
+            // One Response per statement: a when(...) nested in another's argument
+            // leaves both stubbings unfinished (see HitlConfigWiringTests).
+            var parser = located("eddi://ai.labs.parser/parserstore/parsers/" + PARSER_ID + "?version=1");
+            when(parserStore.createParser(any())).thenReturn(parser);
+            var rules = located("eddi://ai.labs.rules/rulestore/rulesets/" + RULES_ID + "?version=1");
+            when(ruleSetStore.createRuleSet(any())).thenReturn(rules);
+            var llm = located("eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1");
+            when(llmStore.createLlm(any())).thenReturn(llm);
+            var mcpCalls = located("eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/" + MCP_ID + "?version=1");
+            when(mcpCallsStore.createMcpCalls(any())).thenReturn(mcpCalls);
+            var output = located("eddi://ai.labs.output/outputstore/outputsets/" + OUTPUT_ID + "?version=1");
+            when(outputStore.createOutputSet(any())).thenReturn(output);
+            var workflow = located("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1");
+            when(workflowStore.createWorkflow(any())).thenReturn(workflow);
+            var agent = located("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1");
+            when(agentStore.createAgent(any())).thenReturn(agent);
+
+            wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
+                    "http://localhost:11434");
+        }
+
+        /** Full path: an intro message adds the output set, one URL an MCP config. */
+        private SetupAgentRequest fullRequest() {
+            return new SetupAgentRequest(AGENT_NAME, "You are helpful.", "ollama", "llama3", null, null, "Hello!", null, null, null, null,
+                    "https://mcp.example.com/mcp", false, null, null, null);
+        }
+
+        @Test
+        @DisplayName("each created document gets the agent's name on its descriptor, once")
+        void everyCreatedResourceIsDescribed() throws Exception {
+            wiredService.setupAgent(fullRequest());
+
+            var ids = ArgumentCaptor.forClass(String.class);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<PatchInstruction<DocumentDescriptor>> patches = ArgumentCaptor.forClass(PatchInstruction.class);
+            verify(descriptorStore, times(7)).patchDescriptor(ids.capture(), eq(1), patches.capture());
+            assertEquals(List.of(PARSER_ID, RULES_ID, LLM_ID, MCP_ID, OUTPUT_ID, WORKFLOW_ID, AGENT_ID), ids.getAllValues());
+            for (var patch : patches.getAllValues()) {
+                assertEquals(PatchInstruction.PatchOperation.SET, patch.getOperation());
+                assertEquals(AGENT_NAME, patch.getDocument().getName());
+            }
+        }
+
+        @Test
+        @DisplayName("each created document is reported in the result under its location key")
+        void everyCreatedResourceIsRecorded() throws Exception {
+            var resources = wiredService.setupAgent(fullRequest()).resources();
+
+            assertEquals("eddi://ai.labs.parser/parserstore/parsers/" + PARSER_ID + "?version=1", resources.get("parserLocation"));
+            assertEquals("eddi://ai.labs.rules/rulestore/rulesets/" + RULES_ID + "?version=1", resources.get("behaviorLocation"));
+            assertEquals("eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1", resources.get("langchainLocation"));
+            assertEquals("eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/" + MCP_ID + "?version=1", resources.get("mcpCallsLocation_1"));
+            assertEquals("eddi://ai.labs.output/outputstore/outputsets/" + OUTPUT_ID + "?version=1", resources.get("outputLocation"));
+            assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1", resources.get("packageLocation"));
+            assertEquals("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1", resources.get("agentLocation"));
+        }
+
+        @Test
+        @DisplayName("a failure at the workflow step deletes everything created before it, newest first")
+        void workflowFailureRollsBackInReverseCreationOrder() {
+            when(workflowStore.createWorkflow(any())).thenThrow(new RuntimeException("workflow store down"));
+
+            assertThrows(AgentSetupService.AgentSetupException.class, () -> wiredService.setupAgent(fullRequest()));
+
+            InOrder rollback = inOrder(outputStore, mcpCallsStore, llmStore, ruleSetStore, parserStore);
+            rollback.verify(outputStore).deleteOutputSet(OUTPUT_ID, 1, true);
+            rollback.verify(mcpCallsStore).deleteMcpCalls(MCP_ID, 1, true);
+            rollback.verify(llmStore).deleteLlm(LLM_ID, 1, true);
+            rollback.verify(ruleSetStore).deleteRuleSet(RULES_ID, 1, true);
+            rollback.verify(parserStore).deleteParser(PARSER_ID, 1, true);
+            verify(agentStore, never()).createAgent(any());
         }
     }
 
