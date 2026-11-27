@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.BoundedPdfLoaderTest;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import org.apache.pdfbox.Loader;
@@ -16,6 +17,7 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -458,6 +460,55 @@ class AttachmentTextExtractorTest {
             }
             doc.save(out);
             return out.toByteArray();
+        }
+    }
+
+    /**
+     * A ~150-byte cross-reference stream declaring two billion entries. Unbounded,
+     * PDFBox stores every one and exhausts a 256 MB heap in seconds.
+     */
+    @Nested
+    class CrossReferenceBomb {
+
+        private static final byte[] BOMB = ("%PDF-1.5\n1 0 obj\n<</Type /XRef /W [0 0 0] /Size 2000000000 /Length 1>>"
+                + "stream\nX\nendstream\nendobj\nstartxref\n9\n%%EOF\n").getBytes(StandardCharsets.ISO_8859_1);
+
+        private void assertRefused(Executable call) {
+            var refused = assertTimeoutPreemptively(Duration.ofSeconds(30),
+                    () -> assertThrows(AttachmentExtractionException.class, call));
+            assertTrue(refused.getMessage().contains("declares more than"), refused.getMessage());
+        }
+
+        @Test
+        void extractPdfTextRefusesIt() {
+            assertRefused(() -> extractor.extractPdfText(BOMB));
+        }
+
+        @Test
+        void extractPdfPageRangeRefusesIt() {
+            assertRefused(() -> extractor.extractPdfText(BOMB, 1, 1, 1_000));
+        }
+
+        @Test
+        void extractPdfInfoRefusesIt() {
+            assertRefused(() -> extractor.extractPdfInfo(BOMB));
+        }
+
+        /**
+         * An object stream over the cap, first read inside
+         * {@code PDFont.getSpaceWidth()}, which catches the refusal and carries on.
+         */
+        private static final byte[] SWALLOWED = BoundedPdfLoaderTest.spaceWidthInObjectStreamPdf(1_000_000);
+
+        @Test
+        void extractPdfTextRefusesAFileWhoseRefusalPdfBoxSwallowed() throws Exception {
+            assertRefused(() -> extractor.extractPdfText(SWALLOWED));
+            assertTrue(extractor.extractPdfText(BoundedPdfLoaderTest.spaceWidthInObjectStreamPdf(1)).contains("Hello"));
+        }
+
+        @Test
+        void extractPdfPageRangeRefusesAFileWhoseRefusalPdfBoxSwallowed() {
+            assertRefused(() -> extractor.extractPdfText(SWALLOWED, 1, 1, 1_000));
         }
     }
 

@@ -4,13 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.BoundedPdfLoader;
 import ai.labs.eddi.modules.ingestion.extract.PdfDecodeBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfStreamBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.IOUtils;
@@ -125,11 +125,15 @@ public class AttachmentTextExtractor {
      * Loads a PDF from bytes with a temp-file scratch cache rather than PDFBox's
      * default unlimited in-memory buffering. The scratch cache alone does not bound
      * a "PDF bomb": PDFBox decodes every stream into a buffer it sizes itself, so
-     * {@link #withDecodeBudget} wraps every use of a loaded document.
+     * {@link #withDecodeBudget} wraps every use of a loaded document. And
+     * {@link BoundedPdfLoader} caps the cross-reference entries PDFBox stores,
+     * which a 150-byte file could otherwise push into the billions. Every reader
+     * calls {@link BoundedPdfLoader#requireWithinCap} once it is done, because
+     * PDFBox can swallow that refusal.
      */
     private static PDDocument loadPdf(byte[] pdfBytes) throws IOException {
         StreamCacheCreateFunction tempFileCache = IOUtils.createTempFileOnlyStreamCache();
-        return Loader.loadPDF(pdfBytes, "", null, null, tempFileCache);
+        return BoundedPdfLoader.load(pdfBytes, tempFileCache);
     }
 
     /** One PDF operation, run inside the decode budget. */
@@ -263,6 +267,7 @@ public class AttachmentTextExtractor {
             stripper.setStartPage(1);
             stripper.setEndPage(lastPage);
             String text = stripper.getText(document);
+            BoundedPdfLoader.requireWithinCap(document);
             LOGGER.debugf("Extracted %d characters from PDF (%d of %d pages)",
                     text.length(), lastPage, totalPages);
             return cap(text, cap);
@@ -297,6 +302,7 @@ public class AttachmentTextExtractor {
             stripper.setStartPage(startPage);
             stripper.setEndPage(effectiveEnd);
             String text = stripper.getText(document);
+            BoundedPdfLoader.requireWithinCap(document);
             LOGGER.debugf("Extracted text from PDF pages %d-%d (%d characters)",
                     startPage, effectiveEnd, text.length());
             return cap(text, cap);
@@ -318,7 +324,9 @@ public class AttachmentTextExtractor {
             String subject = info != null ? info.getSubject() : null;
             String creator = info != null ? info.getCreator() : null;
             Calendar creationDate = info != null ? info.getCreationDate() : null;
-            return new PdfInfo(document.getNumberOfPages(), title, author, subject, creator, creationDate);
+            int pages = document.getNumberOfPages();
+            BoundedPdfLoader.requireWithinCap(document);
+            return new PdfInfo(pages, title, author, subject, creator, creationDate);
         }
     }
 

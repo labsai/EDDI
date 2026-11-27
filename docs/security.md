@@ -1042,6 +1042,14 @@ Four small parsers and matchers run on text an agent designer or a chatting user
 
 A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
 
+### Uploaded PDFs: cross-reference entries
+
+PDFBox stores every cross-reference entry a file declares, with no bound of its own. A file of about 150 bytes, one cross-reference stream with `/W [0 0 0]` and a `/Size` of two billion, makes it store two billion entries and exhausts a 256 MB heap in seconds. Every PDF EDDI reads from untrusted bytes (document ingestion, chat attachments, `readAttachment`, the PDF reader tool) is therefore opened through `BoundedPdfLoader`, which replaces PDFBox's cross-reference resolver with one that counts each entry handed to it and stops the parse past **500,000**. PDFBox passes every entry it reads from a classic table or a cross-reference stream through that resolver, so the cap holds whatever form the table takes; a hybrid file that lists objects in both is counted twice and so reaches the cap sooner. A file over the cap is refused with *"This PDF declares more than 500000 objects…"*, and the user is told to split it. The decode budgets that bound what a PDF's streams expand to are separate and unchanged.
+
+Object streams fall under the same cap, before their header is read. PDFBox reads an object stream's header into a map before any entry reaches the resolver: during a lenient rebuild for every object stream it finds, and in an intact file the first time it reads an object from one. The map holds one entry per pair read, until `/N` pairs have been read or `/First` is reached. Five million short header entries decode to under 50 MB, inside the stream decode budgets, but the map takes hundreds of MB of heap. `/N` is the bound the cap can use, so `BoundedPdfLoader` adds each object stream's `/N` (direct or indirect) to a per-document total when PDFBox opens the stream to read it, once per stream (keyed by where its data starts), and refuses the file with the same message once the total passes 500,000. PDFBox catches every exception in a few places, such as while it works out a font's space width, so a refusal raised there would be logged and ignored. Every later object stream is still refused, and the extractors check after reading whether a refusal happened, so the file is refused rather than returned as partial text.
+
+One path is bounded by the file's size rather than by this cap: when a damaged file is repaired leniently, PDFBox first collects the `N 0 obj` markers it finds by scanning the file in maps of its own, and only then hands them to the resolver. A file packed with tiny objects can therefore cost a multiple of its own size before it is refused, which the upload size limit bounds.
+
 ---
 
 ## Tool Execution Pipeline
