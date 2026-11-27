@@ -121,6 +121,21 @@ public interface IHealthOutcomeStore {
     long deleteByConversationId(String conversationId);
 
     /**
+     * How many sessions of a user are stored — the verification of an erasure (0,
+     * or the step fails). Read from what has committed (on MongoDB, the primary at
+     * majority read concern): a lagging secondary could answer 0 while a row is
+     * still stored.
+     */
+    long countByUserId(String userId);
+
+    /**
+     * How many sessions of a conversation are stored — the verification of a
+     * permanent conversation delete. Read from what has committed, as
+     * {@link #countByUserId}.
+     */
+    long countByConversationId(String conversationId);
+
+    /**
      * Streams the distinct conversations of sessions evaluated at or after
      * {@code since}, at most {@code limit} — what the orphan sweep checks.
      */

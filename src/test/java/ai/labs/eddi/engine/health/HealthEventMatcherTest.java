@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.health.model.HealthEvent;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -26,7 +29,9 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -46,7 +51,8 @@ class HealthEventMatcherTest {
     IHealthEventStore events;
     IHealthOutcomeStore outcomes;
     GdprComplianceService gdpr;
-    HealthErasureFence fence;
+    InMemoryErasureTombstoneStore tombstones;
+    ErasureGuard guard;
     SimpleMeterRegistry registry;
     HealthEventMatcher matcher;
 
@@ -59,9 +65,11 @@ class HealthEventMatcherTest {
         Instance<GdprComplianceService> gdprInstance = mock(Instance.class);
         when(gdprInstance.isResolvable()).thenReturn(true);
         when(gdprInstance.get()).thenReturn(gdpr);
-        fence = new HealthErasureFence(Clock.fixed(NOW, ZoneOffset.UTC));
+        tombstones = new InMemoryErasureTombstoneStore();
+        guard = new ErasureGuard(tombstones, List.of(), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400), Duration.ofSeconds(1),
+                Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
         registry = new SimpleMeterRegistry();
-        matcher = new HealthEventMatcher(events, outcomes, HASHER, fence, gdprInstance, HealthSettings.defaults(), new HealthMetrics(registry),
+        matcher = new HealthEventMatcher(events, outcomes, HASHER, guard, gdprInstance, HealthSettings.defaults(), new HealthMetrics(registry),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(events.markMatched(any())).thenReturn(true);
     }
@@ -118,7 +126,7 @@ class HealthEventMatcherTest {
 
         IHealthOutcomeStore hashedOnly = mock(IHealthOutcomeStore.class);
         when(hashedOnly.findByRefs(anyString(), anyCollection(), anyInt())).thenReturn(List.of());
-        HealthEventMatcher m = new HealthEventMatcher(events, hashedOnly, HASHER, fence, null, HealthSettings.defaults(),
+        HealthEventMatcher m = new HealthEventMatcher(events, hashedOnly, HASHER, guard, null, HealthSettings.defaults(),
                 new HealthMetrics(new SimpleMeterRegistry()), Clock.fixed(NOW, ZoneOffset.UTC));
         m.tryMatch(byRef("orderId#abc", null, NOW));
         verify(hashedOnly).findByRefs(eq("agent"), eq(Set.of("orderId#abc")), anyInt());
@@ -193,13 +201,73 @@ class HealthEventMatcherTest {
     }
 
     @Test
-    @DisplayName("an event of a user being erased is dropped")
-    void erasedUserDropped() {
-        fence.stopInFlightWork("erased");
+    @DisplayName("a session of an erased user is not matched: the event names no user and stays pending")
+    void erasedUserNotMatched() {
+        guard.tombstoneUser("erased", List.of());
         when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "erased")));
+        assertEquals(HealthEventMatcher.Outcome.PENDING, matcher.tryMatch(byConversation("c1", NOW)));
+        verify(events, never()).markMatched(any());
+        verify(outcomes, never()).markDue(anyString(), any(), any());
+        assertEquals(0, counted(HealthMetrics.EVENT_MATCHED));
+    }
+
+    @Test
+    @DisplayName("a session of a deleted conversation is not matched")
+    void tombstonedConversationNotMatched() {
+        guard.tombstoneConversation("c1");
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "u")));
+        assertEquals(HealthEventMatcher.Outcome.PENDING, matcher.tryMatch(byConversation("c1", NOW)));
+        verify(events, never()).markMatched(any());
+    }
+
+    @Test
+    @DisplayName("a session the user started after their erasure is matched (the same id, a new person's data)")
+    void sessionAfterTheErasureMatched() {
+        guard.tombstoneUser("u", List.of());
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.plus(Duration.ofHours(1)), "u")));
+        assertEquals(HealthEventMatcher.Outcome.MATCHED, matcher.tryMatch(byConversation("c1", NOW.plus(Duration.ofHours(2)))));
+    }
+
+    @Test
+    @DisplayName("an erasure that starts while the match is written deletes the event again and judges no session on it")
+    void erasureDuringTheWriteRemovesTheEvent() {
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "u")));
+        when(events.markMatched(any())).thenAnswer(inv -> {
+            guard.tombstoneUser("u", List.of("c1"));
+            return true;
+        });
         assertEquals(HealthEventMatcher.Outcome.DROPPED, matcher.tryMatch(byConversation("c1", NOW)));
         verify(events).delete(List.of("e2"));
+        verify(outcomes, never()).markDue(anyString(), any(), any());
         assertEquals(1, counted(HealthMetrics.EVENT_ERASED));
+        assertEquals(0, tombstones.pendingCount());
+    }
+
+    @Test
+    @DisplayName("an event removal that fails during the write is recorded as pending, under the health writer")
+    void failedRemovalIsRecordedPending() {
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "u")));
+        when(events.markMatched(any())).thenAnswer(inv -> {
+            guard.tombstoneConversation("c1");
+            return true;
+        });
+        when(events.delete(any())).thenThrow(new HealthStoreException("down", null));
+        assertEquals(HealthEventMatcher.Outcome.DROPPED, matcher.tryMatch(byConversation("c1", NOW)));
+        assertEquals(1, tombstones.pendingCount());
+    }
+
+    @Test
+    @DisplayName("a match waits in the drain barrier while it runs")
+    void matchRunsInTheBarrier() throws Exception {
+        when(outcomes.findByConversation("c1")).thenReturn(List.of(session("c1", 0, "agent", NOW.minus(Duration.ofHours(1)), "u")));
+        boolean[] drainedDuring = {true};
+        when(events.markMatched(any())).thenAnswer(inv -> {
+            drainedDuring[0] = matcher.awaitDrained(Duration.ofMillis(50));
+            return true;
+        });
+        matcher.tryMatch(byConversation("c1", NOW));
+        assertFalse(drainedDuring[0]);
+        assertTrue(matcher.awaitDrained(Duration.ofMillis(50)));
     }
 
     @Test

@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.gdpr.erasure.DrainBarrier;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.health.model.HealthEvent;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -50,15 +53,26 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * every pass until {@code eddi.health.event-match-window} (72 h) after its
  * receipt; then it is deleted and counted {@code expired}.
  * <p>
- * <b>GDPR.</b> A match names the session's user. When an erasure of that user
- * is in progress ({@link HealthErasureFence}) the event is dropped
- * ({@code erased}); when the user's processing is restricted (Art. 18, as
- * ratings honour it) it is dropped too ({@code restricted}) — nothing is
- * derived from a restricted user's conversation. A restriction that cannot be
- * read leaves the event pending (fail closed, retried). An event for a purged
- * conversation finds no session and expires. <i>Hook for the erasure-guarantee
- * work:</i> {@link #erasedOrRestricted} is the one place a match consults a
- * user's GDPR state.
+ * <b>GDPR.</b> A match writes the session's user and conversation onto the
+ * event, so it is a guarded write of Agent Health's async writer
+ * ({@link HealthErasureWriter}, the
+ * {@linkplain ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter erasure
+ * guarantee}): every match runs through a {@link DrainBarrier}
+ * ({@link #awaitDrained}), so an erasure or a permanent conversation delete
+ * waits for the matches in flight; before the write it asks
+ * {@link ErasureGuard#beforeWrite} — captured at the session's start, so a
+ * session of an erased user that began before the erasure is refused — and a
+ * refused match leaves the event pending: it names no user, and once the
+ * erasure deleted the sessions it can no longer match and expires (a refusal
+ * because the tombstones could not be read is retried with the next pass).
+ * Right after the write it asks again ({@link ErasureGuard#afterWrite}) and
+ * deletes the event when an erasure started meanwhile, or records a pending
+ * removal ({@code event:<id>}); such an event is counted {@code erased}. When
+ * the user's processing is restricted (Art. 18, as ratings honour it) the event
+ * is dropped ({@code restricted}) — nothing is derived from a restricted user's
+ * conversation. A restriction that cannot be read leaves the event pending
+ * (fail closed, retried). An event for a purged conversation finds no session
+ * and expires.
  * <p>
  * A matched event marks its session due, so the outcome evaluation that follows
  * judges it again — the external outcome overrides every other source
@@ -90,24 +104,27 @@ public class HealthEventMatcher {
     private final IHealthEventStore eventStore;
     private final IHealthOutcomeStore outcomeStore;
     private final HealthRefHasher hasher;
-    private final HealthErasureFence fence;
+    /** Null only in tests that look at the matching alone. */
+    private final ErasureGuard erasureGuard;
     private final Instance<GdprComplianceService> gdpr;
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
+    /** Every match runs through it: the matcher's part of the drain barrier. */
+    private final DrainBarrier barrier = new DrainBarrier();
 
     @Inject
-    public HealthEventMatcher(IHealthEventStore eventStore, IHealthOutcomeStore outcomeStore, HealthRefHasher hasher, HealthErasureFence fence,
+    public HealthEventMatcher(IHealthEventStore eventStore, IHealthOutcomeStore outcomeStore, HealthRefHasher hasher, ErasureGuard erasureGuard,
             Instance<GdprComplianceService> gdpr, HealthSettings settings, HealthMetrics metrics) {
-        this(eventStore, outcomeStore, hasher, fence, gdpr, settings, metrics, Clock.systemUTC());
+        this(eventStore, outcomeStore, hasher, erasureGuard, gdpr, settings, metrics, Clock.systemUTC());
     }
 
-    HealthEventMatcher(IHealthEventStore eventStore, IHealthOutcomeStore outcomeStore, HealthRefHasher hasher, HealthErasureFence fence,
+    HealthEventMatcher(IHealthEventStore eventStore, IHealthOutcomeStore outcomeStore, HealthRefHasher hasher, ErasureGuard erasureGuard,
             Instance<GdprComplianceService> gdpr, HealthSettings settings, HealthMetrics metrics, Clock clock) {
         this.eventStore = eventStore;
         this.outcomeStore = outcomeStore;
         this.hasher = hasher;
-        this.fence = fence;
+        this.erasureGuard = erasureGuard;
         this.gdpr = gdpr;
         this.settings = settings;
         this.metrics = metrics;
@@ -152,15 +169,36 @@ public class HealthEventMatcher {
         MATCHED, DROPPED, PENDING
     }
 
-    /** Tries one event. Never throws. */
+    /**
+     * Waits until every match started before the call has finished — the matcher's
+     * part of the drain barrier of {@link HealthErasureWriter}.
+     *
+     * @return {@code false} on timeout
+     */
+    public boolean awaitDrained(Duration timeout) throws InterruptedException {
+        return barrier.awaitDrained(timeout);
+    }
+
+    /** Tries one event, tracked by the drain barrier. Never throws. */
     Outcome tryMatch(HealthEvent event) {
+        Outcome[] outcome = {Outcome.PENDING};
+        barrier.execute(Runnable::run, () -> outcome[0] = tryMatchTracked(event));
+        return outcome[0];
+    }
+
+    private Outcome tryMatchTracked(HealthEvent event) {
         try {
             Match match = match(event);
             if (match == null) {
                 return Outcome.PENDING;
             }
             HealthOutcome session = match.session();
-            String gdprState = erasedOrRestricted(session.userId());
+            // Before the restriction: a refused write must not delete the event either.
+            Admission admission = admit(session);
+            if (admission != null && !admission.allowed()) {
+                return Outcome.PENDING;
+            }
+            String gdprState = restricted(session.userId());
             if (gdprState == null) {
                 return Outcome.PENDING;
             }
@@ -175,6 +213,13 @@ public class HealthEventMatcher {
             if (!eventStore.markMatched(matched)) {
                 return Outcome.PENDING;
             }
+            if (admission != null && erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(event.id()), admission,
+                    () -> eventStore.delete(List.of(event.id())))) {
+                // An erasure started while the match was written: the event is gone (or
+                // its removal pending), and its session is not judged on it.
+                metrics.events(HealthMetrics.EVENT_ERASED, 1);
+                return Outcome.DROPPED;
+            }
             outcomeStore.markDue(session.conversationId(), List.of(session.sessionNo()), now);
             metrics.events(HealthMetrics.EVENT_MATCHED, 1);
             return Outcome.MATCHED;
@@ -185,17 +230,26 @@ public class HealthEventMatcher {
     }
 
     /**
-     * The GDPR state a match must respect: {@code ""} when the event may be kept,
-     * {@link HealthMetrics#EVENT_ERASED} or {@link HealthMetrics#EVENT_RESTRICTED}
-     * when it must be dropped, {@code null} when the restriction cannot be read
-     * (the event stays pending).
+     * The guard's admission of a match to {@code session}; {@code null} without a
+     * guard (everything allowed). Captured at the session's start: a session of an
+     * erased user that began before the erasure is refused, one of the user's later
+     * conversations is not.
      */
-    String erasedOrRestricted(String userId) {
+    private Admission admit(HealthOutcome session) {
+        if (erasureGuard == null) {
+            return null;
+        }
+        return erasureGuard.beforeWrite(session.userId(), session.conversationId(), session.startedAt());
+    }
+
+    /**
+     * The processing restriction a match must respect: {@code ""} when the event
+     * may be kept, {@link HealthMetrics#EVENT_RESTRICTED} when it must be dropped,
+     * {@code null} when the restriction cannot be read (the event stays pending).
+     */
+    String restricted(String userId) {
         if (userId == null) {
             return "";
-        }
-        if (fence != null && fence.covers(userId)) {
-            return HealthMetrics.EVENT_ERASED;
         }
         if (gdpr == null || !gdpr.isResolvable()) {
             return "";

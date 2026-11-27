@@ -56,6 +56,9 @@ src/
 ├── i18n/
 │   ├── index.ts        # t(), initLocale() on i18next via @eddi/ui — ALL widget-owned text goes through t()
 │   └── locales/        # en.json (bundled) + 10 lazily loaded locales, the Manager's eleven
+├── embed/              # /chat/embed.js, the launcher (T2.9): standalone, no React, no import from the widget
+│   ├── launcher.ts         # data- attributes → config, the button + dialog in a shadow root, the token relay
+│   └── embed.ts            # The entry: reads document.currentScript, mounts, sets window.EddiChat
 ├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
@@ -82,7 +85,14 @@ conversation, shared with every other agent surface (phase 3b):
   `QuickReplies`, `ThinkingIndicator` (thinking, tool, cascade, and "Checking the
   reply…" while a guardrail that fired is at work — `guardrailActive`) /
   `TypingIndicator`, `PausedCard`, `RatingCard`, `StepRating`, `ScrollToBottom`. They
-  keep their BEM class names, styled by `chat.css` here. The controller's host hooks
+  keep their BEM class names, styled by `chat.css` here. **Phase 7:** `PausedCard` and
+  `RatingCard` are loaded on demand (`lazy`, from `@eddi/conversation/paused-card` and
+  `/rating-card`), and `Message` loads `StepRating` the same way: the first load sits
+  on its 170 KB budget, so a component only some conversations show is a chunk, not
+  first-load code. Esc stops a running turn (as the Stop button); the controller is
+  created with `STOP_VERIFY_DELAYS_MS` and `RECONNECT_DELAYS_MS`, so a Stop that did
+  not take and a dropped stream are said in the transcript (`ThinkingIndicator
+  reconnecting`); Mermaid diagrams render through the shared renderer, lazily. The controller's host hooks
   (README → Host hooks) are the Manager's; the widget uses none of them.
 - **The `conversation.*` strings** — every string those render, in the eleven locales,
   merged into the widget's bundles by `withConversationLocales` (`src/i18n`).
@@ -93,6 +103,13 @@ conversation, shared with every other agent surface (phase 3b):
 The component tests still live here (`ChatInput.test.tsx`, `MessageBubble.test.tsx`, …)
 and import from `@eddi/conversation`: they render the components inside `ChatProvider`,
 as the widget does.
+
+Import only the package's main entry — except the two lazy subpaths above,
+`@eddi/conversation/paused-card` and `/rating-card`, which are imported only through
+`lazy(() => import(...))` precisely so they stay out of the first load. `@eddi/conversation/team` (group discussions,
+phase 6) and `@eddi/conversation/i18next` (the react-i18next binding) are the signed-in
+apps'; importing either here would put React-i18next and the team components into a
+first load that sits on its budget.
 
 ### What comes from `@eddi/ui`
 
@@ -158,6 +175,21 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 ```bash
 npm run build    # Outputs to dist/
 ```
+
+`npm run build` runs a second Vite build, `vite.embed.config.ts`: the **embed launcher**
+(`src/embed/`, frontend unification plan T2.9) as one IIFE,
+`dist/scripts/js/chat-ui-embed.js`. The Maven patterns for `scripts/js/chat-ui*.js` already
+copy, exclude and clean it; EDDI serves it at **`/chat/embed.js`**
+(`RestHtmlChatResource#fetchEmbedScript`, a literal path beside the SPA catch-all, cached an
+hour because host pages hard-code the URL). It has its own budget in
+`ui/bundle-budget.json` (`chat.scripts`), checked by `npm run budget` with the widget's.
+Rules for it, pinned by `src/embed/launcher.test.ts`: no import from the widget or any
+package (it is the whole download on someone else's page); no `innerHTML`, `eval`,
+`new Function`, cookies or storage; a message is answered only from its own iframe's window
+and EDDI's origin, and the token is posted to that exact origin; `tokenOrigin` goes on the
+widget URL only when the host gave a token provider (the widget would otherwise hold its
+start five seconds for a token). Its contract for embedders is section 6 of
+`docs/chat-ui-embedding.md`.
 
 Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
 shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).

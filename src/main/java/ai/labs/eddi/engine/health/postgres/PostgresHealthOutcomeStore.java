@@ -430,6 +430,29 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
+    public long countByUserId(String userId) {
+        return count("SELECT COUNT(*) FROM health_outcomes WHERE user_id = ?", "Could not count a user's health outcomes",
+                (c, s) -> s.setString(1, userId));
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count("SELECT COUNT(*) FROM health_outcomes WHERE conversation_id = ?", "Could not count a conversation's health outcomes",
+                (c, s) -> s.setString(1, conversationId));
+    }
+
+    private long count(String sql, String failure, Binder binder) {
+        try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(sql)) {
+            binder.bind(connection, s);
+            try (ResultSet r = s.executeQuery()) {
+                return r.next() ? r.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    @Override
     public void forEachConversationEvaluatedSince(Instant since, int limit, Consumer<String> consumer) {
         try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(EVALUATED_SINCE)) {
             s.setLong(1, since.toEpochMilli());

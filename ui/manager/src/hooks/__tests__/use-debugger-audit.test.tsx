@@ -3,10 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { useDebuggerAudit } from "@/hooks/use-debugger-audit";
-import { useDebugStore } from "@/hooks/use-debug-events";
-import { AUDIT_PAGE_SIZE } from "@/lib/audit-pages";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useDebuggerAudit } from "@eddi/app-kit/hooks/use-debugger-audit";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
+import { AUDIT_PAGE_SIZE } from "@eddi/app-kit/lib/audit-pages";
 
 const row = (id: string) => ({ id, stepIndex: 0, cost: 0 });
 

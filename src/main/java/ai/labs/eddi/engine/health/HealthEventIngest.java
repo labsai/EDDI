@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.gdpr.erasure.DrainBarrier;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.HealthEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -58,6 +61,16 @@ import java.util.regex.Pattern;
  * full ({@code agent_backlog_full}). A reference the agent hashes is hashed
  * here and never stored in plain; when no hash can be made the event is refused
  * ({@code hashing_unavailable}).
+ * <p>
+ * <b>GDPR.</b> An event that names a conversation is a guarded write of Agent
+ * Health's async writer ({@link HealthErasureWriter}): every ingest runs
+ * through a {@link DrainBarrier} ({@link #awaitDrained}), such an event is
+ * refused ({@code conversation_unavailable}) when the erasure guard does not
+ * admit its conversation — it was deleted or erased, or the tombstones cannot
+ * be read (fail closed) — and right after the insert the guard asks again and
+ * deletes it when a delete started meanwhile. An event that names a reference
+ * names neither a user nor a conversation; nothing joins it to a person until
+ * {@link HealthEventMatcher} matches it, which is guarded in turn.
  */
 @ApplicationScoped
 public class HealthEventIngest {
@@ -76,6 +89,7 @@ public class HealthEventIngest {
     public static final String REASON_NOT_AN_OBJECT = "not_an_object";
     public static final String REASON_BACKLOG_FULL = "agent_backlog_full";
     public static final String REASON_HASHING_UNAVAILABLE = "hashing_unavailable";
+    public static final String REASON_CONVERSATION_UNAVAILABLE = "conversation_unavailable";
 
     /** How far in the future an event's {@code at} may lie (clock skew). */
     static final Duration FUTURE_SKEW = Duration.ofMinutes(5);
@@ -106,6 +120,15 @@ public class HealthEventIngest {
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
+    /** Every ingest runs through it: the ingest's part of the drain barrier. */
+    private final DrainBarrier barrier = new DrainBarrier();
+
+    /**
+     * Guards the events that name a conversation. Field-injected and null-checked:
+     * tests build this class by hand, and then guard nothing.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
 
     @Inject
     public HealthEventIngest(IHealthEventStore store, HealthConfigPolicy configPolicy, HealthRefHasher hasher, HealthSettings settings,
@@ -138,6 +161,22 @@ public class HealthEventIngest {
         if (!settings.enabled()) {
             return new Result(503, 0, 0, List.of(), "Agent Health is disabled on this deployment.");
         }
+        Result[] result = {null};
+        barrier.execute(Runnable::run, () -> result[0] = ingestTracked(integrationId, agentIds, eventType, data));
+        return result[0];
+    }
+
+    /**
+     * Waits until every ingest started before the call has finished — the ingest's
+     * part of the drain barrier of {@link HealthErasureWriter}.
+     *
+     * @return {@code false} on timeout
+     */
+    public boolean awaitDrained(Duration timeout) throws InterruptedException {
+        return barrier.awaitDrained(timeout);
+    }
+
+    private Result ingestTracked(String integrationId, Collection<String> agentIds, String eventType, Object data) {
         List<Object> items = items(data);
         if (items == null) {
             return new Result(422, 0, 0, List.of(), "The body must be an event object, an array of them, or {\"events\": [...]}.");
@@ -154,6 +193,7 @@ public class HealthEventIngest {
         List<HealthEvent> accepted = new ArrayList<>();
         Map<String, Resolved> configs = new HashMap<>();
         Map<String, Long> backlog = new HashMap<>();
+        Map<String, Admission> admissions = new LinkedHashMap<>();
         boolean onlyBacklog = true;
         for (int i = 0; i < items.size(); i++) {
             String reason;
@@ -165,8 +205,15 @@ public class HealthEventIngest {
                     throw new Refusal(REASON_BACKLOG_FULL, "The agent has " + pending + " unmatched events waiting (the most is "
                             + settings.maxPendingEventsPerAgent() + ")");
                 }
+                Admission admission = admit(event, now);
+                if (admission != null && !admission.allowed()) {
+                    throw new Refusal(REASON_CONVERSATION_UNAVAILABLE, "The conversation is not available");
+                }
                 backlog.put(event.agentId(), pending + 1);
                 accepted.add(event);
+                if (admission != null) {
+                    admissions.put(event.id(), admission);
+                }
                 continue;
             } catch (Refusal r) {
                 reason = r.reason;
@@ -179,12 +226,35 @@ public class HealthEventIngest {
             }
         }
         metrics.events(HealthMetrics.EVENT_REFUSED, refused.size());
-        int inserted = accepted.isEmpty() ? 0 : store.insert(accepted);
+        int inserted;
+        try {
+            inserted = accepted.isEmpty() ? 0 : store.insert(accepted);
+        } finally {
+            // Also after a failed insert, which may have stored part of the batch.
+            for (Map.Entry<String, Admission> admitted : admissions.entrySet()) {
+                String id = admitted.getKey();
+                // A delete that started meanwhile: the event goes again (also a
+                // redelivery's row, which names the same conversation).
+                erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.eventRowId(id), admitted.getValue(),
+                        () -> store.delete(List.of(id)));
+            }
+        }
         int duplicates = accepted.size() - inserted;
         metrics.events(HealthMetrics.EVENT_ACCEPTED, inserted);
         metrics.events(HealthMetrics.EVENT_DUPLICATE, duplicates);
         int status = !accepted.isEmpty() ? 202 : onlyBacklog ? 429 : 422;
         return new Result(status, inserted, duplicates, refused, accepted.isEmpty() ? "No event was accepted." : null);
+    }
+
+    /**
+     * The guard's admission of an event that names a conversation; {@code null} for
+     * one that names a reference, or without a guard (nothing to guard).
+     */
+    private Admission admit(HealthEvent event, Instant now) {
+        if (erasureGuard == null || !event.byConversation() || event.conversationId() == null) {
+            return null;
+        }
+        return erasureGuard.beforeWrite(null, event.conversationId(), now);
     }
 
     /** The events of a body, or {@code null} when it has none of the shapes. */

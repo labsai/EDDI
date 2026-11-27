@@ -2,7 +2,7 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TaskToolQuotas } from "../llm/task-tool-quotas";
-import type { LlmTask } from "../llm/types";
+import type { LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Hosts the section with real state so every edit is visible in `latest`. */
 function Host({ initial, readOnly, onTask }: { initial: LlmTask; readOnly?: boolean; onTask: (t: LlmTask) => void }) {

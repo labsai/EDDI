@@ -11,7 +11,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class HealthQueryCacheTest {
 
@@ -37,7 +40,8 @@ class HealthQueryCacheTest {
         CountDownLatch loaderEntered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch allStarted = new CountDownLatch(callers);
-        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        List<Thread> threads = new CopyOnWriteArrayList<>();
+        ExecutorService pool = recordingPool(callers, threads);
         try {
             List<Future<String>> results = new ArrayList<>();
             for (int i = 0; i < callers; i++) {
@@ -57,8 +61,8 @@ class HealthQueryCacheTest {
             }
             assertTrue(allStarted.await(5, TimeUnit.SECONDS));
             assertTrue(loaderEntered.await(5, TimeUnit.SECONDS));
-            // Give the other callers time to reach the cache while the load is in flight.
-            Thread.sleep(500);
+            // Every caller is parked in the cache (the loader, or a waiter of its load).
+            awaitParkedInCache(threads, callers);
             release.countDown();
             for (Future<String> result : results) {
                 assertEquals("value", result.get(5, TimeUnit.SECONDS));
@@ -78,7 +82,8 @@ class HealthQueryCacheTest {
         CountDownLatch loaderEntered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch allStarted = new CountDownLatch(callers);
-        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        List<Thread> threads = new CopyOnWriteArrayList<>();
+        ExecutorService pool = recordingPool(callers, threads);
         try {
             List<Future<String>> results = new ArrayList<>();
             for (int i = 0; i < callers; i++) {
@@ -98,7 +103,7 @@ class HealthQueryCacheTest {
             }
             assertTrue(allStarted.await(5, TimeUnit.SECONDS));
             assertTrue(loaderEntered.await(5, TimeUnit.SECONDS));
-            Thread.sleep(500);
+            awaitParkedInCache(threads, callers);
             release.countDown();
             for (Future<String> result : results) {
                 assertEquals("rows", result.get(5, TimeUnit.SECONDS));
@@ -129,7 +134,8 @@ class HealthQueryCacheTest {
         HealthQueryCache cache = new HealthQueryCache(Duration.ofSeconds(60), CLOCK);
         CountDownLatch loaderEntered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List<Thread> threads = new CopyOnWriteArrayList<>();
+        ExecutorService pool = recordingPool(2, threads);
         try {
             Future<String> first = pool.submit(() -> cache.get("key", () -> {
                 loaderEntered.countDown();
@@ -146,7 +152,8 @@ class HealthQueryCacheTest {
                 waiterLoads.incrementAndGet();
                 return "waiter";
             }));
-            Thread.sleep(500);
+            // The waiter has joined the in-flight load before the loader fails.
+            awaitParkedInCache(threads, 2);
             release.countDown();
             assertThrows(Exception.class, () -> first.get(5, TimeUnit.SECONDS));
             // The waiter reached the cache while the load was in flight, so it shares
@@ -186,5 +193,38 @@ class HealthQueryCacheTest {
         cache.put("key", "value");
         assertEquals("value", cache.peek("key"));
         assertEquals("value", cache.get("key", () -> "other"));
+    }
+
+    /**
+     * A fixed pool whose threads are recorded, so a test can see where they wait.
+     */
+    private static ExecutorService recordingPool(int size, List<Thread> threads) {
+        return Executors.newFixedThreadPool(size, task -> {
+            Thread thread = new Thread(task);
+            threads.add(thread);
+            return thread;
+        });
+    }
+
+    /**
+     * Waits until {@code expected} threads are parked inside
+     * {@link HealthQueryCache} — the loader (blocked in its load) or a caller
+     * joined to the in-flight load. A thread that has not reached the cache yet is
+     * not parked there, so the release cannot overtake it.
+     */
+    private static void awaitParkedInCache(List<Thread> threads, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (threads.size() < expected || !threads.stream().allMatch(HealthQueryCacheTest::parkedInCache)) {
+            if (System.nanoTime() > deadline) {
+                fail("The callers did not all reach the cache within 5 s");
+            }
+            Thread.sleep(5);
+        }
+    }
+
+    private static boolean parkedInCache(Thread thread) {
+        Thread.State state = thread.getState();
+        return (state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING)
+                && Arrays.stream(thread.getStackTrace()).anyMatch(frame -> HealthQueryCache.class.getName().equals(frame.getClassName()));
     }
 }

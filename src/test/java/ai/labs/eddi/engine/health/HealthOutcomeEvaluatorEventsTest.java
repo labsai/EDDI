@@ -57,7 +57,7 @@ class HealthOutcomeEvaluatorEventsTest {
         when(policy.windowOf(anyString(), any())).thenReturn(Duration.ofHours(24));
         when(outcomes.watermark()).thenReturn(Optional.empty());
         evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, mock(IConversationRatingStore.class),
-                new HealthErasureFence(Clock.fixed(NOW, ZoneOffset.UTC)), HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()),
+                null, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         Instance<IHealthEventStore> instance = mock(Instance.class);
         when(instance.isResolvable()).thenReturn(true);

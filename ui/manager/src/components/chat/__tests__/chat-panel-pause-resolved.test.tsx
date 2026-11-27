@@ -2,11 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import * as chatApi from "@/lib/api/chat";
-import { ChatPanel } from "../chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import * as chatApi from "@eddi/app-kit/lib/api/chat";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 /**
  * A pause decided elsewhere, then a next turn that pauses again.
@@ -20,7 +20,7 @@ import { useChatStore } from "@/hooks/use-chat";
  * The notice's own watch polls approval-status every few seconds; here it is a
  * button that reports the resolution, which is all the panel sees of it.
  */
-vi.mock("@/components/hitl/pause-notice", () => ({
+vi.mock("@eddi/app-kit/components/hitl/pause-notice", () => ({
   PauseNotice: ({ onResolved, testIdBase }: { onResolved: () => void; testIdBase?: string }) => (
     <div data-testid={`${testIdBase}-banner`}>
       <button type="button" onClick={onResolved}>

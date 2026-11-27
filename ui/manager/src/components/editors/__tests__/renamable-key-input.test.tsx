@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { RenamableKeyInput } from "../renamable-key-input";
+import { RenamableKeyInput } from "@eddi/app-kit/components/editors/renamable-key-input";
 
 describe("RenamableKeyInput", () => {
   const setup = () => {

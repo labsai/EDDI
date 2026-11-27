@@ -87,4 +87,50 @@ class AgentConfigurationCacheTest {
         verify(agentStore, times(2)).read("agent-1", 2);
         verify(agentStore, times(1)).read("agent-2", 1);
     }
+
+    /** A soft delete flags the version and leaves it in the store, unchanged. */
+    @Test
+    void readIncludingDeletedFindsASoftDeletedVersionOnce() throws Exception {
+        var config = new AgentConfiguration();
+        doThrow(new ResourceNotFoundException("deleted")).when(agentStore).read("agent-1", 3);
+        doReturn(config).when(agentStore).readIncludingDeleted("agent-1", 3);
+
+        assertSame(config, cache.readIncludingDeleted("agent-1", 3));
+        assertSame(config, cache.readIncludingDeleted("agent-1", 3));
+
+        verify(agentStore, times(1)).readIncludingDeleted("agent-1", 3);
+    }
+
+    /** The audit ledger reads the version a turn has just read: no second read. */
+    @Test
+    void readIncludingDeletedServesAVersionReadAlready() throws Exception {
+        var config = new AgentConfiguration();
+        doReturn(config).when(agentStore).read("agent-1", 3);
+        cache.read("agent-1", 3);
+
+        assertSame(config, cache.readIncludingDeleted("agent-1", 3));
+
+        verify(agentStore, never()).readIncludingDeleted(anyString(), anyInt());
+    }
+
+    /** What readIncludingDeleted found is never handed to a caller of read. */
+    @Test
+    void aDeletedVersionIsNotServedByRead() throws Exception {
+        doThrow(new ResourceNotFoundException("deleted")).when(agentStore).read("agent-1", 3);
+        doReturn(new AgentConfiguration()).when(agentStore).readIncludingDeleted("agent-1", 3);
+        cache.readIncludingDeleted("agent-1", 3);
+
+        assertThrows(ResourceNotFoundException.class, () -> cache.read("agent-1", 3));
+    }
+
+    @Test
+    void invalidateAlsoDropsWhatReadIncludingDeletedFound() throws Exception {
+        doReturn(new AgentConfiguration()).when(agentStore).readIncludingDeleted("agent-1", 3);
+        cache.readIncludingDeleted("agent-1", 3);
+
+        cache.invalidate("agent-1");
+        cache.readIncludingDeleted("agent-1", 3);
+
+        verify(agentStore, times(2)).readIncludingDeleted("agent-1", 3);
+    }
 }

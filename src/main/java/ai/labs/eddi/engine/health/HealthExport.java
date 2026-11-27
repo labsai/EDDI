@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.health.HealthMeasures.OutcomeStats;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
 import ai.labs.eddi.engine.health.model.HealthEventCount;
@@ -24,6 +25,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -31,6 +33,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -55,6 +58,20 @@ import java.util.TreeMap;
  * is written row by row, and prefixes a value that a spreadsheet would read as
  * a formula ({@code = + - @}) with {@code '}. JSON carries the same rows as
  * objects, streamed.
+ * <p>
+ * <b>GDPR.</b> A session row names its conversation and references, and is read
+ * a page at a time before it is written out — so a user erasure (or a permanent
+ * conversation delete) that starts while an export runs could delete a row the
+ * export already holds. Every row is therefore checked against the erasure
+ * tombstones right before it is written ({@link ErasureGuard#erasedForReading},
+ * captured at the session's start, the matcher's rule): a row of an erased user
+ * or a deleted conversation is withheld, also when the tombstones cannot be
+ * read (fail closed). Tombstones are written before anything is deleted, so no
+ * row read before an erasure is written after it began. The check is made once
+ * per conversation per page, when the conversation's first row of the page is
+ * reached (two point reads of the tombstone store: at most two per row,
+ * typically fewer). The daily kind holds counts only, which the rollup re-rolls
+ * without an erased user's rows.
  */
 @ApplicationScoped
 public class HealthExport {
@@ -77,6 +94,13 @@ public class HealthExport {
     private final Instance<IHealthEventStore> eventStore;
     private final HealthConfigPolicy configPolicy;
     private final HealthSettings settings;
+
+    /**
+     * Withholds the rows of erased users and deleted conversations from a sessions
+     * export. Field-injected and null-checked: tests build this class by hand.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
 
     @Inject
     public HealthExport(IHealthDailyStore dailyStore, IHealthOutcomeStore outcomeStore, Instance<IHealthEventStore> eventStore,
@@ -271,19 +295,56 @@ public class HealthExport {
             return false;
         }
         int written = 0;
-        for (int offset = 0; written < MAX_SESSIONS; offset += PAGE) {
+        int offset = 0;
+        while (written < MAX_SESSIONS) {
             int size = Math.min(PAGE, MAX_SESSIONS - written);
             List<HealthOutcome> page = outcomeStore.sessions(new HealthSessionQuery(agentId, window.from(), window.to(), versions, origins, List.of(),
                     List.of(), offset, size + 1));
-            for (int i = 0; i < Math.min(size, page.size()); i++) {
-                writer.write(page.get(i));
+            int consumed = Math.min(size, page.size());
+            // Per page, so a verdict is never older than the page it decides.
+            Map<String, Boolean> withheld = new HashMap<>();
+            for (int i = 0; i < consumed; i++) {
+                HealthOutcome session = page.get(i);
+                if (withheld(session, page, withheld)) {
+                    continue;
+                }
+                writer.write(session);
                 written++;
             }
+            offset += consumed;
             if (page.size() <= size) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Whether {@code session} belongs to an erasure and must not be written. One
+     * verdict per conversation of the page, taken when its first row is reached, at
+     * the earliest start of the page's sessions of that conversation and user —
+     * which withholds rather than writes when they differ.
+     */
+    private boolean withheld(HealthOutcome session, List<HealthOutcome> page, Map<String, Boolean> verdicts) {
+        if (erasureGuard == null) {
+            return false;
+        }
+        String key = session.userId() + "\n" + session.conversationId();
+        Boolean verdict = verdicts.get(key);
+        if (verdict == null) {
+            // Null is "before any erasure", the strictest: it is never replaced.
+            Instant capturedAt = session.startedAt();
+            for (int i = 0; capturedAt != null && i < page.size(); i++) {
+                HealthOutcome other = page.get(i);
+                if (Objects.equals(other.conversationId(), session.conversationId()) && Objects.equals(other.userId(), session.userId())
+                        && (other.startedAt() == null || other.startedAt().isBefore(capturedAt))) {
+                    capturedAt = other.startedAt();
+                }
+            }
+            verdict = erasureGuard.erasedForReading(session.userId(), session.conversationId(), capturedAt);
+            verdicts.put(key, verdict);
+        }
+        return verdict;
     }
 
     static List<Object> sessionValues(HealthOutcome o) {

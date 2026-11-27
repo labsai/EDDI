@@ -4,8 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Bot, Loader2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Badge } from "@eddi/ui";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import {
   operatorKeys,
   useAdoptOperator,
@@ -13,12 +13,12 @@ import {
   useRemoveOperatorAgent,
   useUnregisteredOperators,
 } from "@/hooks/use-operator";
-import { isGrantFailure, useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { isGrantFailure, useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { clearOperatorConfig, type OperatorConfig } from "@/lib/api/operator";
-import type { DeploymentStatus } from "@/lib/api/agents";
+import type { DeploymentStatus } from "@eddi/app-kit/lib/api/agents";
 import type { DiscoveredOperator } from "@/lib/api/operator-discovery";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 const STATUS_VARIANT: Record<DeploymentStatus["status"], "success" | "warning" | "destructive" | "secondary"> = {
   READY: "success",
@@ -61,6 +61,8 @@ export function UnregisteredOperators({
       environment,
       agentName: candidate.name,
       failure: isGrantFailure(candidate.failure) ? candidate.failure : undefined,
+      // An operator's key is granted to the operator, never widened to every agent.
+      offerAllowAll: false,
     };
     const refresh = () => void queryClient.invalidateQueries({ queryKey: operatorKeys.all });
     deploy(options)
@@ -251,6 +253,7 @@ export function RegisteredOperatorHealth({
       version: config.version!,
       environment: config.environment,
       failure: isGrantFailure(failure) ? failure : undefined,
+      offerAllowAll: false,
     };
     deploy(options)
       .then((outcome) => reportDeployOutcome(outcome, options, t, undefined, refresh))

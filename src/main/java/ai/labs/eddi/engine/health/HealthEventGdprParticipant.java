@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
 import ai.labs.eddi.engine.health.model.HealthEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,11 +22,22 @@ import java.util.Map;
  * exported with the rest of their data, its business reference in the form it
  * is stored (plain, or a salted hash).
  * <p>
+ * <b>The erasure guarantee.</b> Events are rows of Agent Health's async writer
+ * ({@link HealthErasureWriter}): the erasure tombstones the user and their
+ * conversations and waits for every node's matches and ingests in flight;
+ * {@link HealthEventMatcher} guards each match (the write that puts a user on
+ * an event) with {@link ErasureGuard#beforeWrite} and
+ * {@link ErasureGuard#afterWrite}. After deleting,
+ * {@link ErasureGuard#verifyUserErased} retries the user's pending removals of
+ * that writer and requires no event of the user and no pending removal to be
+ * left; otherwise the step fails and a re-run finishes it.
+ * <p>
  * A <em>pending</em> event names no user — it names a reference or a
- * conversation, and nothing joins it to a person yet. An erasure deletes the
- * user's conversations and session rows, so such an event can no longer match
- * and expires with {@code eddi.health.event-match-window}; a match found while
- * the erasure runs is dropped by the matcher ({@link HealthErasureFence}).
+ * conversation, and nothing joins it to a person yet. The erasure deletes the
+ * events naming each of the user's conversations with the rest of their rows
+ * ({@link HealthErasureWriter#eraseConversation}); one naming a reference can
+ * no longer match once the user's sessions are gone, and expires with
+ * {@code eddi.health.event-match-window}.
  */
 @ApplicationScoped
 public class HealthEventGdprParticipant implements IGdprParticipant {
@@ -34,10 +46,17 @@ public class HealthEventGdprParticipant implements IGdprParticipant {
     static final int MAX_EXPORTED_EVENTS = 10_000;
 
     private final IHealthEventStore store;
+    private final ErasureGuard erasureGuard;
 
     @Inject
-    public HealthEventGdprParticipant(IHealthEventStore store) {
+    public HealthEventGdprParticipant(IHealthEventStore store, ErasureGuard erasureGuard) {
         this.store = store;
+        this.erasureGuard = erasureGuard;
+    }
+
+    /** Without the erasure guard: tests of the delete and the export alone. */
+    HealthEventGdprParticipant(IHealthEventStore store) {
+        this(store, null);
     }
 
     @Override
@@ -50,7 +69,13 @@ public class HealthEventGdprParticipant implements IGdprParticipant {
         if (userId == null || userId.isBlank()) {
             return 0L;
         }
-        return store.deleteByUserId(userId);
+        long deleted = store.deleteByUserId(userId);
+        // Verified whatever the delete answered: the committed count is what decides.
+        // The events' pending removals are recorded under the writer's name.
+        if (erasureGuard != null) {
+            erasureGuard.verifyUserErased(HealthErasureWriter.NAME, userId, () -> store.countByUserId(userId));
+        }
+        return deleted;
     }
 
     @Override

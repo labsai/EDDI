@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { Sidebar } from "@/components/layout/sidebar";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";

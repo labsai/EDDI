@@ -1,11 +1,11 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Gauge } from "lucide-react";
-import { EditorSection } from "../editor-section";
-import { NumberInput } from "../number-input";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import type { TaskSectionProps } from "./task-section-props";
 import { withOpsField, withOpsTool, type OpsBlock as Block } from "./agent-ops";
-import { AGENT_OPS_SLUGS, type AgentOpsSlug } from "./types";
+import { AGENT_OPS_SLUGS, type AgentOpsSlug } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Server defaults, shown as placeholders only (they are never written out). */
 const DEFAULTS = {

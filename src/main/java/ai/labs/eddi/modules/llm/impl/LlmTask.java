@@ -5,10 +5,13 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
+import ai.labs.eddi.engine.documents.DocumentSettings;
+import ai.labs.eddi.engine.documents.EffectiveDocumentsConfig;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -193,6 +196,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     // null-guarded at the call site.
     @Inject
     AttachmentForwarder attachmentForwarder;
+
+    /**
+     * Operator defaults and bounds for the {@code documents} block. Field-injected
+     * like its neighbours so that the many hand-built test instances need no
+     * change; {@code null} there means "no operator setting".
+     */
+    @Inject
+    DocumentSettings documentSettings;
 
     /**
      * Input/output guardrails (WS4). Field-injected for the same reason as
@@ -822,6 +833,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean usedToolMode = false;
         // Real model name of the cascade-selected step, for the audit ledger (#5).
         String cascadeAuditModel = null;
+        // The model of the cascade step that answered — what Agent Health records.
+        String cascadeStepModel = null;
 
         // Agent mode: the orchestrator adds the system message itself, so hand it the
         // system message the history builder actually emitted — WITH the rolling
@@ -906,6 +919,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
+                cascadeStepModel = cascadeResult.modelName();
 
                 // Propagate agent result's tool trace if agent mode was used
                 if (cascadeResult.agentResult() != null) {
@@ -1138,6 +1152,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // A task that may re-ask is buffered (R5): nothing has been emitted yet, so the
         // single emission below carries the final answer or the fallback, never both.
         boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent) && !bufferOutput;
+        // Agent Health: a stream that timed out with nothing returns normally, so no
+        // catch records it; it is recorded once validation has decided how it ends.
+        boolean streamTimedOutEmpty = fallbackServed == null && isNullOrEmpty(responseContent) && responseMetadata != null
+                && Boolean.TRUE.equals(responseMetadata.get("streamingTimeout"));
+        String timedOutModel = cascadeActive ? cascadeStepModel : resolveModelNameOf(processedParams, resolvedType);
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
@@ -1168,6 +1187,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // deliberate failure of the model phase: with onError=fallback it is
                 // absorbed like any other.
                 if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    if (streamTimedOutEmpty) {
+                        recordStreamingTimeout(currentStep, timedOutModel, HealthFailure.NONE, failureMark);
+                    }
                     // The model answered (and was paid) before its answer was rejected.
                     accumulateUsageAndCost(currentStep, responseMetadata, task);
                     recordFailedPhaseSpend(currentStep, validationFailure);
@@ -1177,6 +1199,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", validationFailure,
                         convertObject, memory.getConversationId(), memory.getAgentId(), null);
                 responseContent = fallbackServed.content();
+            }
+            if (streamTimedOutEmpty) {
+                // After markUncommitted: the record is what happened, not the attempt's data.
+                recordStreamingTimeout(currentStep, timedOutModel, fallbackServed != null ? HealthFailure.FALLBACK : HealthFailure.NONE,
+                        failureMark);
             }
         }
 
@@ -2261,8 +2288,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
      * for the paused task, hands the frozen batch + human decision to
      * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
-     * applies the verdicts — implemented in Task 9), then stores the final result
-     * EXACTLY like the normal path and runs {@code postResponse}.
+     * applies the verdicts), then stores the final result EXACTLY like the normal
+     * path and runs {@code postResponse}.
      * <p>
      * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
      * deliberately skips every side-effecting step that already ran before the
@@ -2342,7 +2369,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
 
-        // === Hand off to the resume loop (Task 9) ===
+        // === Hand off to the resume loop ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
         // Same JSON policy the live loop would have applied — a resumed continuation
@@ -2670,6 +2697,27 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 + "Reply with the complete revised answer only, in the same format as your previous answer.";
     }
 
+    /**
+     * Agent Health: the model phase that began at {@code failureMark} ended in a
+     * stream that timed out with no text. The timeout is recorded with
+     * {@code recovery}, and so is every step a cascade escalated past in this
+     * phase: a cascade that ended in a failure recovered nothing.
+     */
+    private static void recordStreamingTimeout(IWritableConversationStep currentStep, String model, String recovery, int failureMark) {
+        LlmFailureRecords.record(currentStep, FailureClass.TIMEOUT, model, recovery);
+        LlmFailureRecords.settle(currentStep, null, null, recovery, failureMark);
+    }
+
+    /**
+     * The tool loop cannot re-ask a revision's final answer: a refusal of the
+     * request, not a model failure.
+     */
+    private static final class ReaskUnavailableException extends LifecycleException {
+        ReaskUnavailableException() {
+            super("The tool loop cannot re-ask its final answer");
+        }
+    }
+
     /** A revision that passed the task's checks, ready to be stored. */
     private record Revision(String content, Map<String, Object> metadata, Map<String, String> processedParams, String resolvedType,
             List<ChatMessage> request, boolean convertObject) {
@@ -2835,7 +2883,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 ? (msgs, maxTokens) -> {
                     var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
                     if (reply == null) {
-                        throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                        throw new ReaskUnavailableException();
                     }
                     return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
                 }
@@ -2854,7 +2902,19 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             priced.put(KEY_REPROMPT_COST, usage.get("cascadeCostUsd"));
             return new FormatRetryRunner.Attempt(reply.text(), priced);
         };
-        var attempt = asker.ask(request, null);
+        // Agent Health: a failed revision call is a model failure like any other; the
+        // rejection then applies as is, so nothing recovered it. Its same-model retries
+        // are written with it.
+        int failureMark = LlmFailureRecords.mark(currentStep);
+        FormatRetryRunner.Attempt attempt;
+        try {
+            attempt = asker.ask(request, null);
+        } catch (LifecycleException | RuntimeException e) {
+            if (!(e instanceof ReaskUnavailableException)) {
+                LlmFailureRecords.settle(currentStep, e, resolveModelNameOf(processedParams, resolvedType), HealthFailure.NONE, failureMark);
+            }
+            throw e;
+        }
         Map<String, Object> metadata = attempt.metadata() != null ? new HashMap<>(attempt.metadata()) : new HashMap<>();
         priceAtCascadeStep(metadata, revisionStep, task);
         String content = attempt.text();
@@ -3831,7 +3891,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * @param context
      *            the retrieved context (may be null)
      * @param maxChars
-     *            character ceiling; {@code -1} = unbounded
+     *            character ceiling; {@code <= 0} = unbounded
      * @param source
      *            human-readable source name, used in the warning
      * @return the context, truncated with an explanatory marker when it exceeded
@@ -3939,6 +3999,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 validateAnswerMode(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
+                warnOnDocumentsConfig(llmConfiguration, documentSettings);
                 return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -3947,6 +4008,42 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Resolves each task's {@code documents} block once at deploy time and logs, at
+     * WARN, every value that was ignored (a key not available in this version, an
+     * unknown name) or clamped to an operator bound. Never throws: a stored
+     * configuration (written directly to the database, or by a newer version) or a
+     * bound tightened later must not un-deploy an agent — only the next
+     * <em>save</em> of such a value is refused. A task without a block is resolved
+     * too, so an operator default that is ignored or clamped is reported for it.
+     *
+     * @return the lines logged, in order (for tests: log capture is not reliable
+     *         across a shared test JVM)
+     */
+    static List<String> warnOnDocumentsConfig(LlmConfiguration llmConfiguration, DocumentSettings settings) {
+        List<String> logged = new ArrayList<>();
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return logged;
+        }
+        for (var task : llmConfiguration.tasks()) {
+            if (task == null) {
+                continue;
+            }
+            String taskId = task.getId() != null ? sanitize(task.getId()) : "<unnamed>";
+            try {
+                var effective = EffectiveDocumentsConfig.resolve(task.getDocuments(), settings != null ? settings : DocumentSettings.none());
+                for (String warning : effective.clampWarnings()) {
+                    logged.add(String.format("LLM task '%s': %s", taskId, warning));
+                }
+            } catch (RuntimeException e) {
+                logged.add(String.format("LLM task '%s': the documents block could not be resolved (%s); built-in defaults apply", taskId,
+                        e.getClass().getSimpleName()));
+            }
+        }
+        logged.forEach(LOGGER::warn);
+        return logged;
     }
 
     /**

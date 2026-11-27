@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ChevronRight, MessageSquareHeart } from "lucide-react";
-import { useMayOpenScreen } from "@/hooks/use-auth";
+import { useMayOpenScreen } from "@eddi/app-kit/hooks/use-auth";
 import { useAttentionCount, useRatingSummary } from "@/hooks/use-ratings";
 import { percent, periodRange } from "./feedback-utils";
 

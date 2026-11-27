@@ -30,6 +30,7 @@ import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
 import ai.labs.eddi.datastore.postgres.PostgresAlertEventStore;
+import ai.labs.eddi.datastore.postgres.PostgresErasureTombstoneStore;
 import ai.labs.eddi.datastore.postgres.PostgresAlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationRatingStore;
 import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
@@ -65,6 +66,8 @@ import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
 import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
+import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore;
+import ai.labs.eddi.engine.gdpr.erasure.mongo.ErasureTombstoneStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
 import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
@@ -84,6 +87,7 @@ import ai.labs.eddi.engine.hitl.oversight.samples.mongo.MongoAuditSampleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
+import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -264,6 +268,12 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IErasureTombstoneStore erasureTombstoneStore(Instance<ErasureTombstoneStore> mongo, Instance<PostgresErasureTombstoneStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IConversationMemoryStore conversationMemoryStore(Instance<ConversationMemoryStore> mongo,
                                                             Instance<PostgresConversationMemoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
@@ -401,6 +411,15 @@ public class DataStoreProducers {
     public IAttachmentStore attachmentStore(
                                             Instance<GridFsAttachmentStore> mongo,
                                             Instance<PostgresAttachmentStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    /** The active attachment store, as the grant backfill sees it. */
+    @Produces
+    @ApplicationScoped
+    public IAttachmentGrantMigration attachmentGrantMigration(
+                                                              Instance<GridFsAttachmentStore> mongo,
+                                                              Instance<PostgresAttachmentStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

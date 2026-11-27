@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -209,6 +211,33 @@ public class MongoHealthEventStore implements IHealthEventStore {
     @Override
     public long deleteOlderThan(LocalDate day) {
         return deleteMany(lt(FIELD_DAY, day.toString()), "Could not delete expired health events");
+    }
+
+    @Override
+    public long countByUserId(String userId) {
+        return count(eq(FIELD_USER, userId), "Could not count a user's health events");
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count(eq(FIELD_CONVERSATION, conversationId), "Could not count a conversation's health events");
+    }
+
+    private long count(Bson filter, String failure) {
+        try {
+            return committed().countDocuments(filter);
+        } catch (MongoException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    /**
+     * The collection read from the primary with majority read concern, so what it
+     * answers is committed — for the counts an erasure's verification decides on (a
+     * lagging secondary could answer "0 left" while a row is still stored).
+     */
+    private MongoCollection<Document> committed() {
+        return events.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
     }
 
     private long deleteMany(Bson filter, String failure) {

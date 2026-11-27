@@ -47,6 +47,7 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -82,8 +83,14 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentD
  * agent. For each selected resource in the preview, writes the source content
  * into the target's existing resource (creating a new version).
  * <p>
- * The target agent's URI structure stays unchanged — only content is updated
- * and version numbers incremented.
+ * Matched resources are written as new versions of the target's own resources
+ * and the agent is re-pointed at them. Beyond that, a run can create resources
+ * and whole workflows the target lacks, take off the workflows the source no
+ * longer has, reorder workflows, and adopt the source agent's own settings
+ * (except {@code signInterAgentMessages}, which stays off when the target's own
+ * key cannot sign); a resource the target changed locally since the last sync
+ * (CONFLICT) is only overwritten when it is named in the selection. Nothing is
+ * written when the source changes nothing.
  * <p>
  * Adding an extension type takes two edits: register the resource authority in
  * {@link WorkflowExtensions} (file extension + remote REST path) and add its
@@ -1016,7 +1023,9 @@ public class UpgradeExecutor {
             // it would replace a credential with the marker. Recorded as this resource
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
-            IResourceId created = store.create(content);
+            // Copied from the sync source, where it exists already: a ruleset among
+            // them keeps a retired condition config, with a WARN, as on deploy.
+            IResourceId created = ExistingRuleSetWrite.call(() -> store.create(content));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1076,7 +1085,9 @@ public class UpgradeExecutor {
             case "behavior" -> new ExtensionStoreOps<>(
                     RuleSetConfiguration.class,
                     IRuleSetStore.class,
-                    (id, version, config) -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config),
+                    // A synced ruleset exists on the source already: a retired condition
+                    // config is accepted with a WARN, as on deploy.
+                    (id, version, config) -> ExistingRuleSetWrite.call(() -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config)),
                     IRestRuleSetStore.resourceURI,
                     IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(

@@ -147,7 +147,8 @@ public final class BoundedFanOut {
         Admission gate = admission != null ? admission : Admission.ALWAYS;
         AtomicBoolean closed = new AtomicBoolean(false);
         // 0 queued, 1 started, 2 finished, 3 abandoned (the caller stopped waiting
-        // before it started — it never will). Queued -> started and queued ->
+        // before it started — it never will), 4 refused (STATE_REFUSED: the gate
+        // refused it, or the step had closed). Queued -> started and queued ->
         // abandoned are both compare-and-set, so the caller's "not sent" and the
         // item's start cannot both win: reading the state and THEN starting let an
         // item the caller had just reported as not sent go on and send.

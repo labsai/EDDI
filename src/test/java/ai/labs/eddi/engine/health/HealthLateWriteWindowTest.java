@@ -469,6 +469,21 @@ class HealthLateWriteWindowTest {
         }
 
         @Override
+        public long deleteRow(String conversationId, String executionId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long countByUserId(String userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long countByConversationId(String conversationId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer) {
             throw new UnsupportedOperationException();
         }

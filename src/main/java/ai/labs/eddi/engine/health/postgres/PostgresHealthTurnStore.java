@@ -792,6 +792,37 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
+    public long deleteRow(String conversationId, String executionId) {
+        return delete("DELETE FROM health_turns WHERE conversation_id = ? AND execution_id = ?", "Could not delete a health turn", s -> {
+            s.setString(1, conversationId);
+            s.setString(2, executionId);
+        });
+    }
+
+    @Override
+    public long countByUserId(String userId) {
+        return count("SELECT COUNT(*) FROM health_turns WHERE user_id = ?", "Could not count a user's health turns", s -> s.setString(1, userId));
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count("SELECT COUNT(*) FROM health_turns WHERE conversation_id = ?", "Could not count a conversation's health turns",
+                s -> s.setString(1, conversationId));
+    }
+
+    private long count(String sql, String failure, Binder binder) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    @Override
     public void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer) {
         ensureSchema();
         long at = since.toEpochMilli();

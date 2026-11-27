@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { DiscussionActions } from "@/components/groups/discussion-actions";
-import type { GroupConversationAction } from "@/lib/api/groups";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { DiscussionActions } from "@eddi/app-kit/components/groups/discussion-actions";
+import type { GroupConversationAction } from "@eddi/app-kit/lib/api/groups";
 
 const MEMBERS = [
   { agentId: "agent1", displayName: "Support Agent", memberType: "AGENT" as const },

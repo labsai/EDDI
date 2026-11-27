@@ -216,3 +216,68 @@ presets, status and reasons.
   exists (it reads one past the cap), and the portfolio carries it as the new field `agentsTruncated` (existing fields
   unchanged). Tests: `HealthAccessTest.viewableAgentsCap` (exactly 5,000 is not truncated, 5,001 is),
   `RestAgentHealthTest.portfolioTruncated`.
+
+## 🔀 merge(health): H2b on the GDPR erasure guarantee of the merged Agent Health 1/N (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+The final #1386 replaced `HealthErasureFence` with `HealthErasureWriter`, an `AsyncErasureWriter` of the GDPR erasure
+guarantee. H2b's dirty-day marking moves onto that design; the fence (and the step-0 agent noting H2b had added to it,
+see the 2026-11-11 entry above) is gone.
+
+- `HealthTurnRecorder` keeps the guard's `DrainBarrier` and `beforeWrite`/`afterWrite`, with H2b's late-write stamp,
+  stored-day and discard-day notes and the shutdown flush layered on. A row the guard removes again after its write
+  has its days marked dirty at once (`HealthDirtyDays.markDeletedRows`).
+- `HealthErasureWriter.eraseConversation` (guarded purge, retention sweep, the user erasure's conversation step) deletes
+  with `deleteConversationReturningDays` and marks the days; unknown days fall back to the conversation's agent, read
+  from the conversation store while the conversation still exists. Unlike the unguarded agent-test purge, it deletes
+  even when neither is known (the guarantee verifies that no row is left) and `markDeletedRows` warns. `removeRow` (a
+  pending removal's retry) reads the conversation's (agent, day)s before the delete and marks them.
+- `HealthTurnGdprParticipant` keeps `deleteByUserIdReturningDays` + `markErasedRows`, then `verifyUserErased`. The
+  user's own conversations are erased (and their days marked, agent known) in the cascade's conversation step before
+  the participant runs. Unknown days of what is left are not re-rolled (the conversations are gone by then): a WARN.
+- The daily, dirty-day and change-marker stores hold counts, (agent, day) pairs and agent/version labels — no user or
+  conversation id — so they take no part in erasure.
+- MCP: the three health tools join `McpToolTiers` (tier `HEALTH_READ`); 123 tools. Dashboard panels "Agent Health rollup
+  backlog/work" are 469/470 inside the Agent Health row (466). Operator revision 83.
+
+## 🐛 fix(health): erasure-relevant MongoDB reads go to the primary; a failed write's removal marks its day (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `MongoHealthTurnStore` reads the rows the rollup recomputes a day from (`forEachByAgentAndDay`) and the (agent, day)s
+  read before a delete (`agentDays`) from the primary at majority read concern, like the erasure counts. On the client
+  default (`nearest`), a lagging secondary could hand the rollup rows an erasure had just deleted — the day's dirty mark
+  then cleared with the erased counts in it — or an incomplete day set that looked known, so the fallback never ran.
+  The same applies to `daysOf` (the days a write touched, which the guard's removal marks) and to the self-heal and
+  orphan-sweep window scans. PostgreSQL has one datasource and deletes with `RETURNING`: no equivalent. Test:
+  `MongoHealthTurnStoreTest.erasureRelevantReadsAreCommitted`.
+- `HealthTurnRecorder`: a write that threw before its days were read (an upsert that committed, then timed out) and
+  whose row the erasure guard removes now marks the turn's own day. Test: `failedWriteRemovalMarksTheTurnsDay`.
+- `HealthTurnGdprParticipant` drops its conversation-store agent fallback: it runs after the cascade deleted the
+  user's conversations, so the lookup could only ever find nothing.
+
+## 🐛 fix(health): review follow-ups — removal days, series preset and ratings, docs (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthErasureWriter.removeRow` (a pending removal's retry): when the conversation's days cannot be read, the delete
+  still marks the conversation's agent's retained days (read from the conversation store, as `eraseConversation`
+  does), or warns when neither is known. It used to mark nothing. Test: `removeRowWithUnreadableDays`.
+- `HealthTurnRecorder`: the erasure guard's removal reads the day the row is stored on just before deleting it, so a
+  resumed row whose upsert committed and then threw has its first day marked, not only the turn's. Test:
+  `failedWriteRemovalMarksTheStoredDay`.
+- `HealthReportService.series` picks the default-origin preset from the same rows as the report (window and
+  baseline), so one window gets one origin set on every endpoint; the points still come from the window. A failed
+  daily rating read is now unavailable (`null`) rather than an empty map that read as zero ratings. Tests:
+  `seriesPresetMatchesTheReport`, `seriesRatingReadFailure`.
+- Docs: the rollup interval is the normal cadence, not a bound on how far today's numbers lag; the erasure has no
+  agent fallback for days it cannot read (stale text from before the merge); the admin skill attributes failures by
+  the agent's own failure classes, an incident day being supporting context only.
+- `HealthRollupService`'s comment states the remaining race: `replaceDay` is not fenced, so a rollup stalled past the
+  schedule lease can overwrite a newer rollup of the same day. A fence in both stores is a follow-up.
+- Tests: `HealthDirtyDaysTest` stops its flusher in a `finally`; `HealthQueryCacheTest` waits until every caller is
+  parked in the cache instead of sleeping 500 ms.
+- Operator prompt (`system-prompt.ts`) matches the docs: the rollup interval is the cadence, not a lag bound, and
+  failures are attributed by the agent's own failure classes, an incident day being supporting context only. The
+  revision stays 83 (this PR's bump); only its fingerprint changes.

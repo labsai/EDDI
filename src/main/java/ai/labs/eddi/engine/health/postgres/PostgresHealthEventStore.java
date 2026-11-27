@@ -296,6 +296,28 @@ public class PostgresHealthEventStore implements IHealthEventStore {
         }
     }
 
+    @Override
+    public long countByUserId(String userId) {
+        return count("SELECT COUNT(*) FROM health_events WHERE user_id = ?", userId, "Could not count a user's health events");
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count("SELECT COUNT(*) FROM health_events WHERE conversation_id = ?", conversationId,
+                "Could not count a conversation's health events");
+    }
+
+    private long count(String sql, String key, String failure) {
+        try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(sql)) {
+            s.setString(1, key);
+            try (ResultSet r = s.executeQuery()) {
+                return r.next() ? r.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
     private long update(String sql, String failure, Binder binder) {
         try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(sql)) {
             binder.bind(s);

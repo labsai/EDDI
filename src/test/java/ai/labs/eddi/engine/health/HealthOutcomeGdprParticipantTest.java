@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -29,6 +32,8 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -58,6 +63,21 @@ class HealthOutcomeGdprParticipantTest {
         assertEquals(3, participant.erase("alice"));
         assertEquals(0, participant.erase(" "));
         verify(store, never()).deleteByUserId(" ");
+    }
+
+    @Test
+    @DisplayName("erasure is verified: a session left after the delete fails the step, none left passes")
+    void eraseIsVerified() {
+        IHealthOutcomeStore store = mock(IHealthOutcomeStore.class);
+        ErasureGuard guard = new ErasureGuard(new InMemoryErasureTombstoneStore(), List.of(), new ErasureMetrics(new SimpleMeterRegistry()),
+                Duration.ofDays(400), Duration.ofSeconds(1), Duration.ofMinutes(5), Clock.systemUTC());
+        HealthOutcomeGdprParticipant participant = new HealthOutcomeGdprParticipant(store, guard);
+        when(store.deleteByUserId("alice")).thenReturn(2L);
+        when(store.countByUserId("alice")).thenReturn(1L);
+        IllegalStateException left = assertThrows(IllegalStateException.class, () -> participant.erase("alice"));
+        assertTrue(left.getMessage().contains("1 row(s)"), left.getMessage());
+        when(store.countByUserId("alice")).thenReturn(0L);
+        assertEquals(2, participant.erase("alice"));
     }
 
     @Test

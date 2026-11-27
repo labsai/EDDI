@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
 import ai.labs.eddi.engine.memory.model.Attachment;
@@ -16,6 +17,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -32,10 +34,26 @@ public class GroupAttachmentBinder {
 
     private final IAttachmentStore attachmentStore;
     private final String defaultTenantId;
+    private final AttachmentShareService shareService;
 
+    /**
+     * A binder whose capability check runs on an {@link AttachmentShareService}
+     * built over the same store, without metrics or audit.
+     */
     public GroupAttachmentBinder(IAttachmentStore attachmentStore, String defaultTenantId) {
+        this(attachmentStore, defaultTenantId, new AttachmentShareService(attachmentStore, null, null));
+    }
+
+    /**
+     * @param shareService
+     *            decides whether a passed-through reference may be shared — the
+     *            rule every agent-to-agent path uses; must be built over the same
+     *            store as {@code attachmentStore}
+     */
+    public GroupAttachmentBinder(IAttachmentStore attachmentStore, String defaultTenantId, AttachmentShareService shareService) {
         this.attachmentStore = attachmentStore;
         this.defaultTenantId = defaultTenantId;
+        this.shareService = Objects.requireNonNull(shareService, "shareService");
     }
 
     /**
@@ -134,25 +152,31 @@ public class GroupAttachmentBinder {
     /**
      * Whether a pre-stored reference may be shared with {@code gc}'s members: only
      * when server code took it from {@code trustedSourceConversationId} and that
-     * conversation can read the blob (as owner or grantee). On success {@code gc}
-     * is granted read access as well.
+     * conversation can read the blob (as owner or grantee) — the rule
+     * {@link AttachmentShareService#mayRead} holds for every agent-to-agent path
+     * (asked through {@link AttachmentShareService#whyNotReadable} for the log). On
+     * success {@code gc} is granted read access as well.
      */
     private boolean mayPassThrough(String storageRef, GroupConversation gc, String trustedSourceConversationId) {
-        if (trustedSourceConversationId == null || trustedSourceConversationId.isBlank() || attachmentStore == null) {
-            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': only references taken from the "
-                    + "caller's own conversation are shared", gc.getId());
+        // No store to grant through means nothing can be passed on, whatever the
+        // share service's own store says.
+        String refusal = attachmentStore == null ? "no store" : shareService.whyNotReadable(storageRef, trustedSourceConversationId);
+        if (refusal != null) {
+            // The source id is caller-supplied: sanitized (LogSanitizer's rule). The
+            // reason is a fixed phrase or an exception class name, never the store's
+            // message.
+            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': only references the caller's own "
+                    + "conversation can read are shared (source conversation: '%s', reason: %s)", gc.getId(),
+                    sanitize(trustedSourceConversationId), refusal);
             return false;
         }
         try {
-            attachmentStore.getMetadata(storageRef, trustedSourceConversationId);
             attachmentStore.grantAccess(storageRef, gc.getId());
             return true;
         } catch (Exception e) {
-            // Both values are sanitized at the call site (LogSanitizer's rule): the
-            // source id is a caller-supplied conversation id and the store's message
-            // may echo the reference it refused.
-            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': its source conversation '%s' "
-                    + "cannot read it (%s)", gc.getId(), sanitize(trustedSourceConversationId), sanitize(e.getMessage()));
+            // The store's message may echo the reference it refused.
+            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': it could not be granted (%s)",
+                    gc.getId(), sanitize(e.getMessage()));
             return false;
         }
     }

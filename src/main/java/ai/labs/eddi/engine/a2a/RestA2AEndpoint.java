@@ -222,7 +222,7 @@ public class RestA2AEndpoint {
      * And a real EDDI role, not just a token: {@code @Authenticated} admitted any
      * identity the realm issues, a role-less one included. The tier is the one the
      * JSON-RPC endpoint below requires — whoever may converse with an A2A agent may
-     * see which ones exist.
+     * see which ones exist. While A2A is disabled the answer is an empty list.
      */
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
     @GET
@@ -310,7 +310,8 @@ public class RestA2AEndpoint {
      * {@code message/send} (0.3), {@code tasks/send} (pre-0.2) — and the answer is
      * written in the same dialect. Streaming methods answer with
      * {@code text/event-stream}, everything else with JSON. While A2A is disabled
-     * every call answers HTTP 200 with a JSON-RPC "method not found" error.
+     * every well-formed call (a request with a method and an acceptable id) answers
+     * HTTP 200 with a JSON-RPC "method not found" error.
      */
     @POST
     @Path("a2a/agents/{agentId}")

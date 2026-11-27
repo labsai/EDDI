@@ -239,7 +239,8 @@ the routing by `triggers`.
   `agent_missing`, `event_missing`, `event_invalid`, `ref_or_conversation_required`,
   `ref_invalid`, `ref_not_declared`, `conversation_id_invalid`, `value_invalid`,
   `at_invalid`, `id_invalid`, `not_an_object`, `hashing_unavailable`,
-  `agent_backlog_full`); `422` when none was; `429` when every refusal was a full
+  `agent_backlog_full`, `conversation_unavailable` — the named conversation was
+  deleted or erased); `422` when none was; `429` when every refusal was a full
   backlog (`eddi.health.events.max-pending-per-agent`, 10 000 unmatched events per
   agent); `413` past the per-request cap; `503` with Agent Health off. A repeat
   of an accepted delivery is `200 {"duplicate": true}`.

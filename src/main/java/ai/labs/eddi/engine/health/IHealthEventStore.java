@@ -67,8 +67,25 @@ public interface IHealthEventStore {
     /** Deletes a user's matched events (GDPR erasure). */
     long deleteByUserId(String userId);
 
-    /** Deletes the events matched to a conversation (it was deleted). */
+    /**
+     * Deletes the events of a conversation (it was deleted): those matched to it
+     * and the pending ones that name it.
+     */
     long deleteByConversationId(String conversationId);
+
+    /**
+     * How many matched events name {@code userId} — the verification of a GDPR
+     * erasure. Reads committed data from the primary: a lagging replica must not
+     * answer "none left".
+     */
+    long countByUserId(String userId);
+
+    /**
+     * How many events — matched or pending — name {@code conversationId}: the
+     * verification of a permanent conversation delete. Committed, like
+     * {@link #countByUserId}.
+     */
+    long countByConversationId(String conversationId);
 
     /** Deletes the events that happened before {@code day} (retention). */
     long deleteOlderThan(LocalDate day);

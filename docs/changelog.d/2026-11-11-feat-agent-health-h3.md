@@ -99,3 +99,28 @@ An independent review of the evaluator job found real defects; all fixed on the 
 [`IHealthOutcomeStore.java`](../../src/main/java/ai/labs/eddi/engine/health/IHealthOutcomeStore.java),
 [`HealthConfig.java`](../../src/main/java/ai/labs/eddi/configs/agents/model/HealthConfig.java),
 [`ReportConversationOutcomeTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/impl/ReportConversationOutcomeTool.java)
+
+## 🔀 merge(health): H3 on the GDPR erasure guarantee of H2b (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+H2b (#1388) moved Agent Health from the best-effort `HealthErasureFence` to `HealthErasureWriter`, an
+`AsyncErasureWriter` of the GDPR erasure guarantee. The fence is gone, so the session outcomes move onto that design.
+
+- **One writer, not two.** Sessions are rows of the existing `HealthErasureWriter` (`agentHealthTurns`): derived from
+  the turn rows by the same feature, drained and verified with them. Its barrier now also waits for the outcome
+  evaluations in flight; `removeRow` takes a session id (`session:<conversationId>|<sessionNo>`, kept apart from a turn
+  row's `<conversationId>|<executionId>`); `eraseConversation` and `countForConversation` cover both stores. Session
+  deletes mark no day dirty: the daily rows hold no outcome counts.
+- `HealthOutcomeEvaluator` runs each conversation's evaluation through a `DrainBarrier` (on the caller's thread), asks
+  `beforeWrite` captured at the earliest turn the sessions derive from (each turn's capture as the recorder takes it,
+  `updatedAt` else `timestamp`), and calls `afterWrite` for each session written
+  — also after a failed bulk write. A refused write is a failed evaluation, retried by the feed and the due pass: after
+  the erasure deleted the turn rows a retry leaves nothing; after a tombstone-store outage (fail closed) it writes them.
+- `HealthOutcomeGdprParticipant` (`agentHealthOutcomes`) deletes, then `verifyUserErased` under the writer's name.
+  `IHealthOutcomeStore` gains `countByUserId` / `countByConversationId`; on MongoDB those and the orphan sweep's scan
+  read committed data on the primary, as the turn store does.
+- `ConversationPurgeService`: a guarded purge erases sessions through the guard; the agent-test purge still deletes them
+  best effort with its turn rows.
+- MCP: `list_agent_health_sessions` and `suggest_outcome_mappings` join `McpToolTiers` (`HEALTH_READ`); 125 tools.
+  Operator revision 84.

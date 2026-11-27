@@ -135,4 +135,19 @@ public interface HealthEventStoreContract {
         store().insert(List.of(pending("r", "agent", "x", null, null, "c7", null, T0.minusSeconds(86_400 * 10))));
         assertEquals(1, store().deleteOlderThan(LocalDate.ofInstant(T0, ZoneOffset.UTC).minusDays(2)));
     }
+
+    @Test
+    @DisplayName("the erasure verification counts a user's matched events and a conversation's events, pending ones included")
+    default void erasureCounts() {
+        store().insert(List.of(pending("m1", "agent", "x", "orderId=1", "1", null, null, T0), pending("p1", "agent", "x", null, null, "c1", null, T0),
+                pending("p2", "agent", "x", null, null, "c2", null, T0)));
+        store().markMatched(pending("m1", "agent", "x", "orderId=1", "1", null, null, T0).matched("c1", 0, 1, "api", "user", "external_event", T0));
+        assertEquals(1, store().countByUserId("user"));
+        assertEquals(0, store().countByUserId("other"));
+        assertEquals(2, store().countByConversationId("c1"), "the matched event and the pending one naming it");
+        assertEquals(2, store().deleteByConversationId("c1"));
+        assertEquals(0, store().countByConversationId("c1"));
+        assertEquals(0, store().countByUserId("user"));
+        assertEquals(1, store().countByConversationId("c2"));
+    }
 }

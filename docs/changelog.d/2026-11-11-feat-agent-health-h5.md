@@ -34,8 +34,19 @@ after a conversation becomes the strongest outcome evidence there is. Documented
 - **Precedence.** `HealthSessionEvaluator` ranks a matched, mapped event above everything (`external_event` /
   `conversation_id_event`, counted as confirmed); of several events the one that happened last decides.
 - **GDPR.** Matched events carry the session's user: erased and exported (`agentHealthEvents`), purged with their
-  conversation and by the retention and orphan sweeps. A match for a user with restricted processing (Art. 18) or under
-  an erasure fence is dropped; an unreadable restriction keeps the event pending. Turn and session exports include refs.
+  conversation and by the retention and orphan sweeps. A match for a user with restricted processing (Art. 18) is
+  dropped; an unreadable restriction keeps the event pending. Turn and session exports include refs.
+- **Erasure guarantee (rebuilt on h3).** The events are rows of `HealthErasureWriter` (`agentHealthTurns`), like the
+  session outcomes, not a writer of their own: they are joined to the same sessions in the same rollup pass, and an
+  erasure must drain and verify all of them together. The matcher and the ingest each run through a `DrainBarrier`
+  the writer's `awaitDrained` waits on; a match is a guarded write (`beforeWrite` at the session's start, `afterWrite`
+  removing the event, pending removals as `event:<id>`); a refused match leaves the event pending (it names no user);
+  an event naming a tombstoned conversation is refused at ingest (`conversation_unavailable`) and removed again when a
+  delete starts during the insert. `eraseConversation` / `countForConversation` include the conversation's events
+  (pending ones too); `HealthEventGdprParticipant` verifies with `verifyUserErased`; the new `countByUserId` /
+  `countByConversationId` read committed data from the Mongo primary. The sessions export checks each conversation's
+  rows with the new read-side `ErasureGuard.erasedForReading` right before writing them, so an export in progress
+  never emits rows of a user erased meanwhile.
 - **Business section and export.** One `event:<type>` measure per declared type (matched count, baseline, significance,
   `byReference` / `byConversationId` / `valueSum`). `GET /agents/{agentId}/health/export?format=json|csv&kind=daily|sessions`
   — daily needs VIEW, sessions the drill-down rule; fixed CSV columns, formula cells defused, no user ids.

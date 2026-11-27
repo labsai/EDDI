@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, Loader2, XCircle, MinusCircle } from "lucide-react";
-import { type Environment } from "@/lib/constants";
-import type { EnvironmentStatus } from "@/lib/api/agents";
-import { deployedEnvironments, isAnyEnvironmentBusy } from "@/lib/deployment-environments";
+import { type Environment } from "@eddi/app-kit/lib/constants";
+import type { EnvironmentStatus } from "@eddi/app-kit/lib/api/agents";
+import { deployedEnvironments, isAnyEnvironmentBusy } from "@eddi/app-kit/lib/deployment-environments";
 import { useEnvironmentLabel } from "@/hooks/use-environment-label";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /**
  * The agent card's deployment badge. Pure helpers live in
