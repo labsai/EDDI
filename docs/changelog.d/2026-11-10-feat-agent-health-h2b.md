@@ -249,7 +249,8 @@ see the 2026-11-11 entry above) is gone.
   read before a delete (`agentDays`) from the primary at majority read concern, like the erasure counts. On the client
   default (`nearest`), a lagging secondary could hand the rollup rows an erasure had just deleted — the day's dirty mark
   then cleared with the erased counts in it — or an incomplete day set that looked known, so the fallback never ran.
-  PostgreSQL has one datasource and deletes with `RETURNING`: no equivalent. Test:
+  The same applies to `daysOf` (the days a write touched, which the guard's removal marks) and to the self-heal and
+  orphan-sweep window scans. PostgreSQL has one datasource and deletes with `RETURNING`: no equivalent. Test:
   `MongoHealthTurnStoreTest.erasureRelevantReadsAreCommitted`.
 - `HealthTurnRecorder`: a write that threw before its days were read (an upsert that committed, then timed out) and
   whose row the erasure guard removes now marks the turn's own day. Test: `failedWriteRemovalMarksTheTurnsDay`.

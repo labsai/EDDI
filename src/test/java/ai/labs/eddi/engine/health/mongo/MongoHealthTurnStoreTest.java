@@ -81,7 +81,7 @@ class MongoHealthTurnStoreTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    @DisplayName("the rollup's day read and the days read before a delete go to the primary at majority, never the client default")
+    @DisplayName("the erasure- and rollup-relevant reads go to the primary at majority, never the client default")
     void erasureRelevantReadsAreCommitted() {
         MongoCollection<Document> primary = mock(MongoCollection.class);
         MongoCollection<Document> committed = mock(MongoCollection.class);
@@ -98,6 +98,7 @@ class MongoHealthTurnStoreTest {
         MongoCursor<Document> rows = mock(MongoCursor.class);
         when(committed.find(any(Bson.class))).thenReturn(found);
         when(found.iterator()).thenReturn(rows);
+        when(found.projection(any())).thenReturn(found);
         when(committed.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
         when(collection.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
 
@@ -105,9 +106,18 @@ class MongoHealthTurnStoreTest {
         assertTrue(store.deleteConversationReturningDays("conv").daysKnown());
         store.forEachByAgentAndDay("agent", LocalDate.of(2026, 11, 10), turn -> {
         });
+        // The days a write touched, and the rollup's and orphan sweep's window scans.
+        store.daysOf("conv", List.of("exec"));
+        Instant since = Instant.parse("2026-11-08T00:00:00Z");
+        store.forEachAgentDayUpdatedSince(since, since.plusSeconds(3600), 10, (agent, day) -> {
+        });
+        store.forEachConversationAgentUpdatedSince(since, 10, (conversation, agent) -> {
+        });
+        store.forEachConversationUpdatedSince(since, 10, conversation -> {
+        });
 
-        verify(committed, times(2)).aggregate(anyList());
-        verify(committed).find(any(Bson.class));
+        verify(committed, times(5)).aggregate(anyList());
+        verify(committed, times(2)).find(any(Bson.class));
         verify(collection, never()).aggregate(anyList());
         verify(collection, never()).find(any(Bson.class));
     }

@@ -321,7 +321,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         try {
             List<String> ids = new LinkedHashSet<>(executionIds).stream().map(e -> id(conversationId, e)).toList();
             Set<LocalDate> days = new TreeSet<>();
-            for (Document d : turns.find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
+            for (Document d : committed().find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
                 String day = d.getString(FIELD_DAY);
                 if (day != null) {
                     days.add(LocalDate.parse(day));
@@ -488,7 +488,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 and(gte(FIELD_WRITTEN_LATE, date(since)), lt(FIELD_WRITTEN_LATE, date(until))));
         List<Bson> pipeline = List.of(Aggregates.match(and(inWindow, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 consumer.accept(key.getString("a"), LocalDate.parse(key.getString("d")));
@@ -549,7 +549,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         Date at = date(since);
         List<Bson> pipeline = List.of(Aggregates.match(or(gte(FIELD_UPDATED, at), gte(FIELD_DISCARDED_AT, at))),
                 Aggregates.group(new Document("c", "$" + FIELD_CONVERSATION).append("a", "$" + FIELD_AGENT)), Aggregates.limit(Math.max(1, limit)));
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 if (key.get("c") != null) {
@@ -626,16 +626,13 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     /**
-     * Counts on the primary with majority read concern: the client reads
-     * {@code nearest()}, and a lagging secondary could answer "0 left" while a row
-     * is still stored.
-     */
-    /**
      * The collection read from the primary at majority read concern — what has
      * committed. For the reads whose answer decides what an erasure or the rollup
-     * does: the erasure counts, the days of rows about to be deleted, and the rows
-     * the rollup recomputes a day from. The client default ({@code nearest}) may be
-     * a lagging secondary.
+     * does: the erasure counts (a lagging secondary could answer "0 left" while a
+     * row is still stored), the days a write touched and the days of rows about to
+     * be deleted, the self-heal and orphan-sweep window scans, and the rows the
+     * rollup recomputes a day from. The client default ({@code nearest}) may be a
+     * lagging secondary.
      */
     private MongoCollection<Document> committed() {
         return turns.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
@@ -654,7 +651,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         // A $group, not distinct(): distinct answers in one document (16 MB) and
         // takes no limit. allowDiskUse lets a large window group past the in-memory
         // stage limit.
-        try (MongoCursor<Document> cursor = turns.aggregate(updatedSincePipeline(since, limit)).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(updatedSincePipeline(since, limit)).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Object conversationId = cursor.next().get("_id");
                 if (conversationId != null) {
