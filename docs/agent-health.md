@@ -516,10 +516,11 @@ Turn rows are personal data about a user's use of an agent:
   retained day of the user's agents is re-rolled instead. The rows of the user's
   own conversations are normally gone before the participant runs: the cascade
   erases them through the erasure guarantee while the conversations still exist
-  (below), with each conversation's agent known. For what is left, the agents
-  come from the user's conversations still in the conversation store. If no
-  agent is known, a WARN is logged and the daily rows keep the user's counts
-  until `eddi.health.daily-retention`. That alone never fails the step: the rows
+  (below), with each conversation's agent known. For what is left, unreadable
+  days cannot be re-rolled — the conversations are gone by then, so no agent can
+  be looked up: a WARN is logged and the daily rows keep the user's counts until
+  a later re-roll of those days or `eddi.health.daily-retention`. That alone
+  never fails the step: the rows
   (the only personal data) are gone; the participant then verifies that no row,
   marker or pending removal of the user is left. Only days within
   `eddi.health.facts-retention` (90 days) can be re-rolled. On older days the

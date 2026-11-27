@@ -525,6 +525,29 @@ class HealthTurnRecorderTest {
         }
 
         @Test
+        @DisplayName("a write that failed before its days were read still has the removed row's day (the turn's own) marked")
+        void failedWriteRemovalMarksTheTurnsDay() {
+            HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+            doReturn(1L).when(store).deleteRow(any(), any());
+            doAnswer(inv -> {
+                // The upsert committed, then timed out; the erasure started meanwhile.
+                guard.tombstoneConversation("conv-1");
+                throw new HealthStoreException("timeout", null);
+            }).when(store).upsert(any());
+            HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), guard, HealthSettings.defaults(), new HealthMetrics(registry),
+                    dirty, CLOCK);
+            try {
+                marking.record(memory(), null, null, null, false);
+
+                verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
+                verify(dirty, timeout(5_000)).markDeletedRows(eq("conv-1"), eq(List.of("agent-1")),
+                        eq(new HealthDeletedRows(1L, Map.of("agent-1", Set.of(LocalDate.of(2026, 11, 10))))));
+            } finally {
+                marking.shutdown();
+            }
+        }
+
+        @Test
         @DisplayName("a removal that fails is recorded as pending and keeps the user's erasure failing until a retry removes the row")
         void failedRemovalKeepsErasureFailing() throws Exception {
             CountDownLatch writing = new CountDownLatch(1);

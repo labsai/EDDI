@@ -235,8 +235,23 @@ see the 2026-11-11 entry above) is gone.
   pending removal's retry) reads the conversation's (agent, day)s before the delete and marks them.
 - `HealthTurnGdprParticipant` keeps `deleteByUserIdReturningDays` + `markErasedRows`, then `verifyUserErased`. The
   user's own conversations are erased (and their days marked, agent known) in the cascade's conversation step before
-  the participant runs; for what is left, the agents come from conversations still in the conversation store.
+  the participant runs. Unknown days of what is left are not re-rolled (the conversations are gone by then): a WARN.
 - The daily, dirty-day and change-marker stores hold counts, (agent, day) pairs and agent/version labels — no user or
   conversation id — so they take no part in erasure.
 - MCP: the three health tools join `McpToolTiers` (tier `HEALTH_READ`); 123 tools. Dashboard panels "Agent Health rollup
   backlog/work" are 469/470 inside the Agent Health row (466). Operator revision 83.
+
+## 🐛 fix(health): erasure-relevant MongoDB reads go to the primary; a failed write's removal marks its day (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `MongoHealthTurnStore` reads the rows the rollup recomputes a day from (`forEachByAgentAndDay`) and the (agent, day)s
+  read before a delete (`agentDays`) from the primary at majority read concern, like the erasure counts. On the client
+  default (`nearest`), a lagging secondary could hand the rollup rows an erasure had just deleted — the day's dirty mark
+  then cleared with the erased counts in it — or an incomplete day set that looked known, so the fallback never ran.
+  PostgreSQL has one datasource and deletes with `RETURNING`: no equivalent. Test:
+  `MongoHealthTurnStoreTest.erasureRelevantReadsAreCommitted`.
+- `HealthTurnRecorder`: a write that threw before its days were read (an upsert that committed, then timed out) and
+  whose row the erasure guard removes now marks the turn's own day. Test: `failedWriteRemovalMarksTheTurnsDay`.
+- `HealthTurnGdprParticipant` drops its conversation-store agent fallback: it runs after the cascade deleted the
+  user's conversations, so the lookup could only ever find nothing.

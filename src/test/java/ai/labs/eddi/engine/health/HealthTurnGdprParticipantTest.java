@@ -10,8 +10,6 @@ import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
@@ -29,7 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -73,53 +70,28 @@ class HealthTurnGdprParticipantTest {
     }
 
     @Test
-    @DisplayName("the days the delete returned are marked; no agent lookup is needed")
-    void daysKnown() throws Exception {
+    @DisplayName("the days the delete returned are marked")
+    void daysKnown() {
         HealthDirtyDays dirty = dirtyDays();
         HealthDeletedRows deleted = new HealthDeletedRows(3L, Map.of("agent", Set.of(LocalDate.of(2026, 11, 10))));
         when(store.deleteByUserIdReturningDays("user-1")).thenReturn(deleted);
-        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
-        participant.conversations = instance(conversations);
 
         assertEquals(3L, participant.erase("user-1"));
         verify(dirty).markErasedRows(Set.of(), deleted);
-        verify(conversations, never()).getConversationIdsByUserId(any());
     }
 
     @Test
-    @DisplayName("unknown days: the agents of the user's conversations still stored are re-rolled")
-    void unknownDaysUseLiveConversations() throws Exception {
-        HealthDirtyDays dirty = dirtyDays();
-        HealthDeletedRows unknown = new HealthDeletedRows(1L, null);
-        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(unknown);
-        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
-        when(conversations.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1"));
-        when(conversations.loadListingSummaries(any())).thenReturn(Map.of("c1", summary("c1", "a1")));
-        participant.conversations = instance(conversations);
-
-        participant.erase("user-1");
-        verify(dirty).markErasedRows(Set.of("a1"), unknown);
-    }
-
-    @Test
-    @DisplayName("nothing known: the erasure still succeeds, and markErasedRows gets no agent (it warns)")
-    void nothingKnown() throws Exception {
+    @DisplayName("unknown days: the erasure still succeeds, and markErasedRows gets no agent (it warns)")
+    void unknownDays() {
         HealthDirtyDays dirty = dirtyDays();
         HealthDeletedRows unknown = new HealthDeletedRows(2L, null);
         when(store.deleteByUserIdReturningDays("user-1")).thenReturn(unknown);
-        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
-        when(conversations.getConversationIdsByUserId("user-1")).thenThrow(new IllegalStateException("down"));
-        participant.conversations = instance(conversations);
 
         assertEquals(2L, participant.erase("user-1"));
         verify(dirty).markErasedRows(Set.of(), unknown);
 
-        participant.conversations = null;
+        participant.dirtyDays = null;
         assertEquals(2L, participant.erase("user-1"));
-    }
-
-    private static ConversationListingSummary summary(String conversationId, String agentId) {
-        return new ConversationListingSummary(conversationId, "user-1", null, null, agentId, 1, 1);
     }
 
     @Test

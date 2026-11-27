@@ -301,7 +301,10 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
 
     @Override
     public void forEachByAgentAndDay(String agentId, LocalDate day, Consumer<HealthTurn> consumer) {
-        try (MongoCursor<Document> cursor = turns.find(and(eq(FIELD_AGENT, agentId), eq(FIELD_DAY, day.toString()))).iterator()) {
+        // From what has committed, on the primary: the rollup recomputes a day an
+        // erasure
+        // just marked dirty, and a lagging secondary would still hold the erased rows.
+        try (MongoCursor<Document> cursor = committed().find(and(eq(FIELD_AGENT, agentId), eq(FIELD_DAY, day.toString()))).iterator()) {
             while (cursor.hasNext()) {
                 consumer.accept(fromDocument(cursor.next()));
             }
@@ -562,7 +565,9 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         List<Bson> pipeline = List.of(Aggregates.match(and(filter, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
         Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        // Read before a delete on the primary: a lagging secondary could answer an
+        // incomplete set that looks known, so the fallback re-roll would never run.
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 days.computeIfAbsent(key.getString("a"), k -> new TreeSet<>()).add(LocalDate.parse(key.getString("d")));
@@ -625,9 +630,20 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
      * {@code nearest()}, and a lagging secondary could answer "0 left" while a row
      * is still stored.
      */
+    /**
+     * The collection read from the primary at majority read concern — what has
+     * committed. For the reads whose answer decides what an erasure or the rollup
+     * does: the erasure counts, the days of rows about to be deleted, and the rows
+     * the rollup recomputes a day from. The client default ({@code nearest}) may be
+     * a lagging secondary.
+     */
+    private MongoCollection<Document> committed() {
+        return turns.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
+    }
+
     private long count(Bson filter, String failure) {
         try {
-            return turns.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY).countDocuments(filter);
+            return committed().countDocuments(filter);
         } catch (MongoException e) {
             throw new HealthStoreException(failure, e);
         }

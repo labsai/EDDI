@@ -345,9 +345,11 @@ public class HealthTurnRecorder {
         return erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.rowId(conversationId, executionId), admission, () -> {
             long deleted = store.get().deleteRow(conversationId, executionId);
             // The rollup may already have counted the row: its days are re-rolled now.
-            if (deleted > 0 && dirtyDays != null && turn.agentId() != null && !days.isEmpty()) {
-                dirtyDays.markDeletedRows(conversationId, List.of(turn.agentId()),
-                        new HealthDeletedRows(deleted, Map.of(turn.agentId(), Set.copyOf(days))));
+            // A write that failed before its days were read (it may still have
+            // committed) falls back to the turn's own day.
+            Set<LocalDate> marked = days.isEmpty() && turn.day() != null ? Set.of(turn.day()) : Set.copyOf(days);
+            if (deleted > 0 && dirtyDays != null && turn.agentId() != null && !marked.isEmpty()) {
+                dirtyDays.markDeletedRows(conversationId, List.of(turn.agentId()), new HealthDeletedRows(deleted, Map.of(turn.agentId(), marked)));
             }
         });
     }

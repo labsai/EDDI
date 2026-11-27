@@ -9,14 +9,11 @@ import ai.labs.eddi.engine.gdpr.UserDataExport;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -55,22 +52,17 @@ import java.util.Set;
  * deleted, which marks their days with the agent known — so this delete takes
  * what is left. Its days come with the delete
  * ({@link IHealthTurnStore#deleteByUserIdReturningDays}); when they cannot be
- * read the delete still runs, and every retained day of the agents of any
- * conversation of the user still in the conversation store is re-rolled. When
- * none is known nothing can be re-rolled: a WARN, and the daily rows keep the
- * user's counts until {@code eddi.health.daily-retention}. That does not fail
- * the step — the rows, the only personal data, are gone.
+ * read the delete still runs, but nothing can be re-rolled — this step runs
+ * after the cascade deleted the user's conversations, so no agent can be looked
+ * up there either: a WARN, and the daily rows keep the user's counts until a
+ * later re-roll of those days or {@code eddi.health.daily-retention}. That does
+ * not fail the step — the rows, the only personal data, are gone.
  */
 @ApplicationScoped
 public class HealthTurnGdprParticipant implements IGdprParticipant {
 
     /** An export carries at most this many rows. */
     static final int MAX_EXPORTED_TURNS = 10_000;
-
-    /** The most conversations of an erased user whose agents are read. */
-    static final int MAX_CONVERSATIONS = 10_000;
-
-    private static final int BATCH = 500;
 
     private final IHealthTurnStore store;
     private final ErasureGuard erasureGuard;
@@ -82,10 +74,6 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
      */
     @Inject
     Instance<HealthDirtyDays> dirtyDays;
-
-    /** The fallback for the user's agents. Field-injected, null-checked. */
-    @Inject
-    Instance<IConversationMemoryStore> conversations;
 
     @Inject
     public HealthTurnGdprParticipant(IHealthTurnStore store, ErasureGuard erasureGuard) {
@@ -111,55 +99,13 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
         HealthDeletedRows deleted = store.deleteByUserIdReturningDays(userId);
         long count = deleted == null ? 0L : deleted.deleted();
         if (dirtyDays != null && dirtyDays.isResolvable() && count > 0) {
-            dirtyDays.get().markErasedRows(deleted.daysKnown() ? Set.of() : agentsOf(userId), deleted);
+            dirtyDays.get().markErasedRows(Set.of(), deleted);
         }
         // Verified whatever the delete answered: the count is what decides.
         if (erasureGuard != null) {
             erasureGuard.verifyUserErased(HealthErasureWriter.NAME, userId, () -> store.countByUserId(userId));
         }
         return count;
-    }
-
-    /**
-     * The erased user's agents when the deleted rows' days are unknown: those of
-     * the user's conversations still in the conversation store (best effort).
-     */
-    private Set<String> agentsOf(String userId) {
-        if (conversations != null && conversations.isResolvable()) {
-            try {
-                return agentsOfConversations(conversations.get(), userId);
-            } catch (Exception e) {
-                // Nothing else to try; markErasedRows warns.
-            }
-        }
-        return Set.of();
-    }
-
-    /**
-     * The distinct agent ids of the user's conversations — at most
-     * {@link #MAX_CONVERSATIONS} of them, read in batches. Throws when the store
-     * cannot answer.
-     */
-    static Set<String> agentsOfConversations(IConversationMemoryStore store, String userId) throws Exception {
-        List<String> ids = store.getConversationIdsByUserId(userId);
-        Set<String> found = new LinkedHashSet<>();
-        if (ids == null || ids.isEmpty()) {
-            return found;
-        }
-        List<String> capped = ids.size() > MAX_CONVERSATIONS ? ids.subList(0, MAX_CONVERSATIONS) : ids;
-        for (int from = 0; from < capped.size(); from += BATCH) {
-            Map<String, ConversationListingSummary> summaries = store
-                    .loadListingSummaries(capped.subList(from, Math.min(capped.size(), from + BATCH)));
-            if (summaries == null) {
-                continue;
-            }
-            for (ConversationListingSummary summary : summaries.values()) {
-                if (summary != null && summary.agentId() != null && !summary.agentId().isBlank()) {
-                    found.add(summary.agentId());
-                }
-            }
-        }
-        return found;
     }
 
     @Override
