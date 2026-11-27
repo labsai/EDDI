@@ -10,6 +10,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.MailboxGrants;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
@@ -25,6 +26,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -59,6 +61,13 @@ public class EmailChannelSupport {
      */
     @Inject
     Instance<MailboxGrants> mailboxGrants;
+
+    /**
+     * Names an address in the log without disclosing it. Field-injected for the
+     * same reason as {@link #suppressions}.
+     */
+    @Inject
+    Instance<GdprPseudonymizer> pseudonymizer;
 
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
@@ -232,9 +241,23 @@ public class EmailChannelSupport {
             throw new BadRequestException("'address' must be a plain email address.");
         }
         boolean removed = requireSuppressions().remove(integrationId, normalized);
-        LOGGER.infof("Email integration %s: suppression of %s %s by an administrator", sanitize(integrationId),
-                IEmailSuppressionStore.hash(normalized), removed ? "cleared" : "not found");
+        LOGGER.infof("Email integration %s: suppression of %s %s by an administrator", sanitize(integrationId), addressPseudonym(normalized),
+                removed ? "cleared" : "not found");
         return removed;
+    }
+
+    /**
+     * The address as the log may name it: its {@link GdprPseudonymizer} pseudonym,
+     * the token the bounce line in {@code EmailReplySender} logs. Never the address
+     * and never {@link IEmailSuppressionStore#hash}, an unkeyed SHA-256 that anyone
+     * reading the log could confirm a guessed address against. Without a
+     * pseudonymizer the line names no address at all.
+     */
+    private String addressPseudonym(String normalized) {
+        if (pseudonymizer == null || !pseudonymizer.isResolvable()) {
+            return "an address";
+        }
+        return pseudonymizer.get().pseudonymFor(normalized.toLowerCase(Locale.ROOT));
     }
 
     private IEmailSuppressionStore requireSuppressions() {

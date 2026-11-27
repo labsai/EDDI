@@ -814,14 +814,21 @@ public class GroupContextBuilder {
      * everything under {@code NONE}, a still-blind ballot).
      * <p>
      * {@code SYNTHESIS} and {@code RETRO} keep the whole transcript, as their
-     * rendered prompts do. Under {@code FULL} the raw entries are kept (error and
-     * skip records included, as before) minus those not yet visible to peers.
-     * {@code ANONYMOUS} entries lose speaker, target and signature fields; one
-     * shown under a non-agent name is named "Anonymous (not an agent, unverified)",
-     * as in the rendered prompt.
+     * rendered prompts do. Under {@code FULL} the raw entries are kept (engine
+     * notes included) minus those not yet visible to peers. In every scope a member
+     * turn that did not answer is left out (K1). {@code ANONYMOUS} entries lose
+     * speaker, target and signature fields; one shown under a non-agent name is
+     * named "Anonymous (not an agent, unverified)", as in the rendered prompt.
      */
-    public List<TranscriptEntry> scopedTranscript(List<TranscriptEntry> snapshot, DiscussionPhase phase, int currentPhaseIdx,
+    public List<TranscriptEntry> scopedTranscript(List<TranscriptEntry> fullSnapshot, DiscussionPhase phase, int currentPhaseIdx,
                                                   GroupMember speaker) {
+        // A member turn that did not answer (failed, timed out, skipped) is no
+        // contribution: its record is left out of what another member is handed, so
+        // neither its absence of text nor its reason reads as a position.
+        List<TranscriptEntry> snapshot = fullSnapshot.stream()
+                .filter(e -> e == null || e.speakerAgentId() == null || "system".equals(e.speakerAgentId())
+                        || e.outcome() == GroupConversation.TurnOutcome.ANSWERED)
+                .toList();
         if (phase == null || phase.type() == PhaseType.SYNTHESIS || phase.type() == PhaseType.RETRO) {
             return snapshot;
         }

@@ -31,9 +31,38 @@ public class ToolApprovalGate {
     /** Why a reissue of an already-executed approved call is gated again. */
     public static final String REPEAT_REASON = "repeat of an approved call that has already been executed";
 
+    /**
+     * @param mandatoryByCallId
+     *            call id to the {@link MandatoryApproval} a
+     *            {@link MandatoryApprovalRule} demanded for it; empty when no rule
+     *            matched (and always empty for the overloads without rules)
+     */
     public record GateResult(List<ToolExecutionRequest> gated,
             List<ToolExecutionRequest> allowed,
-            Map<String, String> gateReasonByCallId) {
+            Map<String, String> gateReasonByCallId,
+            Map<String, MandatoryApproval> mandatoryByCallId) {
+
+        public GateResult {
+            mandatoryByCallId = mandatoryByCallId == null ? Map.of() : Map.copyOf(mandatoryByCallId);
+        }
+
+        /** A result no mandatory rule contributed to — the pre-hook shape. */
+        public GateResult(List<ToolExecutionRequest> gated, List<ToolExecutionRequest> allowed, Map<String, String> gateReasonByCallId) {
+            this(gated, allowed, gateReasonByCallId, Map.of());
+        }
+
+        /**
+         * The same result with {@code gated} replaced — the shape every screening step
+         * that refuses some gated calls rebuilds, keeping the mandatory markers.
+         */
+        public GateResult withGated(List<ToolExecutionRequest> stillGated) {
+            return new GateResult(stillGated, allowed, gateReasonByCallId, mandatoryByCallId);
+        }
+
+        /** The mandatory approval of {@code request}, or null. */
+        public MandatoryApproval mandatoryOf(ToolExecutionRequest request) {
+            return request == null || request.id() == null ? null : mandatoryByCallId.get(request.id());
+        }
     }
 
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
@@ -64,6 +93,70 @@ public class ToolApprovalGate {
      */
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
                                Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
+        return classifyPatterns(batch, toolSources, toolEndpoints, cfg, cleared);
+    }
+
+    /**
+     * As {@link #classify(List, Map, Map, ToolApprovalsConfig, ClearedToolCalls)},
+     * with the mandatory, argument-aware rules of this turn applied first.
+     * <p>
+     * A call any rule matches is gated <b>before P1-P3 are evaluated</b>:
+     * {@code exempt} does not let it through, an empty {@code requireApproval} does
+     * not disable the gate for it, and its {@link MandatoryApproval} is carried in
+     * {@link GateResult#mandatoryByCallId()}. A call the rules leave alone is
+     * classified exactly as without them, so an empty rule list gives a result
+     * identical to the overload without rules.
+     * <p>
+     * A reissue of an approved call that a rule matches is gated as a
+     * {@link #REPEAT_REASON repeat} and still carries its mandatory approval, so
+     * the repeat needs the same approver as the original. Every call the rules gate
+     * must have an id (the tool loop mints ids whenever rules are present); a call
+     * without one is gated with no marker rather than allowed.
+     */
+    public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
+                               Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared,
+                               List<MandatoryApprovalRule> mandatoryRules) {
+        if (mandatoryRules == null || mandatoryRules.isEmpty()) {
+            return classifyPatterns(batch, toolSources, toolEndpoints, cfg, cleared);
+        }
+        List<ToolExecutionRequest> rest = new ArrayList<>();
+        List<ToolExecutionRequest> mandatoryGated = new ArrayList<>();
+        Map<String, MandatoryApproval> mandatory = new HashMap<>();
+        Map<String, String> mandatoryReasons = new HashMap<>();
+        for (ToolExecutionRequest request : batch) {
+            MandatoryApproval approval = request.name() == null ? null : MandatoryApprovals.evaluate(mandatoryRules, request);
+            if (approval == null) {
+                rest.add(request);
+                continue;
+            }
+            mandatoryGated.add(request);
+            boolean repeat = cleared != null && cleared.consume(request);
+            if (request.id() != null && !request.id().isBlank()) {
+                mandatory.put(request.id(), approval);
+                mandatoryReasons.put(request.id(), repeat ? REPEAT_REASON : MandatoryApprovals.GATE_REASON_PREFIX + approval.reasonCode());
+            }
+        }
+        if (mandatoryGated.isEmpty()) {
+            return classifyPatterns(batch, toolSources, toolEndpoints, cfg, cleared);
+        }
+        GateResult patterns = rest.isEmpty()
+                ? new GateResult(List.of(), List.of(), Map.of())
+                : classifyPatterns(rest, toolSources, toolEndpoints, cfg, cleared);
+        // Keep the model's order among the gated calls: the pending batch lists them
+        // in this order, and an approver reads them as the model proposed them.
+        List<ToolExecutionRequest> gated = new ArrayList<>();
+        for (ToolExecutionRequest request : batch) {
+            if (mandatoryGated.contains(request) || patterns.gated().contains(request)) {
+                gated.add(request);
+            }
+        }
+        Map<String, String> reasons = new HashMap<>(patterns.gateReasonByCallId());
+        reasons.putAll(mandatoryReasons);
+        return new GateResult(gated, patterns.allowed(), reasons, mandatory);
+    }
+
+    private GateResult classifyPatterns(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
+                                        Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
         if (cfg == null || (cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) && SuspendedGate.none(cfg)) {
             return new GateResult(List.of(), List.copyOf(batch), Map.of());
         }

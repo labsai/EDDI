@@ -1242,7 +1242,12 @@ Three of those are worth knowing by name:
   produces an authentication failure with no visible cause. Those caches are also
   keyed on *unresolved* parameters by design. Use `${vault:…}`, which does
   everything a `SERVICE`-bound connection would there.
-* **Slack channel integrations** still use their own `botToken` field.
+* **Slack channel integrations** still use their own `botToken` field. Channel
+  types added from 6.7.0 on (the coming Teams and Discord adapters) are
+  *connection-backed* instead: `platformConfig.connection` names a `SERVICE`-bound
+  connection, any key the type does not declare is refused at save time, and
+  the credential is resolved on every send against the real destination. The
+  email channel already worked this way.
 * **Group conversations and `PER_USER`** — whose token a group member should spend
   is an open question, and nothing in the group path answers it. A member
   conversation is opened under the group conversation's own `userId`, so it takes

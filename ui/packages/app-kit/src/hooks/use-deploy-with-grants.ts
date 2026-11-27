@@ -67,6 +67,14 @@ export interface GrantRequest {
    * the ordinary one-agent request, which renders exactly as before.
    */
   agents?: GrantAgent[];
+  /**
+   * Whether the dialog may offer widening the key to every agent. Default true.
+   * A flow whose agent replaces one that held the grant (the Platform Operator's
+   * upgrade) passes false: the fix there is adding this one agent, and an "allow
+   * every agent" checkbox in the middle of an upgrade is a temptation to remove
+   * the key's only limit just to get past a dialog.
+   */
+  offerAllowAll?: boolean;
 }
 
 interface PendingGrantRequest extends GrantRequest {
@@ -167,6 +175,8 @@ export interface DeployWithGrantsOptions {
    * preflight and open the dialog from it straight away.
    */
   failure?: DeploymentFailure;
+  /** Passed to the dialog — see {@link GrantRequest.offerAllowAll}. */
+  offerAllowAll?: boolean;
 }
 
 export type DeployWithGrantsOutcome =
@@ -198,6 +208,7 @@ export async function runDeployWithGrants(options: DeployWithGrantsOptions): Pro
     agentName: options.agentName,
     version: options.version,
     environment,
+    ...(options.offerAllowAll === false ? { offerAllowAll: false } : {}),
   };
 
   if (options.failure && isGrantFailure(options.failure)) {
@@ -231,7 +242,7 @@ export async function runDeployWithGrants(options: DeployWithGrantsOptions): Pro
   return deployAndSettle(base, options.signal);
 }
 
-type DeployBase = Pick<GrantRequest, "agentId" | "agentName" | "version" | "environment">;
+type DeployBase = Pick<GrantRequest, "agentId" | "agentName" | "version" | "environment" | "offerAllowAll">;
 
 /**
  * Deploy and wait; on a grant refusal the preflight did not predict, ask once

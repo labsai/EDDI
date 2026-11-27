@@ -30,12 +30,12 @@ import java.util.List;
  * <p>
  * <b>Roles are enumerated, not inherited.</b> EDDI has no role hierarchy —
  * neither JAX-RS {@code @RolesAllowed} nor the MCP layer's
- * {@code McpToolUtils.requireRole} (a literal {@code identity.hasRole}) grants
- * one role by virtue of holding a more privileged one. So the read tier is
- * spelled out. In particular this must NOT be {@code eddi-viewer} alone: that
- * role appears only on the MCP surface, and an {@code eddi-admin} principal —
- * which is what an operator agent actually runs as — would be refused by the
- * one endpoint built for it.
+ * {@code McpToolUtils.requireAnyRole} (a literal {@code identity.hasRole})
+ * grants one role by virtue of holding a more privileged one. So the read tier
+ * is spelled out. In particular this must NOT be {@code eddi-viewer} alone:
+ * that role appears only on the MCP surface, and an {@code eddi-admin}
+ * principal — which is what an operator agent actually runs as — would be
+ * refused by the one endpoint built for it.
  * <p>
  * The set is deliberately the widest read tier in the codebase: these are the
  * project's published documentation pages, so anyone permitted to use the

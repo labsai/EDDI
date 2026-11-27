@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.*;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -895,8 +896,12 @@ class GroupConversationServiceExtendedTest {
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
 
-            // Should complete with a skipped/timeout entry
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // The only member timed out: a TIMED_OUT turn, and with nobody answering the
+            // round fails (K1) — the moderator's synthesis of nothing is not an answer
+            assertEquals(GroupConversationState.FAILED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> "a1".equals(e.speakerAgentId()) && e.outcome() == GroupConversation.TurnOutcome.TIMED_OUT));
+            assertNull(result.getSynthesizedAnswer());
         }
     }
 
@@ -1176,10 +1181,11 @@ class GroupConversationServiceExtendedTest {
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
 
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // K1: the only member failed after its retry — no member answered
+            assertEquals(GroupConversationState.FAILED, result.getState());
             assertTrue(result.getTranscript().stream()
                     .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED &&
-                            "a1".equals(e.speakerAgentId())));
+                            "a1".equals(e.speakerAgentId()) && e.outcome() == GroupConversation.TurnOutcome.FAILED));
         }
 
         @Test
@@ -1668,12 +1674,13 @@ class GroupConversationServiceExtendedTest {
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
 
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
-            // Should contain the error message from ERROR state fallback
+            // K1: an ERROR-state reply is a FAILED turn without content — never a
+            // placeholder OPINION — and a round in which nobody answered fails
+            assertEquals(GroupConversationState.FAILED, result.getState());
             assertTrue(result.getTranscript().stream()
-                    .anyMatch(e -> e.type() == TranscriptEntryType.OPINION
-                            && e.content() != null
-                            && e.content().contains("Agent failed")));
+                    .anyMatch(e -> e.outcome() == GroupConversation.TurnOutcome.FAILED && e.content() == null
+                            && MemberTurnExecutor.REASON_ERROR_STATE.equals(e.errorReason())));
+            assertTrue(result.getTranscript().stream().noneMatch(e -> e.type() == TranscriptEntryType.OPINION));
         }
 
         @Test
@@ -1850,7 +1857,9 @@ class GroupConversationServiceExtendedTest {
 
             var result = service.discuss(parentGroupId, QUESTION, USER_ID, 0);
 
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // K1: the only member failed, so no member answered — FAILED, not COMPLETED
+            assertEquals(GroupConversationState.FAILED, result.getState());
+            assertEquals(GroupConversation.DiscussionOutcome.FAILED, result.getOutcome());
             // Sub-group failure should produce a SKIPPED entry (default policy is SKIP)
             assertTrue(result.getTranscript().stream()
                     .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED
