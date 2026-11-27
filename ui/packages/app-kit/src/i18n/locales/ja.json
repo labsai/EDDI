@@ -951,7 +951,8 @@
       "useDefaultKey": "ワークフォースのデフォルトキー",
       "useExisting": "既存のエージェントを使用",
       "useStarterPrompt": "スタータープロンプトを挿入",
-      "yourAdvisors": "あなたのアドバイザー"
+      "yourAdvisors": "あなたのアドバイザー",
+      "createNeedsAdmin": "新しいアドバイザーの作成には管理者が必要です。代わりに既存のエージェントを使ってください。"
     }
   },
   "connections": {

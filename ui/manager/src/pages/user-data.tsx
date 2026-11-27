@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { NotebookPen, Tags, MessagesSquare, UserRoundSearch } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { UserMemoryPage } from "./user-memory";
 import { PropertiesPage } from "./properties";
 import { UserConversationsPage } from "./user-conversations";
@@ -25,9 +26,12 @@ const TAB_COLORS: Record<Tab, string> = {
 export function UserDataPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
+  // The user-conversations store is admin-only; an eddi-user gets the other two tabs.
+  const mayListConversations = useCan("userdata.conversations");
+  const tabs = TABS.filter((tab) => tab !== "conversations" || mayListConversations);
   const initialTab = (searchParams.get("tab") as Tab) || "memories";
   const [activeTab, setActiveTab] = useState<Tab>(
-    TABS.includes(initialTab) ? initialTab : "memories",
+    tabs.includes(initialTab) ? initialTab : "memories",
   );
 
   // One user id for all three tabs, kept in the URL: switching tabs (or
@@ -86,7 +90,7 @@ export function UserDataPage() {
         role="tablist"
         aria-label={t("userData.tabs", "User data sections")}
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const Icon = TAB_ICONS[tab];
           const isActive = activeTab === tab;
           return (

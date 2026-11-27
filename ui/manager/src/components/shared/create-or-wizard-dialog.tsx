@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Plus, Wand2 } from "lucide-react";
 import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 
 interface CreateOrWizardDialogProps {
   open: boolean;
@@ -26,6 +27,10 @@ export function CreateOrWizardDialog({
 }: CreateOrWizardDialogProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // The agent wizard ends in `POST /administration/agents/setup`, which is
+  // eddi-admin only. An editor is not led through five steps to a "Forbidden":
+  // the card says so and Quick Create stays the way in.
+  const mayGuided = useCan("setup.guided") || type !== "agent";
 
   const handleWizard = () => {
     onClose();
@@ -72,7 +77,8 @@ export function CreateOrWizardDialog({
           {/* Guided Wizard card */}
           <button
             onClick={handleWizard}
-            className="group flex flex-col items-start gap-4 rounded-xl border-2 border-border bg-card p-6 text-start transition-all hover:-translate-y-1 hover:border-brand-500/60 hover:shadow-xl"
+            disabled={!mayGuided}
+            className="group flex flex-col items-start gap-4 rounded-xl border-2 border-border bg-card p-6 text-start transition-all hover:-translate-y-1 hover:border-brand-500/60 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
             data-testid="choice-wizard"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-brand-500/10 text-brand-500 transition-colors group-hover:bg-brand-500/20">
@@ -83,7 +89,12 @@ export function CreateOrWizardDialog({
                 {t("createOrWizard.guidedSetup", "Guided Setup")}
               </h3>
               <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-                {type === "group"
+                {!mayGuided
+                  ? t(
+                      "createOrWizard.guidedSetupAdminOnly",
+                      "Guided setup needs an administrator because it stores API keys in the vault. Use Quick Create and configure the agent afterwards."
+                    )
+                  : type === "group"
                   ? t(
                       "createOrWizard.guidedSetupDescGroup",
                       "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."

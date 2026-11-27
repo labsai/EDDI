@@ -15,6 +15,7 @@ import { useBrand } from "@eddi/app-kit/hooks/use-brand";
 import { isUpdateUiVisible } from "@eddi/app-kit/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useRouteEntityName } from "@/hooks/use-route-entity-name";
+import { RouteGate } from "./route-gate";
 
 import { cn } from "@eddi/app-kit/lib/utils";
 
@@ -197,7 +198,9 @@ export function AppLayout() {
               one. Pages taller than the viewport still overflow this wrapper
               and scroll <main>, exactly as before. */}
           <div className="@container/main mx-auto h-full max-w-screen-2xl">
-            <SuspendedOutlet />
+            <RouteGate>
+              <SuspendedOutlet />
+            </RouteGate>
           </div>
         </main>
       </div>

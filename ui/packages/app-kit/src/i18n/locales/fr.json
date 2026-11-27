@@ -959,7 +959,8 @@
       "useDefaultKey": "Clé par défaut de l'effectif",
       "useExisting": "Utiliser un agent existant",
       "useStarterPrompt": "Insérer une invite de départ",
-      "yourAdvisors": "Vos conseillers"
+      "yourAdvisors": "Vos conseillers",
+      "createNeedsAdmin": "La création d'un nouveau conseiller nécessite un administrateur. Utilisez plutôt un agent existant."
     }
   },
   "connections": {

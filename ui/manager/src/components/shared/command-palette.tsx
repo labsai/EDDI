@@ -291,7 +291,7 @@ export function CommandPalette() {
           <Command.Item
             value="action new agent create"
             onSelect={() =>
-              handleSelect("/manage/agents/wizard", t("commandPalette.createAgent", "Create New Agent"))
+              handleSelect(mayOpen("/manage/agents/wizard") ? "/manage/agents/wizard" : "/manage/agents", t("commandPalette.createAgent", "Create New Agent"))
             }
             className={itemClass}
           >

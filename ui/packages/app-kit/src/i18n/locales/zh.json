@@ -951,7 +951,8 @@
       "useDefaultKey": "团队默认密钥",
       "useExisting": "使用现有代理",
       "useStarterPrompt": "插入起始提示词",
-      "yourAdvisors": "您的顾问"
+      "yourAdvisors": "您的顾问",
+      "createNeedsAdmin": "创建新顾问需要管理员。请改用现有智能体。"
     }
   },
   "connections": {

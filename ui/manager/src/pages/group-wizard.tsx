@@ -36,6 +36,7 @@ import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select"
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@eddi/app-kit/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { styleLabel, styleDisplay } from "@eddi/conversation/team";
 import {
   groupSaveProblems,
@@ -303,6 +304,8 @@ function stepBlockers(
   state: WizardState,
   availableStyles: readonly DiscussionStyle[],
   t: TFunction,
+  /** False for a role that cannot call `POST /administration/agents/setup` (admin-only). */
+  mayCreateAgents = true,
 ): string[] {
   const out: string[] = [];
   if (stepId === "config") {
@@ -347,6 +350,16 @@ function stepBlockers(
         if (!m.agentId.trim()) {
           out.push(t("groupWizard.blockerMemberGroup", "{{member}}: pick the nested group.", { member: who }));
         }
+      } else if (!mayCreateAgents && needsAgentCreation(m)) {
+        // Creating an agent calls the admin-only setup endpoint: say so before the
+        // steps, not as a 403 after earlier members were already created.
+        out.push(
+          t(
+            "groupWizard.blockerCreateNeedsAdmin",
+            "{{member}}: creating a new agent needs an administrator. Pick an existing agent instead.",
+            { member: who },
+          ),
+        );
       } else if (m.mode === "existing" && !m.agentId) {
         out.push(
           t("groupWizard.blockerMemberAgent", "{{member}}: pick an existing agent, or switch to Create New.", { member: who }),
@@ -361,6 +374,15 @@ function stepBlockers(
         );
       }
     });
+    if (!mayCreateAgents && state.moderator && needsAgentCreation(state.moderator)) {
+      out.push(
+        t(
+          "groupWizard.blockerCreateNeedsAdmin",
+          "{{member}}: creating a new agent needs an administrator. Pick an existing agent instead.",
+          { member: t("groupWizard.moderator", "Moderator") },
+        ),
+      );
+    }
     if (state.moderator && missingApiKey(state.moderator)) {
       out.push(
         t(
@@ -513,7 +535,8 @@ export function GroupWizardPage() {
     setCurrentStep(1);
   }
 
-  const blockers = step ? stepBlockers(step.id, state, availableStyles, t) : [];
+  const mayCreateAgents = useCan("setup.guided");
+  const blockers = step ? stepBlockers(step.id, state, availableStyles, t, mayCreateAgents) : [];
   const canProceed = blockers.length === 0;
 
   function handleNext() {
@@ -1893,6 +1916,7 @@ function MemberCard({
   onCreateAgent: () => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
+  const mayCreateAgents = useCan("setup.guided");
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === member.provider);
   const needsKey = providerNeedsKey(member.provider || DEFAULT_PROVIDER);
   const keyMissing = missingApiKey(member);
@@ -2070,7 +2094,7 @@ function MemberCard({
                 <button
                   onClick={() => onUpdate({ mode: "existing", agentId: "" })}
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50",
                     member.mode === "existing"
                       ? "border-primary bg-primary/5 text-primary"
                       : "border-border text-muted-foreground hover:border-primary/30"
@@ -2081,8 +2105,11 @@ function MemberCard({
                 </button>
                 <button
                   onClick={() => onUpdate({ mode: "new", agentId: "" })}
+                  disabled={!mayCreateAgents}
+                  title={mayCreateAgents ? undefined : t("groupWizard.createNewAdminOnly", "Creating a new agent needs an administrator. Use an existing agent.")}
+                  data-testid="member-create-new"
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50",
                     member.mode === "new"
                       ? `${styleColors.border} ${styleColors.bg} ${styleColors.text}`
                       : "border-border text-muted-foreground hover:border-primary/30"
@@ -2272,6 +2299,7 @@ function ModeratorCard({
   onCreateAgent: () => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
+  const mayCreateAgents = useCan("setup.guided");
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === moderator.provider);
   const needsKey = providerNeedsKey(moderator.provider || DEFAULT_PROVIDER);
   const keyMissing = missingApiKey(moderator);
@@ -2316,7 +2344,7 @@ function ModeratorCard({
         <button
           onClick={() => onChange({ mode: "existing", agentId: "" })}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+            "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50",
             moderator.mode === "existing"
               ? "border-primary bg-primary/5 text-primary"
               : "border-border text-muted-foreground hover:border-primary/30"
@@ -2327,8 +2355,11 @@ function ModeratorCard({
         </button>
         <button
           onClick={() => onChange({ mode: "new", agentId: "" })}
+          disabled={!mayCreateAgents}
+          title={mayCreateAgents ? undefined : t("groupWizard.createNewAdminOnly", "Creating a new agent needs an administrator. Use an existing agent.")}
+          data-testid="moderator-create-new"
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+            "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50",
             moderator.mode === "new"
               ? "border-primary bg-primary/5 text-primary"
               : "border-border text-muted-foreground hover:border-primary/30"

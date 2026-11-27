@@ -30,6 +30,7 @@ import {
 import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@eddi/app-kit/hooks/use-agents";
 import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@eddi/app-kit/lib/api/conversations";
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
@@ -148,7 +149,11 @@ export function ConversationsPage() {
   // Where the detail page sends its Back link: this very list, filters intact.
   const listState = { from: location.pathname + location.search };
 
-  const { data: versions } = useAgentVersions(agentFilter);
+  // The agent store (names, the filter's picker, versions) is eddi-admin / eddi-editor
+  // only; the conversation list itself admits every role. Without the capability
+  // the rows show ids and the agent filter is not offered, instead of three 403s.
+  const mayReadAgents = useCan("agents.read");
+  const { data: versions } = useAgentVersions(mayReadAgents ? agentFilter : "");
   // Dedupe by version number — one <option> per distinct version.
   const versionOptions = useMemo(
     () => (versions ? [...new Map(versions.map((v) => [v.version, v])).values()] : []),
@@ -165,7 +170,7 @@ export function ConversationsPage() {
       versionFilter
     );
   // Enough agents to name every row; the listing only carries agent ids.
-  const { data: agents = [] } = useAgentDescriptors(AGENT_NAME_LOOKUP_LIMIT);
+  const { data: agents = [] } = useAgentDescriptors(AGENT_NAME_LOOKUP_LIMIT, 0, "", mayReadAgents);
   const agentNames = useMemo(
     () => new Map(groupAgentsByName(agents).map((a) => [a.id, a.name])),
     [agents]
@@ -273,6 +278,7 @@ export function ConversationsPage() {
 
       {/* Agent + version filter row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center" data-testid="agent-filter">
+        {mayReadAgents && (
         <div className="flex items-center gap-1.5 sm:w-80">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <AgentPicker
@@ -281,6 +287,7 @@ export function ConversationsPage() {
             placeholder={t("conversations.filterByAgent", "Filter by agent")}
           />
         </div>
+        )}
         {agentFilter && versionOptions.length > 0 && (
           <select
             value={versionFilter ?? ""}

@@ -951,7 +951,8 @@
       "useDefaultKey": "Voreingestellter Schlüssel der Belegschaft",
       "useExisting": "Vorhandenen Agenten verwenden",
       "useStarterPrompt": "Start-Prompt einfügen",
-      "yourAdvisors": "Ihre Berater"
+      "yourAdvisors": "Ihre Berater",
+      "createNeedsAdmin": "Ein neuer Berater kann nur von einem Administrator erstellt werden. Nutzen Sie stattdessen einen vorhandenen Agenten."
     }
   },
   "connections": {

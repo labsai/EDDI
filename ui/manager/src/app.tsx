@@ -10,6 +10,7 @@ import { NotFoundPage } from "@eddi/app-kit/pages/not-found";
 import { lazyPage } from "@eddi/app-kit/lib/lazy-page";
 import { isUpdateUiVisible } from "@eddi/app-kit/lib/brand";
 import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { RouteGate } from "@/components/layout/route-gate";
 
 /**
  * Route components are code-split; the layouts, the landing page and the command
@@ -114,7 +115,7 @@ export function App() {
           <Route path="/" element={<Navigate to="/welcome" replace />} />
 
           {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
-          <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
+          <Route path="/manage/studio/:agentId" element={<RouteGate><AgentStudioPage /></RouteGate>} />
 
           <Route element={<AppLayout />}>
             <Route path="/manage" element={<DashboardPage />} />
