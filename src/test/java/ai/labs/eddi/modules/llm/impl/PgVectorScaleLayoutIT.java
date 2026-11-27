@@ -41,6 +41,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -246,8 +247,14 @@ class PgVectorScaleLayoutIT {
     @DisplayName("knowledge bases on one server share one connection pool")
     void poolIsShared() {
         factory.clearCache();
-        factory.getOrCreate("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()));
-        factory.getOrCreate("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()));
+        // For writing, so both stores are built: a read of an absent table returns
+        // ABSENT_TABLE after a table check, which opens a pool without building a
+        // store.
+        var first = factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()));
+        var second = factory.getOrCreateForIngestion("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()));
+        assertNotSame(EmbeddingStoreFactory.ABSENT_TABLE, first);
+        assertNotSame(EmbeddingStoreFactory.ABSENT_TABLE, second);
+        assertNotSame(first, second);
         assertEquals(1, factory.pgVectorPoolCount());
     }
 
