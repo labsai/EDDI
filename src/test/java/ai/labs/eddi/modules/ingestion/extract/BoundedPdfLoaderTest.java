@@ -11,6 +11,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
@@ -101,6 +102,71 @@ class BoundedPdfLoaderTest {
         assertTrue(refused.getMessage().contains("declares more than 50 objects"), refused.getMessage());
     }
 
+    @Test
+    @DisplayName("a rebuild refuses an object stream whose /N passes the cap before reading its header, even when the header lists one object")
+    void objectStreamDeclaringMoreThanTheCapIsRefusedBeforeItsHeaderIsRead() throws IOException {
+        // The header holds one entry, so the table never nears the cap: only the
+        // declared /N, which sizes the map PDFBox fills from the header, can refuse it.
+        byte[] pdf = objectStreamsWithoutXrefPdf(1, 200);
+
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                IOUtils.createMemoryOnlyStreamCache(), 5000, true)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+        }
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf), IOUtils.createMemoryOnlyStreamCache(),
+                        50, true));
+        assertTrue(refused.getMessage().contains("declares more than 50 objects"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("the objects object streams declare are totalled for the document: two streams of 30 pass at cap 60, fail at cap 59")
+    void objectStreamDeclarationsAreTotalledPerDocument() throws IOException {
+        byte[] pdf = objectStreamsWithoutXrefPdf(1, 30, 30);
+
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                IOUtils.createMemoryOnlyStreamCache(), 60, true)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+        }
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf), IOUtils.createMemoryOnlyStreamCache(),
+                        59, true));
+        assertTrue(refused.getMessage().contains("declares more than 59 objects"), refused.getMessage());
+    }
+
+    @ParameterizedTest(name = "lenient = {0}, indirect /N = {1}")
+    @CsvSource({"true, false", "false, false", "true, true", "false, true"})
+    @DisplayName("an ordinary file whose catalog sits in an object stream: /N 1 loads at cap 50, /N 60 is refused")
+    void objectStreamReadThroughTheCrossReferenceStreamIsCounted(boolean lenient, boolean indirect)
+            throws IOException {
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(compressedCatalogPdf(1, indirect)),
+                IOUtils.createMemoryOnlyStreamCache(), 50, lenient)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+        }
+        byte[] pdf = compressedCatalogPdf(60, indirect);
+        var refused = assertThrows(UnreadableDocumentException.class, () -> {
+            // Wherever PDFBox first reads the catalog, at load or afterwards.
+            try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                    IOUtils.createMemoryOnlyStreamCache(), 50, lenient)) {
+                new PDFTextStripper().getText(document);
+            }
+        });
+        assertTrue(refused.getMessage().contains("declares more than 50 objects"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("an object stream declaring a million objects is refused through the ingestion PDF extractor")
+    void objectStreamBombThroughTextExtractor() {
+        byte[] pdf = compressedCatalogPdf(1_000_000, false);
+        var refused = assertTimeoutPreemptively(Duration.ofSeconds(30), () -> assertThrows(
+                UnreadableDocumentException.class,
+                () -> new PdfTextExtractor().extract(pdf, ExtractionLimits.defaults())));
+        assertTrue(refused.getMessage().contains("declares more than " + BoundedPdfLoader.DEFAULT_MAX_XREF_ENTRIES
+                + " objects"), refused.getMessage());
+        assertTrue(new PdfTextExtractor().extract(compressedCatalogPdf(1, false), ExtractionLimits.defaults())
+                .contains("Hello"));
+    }
+
     /**
      * The five objects of {@link #fiveObjectPdf()} and an object stream whose
      * header lists {@code listed} object numbers, with no cross-reference table and
@@ -108,27 +174,87 @@ class BoundedPdfLoaderTest {
      * writes the stream's entries into it without going through {@code setXRef}.
      */
     static byte[] objectStreamWithoutXrefPdf(int listed) {
-        String content = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";
-        List<String> objects = List.of(
-                "<</Type/Catalog/Pages 2 0 R>>",
-                "<</Type/Pages/Kids[3 0 R]/Count 1>>",
-                "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
-                "<</Length " + content.length() + ">>stream\n" + content + "\nendstream",
-                "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>");
+        return objectStreamsWithoutXrefPdf(listed, listed);
+    }
+
+    /**
+     * Like {@link #objectStreamWithoutXrefPdf(int)}, with one object stream per
+     * element of {@code declared}: each lists {@code listed} object numbers of its
+     * own and declares that element as its {@code /N}.
+     */
+    static byte[] objectStreamsWithoutXrefPdf(int listed, int... declared) {
         var out = new ByteArrayOutputStream();
         write(out, "%PDF-1.5\n");
-        for (int i = 0; i < objects.size(); i++) {
-            write(out, (i + 1) + " 0 obj\n" + objects.get(i) + "\nendobj\n");
+        for (int i = 0; i < PAGE_OBJECTS.size(); i++) {
+            write(out, (i + 1) + " 0 obj\n" + PAGE_OBJECTS.get(i) + "\nendobj\n");
         }
-        var header = new StringBuilder();
-        for (int i = 0; i < listed; i++) {
-            header.append(100 + i).append(" 0 ");
+        for (int s = 0; s < declared.length; s++) {
+            var header = new StringBuilder();
+            for (int i = 0; i < listed; i++) {
+                header.append(100 + s * listed + i).append(" 0 ");
+            }
+            write(out, (6 + s) + " 0 obj\n<</Type/ObjStm/N " + declared[s] + "/First " + header.length() + "/Length "
+                    + header.length() + ">>stream\n" + header + "\nendstream\nendobj\n");
         }
-        write(out, "6 0 obj\n<</Type/ObjStm/N " + listed + "/First " + header.length() + "/Length " + header.length()
-                + ">>stream\n" + header + "\nendstream\nendobj\n");
-        write(out, "trailer<</Size 7/Root 1 0 R>>\n%%EOF\n");
+        write(out, "trailer<</Size " + (6 + declared.length) + "/Root 1 0 R>>\n%%EOF\n");
         return out.toByteArray();
     }
+
+    /**
+     * An intact PDF 1.5 file: the catalog is the one object of object stream 6, and
+     * a cross-reference stream says so, so PDFBox reads the object stream on its
+     * ordinary path, with no rebuild. The stream declares {@code declared} objects
+     * while its header lists only the catalog, directly or, with {@code indirectN},
+     * through object 8.
+     */
+    static byte[] compressedCatalogPdf(int declared, boolean indirectN) {
+        var out = new ByteArrayOutputStream();
+        write(out, "%PDF-1.5\n");
+        long[] offsets = new long[9];
+        for (int i = 1; i < PAGE_OBJECTS.size(); i++) {
+            offsets[i + 1] = out.size();
+            write(out, (i + 1) + " 0 obj\n" + PAGE_OBJECTS.get(i) + "\nendobj\n");
+        }
+        String header = "1 0 ";
+        String body = header + PAGE_OBJECTS.get(0);
+        String n = indirectN ? "8 0 R" : String.valueOf(declared);
+        offsets[6] = out.size();
+        write(out, "6 0 obj\n<</Type/ObjStm/N " + n + "/First " + header.length() + "/Length " + body.length()
+                + ">>stream\n" + body + "\nendstream\nendobj\n");
+        int size = indirectN ? 9 : 8;
+        if (indirectN) {
+            offsets[8] = out.size();
+            write(out, "8 0 obj\n" + declared + "\nendobj\n");
+        }
+        offsets[7] = out.size();
+        var entries = new ByteArrayOutputStream();
+        for (int i = 0; i < size; i++) {
+            if (i == 0) {
+                entries.writeBytes(new byte[]{0, 0, 0, 0, 0, (byte) 0xFF, (byte) 0xFF});
+            } else if (i == 1) {
+                entries.writeBytes(new byte[]{2, 0, 0, 0, 6, 0, 0});
+            } else {
+                long offset = offsets[i];
+                entries.writeBytes(new byte[]{1, (byte) (offset >> 24), (byte) (offset >> 16), (byte) (offset >> 8),
+                        (byte) offset, 0, 0});
+            }
+        }
+        write(out, "7 0 obj\n<</Type/XRef/Size " + size + "/W[1 4 2]/Root 1 0 R/Length " + entries.size()
+                + ">>stream\n");
+        out.writeBytes(entries.toByteArray());
+        write(out, "\nendstream\nendobj\nstartxref\n" + offsets[7] + "\n%%EOF\n");
+        return out.toByteArray();
+    }
+
+    private static final String PAGE_CONTENT = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";
+
+    /** Objects 1 to 5 of a one-page document reading "Hello". */
+    private static final List<String> PAGE_OBJECTS = List.of(
+            "<</Type/Catalog/Pages 2 0 R>>",
+            "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+            "<</Length " + PAGE_CONTENT.length() + ">>stream\n" + PAGE_CONTENT + "\nendstream",
+            "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>");
     @Test
     @DisplayName("an ordinary PDF loads under the default cap and reads as before")
     void ordinaryPdfLoads() throws IOException {

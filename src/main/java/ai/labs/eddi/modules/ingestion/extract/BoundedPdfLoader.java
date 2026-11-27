@@ -4,9 +4,16 @@
  */
 package ai.labs.eddi.modules.ingestion.extract;
 
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSDocument;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObjectKey;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.cos.ICOSParser;
 import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
+import org.apache.pdfbox.io.RandomAccessReadView;
+import org.apache.pdfbox.io.RandomAccessStreamCache;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdfparser.PDFParser;
 import org.apache.pdfbox.pdfparser.XrefTrailerResolver;
@@ -14,6 +21,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 
 import java.io.IOException;
 import java.util.AbstractMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -36,14 +44,25 @@ import java.util.Set;
  * syntax, which a separate pre-scan of the cross-reference sections could not.
  *
  * <p>
+ * Object streams are counted before their header is read. PDFBox reads the
+ * header of an object stream into a map of its own, up to the stream's
+ * {@code /N} entries, before one of them reaches the table: a lenient rebuild
+ * does so for every object stream it finds, and an ordinary file the first time
+ * it reads an object from one, keeping that stream's objects afterwards. Five
+ * million short entries decode to under 50 MB, inside the stream decode limits,
+ * yet their map takes hundreds of MB of heap. So every stream the parser reads
+ * from the file adds its {@code /N}, once per stream, to a total for the
+ * document when its decoded view is opened, which is where PDFBox's
+ * object-stream parser starts, and the document is refused once the total
+ * passes the same cap. {@code /N} is read the way PDFBox reads it, so an
+ * indirect one counts too.
+ *
+ * <p>
  * Not covered: a lenient rebuild first collects the objects it finds in maps of
  * its own, and only then passes them to the resolver, so a damaged file made of
  * many tiny {@code N 0 obj} markers is held there before the cap refuses it.
  * That costs a multiple of the file's size, not anything the file merely
- * declares, so the upload size limit bounds it. The same holds for the header
- * of an object stream, which PDFBox reads whole into a map of its own before
- * the first entry is put into the capped table: it is bounded by the decoded
- * stream, which the stream decode limits bound.
+ * declares, so the upload size limit bounds it.
  *
  * <p>
  * Every PDF EDDI reads from untrusted bytes is opened here, never with
@@ -96,13 +115,17 @@ public final class BoundedPdfLoader {
             return new BoundedParser(source, streamCache, maxXrefEntries).parse(lenient);
         } catch (XrefLimitExceeded e) {
             closeQuietly(source, e);
-            throw new UnreadableDocumentException("This PDF declares more than " + maxXrefEntries
-                    + " objects, more than one document may have. If the file is genuine, split it into smaller "
-                    + "files and upload those.", e);
+            throw tooManyObjects(maxXrefEntries, e);
         } catch (IOException | RuntimeException | Error e) {
             closeQuietly(source, e);
             throw e;
         }
+    }
+
+    private static UnreadableDocumentException tooManyObjects(long maxEntries, Throwable cause) {
+        return new UnreadableDocumentException("This PDF declares more than " + maxEntries
+                + " objects, more than one document may have. If the file is genuine, split it into smaller "
+                + "files and upload those.", cause);
     }
 
     private static void closeQuietly(RandomAccessRead source, Throwable failure) {
@@ -114,13 +137,125 @@ public final class BoundedPdfLoader {
     }
 
     /**
-     * A PDFBox parser whose cross-reference map refuses to grow past a cap.
+     * A PDFBox parser whose cross-reference map refuses to grow past a cap, and
+     * whose document counts the objects its object streams declare.
      */
     private static final class BoundedParser extends PDFParser {
         BoundedParser(RandomAccessRead source, StreamCacheCreateFunction streamCache, long maxEntries)
                 throws IOException {
-            super(source, "", null, null, streamCache);
+            // No cache function here: the document PDFParser creates with it is
+            // replaced at once, and a null function allocates no cache for it.
+            super(source, "", null, null, null);
+            document = new BoundedDocument(new CapturingCache(streamCache), this, maxEntries);
             xrefTrailerResolver = new CountingResolver(maxEntries);
+        }
+    }
+
+    /**
+     * Remembers the cache it creates, so that {@link BoundedDocument} can give its
+     * streams the one {@link COSDocument} keeps privately.
+     */
+    private static final class CapturingCache implements StreamCacheCreateFunction {
+        private final StreamCacheCreateFunction delegate;
+        private RandomAccessStreamCache created;
+
+        CapturingCache(StreamCacheCreateFunction delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public RandomAccessStreamCache create() throws IOException {
+            created = delegate.create();
+            return created;
+        }
+    }
+
+    /**
+     * The document of a bounded parse. Every stream read from the file is created
+     * here, by the main parser and by the one a lenient rebuild uses alike, which
+     * lets an object stream's {@code /N} be counted before PDFBox reads the header
+     * it sizes.
+     */
+    private static final class BoundedDocument extends COSDocument {
+        private final RandomAccessStreamCache streamCache;
+        private final ICOSParser parser;
+        private final long maxEntries;
+        private final Set<Long> counted = new HashSet<>();
+        private long declared;
+        private boolean exceeded;
+
+        BoundedDocument(CapturingCache cache, ICOSParser parser, long maxEntries) {
+            super(cache.delegate == null ? null : cache, parser);
+            this.streamCache = cache.created;
+            this.parser = parser;
+            this.maxEntries = maxEntries;
+        }
+
+        /**
+         * {@link COSDocument#createCOSStream(COSDictionary, long, long)}, creating a
+         * {@link CountedStream}.
+         */
+        @Override
+        public COSStream createCOSStream(COSDictionary dictionary, long startPosition, long streamLength)
+                throws IOException {
+            COSStream stream = new CountedStream(streamCache,
+                    parser.createRandomAccessReadView(startPosition, streamLength), this, startPosition);
+            dictionary.forEach(stream::setItem);
+            stream.setKey(dictionary.getKey());
+            return stream;
+        }
+
+        /**
+         * Adds an object stream's {@code /N} to the document's total, once per stream
+         * (a rebuild and a later read of the same object create two instances of it),
+         * and refuses the document past the cap. Any stream with a {@code /First} is
+         * taken for one: PDFBox reads whatever an entry points at as an object stream,
+         * whatever its {@code /Type}, and cannot read one without {@code /First}. Once
+         * refused, every object stream is refused, should anything inside PDFBox
+         * swallow the first refusal.
+         */
+        void charge(COSStream stream, long startPosition) {
+            if (!stream.containsKey(COSName.FIRST)) {
+                return;
+            }
+            if (exceeded) {
+                throw tooManyObjects(maxEntries, null);
+            }
+            if (!counted.add(startPosition)) {
+                return;
+            }
+            int objects = stream.getInt(COSName.N);
+            if (objects > 0) {
+                declared += objects;
+            }
+            if (declared > maxEntries) {
+                exceeded = true;
+                throw tooManyObjects(maxEntries, null);
+            }
+        }
+    }
+
+    /**
+     * A stream read from the file. PDFBox's object-stream parser reads the header
+     * from its decoded view, so the stream is counted when that view is opened,
+     * before anything is decoded. The refusal is unchecked and not an
+     * {@link IOException}, which PDFBox logs and skips around object streams.
+     */
+    private static final class CountedStream extends COSStream {
+        private final BoundedDocument document;
+        private final long startPosition;
+
+        CountedStream(RandomAccessStreamCache streamCache, RandomAccessReadView view, BoundedDocument document,
+                long startPosition) throws IOException {
+            super(streamCache, view);
+            this.document = document;
+            this.startPosition = startPosition;
+        }
+
+        @Override
+        public RandomAccessRead createView() throws IOException {
+            document.charge(this, startPosition);
+            return super.createView();
         }
     }
 

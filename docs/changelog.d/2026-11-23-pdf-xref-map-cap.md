@@ -25,6 +25,17 @@ help, because nothing is decoded.
   refuses a new key once it holds the cap (`getXrefTable()`), so a header listing millions of numbers is refused like
   any other over-cap file. `BoundedPdfLoaderTest` has a hand-written file with no `startxref` and an object stream
   listing 200 objects: refused at cap 50, loaded at cap 5000.
+- **Object-stream headers are capped before they are read.** `PDFObjectStreamParser` reads a header into a map of
+  up to `/N` entries before the first one reaches the guarded table, in a rebuild (`readObjectNumbers`) and on the
+  ordinary path (`parseAllObjects`, whose objects PDFBox then keeps). Five million short entries decode to under
+  50 MB, inside the decode budgets, but need hundreds of MB of heap. The loader now swaps the parser's `COSDocument`
+  for one that creates every stream it reads from the file as a counted stream: opening its decoded view, which is
+  where the object-stream parser starts, adds the stream's `/N` (read as PDFBox reads it, so an indirect `/N` counts)
+  to a per-document total, once per stream, and refuses the file past the same cap. Tests: an object stream declaring
+  `/N 200` whose header lists one object is refused at cap 50 and loads at 5000; two streams of `/N 30` load at cap
+  60 and are refused at 59; an intact file whose catalog sits in an object stream, read through a cross-reference
+  stream, loads with `/N 1` and is refused with `/N 60` at cap 50, strict and lenient, direct and indirect `/N`; and
+  `/N 1000000` is refused through `PdfTextExtractor` at the default cap.
 - **Both loads from a byte array use it:** `PdfTextExtractor` (document ingestion) and `AttachmentTextExtractor`, which
   `PdfReaderTool`, `readAttachment` and the attachment forwarder read through. No `Loader.loadPDF` call remains in
   `src/main/java`. The class is public because the attachment extractor is in another package.
