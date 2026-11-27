@@ -293,7 +293,7 @@ eddi_tool_costs_total{tool="weather"}       # Cost per tool
 
 ```text
 eddi_group_discussion_count_total           # Discussions started
-eddi_group_discussion_failure_count_total   # Discussions failed
+eddi_group_discussion_failure_count_total   # Rounds whose outcome is FAILED (see below), whether or not the discussion stays COMPLETED
 eddi_group_discussion_duration_seconds      # Duration (timer)
 eddi_group_cost_dollars                     # Cumulative discussion cost (gauge)
 eddi_group_cost_ceiling_hit_total           # maxCostPerDiscussion reached
@@ -305,9 +305,38 @@ eddi_group_close_count_total                # Conversations closed to further ro
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_approved_action_total{outcome}   # phase.onApproved calls: succeeded|failed|outcome_unknown|skipped
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
+eddi_group_verify_unanswered_total          # VERIFY passes whose verifier did not answer (tasks failed, not verified)
+eddi_group_discussion_unanswered_total{outcome,reason}  # Rounds that ended NO_ANSWER or FAILED, once stored (see below)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
+
+What the two round counters count. Every round of a discussion, a continuation included, ends
+with an `outcome` (`ANSWERED`, `NO_ANSWER` or `FAILED`) and a `reason`; see
+[Group Conversations](group-conversations.md).
+
+- **`eddi_group_discussion_failure_count_total`** counts each round whose outcome is `FAILED`:
+  member turns ran and none answered because they failed or timed out (`NO_MEMBER_ANSWERED`),
+  the run failed with an error (`DISCUSSION_ERROR`), or a TASK approval cycle made no progress
+  (`NO_PROGRESS`). It counts the round, not the discussion. A failed continuation of a discussion
+  that answered earlier counts, although the discussion stays `COMPLETED`. A `NO_ANSWER` round is
+  not a failure and is not counted here: members were all skipped, the synthesis did not answer,
+  or no decision was reached. A `DISCUSSION_ERROR` round is counted as soon as its error reaches
+  the failure handler, before the stored state is checked, so it is counted even when another
+  pod has already stored a cancel (for example a continuation whose configuration fails to load).
+  The exception is an error from a member turn that the run sees only after re-reading a stored
+  cancel: the run then stops as superseded and is not counted. Settled rounds and `NO_PROGRESS`
+  failures are counted only once their result is stored.
+- **`eddi_group_discussion_unanswered_total{outcome,reason}`** counts each round that ended
+  `NO_ANSWER` or `FAILED`, once that outcome is stored. A round whose result was discarded
+  because a cancel won the conditional write is not counted. This includes rounds that fail with an
+  error (`DISCUSSION_ERROR`) and no-progress failures (`NO_PROGRESS`). A result rejected at an
+  approval gate (`REJECTED_BY_HUMAN`, `APPROVAL_TIMED_OUT`) is not counted.
+- **Cut-short rounds.** `TURN_LIMIT_REACHED` and `COST_CEILING_REACHED` are never a `FAILED`
+  outcome. A cut-short round is in the unanswered meter under that reason only when it ended
+  `NO_ANSWER`. A cut-short round that still answered is in neither meter. A cut-short round
+  whose member turns ran and all failed is `FAILED` with reason `NO_MEMBER_ANSWERED`, and so it
+  is in both meters.
 
 ### Standing Team (Cadence) Metrics
 
