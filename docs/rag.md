@@ -476,7 +476,7 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
      metadata answers `501` and nothing is removed, and a retry answers the same. To change the model there,
      give the knowledge base a new, empty collection: the model is recorded per location, so the new one
      starts without a record and takes the configured model on its first write. Run its sources, then drop
-     the old collection by hand;
+     the old collection by hand once nothing else uses it;
    - *in-memory*: the store is dropped.
 
    A table that is not an EDDI pgvector table is never touched. The answer's `tableRecreated` is `true`

@@ -1212,11 +1212,13 @@ eddi_rag_vector_space_refused_total         # Retrievals, ingests and runs refus
 
 `eddi_rag_vector_space_refused_total` carries `reason` alone — `space` (another model's vectors),
 `dimension` (vectors of another size) or `maintenance` (the knowledge base is being re-embedded, or a
-re-embed of it did not finish — a count that keeps rising with no re-embed running means one has to be
-started again) —
+re-embed of it did not finish) —
 never a knowledge base, whose number is unbounded. A refusal repeats on every turn of every agent that
 uses the knowledge base, so the log line for it is written once a minute per knowledge base and the
-rate is the signal: one that does not fall means a knowledge base needs `POST /ragstore/rags/{id}/reembed`.
+rate is the signal. A `space` or `dimension` rate that does not fall means a knowledge base needs
+`POST /ragstore/rags/{id}/reembed`. For `maintenance`, check `GET /ragstore/rags/{id}/vector-space` first:
+`rebuilding: true` while a re-embed request is still running is the rebuild itself, so wait for its answer;
+`rebuilding: true` with no re-embed running means the last one did not finish, and it has to be started again.
 
 The first two carry `knowledgeBase` (the RAG configuration's name) and `source` (the
 ingestion source's name). Unchanged pages are not counted, so a scheduled re-crawl of a

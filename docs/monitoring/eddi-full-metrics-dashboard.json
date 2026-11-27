@@ -17291,7 +17291,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_rag_vector_space_refused_total` — retrievals, ingests and runs refused because the vector store holds another embedding model's vectors (`space`), vectors of another size (`dimension`), or the knowledge base is being re-embedded (`maintenance`). A rate that does not fall means a knowledge base needs POST /ragstore/rags/{id}/reembed.",
+          "description": "`eddi_rag_vector_space_refused_total` — retrievals, ingests and runs refused because the vector store holds another embedding model's vectors (`space`), vectors of another size (`dimension`), or the knowledge base is being re-embedded (`maintenance`). A `space` or `dimension` rate that does not fall means a knowledge base needs POST /ragstore/rags/{id}/reembed. For `maintenance`, check GET /ragstore/rags/{id}/vector-space first: `rebuilding: true` while a re-embed is still running is the rebuild itself; with none running, the last one did not finish and has to be started again.",
           "gridPos": {
             "h": 6,
             "w": 12,
