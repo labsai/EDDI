@@ -113,12 +113,18 @@ class HealthDirtyDaysTest {
             return null;
         });
         start.countDown();
-        for (Future<?> writer : writers) {
-            writer.get(30, TimeUnit.SECONDS);
+        try {
+            for (Future<?> writer : writers) {
+                writer.get(30, TimeUnit.SECONDS);
+            }
+            writing.set(false);
+            flusher.get(30, TimeUnit.SECONDS);
+        } finally {
+            // Also when a writer failed or timed out: never leave the flusher spinning.
+            writing.set(false);
+            pool.shutdownNow();
+            pool.awaitTermination(30, TimeUnit.SECONDS);
         }
-        writing.set(false);
-        flusher.get(30, TimeUnit.SECONDS);
-        pool.shutdown();
         dirty.flush();
         assertEquals(threads * perThread, marked.size());
         assertEquals(0, dirty.pendingCount());

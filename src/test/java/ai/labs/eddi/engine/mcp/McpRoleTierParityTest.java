@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.agenttests.IRestAgentTestRuns;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
+import ai.labs.eddi.configs.groups.IRestGroupLessons;
 import ai.labs.eddi.configs.groups.IRestGroupTemplates;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
@@ -32,6 +33,9 @@ import ai.labs.eddi.engine.hitl.oversight.rest.IRestAuditSamples;
 import ai.labs.eddi.engine.hitl.oversight.rest.IRestAutonomy;
 import ai.labs.eddi.engine.pricing.rest.IRestModelPriceCatalog;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
+import ai.labs.eddi.engine.spendcontrol.rest.IRestSpendControlChanges;
+import ai.labs.eddi.engine.tenancy.rest.IRestTenantQuota;
+import ai.labs.eddi.secrets.rest.IRestSecretStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkus.security.ForbiddenException;
@@ -44,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,6 +60,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.engine.mcp.McpRoles.ADMIN;
 import static ai.labs.eddi.engine.mcp.McpRoles.APPROVER;
@@ -61,17 +69,24 @@ import static ai.labs.eddi.engine.mcp.McpRoles.EDITOR;
 import static ai.labs.eddi.engine.mcp.McpRoles.USER;
 import static ai.labs.eddi.engine.mcp.McpRoles.VIEWER;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * The MCP role matrix, measured rather than read: every one of the 107 tools is
- * invoked with authorization on, once per single-role identity, and the test
- * records whether the role gate let the call through. The result must equal the
- * documented tier of the tool, and each tier must equal the
- * {@code @RolesAllowed} of the REST resource it mirrors.
+ * The MCP role matrix, measured rather than read: every tool is invoked with
+ * authorization on, once per single-role identity, and the test records whether
+ * the role gate let the call through. The result must equal the tool's entry in
+ * {@link McpToolTiers}, which every tool's gate reads, and each tier must equal
+ * the {@code @RolesAllowed} of the REST resource it mirrors.
+ * <p>
+ * Because the gates read {@link McpToolTiers}, "measured equals the map" alone
+ * would compare the map with itself. So the sets below are a second,
+ * hand-written record of which tool belongs to which tier, and
+ * {@link #tierMapEqualsTheHandWrittenRecord()} requires the map to equal it:
+ * moving a tool to another tier takes an edit in both places.
  * <p>
  * This replaces three divergences: MCP agent setup open to editors while REST
  * setup is admin-only, MCP deploy admin-only while REST deploy admits editors,
@@ -87,7 +102,9 @@ class McpRoleTierParityTest {
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
             McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class, McpHealthTools.class};
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class, McpVersionTools.class,
+            McpHealthTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -101,11 +118,17 @@ class McpRoleTierParityTest {
     private static final Set<String> ADMIN_ONLY_TOOLS = Set.of("setup_agent", "create_api_agent", "create_schedule", "list_schedules",
             "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule", "upsert_user_memory", "delete_user_memory",
             "delete_all_user_memories", "delete_user_data", "export_user_data",
-            // unscoped: the shared server log buffer (see readAgentLogsScoping)
-            "read_agent_logs",
+            // the running build (McpVersionTools)
+            "get_eddi_version",
             // a team's cap is a spending lever (IRestGroupBudget#setCurrentMonthCap,
             // IRestTeamBudgets#transfer)
-            "adjust_team_budget", "transfer_team_budget");
+            "adjust_team_budget", "transfer_team_budget",
+            // spending controls: the quota resource and the catalog write are
+            // admin-only; a loosening write only files a proposal an admin approves
+            "read_tenant_quota", "update_model_prices", "update_tenant_quota", "list_spend_control_changes",
+            "withdraw_spend_control_change",
+            // vault key names (IRestSecretStore is admin-only)
+            "list_vault_keys");
 
     private static final Set<String> CONVERSE_TOOLS = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
             "read_conversation", "read_conversation_log", "list_conversations", "discover_agents",
@@ -117,10 +140,22 @@ class McpRoleTierParityTest {
     /**
      * Conversation diagnostics: admin plus the MCP observer role. Their REST
      * counterparts (audit, logs) are admin-only; see {@link McpRoles#OBSERVE}.
-     * read_agent_logs is listed under ADMIN_ONLY_TOOLS because the measured call
-     * passes no conversationId; readAgentLogsScoping covers the scoped read.
+     * read_agent_logs is here under the union of its tiers; see
+     * {@link #MEASURED_WITHOUT_ARGUMENTS}.
      */
-    private static final Set<String> OBSERVE_TOOLS = Set.of("read_audit_trail");
+    private static final Set<String> OBSERVE_TOOLS = Set.of("read_agent_logs", "read_audit_trail");
+
+    /**
+     * Tools whose tier depends on their arguments. {@link McpToolTiers} lists them
+     * under the union of their tiers, but the matrix calls every tool with null
+     * arguments, which takes the narrowest branch. The value is the tier that
+     * branch admits; a dedicated test covers the other branch.
+     * <p>
+     * read_agent_logs without a conversationId reads the shared server log buffer,
+     * which is admin-only; readAgentLogsScoping covers the conversation-scoped
+     * read.
+     */
+    private static final Map<String, List<String>> MEASURED_WITHOUT_ARGUMENTS = Map.of("read_agent_logs", McpRoles.ADMIN_ONLY);
 
     private static final Set<String> DOCS_TOOLS = Set.of("list_docs", "read_docs");
 
@@ -136,9 +171,51 @@ class McpRoleTierParityTest {
             "list_agent_health_sessions", "suggest_outcome_mappings");
 
     /**
-     * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
-     * configuration.
+     * Authoring: McpAdminTools minus schedules, config reads, group configuration,
+     * and the authoring tools of the smaller classes. Listed explicitly, not as a
+     * fall-through: a tool that is in no set has no expected tier, so a new tool
+     * filed under AUTHOR in McpToolTiers cannot pass without an entry here.
      */
+    private static final Set<String> AUTHOR_TOOLS = Set.of(
+            // McpConversationTools: config reads
+            "list_agents", "list_agent_configs", "get_agent",
+            // McpAdminTools
+            "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent",
+            "delete_agent", "update_agent", "read_workflow", "read_resource", "update_resource", "create_resource", "delete_resource",
+            "apply_agent_changes", "list_agent_resources", "list_agent_triggers", "create_agent_trigger", "update_agent_trigger",
+            "delete_agent_trigger", "list_channel_integrations", "read_channel_integration", "create_channel_integration",
+            "update_channel_integration", "delete_channel_integration",
+            // McpGroupTools
+            "list_groups", "read_group", "create_group", "update_group", "delete_group", "add_team_task", "list_team_backlog",
+            "list_group_templates", "create_group_from_template",
+            // McpTeamHandoffTools, McpTeamCadenceTools
+            "list_team_handoffs", "accept_team_handoff", "decline_team_handoff", "list_team_cadences", "create_team_cadence",
+            "delete_team_cadence", "read_lesson_consolidation", "schedule_lesson_consolidation", "unschedule_lesson_consolidation",
+            // McpAgentTestTools, McpRatingTools, McpAlertTools, McpPricingTools
+            "run_agent_tests", "get_agent_test_run", "list_agent_test_runs", "cancel_agent_test_run", "list_conversation_ratings",
+            "summarize_conversation_ratings", "count_ratings_needing_attention", "review_conversation_rating", "list_alert_events",
+            "acknowledge_alert_event", "read_model_prices");
+
+    private static final Map<List<String>, Set<String>> RECORD = recordByTier();
+
+    private static Map<List<String>, Set<String>> recordByTier() {
+        Map<List<String>, Set<String>> record = new LinkedHashMap<>();
+        // HEALTH_READ and BUDGET_READ are equal role lists, so equal keys: merge,
+        // never overwrite, or one tier's tools would vanish from the record.
+        List.of(Map.entry(McpRoles.HITL, HITL_TOOLS), Map.entry(McpRoles.ADMIN_ONLY, ADMIN_ONLY_TOOLS),
+                Map.entry(McpRoles.CONVERSE, CONVERSE_TOOLS), Map.entry(McpRoles.OBSERVE, OBSERVE_TOOLS),
+                Map.entry(McpRoles.DOCS, DOCS_TOOLS), Map.entry(McpRoles.OVERSIGHT, OVERSIGHT_TOOLS),
+                Map.entry(McpRoles.BUDGET_READ, BUDGET_READ_TOOLS), Map.entry(McpRoles.HEALTH_READ, HEALTH_READ_TOOLS),
+                Map.entry(McpRoles.AUTHOR, AUTHOR_TOOLS))
+                .forEach(e -> record.merge(e.getKey(), e.getValue(), (a, b) -> {
+                    Set<String> union = new TreeSet<>(a);
+                    union.addAll(b);
+                    return union;
+                }));
+        return record;
+    }
+
+    /** The hand-written tier of {@code tool}, or null when the record has none. */
     private static List<String> expectedTier(String tool) {
         if (HITL_TOOLS.contains(tool)) {
             return McpRoles.HITL;
@@ -164,7 +241,10 @@ class McpRoleTierParityTest {
         if (HEALTH_READ_TOOLS.contains(tool)) {
             return McpRoles.HEALTH_READ;
         }
-        return McpRoles.AUTHOR;
+        if (AUTHOR_TOOLS.contains(tool)) {
+            return McpRoles.AUTHOR;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ harness
@@ -204,6 +284,11 @@ class McpRoleTierParityTest {
      * ForbiddenException whose message names the roles; anything else — a result, a
      * validation error, an exception from a mocked collaborator — means the call
      * got past the gate.
+     * <p>
+     * A broken tier lookup is neither, so it is rethrown: a gate naming a tool
+     * without a tier, or an McpToolTiers that failed to initialise, would otherwise
+     * read as "every role admitted" and send whoever reads the failure after a
+     * security regression that is not there.
      */
     private static boolean admitted(Object tools, Method tool, Object[] args) throws Exception {
         try {
@@ -211,6 +296,11 @@ class McpRoleTierParityTest {
             return true;
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
+            if (cause instanceof ExceptionInInitializerError || cause instanceof NoClassDefFoundError
+                    || (cause instanceof IllegalArgumentException && cause.getMessage() != null
+                            && cause.getMessage().startsWith("No MCP role tier"))) {
+                throw new AssertionError("the tier lookup itself failed in " + tool.getName(), cause);
+            }
             return !(cause instanceof ForbiddenException && cause.getMessage() != null && cause.getMessage().contains("requires"));
         }
     }
@@ -241,16 +331,143 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(112, measured.size());
+        assertEquals(McpToolTiers.TIERS.keySet(), measured.keySet(), "the measured tools are exactly the tools with a tier");
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
-            Set<String> expected = new HashSet<>(expectedTier(entry.getKey()));
+            Set<String> expected = new HashSet<>(
+                    MEASURED_WITHOUT_ARGUMENTS.getOrDefault(entry.getKey(), McpToolTiers.of(entry.getKey())));
             if (!expected.equals(entry.getValue())) {
                 violations.add(entry.getKey() + ": admitted " + new TreeSet<>(entry.getValue()) + ", expected " + new TreeSet<>(expected));
             }
         }
         assertTrue(violations.isEmpty(), String.join("\n", violations));
+    }
+
+    @Test
+    @DisplayName("McpToolTiers equals the hand-written tier record — a tier change needs both edits")
+    void tierMapEqualsTheHandWrittenRecord() {
+        var violations = new ArrayList<String>();
+        for (var entry : McpToolTiers.TIERS.entrySet()) {
+            List<String> recorded = expectedTier(entry.getKey());
+            if (recorded == null) {
+                violations.add(entry.getKey() + ": has a tier in McpToolTiers but none in this test's record");
+            } else if (!new HashSet<>(recorded).equals(new HashSet<>(entry.getValue()))) {
+                violations.add(entry.getKey() + ": McpToolTiers says " + new TreeSet<>(entry.getValue()) + ", the record says "
+                        + new TreeSet<>(recorded));
+            }
+        }
+        assertTrue(violations.isEmpty(), String.join("\n", violations));
+
+        // The record names every tool exactly once, and only real tools
+        var named = new TreeSet<String>();
+        var duplicates = new TreeSet<String>();
+        for (Set<String> set : RECORD.values()) {
+            for (String tool : set) {
+                if (!named.add(tool)) {
+                    duplicates.add(tool);
+                }
+            }
+        }
+        assertEquals(Set.of(), duplicates, "names in more than one tier of the record");
+        assertEquals(new TreeSet<>(McpToolTiers.TIERS.keySet()), named, "the record and McpToolTiers must name the same tools");
+    }
+
+    /**
+     * Tools whose gate sits inside an audit try block, after the outcome variable.
+     */
+    private static final Set<String> GATE_NOT_FIRST_STATEMENT = Set.of("delete_user_data", "export_user_data");
+
+    /**
+     * Each gate reads its own tool's tier. Nothing else would notice a gate in
+     * deploy_agent that reads {@code McpToolTiers.of("undeploy_agent")} while both
+     * happen to share a tier, so the sources are scanned: every
+     * {@code McpToolTiers.of("x")} must sit in the body of the {@code @Tool} named
+     * x, and every tool must have exactly one.
+     */
+    @Test
+    @DisplayName("every tool's gate reads its own tool name — once")
+    void eachGateNamesItsOwnTool() throws Exception {
+        // The gate is a statement of its own; a mention in a comment or string is not
+        Pattern gateStatement = Pattern.compile("(?m)^\\s*requireAnyRole\\(identity, authEnabled, McpToolTiers\\.of\\(\"([a-z_]+)\"\\)\\);");
+        Pattern anyLookup = Pattern.compile("McpToolTiers\\.of\\(");
+        Pattern explicitName = Pattern.compile("^@Tool\\((?:[^()]|\\([^()]*\\))*?\\bname\\s*=\\s*\"([a-z_]+)\"", Pattern.DOTALL);
+        Pattern signature = Pattern.compile("public\\s+[\\w<>\\[\\], ?]+\\s+(\\w+)\\s*\\(");
+        var violations = new ArrayList<String>();
+        var gatesPerTool = new TreeMap<String, Integer>();
+        for (Class<?> toolClass : TOOL_CLASSES) {
+            String src = Files.readString(Path.of("src/main/java", toolClass.getName().replace('.', '/') + ".java")).replace("\r\n", "\n");
+            int lookupsInFile = 0;
+            for (Matcher any = anyLookup.matcher(src); any.find();) {
+                lookupsInFile++;
+            }
+            int gatesInToolBodies = 0;
+            Matcher tool = Pattern.compile("@Tool\\(").matcher(src);
+            while (tool.find()) {
+                String fromAnnotation = src.substring(tool.start());
+                Matcher sig = signature.matcher(fromAnnotation);
+                assertTrue(sig.find(), "no method after an @Tool in " + toolClass.getSimpleName());
+                Matcher named = explicitName.matcher(fromAnnotation.substring(0, sig.start()));
+                String name = named.find() ? named.group(1) : sig.group(1);
+                // The method body: from its signature to its closing brace, which the
+                // project formatter puts alone on a line at member indentation
+                int bodyEnd = fromAnnotation.indexOf("\n    }\n", sig.start());
+                assertTrue(bodyEnd > 0, "no closing brace for " + name);
+                String body = fromAnnotation.substring(sig.start(), bodyEnd);
+                // The gate must be the first statement, so that no argument handling or side
+                // effect runs before the role is checked. The GDPR tools open with the audit
+                // outcome variable and a try block, so they are the only named exceptions.
+                int open = body.indexOf("{\n");
+                assertTrue(open > 0, "no opening brace for " + name);
+                String firstStatement = body.substring(open + 2).stripLeading();
+                // Leading line comments are not statements
+                while (firstStatement.startsWith("//")) {
+                    int eol = firstStatement.indexOf('\n');
+                    firstStatement = eol < 0 ? "" : firstStatement.substring(eol + 1).stripLeading();
+                }
+                if (!GATE_NOT_FIRST_STATEMENT.contains(name)
+                        && !firstStatement.startsWith("requireAnyRole(identity, authEnabled, McpToolTiers.of(\"" + name + "\"));")) {
+                    violations.add(name + " does not start with its gate");
+                }
+                Matcher gate = gateStatement.matcher(body);
+                int count = 0;
+                while (gate.find()) {
+                    count++;
+                    if (!gate.group(1).equals(name)) {
+                        violations.add(name + " reads the tier of " + gate.group(1));
+                    }
+                }
+                gatesInToolBodies += count;
+                gatesPerTool.merge(name, count, Integer::sum);
+            }
+            if (lookupsInFile != gatesInToolBodies) {
+                violations.add(toolClass.getSimpleName() + " has " + (lookupsInFile - gatesInToolBodies)
+                        + " McpToolTiers.of(…) outside a tool's own gate statement (a helper, comment or second lookup)");
+            }
+        }
+        assertEquals(McpToolTiers.TIERS.keySet(), gatesPerTool.keySet(), "the scan must see every tool");
+        gatesPerTool.forEach((name, count) -> {
+            if (count != 1) {
+                violations.add(name + " has " + count + " McpToolTiers gates, expected 1");
+            }
+        });
+        assertTrue(violations.isEmpty(), String.join("\n", violations));
+    }
+
+    @Test
+    @DisplayName("an unknown tool name has no tier, so its gate fails closed")
+    void unknownToolHasNoTier() {
+        assertThrows(IllegalArgumentException.class, () -> McpToolTiers.of("no_such_tool"));
+    }
+
+    @Test
+    @DisplayName("a tool listed in two tiers is refused when the map is built")
+    void duplicateToolIsRefused() {
+        Map<String, List<String>> tiers = new LinkedHashMap<>();
+        McpToolTiers.put(tiers, McpRoles.CONVERSE, "some_tool");
+        var e = assertThrows(IllegalStateException.class, () -> McpToolTiers.put(tiers, McpRoles.AUTHOR, "some_tool"));
+        assertTrue(e.getMessage().contains("some_tool"), e.getMessage());
+        assertEquals(McpRoles.CONVERSE, tiers.get("some_tool"), "the first assignment stands");
     }
 
     @Test
@@ -330,6 +547,10 @@ class McpRoleTierParityTest {
         mirrors.put(IRestConversationRatingAdmin.class, McpRoles.AUTHOR); // *_conversation_ratings, review_conversation_rating
         mirrors.put(IRestAlertEvents.class, McpRoles.AUTHOR); // list_alert_events, acknowledge_alert_event
         mirrors.put(IRestTeamHandoffs.class, McpRoles.AUTHOR); // list/accept/decline_team_handoff
+        mirrors.put(IRestGroupLessons.class, McpRoles.AUTHOR); // *_lesson_consolidation
+        mirrors.put(IRestTenantQuota.class, McpRoles.ADMIN_ONLY); // read_tenant_quota, update_tenant_quota
+        mirrors.put(IRestSpendControlChanges.class, McpRoles.ADMIN_ONLY); // list/withdraw_spend_control_change
+        mirrors.put(IRestSecretStore.class, McpRoles.ADMIN_ONLY); // list_vault_keys
         mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
         mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
         mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
@@ -377,7 +598,8 @@ class McpRoleTierParityTest {
                 new MethodTier(IRestGroupBudget.class, "readHistory", McpRoles.BUDGET_READ),
                 new MethodTier(IRestTeamBudgets.class, "listBudgets", McpRoles.BUDGET_READ), // list_team_budgets
                 new MethodTier(IRestGroupBudget.class, "setCurrentMonthCap", McpRoles.ADMIN_ONLY), // adjust_team_budget
-                new MethodTier(IRestTeamBudgets.class, "transfer", McpRoles.ADMIN_ONLY))) { // transfer_team_budget
+                new MethodTier(IRestTeamBudgets.class, "transfer", McpRoles.ADMIN_ONLY), // transfer_team_budget
+                new MethodTier(IRestModelPriceCatalog.class, "replaceCatalog", McpRoles.ADMIN_ONLY))) { // update_model_prices
             Method rest = Arrays.stream(mt.rest().getMethods()).filter(x -> x.getName().equals(mt.method())).findFirst().orElseThrow();
             RolesAllowed annotation = rest.getAnnotation(RolesAllowed.class);
             assertTrue(annotation != null, mt.method() + " carries no @RolesAllowed of its own");

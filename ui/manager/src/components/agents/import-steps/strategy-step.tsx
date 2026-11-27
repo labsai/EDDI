@@ -8,7 +8,7 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 
 type Strategy = "create" | "merge" | "upgrade" | "sync";
 

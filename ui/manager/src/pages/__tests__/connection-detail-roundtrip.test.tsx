@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ConnectionDetailPage } from "@/pages/connection-detail";
-import { toStoredConnection, type ConnectionConfiguration } from "@/lib/api/connections";
-import { validateConnection } from "@/lib/connection-validation";
+import { toStoredConnection, type ConnectionConfiguration } from "@eddi/app-kit/lib/api/connections";
+import { validateConnection } from "@eddi/app-kit/lib/connection-validation";
 
 /**
  * Every backend-valid connection shape, through the editor and back.

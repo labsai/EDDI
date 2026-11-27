@@ -4,10 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { AgentDetailPage } from "@/pages/agent-detail";
-import type { Agent } from "@/lib/api/agents";
-import { server } from "@/test/mocks/server";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 vi.mock("sonner", async () => {
   const actual = await vi.importActual<typeof import("sonner")>("sonner");

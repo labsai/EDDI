@@ -2,7 +2,7 @@
 
 > The token hand-off protocol and `eddi.chat.img-sources` are newer than 6.5.0. Under 6.5.0 a framed widget with authentication on could not start a conversation, and agent output images from other hosts were blocked.
 
-EDDI serves a chat widget at `/chat`. Another site can show it in an `<iframe>`. This page is the contract between that host page and the widget: who may frame it, how a signed-in user's token gets into it with authentication on, and which images it may load.
+EDDI serves a chat widget at `/chat`. Another site can show it in an `<iframe>`, or add one `<script>` tag and get a floating chat button that opens it ([section 6](#6-the-launcher-chatembedjs)). This page is the contract between that host page and the widget: who may frame it, how a signed-in user's token gets into it with authentication on, and which images it may load.
 
 ## 1. Allow the host page to frame `/chat`
 
@@ -26,6 +26,10 @@ This is the operator's allow-list, and the browser enforces it before the widget
 The display parameters (`theme`, `title`, `hideUndo`, the colour parameters) are listed in the [Chat UI README](../ui/chat/README.md). `theme` accepts only `dark`, `light` or `system`. Every colour parameter must be a plain colour: hex, `rgb()`/`hsl()` with numeric arguments, or a named colour. `fontFamily` must be a plain font list. The widget ignores any other value and logs a warning in the console.
 
 These parameters beat the deployment's [brand](white-labeling.md#the-chat-ui): with a brand set, the widget's default title, logo and accent come from it, and a `title` or `accentColor` parameter still overrides them.
+
+Each colour parameter sets one or more `--chat-*` CSS variables (`bgColor` → `--chat-bg`, `accentColor` → `--chat-accent`, the user bubble and the focus ring, …). Those names are stable: since the shared design tokens arrived, the ones with a shared meaning are declared as aliases of them (`--chat-bg` is `var(--color-background)`), and setting the `--chat-*` name still wins, so an existing link renders as it did. The table is `CHAT_TOKEN_ALIASES` in [`ui/packages/ui/src/chat-aliases.ts`](../ui/packages/ui/src/chat-aliases.ts).
+
+`lang` picks the widget's language — any of the eleven the Manager ships (`en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`); without it the browser's languages decide, falling back to English. `lang=ar` lays the widget out right to left. Only the widget's own text is translated, never the agent's.
 
 ## 2. Hand the widget a token (authentication on)
 
@@ -103,8 +107,98 @@ Under the widget's original policy, `img-src 'self' data: blob:`, the browser re
 
 What the widget shows for an agent — display name, avatar, accent colour, conversation starters — and which controls it offers (undo, redo, attachments, rating, quick replies, streaming, HTML in replies) are set on the agent, in `appearance` and `conversationControls` ([agent-config-authoring.md](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)). `GET /agents/{agentId}/profile` serves both, for the deployed version, to anyone who may use the agent, so an embedding needs no extra parameters for them. The URL colour parameters and `/branding/brand.css` keep working as before; they style the deployment, `appearance` styles one agent.
 
+## 5. What the widget does during a reply
+
+Nothing here needs configuring; it is listed so an embedder knows what users see.
+
+- **Stop** (the square button, or **Esc** inside the widget) aborts the stream and calls `POST /agents/{conversationId}/cancel`. That stops a running turn only on the node running it ([HITL](hitl.md)), so the widget reads the conversation again shortly after: when the turn ran on, a line in the conversation says so and shows the reply in full.
+- When the stream drops mid-reply, the widget says it is reconnecting and re-reads the conversation for about half a minute; a turn that finished on the server meanwhile is shown in place of the partial reply.
+- Code blocks name their language, and a block marked `mermaid` is drawn as a diagram by Mermaid (`securityLevel: "strict"`). Mermaid, like KaTeX and highlight.js, is a separate chunk under `/scripts/js/`, loaded only when a reply needs it: the widget's first load is unchanged. The paused-turn and rating cards load the same way, the first time they are shown. All of them are same-origin scripts, so `script-src 'self'` covers them.
+
+## 6. The launcher (`/chat/embed.js`)
+
+Instead of placing an iframe yourself, add one script tag. It draws a floating button in a corner of your page; the button opens the agent's widget in a panel, and closes it again.
+
+```html
+<script
+  src="https://eddi.example.com/chat/embed.js"
+  data-agent-id="<agentId>"
+  defer
+></script>
+```
+
+The panel is the same `/chat` widget in an iframe, so everything above still applies. In particular, **list your page's origin in `eddi.chat.frame-ancestors`** ([section 1](#1-allow-the-host-page-to-frame-chat)); otherwise the button appears but the browser refuses to show the panel. The agent must be deployed to the environment the launcher names.
+
+### Settings
+
+All settings are `data-` attributes on the script tag. Only `data-agent-id` is required.
+
+| Attribute | Default | What it does |
+| --- | --- | --- |
+| `data-agent-id` | — | The agent to chat with. Letters, digits, `.`, `_` and `-` only. Without a usable value, the launcher draws nothing and logs a console warning |
+| `data-environment` | `production` | The environment the agent is deployed to, for example `test` |
+| `data-position` | `bottom-right` | `bottom-right` or `bottom-left` |
+| `data-color` | blue | The button's and the panel header's colour; it is also passed to the widget as `accentColor`. Only a plain colour is accepted (hex, `rgb()`/`hsl()` with numbers, or a named colour), by the same rule as the widget's colour parameters; anything else is ignored with a console warning |
+| `data-label` | per locale | The button's text and the panel's accessible name, at most 60 characters. Without it the launcher uses a built-in word for "Chat" in the widget's eleven languages, picked from `data-lang`, then your page's `<html lang>`, then the browser |
+| `data-open` | off | `"true"` opens the panel when the page loads, without moving focus into it. On a narrow screen (480 px or less), where the panel covers the page, it stays closed until the person taps the button |
+| `data-lang` | — | Passed to the widget as `lang` (any of its eleven languages) |
+| `data-theme` | — | Passed to the widget as `theme`: `light`, `dark` or `system` |
+| `data-token-provider` | — | The name of a function on your page that returns an access token, or a promise of one. Only needed with authentication on; see below |
+
+The launcher also puts one object on your page, `window.EddiChat`, with `open()`, `close()`, `toggle()` and `setTokenProvider(fn)`. Including the script twice draws one button.
+
+### With authentication on
+
+The launcher relays the widget's own token hand-off ([section 2](#2-hand-the-widget-a-token-authentication-on)), so your page does not need to write the message listener itself. Give it a function that returns a fresh access token:
+
+```html
+<script>
+  // Your application's: for keycloak-js, something like this.
+  async function getEddiToken() {
+    await keycloak.updateToken(30);
+    return keycloak.token;
+  }
+</script>
+<script
+  src="https://eddi.example.com/chat/embed.js"
+  data-agent-id="<agentId>"
+  data-token-provider="getEddiToken"
+  defer
+></script>
+```
+
+Or call `window.EddiChat.setTokenProvider(fn)` before the panel is first opened. With a provider, the launcher frames the widget with `?tokenOrigin=<your page's origin>` and answers its `eddi-chat-ready` and `eddi-chat-token-request` messages with your token. Without one, it leaves `tokenOrigin` off, since the widget would otherwise wait five seconds for a token that never comes, and the widget chats anonymously, as an agent that allows it permits.
+
+What the launcher enforces:
+
+- **Exact origins.** A message is answered only when it comes from the launcher's own iframe (`event.source`) and from the EDDI origin the script was loaded from (`event.origin`). The token is posted to that exact origin, never to `"*"`. A message of any other type, or from any other window or origin, is ignored.
+- **Nothing read from your page.** The launcher never reads your cookies, `localStorage` or `sessionStorage`, never uses `eval`, `new Function` or `innerHTML`, and keeps the token only as long as it takes to post it. Its button and panel live in a shadow root, so your page's styles do not reach them and theirs do not reach your page.
+- **Plausible tokens only.** A value that is not printable ASCII without whitespace, at most 16 KB, is not sent.
+
+### Your page's Content Security Policy
+
+If your page sends a CSP, allow the EDDI origin for the script and for the frame:
+
+```text
+script-src 'self' https://eddi.example.com;
+frame-src  https://eddi.example.com;
+```
+
+The launcher's styles are inside its shadow root as a `<style>` element, so a page whose `style-src` forbids inline styles must allow `'unsafe-inline'` for them. The script is a fixed URL, not content-hashed, so it cannot carry a Subresource Integrity hash that would survive an EDDI upgrade. EDDI serves it with `Cache-Control: public, max-age=3600`, so an upgrade reaches your page within an hour. A jar built with `-DskipUi=true` answers `/chat/embed.js` with 404.
+
+### Accessibility
+
+- The button is a real `<button>` with a visible label, `aria-expanded` and `aria-controls`.
+- The panel is a labelled dialog (`role="dialog"`). When the person opens it, focus moves to the panel; **Tab** cycles through the close button and the conversation without leaving the panel; **Esc** on the panel, or the close button (named "Close chat" in the page's language), closes it and puts focus back on the button. Inside the conversation, Esc keeps its widget meaning and stops a running reply; press Shift+Tab to reach the close button, then Esc.
+- On a screen 480 px wide or less, the panel fills the screen and respects the safe areas of a notched phone.
+- The opening animation runs only under `prefers-reduced-motion: no-preference`.
+
 ## Upgrading: HTML in replies is off by default
 
-`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until now the widget rendered HTML for every agent; the Manager never did.
+`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until 6.7.0 the widget rendered HTML for every agent; the Manager never did.
 
-The profile reports the setting from 6.7.0 on. The widget follows it from the release that ships its side of the change (the frontend unification plan, decision D9), and until then keeps rendering HTML, so nothing changes before agents can opt in. **If an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it now**; otherwise, once the widget follows the setting, its replies show the markup as text. Agents whose replies are plain text or markdown need nothing.
+**From 6.7.0 the widget follows the setting** (decision D9 of the frontend unification plan): it reads `conversationControls` from `GET /agents/{agentId}/profile` and renders HTML only for an agent that sets `"rawHtml": true`. For every other agent — and for a profile that reports no controls — `<b>bold</b>` in a reply appears as the literal text `<b>bold</b>`, while markdown (`**bold**`) renders as before. No image in model text loads either way: a markdown image becomes a link, and a raw `<img>` is text, or a link for an agent with `rawHtml` ([section 3](#3-images-in-agent-output)).
+
+**What to do when upgrading:** if an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it and deploy the new version. Agents whose replies are plain text or markdown need nothing. The HTML parser stays a separate chunk, loaded only when a reply of such an agent contains HTML.
+
+The other switches are honoured too: an agent with `undo`, `redo`, `attachments`, `quickReplies` or `rating` set to `false` gets no such control in the widget, and `streaming: false` sends its turns without streaming. The `hide*` URL parameters still hide a control for every agent; the agent's switch can only take one away, never bring back one the URL hid.

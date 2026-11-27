@@ -47,14 +47,19 @@ executionId)`; an execution id belongs to one step — never by increment:
 - a **say after an undo** runs on a new step at the same index with a new id. The
   undone executions are listed on the new step (`health:discarded_executions`),
   and their rows are marked `discarded` — they really ran and really spent, but a
-  later execution replaced them. Spend therefore matches the conversation's own
-  total: the sum of `costUsd` over all rows equals the sum of
-  `costUsd + discardedCostUsd` over the rows that are not discarded;
-- **`day` and `timestamp` are first-recorded**: a turn paused on one day and
-  resumed on the next stays on the day it started, so it is never counted on two
-  days. The rest of the row is replaced by the resume — its cost, tokens,
-  `paused`, outcome — so a rollup of the day it started has to be recomputed
-  (H2b marks that day dirty). `updatedAt` is when the row was last **captured** (on the turn's thread, before it is queued), not when it reached the store;
+  later execution replaced them. When every turn is recorded and every discard
+  is tracked, spend matches the conversation's own total: the sum of `costUsd`
+  over all rows equals the sum of `costUsd + discardedCostUsd` over the rows that
+  are not discarded. A missing row breaks the equality — a dropped row (see
+  `eddi_health_dropped_total`) or a turn whose discards were withheld leaves
+  one side short;
+- **`day` and `timestamp` are first-recorded**: they are the time the turn was
+  first **captured**, when it finished — not when it started, so a turn that
+  starts before midnight and finishes after it is on the second day. A turn
+  paused on one day and resumed on the next stays on the day it was first
+  recorded, so it is never counted on two days. The rest of the row is replaced
+  by the resume — its cost, tokens, `paused`, outcome — so a rollup of that day
+  has to be recomputed (H2b marks that day dirty). `updatedAt` is when the row was last **captured** (on the turn's thread, before it is queued), not when it reached the store;
 - **the newest capture wins**: a write whose `updatedAt` is older than the stored
   row's is ignored, so a stale paused row delayed in one node's queue cannot
   overwrite the finished row another node wrote (ordering is by the writing
@@ -69,7 +74,13 @@ executionId)`; an execution id belongs to one step — never by increment:
   rerun or resume leaves the stored step as it was — and it discards nothing: a
   cancelled say after an undo leaves the undone step in the redo cache. A turn
   abandoned before its step was stamped gets a fresh id, so repeated timeouts at
-  the same step are separate rows.
+  the same step are separate rows;
+- **a turn that failed before its snapshot was stored marks nothing discarded**:
+  its row is written as failed, replacing the row of its execution (a failed
+  resume or rerun keeps the step's id, so the paused or earlier row does not
+  stand), but the conversation still holds the executions its step lists, so
+  none of them is marked. A turn that failed after its snapshot was stored
+  applies its discards as usual.
 
 Health is **derived and not billing-grade**: quotas and cost ceilings stay the
 authoritative counters, and a dropped row is a gap in a chart, nothing more.
@@ -119,7 +130,15 @@ sub-agent conversation started from a tool (which records its own) — and the
 circuit breaker's refusals (the model was never called). The streaming path's
 own retries of an empty timed-out or failed stream are recorded like any other
 same-model retry (`TIMEOUT` for a timeout, the provider error's class
-otherwise).
+otherwise). A stream whose last attempt timed out with no text is recorded as a
+`TIMEOUT` itself — `fallback` when `onError: fallback` or a `fallback`
+validation action served the answer, else `none`. In a cascade only the last
+step streams: when it times out with no earlier answer to serve, the steps
+the cascade escalated past take the same outcome, and when its timeout serves an
+earlier step's answer instead, it is recorded as `cascade`. A stream that timed out after some text keeps that
+text and records no failure (only `streamingTimeout` and the
+`streaming_timeout_partial` warning). A HITL revision whose model call fails
+records the failure with `none`: the rejection then applies as is.
 
 ### Origins
 
@@ -177,16 +196,18 @@ They are recomputed, never incremented:
    days are read just before the delete). When those days cannot be read, the
    delete still goes ahead and **every retained day** of the conversation's
    agent is marked instead, with a WARN — the agent comes from the
-   conversation (purge), the row (the recorder's clean-up) or the sweep's
-   candidate read. A purge that can read neither the agent nor the days
+   conversation (purge, and a pending removal's retry while the conversation
+   still exists), the row (the recorder's clean-up, which also reads the day the
+   row is stored on just before deleting it) or the sweep's candidate read. A purge that can read neither the agent nor the days
    (MongoDB only, since PostgreSQL returns the days with the delete) **keeps** the
    rows, with a WARN. The next orphan sweep then deletes them and marks their
    agent's days, because its candidate read names the agent. Kept rows
    captured within `eddi.health.orphan-sweep-window` are removed by that sweep;
    older ones expire with `eddi.health.facts-retention`. An erasure deletes the
-   user's rows the same way; its fallback is the agents of the user's
-   conversations, noted at the erasure's first step while those conversations
-   still exist (see [GDPR](#gdpr)). Daily rows older than
+   user's rows the same way, but has no agent fallback: the rows of the user's
+   own conversations are erased first, in the cascade's conversation step, with
+   each conversation's agent known; for rows left after that whose days cannot
+   be read, nothing is re-rolled (a WARN; see [GDPR](#gdpr)). Daily rows older than
    `eddi.health.facts-retention` cannot be recomputed at all (see below).
    These marks are written to the store at once, not on the five-second flush,
    because the self-heal cannot find a deleted row; a failed write is retried
@@ -251,7 +272,10 @@ schedule at the next start.
 `dataThrough` in a report is the day before the earliest day of the agent that
 has waited for the rollup longer than one rollup interval, else today: a day
 marked a moment ago is waiting for the next pass, not behind. **Today's numbers
-may lag by up to one rollup interval.** Daily rows are kept
+normally trail by about one rollup interval** — that is the cadence, not a
+bound: a day whose rollup failed waits for a later pass, a pass stops after 90
+seconds with the rest still queued, and the views cache what they read for
+`eddi.health.cache-ttl`; `dataThrough` says how far the numbers are complete. Daily rows are kept
 `eddi.health.daily-retention` (730 days) and hold no personal data (no user or
 conversation id); an erasure removes a user's counts from them at the next pass,
 for days within `eddi.health.facts-retention` (90 days). **Older daily rows
@@ -520,7 +544,8 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
 ending today, or `from`/`to` (both, at most 90 days, not after today);
 `version=<n>`; `origin=<id>` repeatable. Without `origin` the **preset's**
-default applies: an agent with interactive traffic (or none) is `support` and
+default applies: an agent with interactive traffic in the period or its
+baseline (or none) is `support` and
 counts the interactive origins (`api`, `v1`, `mcp`, `email`, `slack`); an agent
 driven only by schedules, webhooks, A2A, groups or delegation is `task` and
 counts every origin but `agent-test`. `agent-test` is counted only when named.
@@ -659,7 +684,7 @@ the review rule applies to the MCP caller exactly as over REST) and
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days. Also the oldest day the rollup recomputes, and how far back sessions and users are counted |
 | `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each row was **captured** on the turn's thread (its `updatedAt`, set before the row is queued for the health worker): the conversations of those rows are checked, and the rows of those that no longer exist deleted |
 | `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. The sweep keeps no cursor, so the excess is **not** guaranteed a later check: what leaves the window unchecked stays until `eddi.health.facts-retention` |
-| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — how far today's numbers may lag. At least 15 s; read when the schedule is created |
+| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — the normal cadence at which today's numbers catch up, not a bound on their lag (failed or queued days wait for a later pass). At least 15 s; read when the schedule is created |
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept |
 | `eddi.health.cache-ttl` | `60s` | How long the views cache what they read from the stores; `0` switches the cache off |
 | `eddi.health.apdex-t` | `4s` | Apdex threshold T (satisfied ≤ T, tolerating ≤ 4T); applies to days rolled up after a change |
@@ -675,15 +700,13 @@ A daily sweep (`health-turn-retention`, on every node — it is one idempotent
 days older than `eddi.health.facts-retention`. It runs even with
 `eddi.health.enabled=false`. With the defaults, turn rows are kept for less time
 than conversations (90 against 365 days), so a conversation removed by its own
-retention has no rows left. That holds only while `eddi.health.facts-retention`
-is the shorter of the two: the conversation-retention sweep does not delete
-health rows — only an explicit conversation delete does — so with a longer
-setting a conversation's rows outlive it until their own retention takes them.
-A user's [erasure](#gdpr) removes them whatever either setting says. Session
-outcomes share the turn rows' retention: the same sweep deletes those that
-ended before the cutoff. The same sweep deletes daily rows and change markers
-older than `eddi.health.daily-retention` (730 days); those hold no personal
-data.
+retention has no rows left. Whatever the two settings, a conversation's rows go
+with it: an explicit permanent delete and the conversation-retention sweep both
+erase them through the [erasure guarantee](#gdpr), and so does a user's erasure.
+Session outcomes share the turn rows' retention: the same sweep deletes those
+that ended before the cutoff, and a conversation's sessions go with it the same
+way. The same sweep deletes daily rows and change markers older than
+`eddi.health.daily-retention` (730 days); those hold no personal data.
 
 The same daily job then runs the **orphan sweep**: it reads the distinct
 conversations of the rows (and discard markers) captured within
@@ -710,10 +733,11 @@ not guaranteed a check before they leave the window, and their rows then stay
 until retention. The window is measured by **capture** time — `updatedAt` is
 set when the turn's thread captures the row, before it is queued — so a row
 delayed long enough on a queue can be written after its conversation was
-deleted yet already be outside the window; if its post-write clean-up also
-failed, it stays until retention. Like the retention it runs on every node and
-is idempotent.
-It is the durable second chance for the [queued-row race](#gdpr) below.
+deleted yet already be outside the window, and then stays until retention. Like
+the retention it runs on every node and is idempotent. Every delete but one is
+covered by the [erasure guarantee](#gdpr), so the sweep matters only for that
+one: an agent-test conversation, purged without a tombstone (its user is
+synthetic), whose row was still queued.
 
 ## GDPR
 
@@ -723,15 +747,18 @@ Turn rows are personal data about a user's use of an agent:
   participant `agentHealthTurns`. Group member conversations are owned by the
   discussion's user and are covered by the same erasure. The delete returns the
   (agent, day)s of the deleted rows, and those days are re-rolled without the
-  user. If the days cannot be read, the rows are deleted all the same and every
-  retained day of the user's agents is re-rolled instead. Those agents come from
-  the conversation store: noted at the erasure's first step (the
-  `agentHealthErasureFence` step reads them before the cascade deletes the
-  conversations; a failed read never fails that step), else read again when the
-  participant runs. If no agent is known either, a WARN is logged and the daily
-  rows keep the user's counts until `eddi.health.daily-retention`. This is not
-  reported as a failed step: the rows (the only personal data) are gone, and a
-  failed step would hold back the participants that run last. Only days within
+  user. If the days cannot be read, the rows are deleted all the same, but the
+  participant has no agent to fall back on, so those days are **not** re-rolled.
+  The rows of the user's own conversations are normally gone before the
+  participant runs: the cascade erases them through the erasure guarantee while
+  the conversations still exist (below), with each conversation's agent known,
+  and an unreadable day set there re-rolls every retained day of that agent.
+  For what the participant deletes itself, unreadable days leave a WARN and the
+  daily rows keep the user's counts until a later re-roll of those days or
+  `eddi.health.daily-retention`. That alone
+  never fails the step: the rows
+  (the only personal data) are gone; the participant then verifies that no row,
+  marker or pending removal of the user is left. Only days within
   `eddi.health.facts-retention` (90 days) can be re-rolled. On older days the
   user's contribution to the daily counts stays until
   `eddi.health.daily-retention` (730 days) removes those rows, which hold no
@@ -741,40 +768,53 @@ Turn rows are personal data about a user's use of an agent:
 - **Session outcomes** (`agentHealthOutcomes`) are erased and exported the same
   way — every session row of the user, newest first, at most 10,000 under
   `agentHealthOutcomes.sessions` (ids, counts, outcome, evidence, last actions;
-  no text). The outcome evaluation writes nothing for a user an erasure is
-  fencing, and deletes again what it wrote while the fence went up; outcomes
-  are derived from turn rows, which the erasure deletes, so nothing re-creates
-  them. A conversation delete removes its sessions too.
-- **Deleting a conversation** deletes its rows (best effort — a failure is
-  logged and the rows expire with the retention).
-- **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health
-  worker's queue, so a turn finished just before an erasure or a delete can
-  reach the store after it. The erasure's first step raises a fence for the user
-  on every node (through the cluster stop in cluster mode); while it lasts (15
-  minutes) the worker writes none of the user's rows or discard markers. After
-  every write the worker checks again, and deletes the conversation's rows when
-  the user is now fenced or the conversation no longer exists — both the erasure
-  and a conversation delete remove the conversation before its rows, so one of
-  the two sees the other on whichever node the row was queued — provided its
-  check and delete succeed (the limits follow). Withheld
-  and removed rows count as `eddi_health_dropped_total{reason="erased"}`. That
-  second check costs one primary-key read of the conversation per recorded
-  turn, on the worker. What it cannot cover: a node that did not confirm the
-  erasure's cluster stop (the erasure then reports `clusterStop` as failed and
-  must be re-run), a conversation store that cannot answer, or a cleanup delete
-  that fails. Each logs a WARN, at most once a minute (the stores EDDI ships
-  always answer the check; only a store without `getStateAndRevision` cannot).
-  Such a row is **normally** removed by the next daily [orphan sweep](#retention),
-  which finds its conversation gone and deletes it — the erasure deletes the
-  user's conversations, so this covers a row left behind by an erasure (also
-  one a node wrote without having confirmed the cluster stop) as well as by a
-  conversation delete. The sweep's own limits: it looks only at rows captured
-  within `eddi.health.orphan-sweep-window`, so if it cannot ask the
-  conversation store, or cannot delete, for longer than that, the row is left
-  to the retention (each failed or skipped run — also one with no conversation
-  store to ask — logs a WARN); and a conversation delete
-  whose own delete of older rows failed is not caught by it (that failure is
-  logged by the delete, and those rows expire with the retention).
+  no text). Sessions are rows of the same async writer as the turn rows
+  (`agentHealthTurns`, below): an erasure or a permanent conversation delete
+  waits for every node's outcome evaluations in flight; the evaluation writes no
+  session of a tombstoned conversation, or derived from an erased user's turns
+  captured before the erasure (a refusal is a failed evaluation: the feed
+  retries it for up to an hour, then gives up with a WARN, and a due session is
+  retried with a growing back-off; so after a tombstone-store outage longer than
+  that, the sessions are written once the conversation changes or a session
+  falls due); and right after its write it asks again and deletes
+  each session it wrote, or records a pending removal. The `agentHealthOutcomes`
+  step then verifies that no session of the user is left, and a conversation
+  delete that none of the conversation is. Their deletes re-roll no day: the
+  daily rows hold no outcome counts.
+- **Deleting a conversation** permanently — explicitly or by the
+  conversation-retention sweep — deletes its rows and verifies that none is
+  left; otherwise the delete fails and a retry finishes it. The days of the
+  deleted rows are re-rolled; when they cannot be read, every retained day of
+  the conversation's agent (read before the snapshot goes) is. Unlike the
+  agent-test purge, which keeps such rows for the orphan sweep, this delete
+  removes the rows even when neither is known — the guarantee needs them gone —
+  and the daily rows then keep their counts (a WARN). A row the guard deletes
+  again right after its write has its days re-rolled the same way.
+- **A row still queued cannot outlive the erasure or the delete — the
+  [erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).**
+  Rows are written on the health worker's queue, so a turn finished just before
+  an erasure or a delete could reach the store after it. The health worker is
+  an async writer of that guarantee (`agentHealthTurns`): the erasure or delete
+  writes durable tombstones first and waits until every node's health queue has
+  written what it held; the worker asks before each write and writes neither
+  the row nor its discard markers of a tombstoned conversation, or of an erased
+  user's turn captured before the erasure; and right after a write (also a
+  failed one) it asks again and deletes each row it wrote, or records a durable
+  pending removal that keeps the erasure failing until a retry removes it.
+  Withheld and removed rows count as `eddi_health_dropped_total{reason="erased"}`
+  — also rows refused because the tombstones could not be read (fail closed; see
+  `eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}`). The checks run
+  on the worker, never on the turn's thread: a few point reads of the tombstone
+  store per turn, which bound the worker's throughput. Two consequences: an
+  erasure or a permanent delete waits for every node's health queue (up to
+  `eddi.gdpr.drain-timeout`; a backlog longer than that fails it, retryably),
+  and a health store that cannot delete or count fails a permanent conversation
+  delete — also with `eddi.health.enabled=false` — until it recovers. The limits are the
+  guarantee's own, listed in the
+  [GDPR guide](gdpr-compliance.md#residual-limits-of-the-erasure-guarantee). The
+  one delete outside it is the purge of an agent-test conversation (its user is
+  synthetic): its rows are deleted best effort, and the daily
+  [orphan sweep](#retention) removes a row its queue wrote afterwards.
 - **A turn whose snapshot was not stored** — a pause that lost its
   compare-and-store to a concurrent end or cancel, a write conflict, a fenced or
   failed write — is recorded unsettled: inserted only if absent, never as
@@ -803,7 +843,7 @@ eddi_health_rollup_failures_total    # Agent days whose rollup failed (retried)
 eddi_health_rollup_pending           # Gauge: agent days waiting (the shared queue, cached 10 s)
 eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent day
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
-eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
+eddi_health_outcomes_failures_total  # Conversation evaluations that failed, also those the erasure guard refused (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
 eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
@@ -818,6 +858,6 @@ lost (`dropped`, with a WARN at most once a minute). Both should stay at zero.
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because
-their user was erased or their conversation deleted; a rising `orphaned` (rows
-the daily sweep removed) means the worker's own clean-up had failed. See
+their user was erased or their conversation deleted; `orphaned` counts the rows
+the daily sweep removed (rows of purged agent-test conversations). See
 [Metrics](metrics.md#agent-health-metrics).

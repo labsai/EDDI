@@ -65,7 +65,7 @@ class GroupHitlCoordinatorApprovalContextTest {
         renderer = mock(GroupApprovalContextRenderer.class);
         when(facade.approvalContextRenderer()).thenReturn(renderer);
         coordinator = new GroupHitlCoordinator(mock(IAgentGroupStore.class), conversationStore, mock(IScheduleStore.class),
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(),
                 mock(ExecutorService.class), new CallerIdentityContext(null, null), facade,
                 new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
                 new SimpleMeterRegistry().counter("test.group.failure"));

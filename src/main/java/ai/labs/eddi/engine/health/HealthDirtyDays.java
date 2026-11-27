@@ -65,10 +65,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link #markRange}) or the row ages out at
  * {@code eddi.health.daily-retention}. When a delete cannot tell which days its
  * rows were on, every retained day of the conversation's agent is marked
- * instead ({@link #markDeletedRows}). A purge that knows neither the days nor
- * the agent does not delete, and leaves the rows to the orphan sweep, which
- * knows the agent. Days older than the turn-row retention cannot be recomputed
- * at all.
+ * instead ({@link #markDeletedRows}). An agent-test purge that knows neither
+ * the days nor the agent does not delete, and leaves the rows to the orphan
+ * sweep, which knows the agent; a delete under the erasure guarantee deletes
+ * them all the same, and their counts stay (a WARN). Days older than the
+ * turn-row retention cannot be recomputed at all.
  */
 @ApplicationScoped
 public class HealthDirtyDays {
@@ -111,14 +112,14 @@ public class HealthDirtyDays {
 
     /**
      * Marks the (agent, day) pairs of rows just deleted — by an erasure, a
-     * conversation delete, the orphan sweep or the recorder's post-write cleanup —
-     * dirty <b>at once</b>, in the store, so their daily rows are recomputed
-     * without them. Not debounced: deletions are rare, and unlike a written row a
-     * deleted one leaves nothing the rollup's self-heal could find again, so a mark
-     * held in memory and lost with the node would leave the deleted counts in the
-     * daily rows until their retention. A failed write is retried once; only when
-     * that fails too are the pairs noted for the next flush, with a WARN (the
-     * residual loss the class comment describes).
+     * conversation delete, the orphan sweep or the erasure guard's post-write
+     * removal — dirty <b>at once</b>, in the store, so their daily rows are
+     * recomputed without them. Not debounced: deletions are rare, and unlike a
+     * written row a deleted one leaves nothing the rollup's self-heal could find
+     * again, so a mark held in memory and lost with the node would leave the
+     * deleted counts in the daily rows until their retention. A failed write is
+     * retried once; only when that fails too are the pairs noted for the next
+     * flush, with a WARN (the residual loss the class comment describes).
      */
     public void markDeleted(Map<String, Set<LocalDate>> agentDays) {
         markAtOnce(agentDays, "deleted Agent Health rows");

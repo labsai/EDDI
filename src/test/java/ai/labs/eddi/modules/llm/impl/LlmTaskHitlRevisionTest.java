@@ -9,12 +9,14 @@ import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -157,6 +159,12 @@ class LlmTaskHitlRevisionTest {
         candidate.setQuickRepliesMark(0);
         candidate.setTranscriptJson(codec.serialize(List.of(SystemMessage.from("You write answers."), UserMessage.from("question")), 100_000).json());
         return candidate;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> healthRecords() {
+        IData<Object> data = memory.getCurrentStep().getData(MemoryKeys.HEALTH_LLM_FAILURES);
+        return data == null || data.getResult() == null ? List.of() : (List<Map<String, Object>>) data.getResult();
     }
 
     @SuppressWarnings("unchecked")
@@ -320,11 +328,25 @@ class LlmTaskHitlRevisionTest {
         }
 
         @Test
-        @DisplayName("the model call fails")
+        @DisplayName("the model call fails: Agent Health records the failure, unrecovered")
         void modelFails() throws Exception {
             when(chatModel.chat(anyList())).thenThrow(new IllegalStateException("boom"));
 
             assertFalse(llmTask.reviseAnswer(memory, config(false), new HitlRevisionRequest(candidate("the draft", false, 0), NOTE, 1)));
+            List<Map<String, Object>> records = healthRecords();
+            assertFalse(records.isEmpty(), "the failed revision call is recorded");
+            assertTrue(records.stream().allMatch(r -> HealthFailure.NONE.equals(r.get(HealthFailure.KEY_RECOVERY))), records.toString());
+        }
+
+        @Test
+        @DisplayName("a tool exchange that cannot be re-asked is no model failure: nothing is recorded")
+        void reaskUnavailableIsNotRecorded() throws Exception {
+            when(agentOrchestrator.reaskFinalAnswer(any(), any(), any(), any(), any(), any())).thenReturn(null);
+            var candidate = candidate("the draft", false, 0);
+            candidate.setToolTranscript(true);
+
+            assertFalse(llmTask.reviseAnswer(memory, config(false), new HitlRevisionRequest(candidate, NOTE, 1)));
+            assertTrue(healthRecords().isEmpty());
         }
 
         @Test

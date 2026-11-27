@@ -73,7 +73,7 @@ class GroupHumanTaskResolveTest {
         });
         var meters = new SimpleMeterRegistry();
         coordinator = new GroupHitlCoordinator(groupStore, conversationStore, mock(IScheduleStore.class), mock(AuditLedgerService.class),
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), executor, new CallerIdentityContext(null, null),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), executor, new CallerIdentityContext(null, null),
                 service, meters.counter("p"), meters.counter("r"), meters.counter("f"));
 
         var config = new AgentGroupConfiguration();

@@ -211,6 +211,27 @@ public interface HealthTurnStoreContract {
     }
 
     @Test
+    @DisplayName("erasure guard: one row or marker deleted by key, idempotently; counts include markers")
+    default void deleteRowAndCounts() {
+        store().upsert(row("c1", 0, "a", "agent", "alice", DAY, T0, 0.1, false));
+        store().upsert(row("c1", 1, "b", "agent", "alice", DAY, T0.plusSeconds(1), 0.1, false));
+        store().upsert(row("c2", 0, "c", "agent", "bob", DAY, T0, 0.1, false));
+        store().markDiscarded(row("c1", 2, "d", "agent", "alice", DAY, T0.plusSeconds(2), 0.1, false), List.of("gone"));
+
+        assertEquals(3L, store().countByUserId("alice"), "two rows and the marker");
+        assertEquals(3L, store().countByConversationId("c1"));
+        assertEquals(1L, store().countByConversationId("c2"));
+
+        assertEquals(1L, store().deleteRow("c1", "a"));
+        assertEquals(0L, store().deleteRow("c1", "a"), "a row already gone is a success");
+        assertEquals(1L, store().deleteRow("c1", "gone"), "a marker is a row too");
+        assertEquals(1L, store().countByUserId("alice"));
+        assertEquals(1L, store().countByConversationId("c1"));
+        assertEquals(1L, store().countByUserId("bob"), "another conversation's rows are untouched");
+        assertEquals(0L, store().countByUserId("nobody"));
+    }
+
+    @Test
     @DisplayName("retention also removes markers whose row never arrived")
     default void retentionTakesOldMarkers() {
         store().markDiscarded(row("c1", 1, "x", "agent", "u", DAY, DAY.minusDays(200).atStartOfDay(ZoneOffset.UTC).toInstant(), 0.1, false),

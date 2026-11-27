@@ -6,9 +6,9 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
-import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -28,31 +28,35 @@ import java.util.Set;
  * their conversations, including those of their group discussions (a member
  * conversation is owned by the discussion's user).
  * <p>
- * A row still waiting in the health queue when the erasure runs does not land
- * after it: the erasure's step 0 raises a {@link HealthErasureFence} on every
- * node, and {@link HealthTurnRecorder} withholds a fenced user's rows and
- * markers, and deletes again a row it wrote while the fence went up.
+ * <b>The erasure guarantee.</b> A row still waiting in the health queue when
+ * the erasure runs does not land after it: the erasure tombstones the user and
+ * their conversations and waits for every node's health queue to drain
+ * ({@link HealthErasureWriter}), and {@link HealthTurnRecorder} guards each
+ * write with {@link ErasureGuard#beforeWrite} and
+ * {@link ErasureGuard#afterWrite}. After deleting,
+ * {@link ErasureGuard#verifyUserErased} retries the user's pending removals and
+ * requires no row, no marker and no pending removal to be left; otherwise the
+ * step fails and a re-run finishes it.
  * <p>
- * A conversation deleted on its own ({@code ConversationPurgeService}) takes
- * its rows with it. One deleted by the conversation-retention sweep does not
- * need to: rows are kept {@code eddi.health.facts-retention} (90 days by
- * default), far less than the conversation retention (365 days), and
- * {@link HealthTurnRetention} removes them on its own.
+ * A conversation deleted on its own ({@code ConversationPurgeService}) or by
+ * the conversation-retention sweep takes its rows with it, through the same
+ * guarantee ({@link HealthErasureWriter#eraseConversation}).
  * <p>
  * The export carries the user's rows, newest first, under {@code turns}; past
  * {@link #MAX_EXPORTED_TURNS} the section is marked
  * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates hold no personal
  * data and are not part of either; the days of the erased rows are marked
- * dirty, so the rollup recomputes them without the user. The days come with the
- * delete ({@link IHealthTurnStore#deleteByUserIdReturningDays}); when they
- * cannot be read the delete still runs, and every retained day of the user's
- * agents is re-rolled instead — the agents noted at step 0
- * ({@link HealthErasureFence#agentsOf}), else those of any conversation of the
- * user still in the conversation store. When neither is known nothing can be
- * re-rolled: a WARN, and the daily rows keep the user's counts until
- * {@code eddi.health.daily-retention}. That is not reported as a failed step —
- * the rows, the only personal data, are gone, and a failed step would hold back
- * the participants that run last.
+ * dirty, so the rollup recomputes them without the user. The rows of the user's
+ * own conversations are normally gone already — the cascade erases them through
+ * {@link HealthErasureWriter#eraseConversation} before the snapshots are
+ * deleted, which marks their days with the agent known — so this delete takes
+ * what is left. Its days come with the delete
+ * ({@link IHealthTurnStore#deleteByUserIdReturningDays}); when they cannot be
+ * read the delete still runs, but nothing can be re-rolled — this step runs
+ * after the cascade deleted the user's conversations, so no agent can be looked
+ * up there either: a WARN, and the daily rows keep the user's counts until a
+ * later re-roll of those days or {@code eddi.health.daily-retention}. That does
+ * not fail the step — the rows, the only personal data, are gone.
  */
 @ApplicationScoped
 public class HealthTurnGdprParticipant implements IGdprParticipant {
@@ -61,6 +65,7 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
     static final int MAX_EXPORTED_TURNS = 10_000;
 
     private final IHealthTurnStore store;
+    private final ErasureGuard erasureGuard;
 
     /**
      * Marks the days of the erased rows dirty, so the daily rows lose the user's
@@ -70,22 +75,20 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
     @Inject
     Instance<HealthDirtyDays> dirtyDays;
 
-    /** The agents noted at the erasure's step 0. Field-injected, null-checked. */
     @Inject
-    Instance<HealthErasureFence> fence;
-
-    /** The live fallback for the user's agents. Field-injected, null-checked. */
-    @Inject
-    Instance<IConversationMemoryStore> conversations;
-
-    @Inject
-    public HealthTurnGdprParticipant(IHealthTurnStore store) {
+    public HealthTurnGdprParticipant(IHealthTurnStore store, ErasureGuard erasureGuard) {
         this.store = store;
+        this.erasureGuard = erasureGuard;
+    }
+
+    /** Without the erasure guard: tests of the delete and the export alone. */
+    HealthTurnGdprParticipant(IHealthTurnStore store) {
+        this(store, null);
     }
 
     @Override
     public String name() {
-        return "agentHealthTurns";
+        return HealthErasureWriter.NAME;
     }
 
     @Override
@@ -94,31 +97,15 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
             return 0L;
         }
         HealthDeletedRows deleted = store.deleteByUserIdReturningDays(userId);
-        if (dirtyDays != null && dirtyDays.isResolvable()) {
-            dirtyDays.get().markErasedRows(deleted.daysKnown() ? Set.of() : agentsOf(userId), deleted);
+        long count = deleted == null ? 0L : deleted.deleted();
+        if (dirtyDays != null && dirtyDays.isResolvable() && count > 0) {
+            dirtyDays.get().markErasedRows(Set.of(), deleted);
         }
-        return deleted.deleted();
-    }
-
-    /**
-     * The erased user's agents when the deleted rows' days are unknown: noted at
-     * step 0, else read now from the conversation store (best effort).
-     */
-    private Set<String> agentsOf(String userId) {
-        if (fence != null && fence.isResolvable()) {
-            Set<String> noted = fence.get().agentsOf(userId);
-            if (!noted.isEmpty()) {
-                return noted;
-            }
+        // Verified whatever the delete answered: the count is what decides.
+        if (erasureGuard != null) {
+            erasureGuard.verifyUserErased(HealthErasureWriter.NAME, userId, () -> store.countByUserId(userId));
         }
-        if (conversations != null && conversations.isResolvable()) {
-            try {
-                return HealthErasureFence.agentsOfConversations(conversations.get(), userId);
-            } catch (Exception e) {
-                // Nothing else to try; markErasedRows warns.
-            }
-        }
-        return Set.of();
+        return count;
     }
 
     @Override

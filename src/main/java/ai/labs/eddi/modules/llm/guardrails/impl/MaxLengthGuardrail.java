@@ -13,11 +13,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Set;
 
 /**
- * {@code max-length} — input and output. Flags a text longer than
- * {@code maxChars} characters (parameter; default {@value #DEFAULT_MAX_CHARS}).
- * The finding is reported as a rewrite cut to {@code maxChars}: action
- * {@code redact} truncates, {@code block} refuses, {@code reprompt} (output)
- * asks the model for a shorter answer.
+ * {@code max-length} — input, output and tool-call arguments. Flags a text
+ * longer than {@code maxChars} characters (parameter; default
+ * {@value #DEFAULT_MAX_CHARS}). The finding is reported as a rewrite cut to
+ * {@code maxChars}: action {@code redact} truncates, {@code block} refuses,
+ * {@code reprompt} (output) asks the model for a shorter answer.
  */
 @ApplicationScoped
 public class MaxLengthGuardrail implements ContentGuardrail {

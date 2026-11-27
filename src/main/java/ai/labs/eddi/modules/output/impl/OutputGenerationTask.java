@@ -327,9 +327,9 @@ public class OutputGenerationTask implements ILifecycleTask {
      * helper method to convert from OutputConfiguration to internal Output Value
      *
      * @param configOutputs
-     *            List<OutputConfiguration.Output> as it comes from the
+     *            {@code List<OutputConfiguration.Output>} as it comes from the
      *            configuration repository
-     * @return List<OutputValue> as it is used in the internal system
+     * @return {@code List<OutputValue>} as it is used in the internal system
      */
     private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.Output> configOutputs) {
         return configOutputs.stream().map(configOutput -> {
@@ -343,9 +343,9 @@ public class OutputGenerationTask implements ILifecycleTask {
      * helper method to convert from OutputConfiguration to internal QuickReply
      *
      * @param configQuickReplies
-     *            List<OutputConfiguration.QuickReply> as it comes from the
-     *            configuration repository
-     * @return List<QuickReply> as it is used in the internal system
+     *            {@code List<QuickReply>} as it comes from the configuration
+     *            repository
+     * @return {@code List<QuickReply>} as it is used in the internal system
      */
     private List<QuickReply> convertQuickRepliesConfig(List<QuickReply> configQuickReplies) {
         if (configQuickReplies == null) {

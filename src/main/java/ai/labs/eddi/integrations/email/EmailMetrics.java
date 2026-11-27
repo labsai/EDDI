@@ -13,10 +13,12 @@ import java.time.Duration;
 
 /**
  * The email channel's meters (email plan §20). Prometheus allows one tag set
- * per meter name, so every meter here always carries the same tags:
- * {@code integration} (the integration's resource id), {@code transport} and
- * {@code mode} ({@code trigger} or {@code conversation}), plus its own outcome
- * tag. {@code eddi.email.auth{result}} stays deployment-wide in
+ * per meter name, so each meter always carries the same tags. The inbound and
+ * mailbox-poll meters carry {@code integration} (the integration's resource
+ * id), {@code transport} and {@code mode} ({@code trigger} or
+ * {@code conversation}), plus their own outcome or result tag; the
+ * stranded-turn sweep, reply and suppression meters carry only their own tags.
+ * {@code eddi.email.auth{result}} stays deployment-wide in
  * {@code SenderAuthenticator}, which has no integration to tag; the outbound
  * counter {@code eddi.email.outbound{kind,outcome}} is shared with the HITL and
  * owner notifiers and keeps their two tags.

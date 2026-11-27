@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Check, Flag, ListChecks } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@eddi/ui";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { oversightErrorCode, useAuditSample, useAuditSamples, useReviewSample } from "@/hooks/use-hitl-oversight";
-import { OVERSIGHT_LIMITS, type AuditSample } from "@/lib/api/hitl-oversight";
+import { OVERSIGHT_LIMITS, type AuditSample } from "@eddi/app-kit/lib/api/hitl-oversight";
 
 const PAGE_SIZE = 20;
 

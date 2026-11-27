@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.health.model.HealthUsagePoint;
 import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -303,7 +305,10 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
 
     @Override
     public void forEachByAgentAndDay(String agentId, LocalDate day, Consumer<HealthTurn> consumer) {
-        try (MongoCursor<Document> cursor = turns.find(and(eq(FIELD_AGENT, agentId), eq(FIELD_DAY, day.toString()))).iterator()) {
+        // From what has committed, on the primary: the rollup recomputes a day an
+        // erasure
+        // just marked dirty, and a lagging secondary would still hold the erased rows.
+        try (MongoCursor<Document> cursor = committed().find(and(eq(FIELD_AGENT, agentId), eq(FIELD_DAY, day.toString()))).iterator()) {
             while (cursor.hasNext()) {
                 consumer.accept(fromDocument(cursor.next()));
             }
@@ -320,7 +325,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         try {
             List<String> ids = new LinkedHashSet<>(executionIds).stream().map(e -> id(conversationId, e)).toList();
             Set<LocalDate> days = new TreeSet<>();
-            for (Document d : turns.find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
+            for (Document d : committed().find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
                 String day = d.getString(FIELD_DAY);
                 if (day != null) {
                     days.add(LocalDate.parse(day));
@@ -521,7 +526,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 and(gte(FIELD_WRITTEN_LATE, date(since)), lt(FIELD_WRITTEN_LATE, date(until))));
         List<Bson> pipeline = List.of(Aggregates.match(and(inWindow, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 consumer.accept(key.getString("a"), LocalDate.parse(key.getString("d")));
@@ -582,7 +587,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         Date at = date(since);
         List<Bson> pipeline = List.of(Aggregates.match(or(gte(FIELD_UPDATED, at), gte(FIELD_DISCARDED_AT, at))),
                 Aggregates.group(new Document("c", "$" + FIELD_CONVERSATION).append("a", "$" + FIELD_AGENT)), Aggregates.limit(Math.max(1, limit)));
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 if (key.get("c") != null) {
@@ -598,7 +603,9 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         List<Bson> pipeline = List.of(Aggregates.match(and(filter, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
         Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
-        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        // Read before a delete on the primary: a lagging secondary could answer an
+        // incomplete set that looks known, so the fallback re-roll would never run.
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Document key = cursor.next().get("_id", Document.class);
                 days.computeIfAbsent(key.getString("a"), k -> new TreeSet<>()).add(LocalDate.parse(key.getString("d")));
@@ -638,11 +645,51 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
+    public long deleteRow(String conversationId, String executionId) {
+        try {
+            return turns.deleteOne(eq("_id", id(conversationId, executionId))).getDeletedCount();
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not delete a health turn", e);
+        }
+    }
+
+    @Override
+    public long countByUserId(String userId) {
+        return count(eq(FIELD_USER, userId), "Could not count a user's health turns");
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count(eq(FIELD_CONVERSATION, conversationId), "Could not count a conversation's health turns");
+    }
+
+    /**
+     * The collection read from the primary at majority read concern — what has
+     * committed. For the reads whose answer decides what an erasure or the rollup
+     * does: the erasure counts (a lagging secondary could answer "0 left" while a
+     * row is still stored), the days a write touched and the days of rows about to
+     * be deleted, the self-heal and orphan-sweep window scans, and the rows the
+     * rollup recomputes a day from. The client default ({@code nearest}) may be a
+     * lagging secondary.
+     */
+    private MongoCollection<Document> committed() {
+        return turns.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
+    }
+
+    private long count(Bson filter, String failure) {
+        try {
+            return committed().countDocuments(filter);
+        } catch (MongoException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    @Override
     public void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer) {
         // A $group, not distinct(): distinct answers in one document (16 MB) and
         // takes no limit. allowDiskUse lets a large window group past the in-memory
         // stage limit.
-        try (MongoCursor<Document> cursor = turns.aggregate(updatedSincePipeline(since, limit)).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(updatedSincePipeline(since, limit)).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Object conversationId = cursor.next().get("_id");
                 if (conversationId != null) {

@@ -23,8 +23,8 @@ import java.util.Optional;
 
 /**
  * PostgreSQL implementation of {@link ISecretPersistence}. Stores encrypted
- * secrets and DEKs in two tables: {@code secret_vault_secrets} and
- * {@code secret_vault_deks}.
+ * secrets and DEKs in {@code secret_vault_secrets} and
+ * {@code secret_vault_deks}, and vault metadata in {@code secret_vault_meta}.
  * <p>
  * Annotated {@code @DefaultBean} so that the non-default {@code @Produces}
  * method in {@code DataStoreProducers} takes priority. Selected at runtime when

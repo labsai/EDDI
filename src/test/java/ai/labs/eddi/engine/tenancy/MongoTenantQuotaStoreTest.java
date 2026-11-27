@@ -15,7 +15,9 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
+import org.bson.BsonObjectId;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.mockito.ArgumentCaptor;
@@ -150,6 +152,49 @@ class MongoTenantQuotaStoreTest {
             sut.setQuota(quota);
 
             verify(quotasCollection).findOneAndUpdate(any(Bson.class), any(Bson.class), any());
+        }
+    }
+
+    // ─── compareAndSetQuota, create branch ─────────────────────────────────────
+
+    @Nested
+    @DisplayName("compareAndSetQuota with no quota expected")
+    class CreateQuota {
+
+        private final TenantQuota next = new TenantQuota(TENANT_ID, 100, 5, 60, 500.0, true);
+
+        @BeforeEach
+        void noStoredQuota() {
+            when(quotasCollection.find(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.first()).thenReturn(null);
+        }
+
+        @Test
+        @DisplayName("inserts through an upsert keyed on tenantId alone, and succeeds only when it inserted")
+        void insertedByUpsert() {
+            when(quotasCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                    .thenReturn(UpdateResult.acknowledged(0, 0L, new BsonObjectId()));
+
+            assertTrue(sut.compareAndSetQuota(null, next));
+
+            ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+            ArgumentCaptor<UpdateOptions> options = ArgumentCaptor.forClass(UpdateOptions.class);
+            verify(quotasCollection).updateOne(filter.capture(), any(Bson.class), options.capture());
+            assertTrue(options.getValue().isUpsert());
+            BsonDocument rendered = filter.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+            assertEquals(Set.of("tenantId"), rendered.keySet(), rendered.toJson());
+            verify(quotasCollection, never()).insertOne(any(Document.class));
+        }
+
+        @Test
+        @DisplayName("a concurrent writer that inserted first makes this one report false")
+        void lostTheRace() {
+            // The upsert matched the other writer's document: nothing inserted, nothing
+            // set.
+            when(quotasCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 0L, null));
+
+            assertFalse(sut.compareAndSetQuota(null, next));
         }
     }
 

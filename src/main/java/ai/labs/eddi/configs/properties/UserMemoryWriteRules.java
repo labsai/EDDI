@@ -85,7 +85,9 @@ public final class UserMemoryWriteRules {
     }
 
     /**
-     * The entry with an absent category set to {@code fact}, as a new statement of
+     * The entry with an absent category set to {@code fact} and an absent last
+     * writer set to its owner (a body that names no writer is recorded as the agent
+     * it names wrote it, as before writers were recorded), as a new statement of
      * its fact ({@link UserMemoryEntry#asStatement()}): a client that read a
      * contested entry and writes it back edited must not keep the old verdict. The
      * stores apply the same rule; doing it here too keeps the contract visible at
@@ -98,12 +100,14 @@ public final class UserMemoryWriteRules {
      */
     public static UserMemoryEntry withDefaults(UserMemoryEntry entry) {
         UserMemoryEntry statement = entry.asStatement().withSourceEntryIds(List.of());
-        if (statement.category() != null) {
+        if (statement.category() != null && statement.lastWriterAgentId() != null) {
             return statement;
         }
-        return new UserMemoryEntry(statement.id(), statement.userId(), statement.key(), statement.value(), "fact", statement.visibility(),
-                statement.sourceAgentId(), statement.groupIds(), statement.sourceConversationId(), false, statement.accessCount(),
-                statement.createdAt(), statement.updatedAt());
+        return new UserMemoryEntry(statement.id(), statement.userId(), statement.key(), statement.value(),
+                statement.category() != null ? statement.category() : "fact", statement.visibility(), statement.sourceAgentId(),
+                statement.groupIds(), statement.sourceConversationId(), false, statement.accessCount(), statement.createdAt(),
+                statement.updatedAt(), UserMemoryEntry.Assessment.ACCEPTED, null, List.of(),
+                statement.lastWriterAgentId() != null ? statement.lastWriterAgentId() : statement.sourceAgentId());
     }
 
     private static int valueLength(Object value) {

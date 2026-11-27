@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import { QueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 
 const RESOURCE_ID = "aaaaaaaaaaaaaaaaaaaaaaaa";
 const SHARES = `*/descriptorstore/descriptors/${RESOURCE_ID}/shares`;
