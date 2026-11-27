@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { createLogEventSource, type LogEntry, getRecentLogs } from "@/lib/api/logs";
-import type { BearerEventSource } from "@/lib/bearer-event-source";
-import { mergeNewestFirst } from "@/lib/log-entries";
+import { createLogEventSource, type LogEntry, getRecentLogs } from "@eddi/app-kit/lib/api/logs";
+import type { BearerEventSource } from "@eddi/app-kit/lib/bearer-event-source";
+import { mergeNewestFirst } from "@eddi/app-kit/lib/log-entries";
 
 /**
  * Session-level log store — a buffer of unfiltered log entries, shared by every

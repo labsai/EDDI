@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { RunResultBody } from "@/components/agent-tests/run-result-sheet";
 import type { AgentTestRun } from "@/lib/api/agent-tests";
-import { buildMockRuns } from "@/test/mocks/agent-test-fixtures";
+import { buildMockRuns } from "@eddi/app-kit/test/mocks/agent-test-fixtures";
 
 const [failing, passing, aborted, errored, ceiling] = buildMockRuns("agent1") as unknown as AgentTestRun[];
 

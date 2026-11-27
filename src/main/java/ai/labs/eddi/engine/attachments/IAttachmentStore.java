@@ -139,7 +139,9 @@ public interface IAttachmentStore {
     boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException;
 
     /**
-     * Delete all attachments for a conversation (GDPR/conversation erasure).
+     * Delete all attachments for a conversation (GDPR/conversation erasure),
+     * together with the grants on them <em>and</em> the grants this conversation
+     * held on other conversations' blobs — so grants never outlive either side.
      *
      * @param conversationId
      *            the conversation ID

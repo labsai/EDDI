@@ -3,7 +3,7 @@ import {
   type AgentOpsConfig,
   type AgentOpsSlug,
   type LlmTask,
-} from "./types";
+} from "@eddi/app-kit/components/editors/llm/types";
 
 export type OpsBlock = "scorecard" | "budgetProposal" | "followUp";
 

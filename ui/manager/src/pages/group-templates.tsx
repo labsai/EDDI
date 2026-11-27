@@ -4,19 +4,19 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutTemplate, Users, ArrowLeft, Sparkles, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { EmptyState } from "@/components/shared/empty-state";
 import { BackLink } from "@/components/shared/back-link";
-import { getErrorMessage } from "@/lib/api-client";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import {
   useGroupTemplates,
   useGroupTemplate,
   useInstantiateGroupTemplate,
 } from "@/hooks/use-group-templates";
 import type { TemplateManifest } from "@/lib/api/group-templates";
-import { parseGroupResourceUri } from "@/lib/api/groups";
+import { parseGroupResourceUri } from "@eddi/app-kit/lib/api/groups";
 import { humanizeRole } from "@/lib/role-labels";
 
 /** Icon per packaged template — matched by id, falls back to a generic template icon. */

@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowUpCircle, Loader2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import type {
   InstructionsChoice,
   OperatorUpgradeAssessment,
 } from "@/lib/operator/operator-revision";
 import { diffLines, summarizeDiff } from "@/lib/operator/prompt-diff";
-import { cn } from "@/lib/utils";
+import { classifyInstructions } from "@/lib/operator/prompt-lineage";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 interface OperatorUpgradeNoticeProps {
   assessment: OperatorUpgradeAssessment;
@@ -55,13 +56,25 @@ export function OperatorUpgradeNotice({
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Pre-selected by what is known: an untouched default is replaced (and no
-  // choice is shown). Anything else keeps the current text unless the admin
-  // picks the new default — including an `unknown` body from a config written
-  // before this was tracked. That is usually an old default, but it may be an
-  // edit, and a fast click-through must never be what discards someone's words.
-  const [choice, setChoice] = useState<InstructionsChoice>(
-    assessment.instructions === "default" ? "use-new-default" : "keep-current",
+  // choice is shown). Otherwise the stored text is read line by line: when every
+  // line is in the new default or in a default the Manager shipped before, the
+  // text is a trimmed or older default — nothing of the admin's is lost — and the
+  // new default is preselected (the 100k-cap trim of 6.7.0 left many such
+  // configs `promptBodyIsDefault: false`). A line found in no shipped default is
+  // the admin's own, and then keeping the text is preselected: a fast
+  // click-through must never be what discards someone's words.
+  const lineage = useMemo(
+    () =>
+      assessment.instructions !== "default" && storedPromptBody !== undefined && defaultPromptBody !== undefined
+        ? classifyInstructions(storedPromptBody, defaultPromptBody)
+        : null,
+    [assessment.instructions, storedPromptBody, defaultPromptBody],
   );
+  const preferredChoice: InstructionsChoice =
+    assessment.instructions === "default" || (lineage !== null && lineage.lineage !== "edited")
+      ? "use-new-default"
+      : "keep-current";
+  const [choice, setChoice] = useState<InstructionsChoice>(preferredChoice);
 
   // Installing stored instructions the admin did not just write needs a read and
   // an explicit yes. A default body is ours and needs neither.
@@ -152,7 +165,16 @@ export function OperatorUpgradeNotice({
       </div>
       <Button
         size="sm"
-        onClick={() => (blocked ? onOpenForm() : setConfirmOpen(true))}
+        onClick={() => {
+          if (blocked) {
+            onOpenForm();
+            return;
+          }
+          // Re-derived on every opening: the stored config may have changed since mount.
+          setChoice(preferredChoice);
+          setReviewed(false);
+          setConfirmOpen(true);
+        }}
         disabled={busy}
         data-testid="operator-upgrade-start"
       >
@@ -186,13 +208,40 @@ export function OperatorUpgradeNotice({
         {assessment.instructions !== "default" && (
           <fieldset className="space-y-2 text-sm" data-testid="operator-upgrade-instructions">
             <legend className="mb-1 font-medium">
-              {assessment.instructions === "customized"
-                ? t("operator.upgrade.instructionsCustomized", "You edited the operator's instructions.")
-                : t(
-                    "operator.upgrade.instructionsUnknown",
-                    "The operator's instructions differ from the current default — either an older default or your own edits.",
-                  )}
+              {lineage && lineage.lineage !== "edited"
+                ? t(
+                    "operator.upgrade.instructionsTrimmed",
+                    "The operator's instructions are a shortened or older version of the default.",
+                  )
+                : assessment.instructions === "customized"
+                  ? t("operator.upgrade.instructionsCustomized", "You edited the operator's instructions.")
+                  : t(
+                      "operator.upgrade.instructionsUnknown",
+                      "The operator's instructions differ from the current default — either an older default or your own edits.",
+                    )}
             </legend>
+            {lineage && (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="operator-upgrade-lineage"
+                data-lineage={lineage.lineage}
+              >
+                {lineage.lineage === "only-removes"
+                  ? t(
+                      "operator.upgrade.lineageOnlyRemoves",
+                      "Your text only removes lines from the default and adds none of its own, so replacing it is preselected.",
+                    )
+                  : lineage.lineage === "older-default"
+                    ? t(
+                        "operator.upgrade.lineageOlderDefault",
+                        "Your text only removes lines from the default or keeps wording from an earlier default, and adds none of its own, so replacing it is preselected.",
+                      )
+                    : t(
+                        "operator.upgrade.lineageEdited",
+                        "Your text has lines that are in no default the Manager has shipped, so keeping it is preselected.",
+                      )}
+              </p>
+            )}
             <label className="flex items-start gap-2">
               <input
                 type="radio"

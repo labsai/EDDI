@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFeedCursor;
@@ -57,7 +60,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@DisplayName("HealthOutcomeEvaluator — the feed, due sessions, ranges, fences and ratings")
+@DisplayName("HealthOutcomeEvaluator — the feed, due sessions, ranges, the erasure guard and ratings")
 class HealthOutcomeEvaluatorTest {
 
     private static final Instant NOW = Instant.parse("2026-11-10T12:00:00Z");
@@ -67,7 +70,8 @@ class HealthOutcomeEvaluatorTest {
     private IHealthOutcomeStore outcomes;
     private HealthConfigPolicy policy;
     private IConversationRatingStore ratings;
-    private HealthErasureFence fence;
+    private InMemoryErasureTombstoneStore tombstones;
+    private ErasureGuard fence;
     private SimpleMeterRegistry registry;
     private HealthOutcomeEvaluator evaluator;
     /** What the store holds as the feed cursor. */
@@ -81,7 +85,9 @@ class HealthOutcomeEvaluatorTest {
         outcomes = mock(IHealthOutcomeStore.class);
         policy = mock(HealthConfigPolicy.class);
         ratings = mock(IConversationRatingStore.class);
-        fence = new HealthErasureFence(Clock.fixed(NOW, ZoneOffset.UTC));
+        tombstones = new InMemoryErasureTombstoneStore();
+        fence = new ErasureGuard(tombstones, List.of(), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400), Duration.ofSeconds(1),
+                Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
         registry = new SimpleMeterRegistry();
         when(policy.require(anyString(), any())).thenReturn(Resolved.DEFAULTS);
         when(policy.windowOf(anyString(), any())).thenReturn(Duration.ofHours(24));
@@ -767,28 +773,109 @@ class HealthOutcomeEvaluatorTest {
     }
 
     @Nested
-    @DisplayName("fences and ratings")
+    @DisplayName("the erasure guard and ratings")
     class FencesAndRatings {
 
         @Test
-        @DisplayName("nothing is written for a user an erasure is fencing")
-        void fencedUser() {
-            fence.stopInFlightWork("user");
+        @DisplayName("nothing is written for an erased user's turns captured before the erasure — a failure, retried")
+        void erasedUser() {
+            fence.tombstoneUser("user", List.of());
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
-            assertEquals(0, evaluator.evaluate("c1", null));
+            assertThrows(HealthStoreException.class, () -> evaluator.evaluate("c1", null));
             verify(outcomes, never()).upsert(any());
         }
 
         @Test
-        @DisplayName("a fence raised while the conversation was evaluated deletes what was just written")
-        void fenceRaisedMeanwhile() {
+        @DisplayName("a turn's capture is taken as the recorder admitted it: a turn resumed after the user's erasure is not refused")
+        void resumedTurnCapturedAfterTheErasure() {
+            fence.tombstoneUser("user", List.of());
+            Instant first = NOW.minus(Duration.ofDays(2));
+            Instant resumed = NOW.plus(Duration.ofHours(1));
+            HealthTurn turn = new HealthTurn("c1", 0, "e0", "agent", 1, null, "user", "api", LocalDate.ofInstant(first, ZoneOffset.UTC), first,
+                    resumed, 0.01, null, null, null, null, 100L, null, false, List.of(), false, 0, 0, 0, 0, true, true, false, List.of("act"), false);
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(List.of(turn));
+            evaluator.evaluate("c1", null);
+            verify(outcomes).upsert(any());
+        }
+
+        @Test
+        @DisplayName("nothing is written for a tombstoned conversation")
+        void erasedConversation() {
+            fence.tombstoneConversation("c1");
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            int[] done = {0, 0, 0};
+            assertFalse(evaluator.evaluateSafely("c1", null, done));
+            verify(outcomes, never()).upsert(any());
+        }
+
+        @Test
+        @DisplayName("tombstones that cannot be read refuse the write (fail closed)")
+        void unreadableTombstones() {
+            tombstones.failReads = true;
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            assertThrows(HealthStoreException.class, () -> evaluator.evaluate("c1", null));
+            verify(outcomes, never()).upsert(any());
+        }
+
+        @Test
+        @DisplayName("an erasure started while the conversation was evaluated removes each session just written")
+        void erasedMeanwhile() {
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
             doAnswer(inv -> {
-                fence.stopInFlightWork("user");
+                fence.tombstoneUser("user", List.of("c1"));
                 return null;
             }).when(outcomes).upsert(any());
             assertEquals(0, evaluator.evaluate("c1", null));
-            verify(outcomes).deleteByConversationId("c1");
+            List<HealthOutcome> written = upserted();
+            assertFalse(written.isEmpty());
+            for (HealthOutcome session : written) {
+                verify(outcomes).deleteSessions("c1", List.of(session.sessionNo()));
+            }
+        }
+
+        @Test
+        @DisplayName("a session that cannot be removed again is recorded as a pending removal of the writer")
+        void removalFailsIsRecorded() {
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            doAnswer(inv -> {
+                fence.tombstoneConversation("c1");
+                return null;
+            }).when(outcomes).upsert(any());
+            when(outcomes.deleteSessions(eq("c1"), eq(List.of(0)))).thenThrow(new HealthStoreException("down", null));
+            assertEquals(0, evaluator.evaluate("c1", null));
+            assertEquals(1, tombstones.pendingCount());
+        }
+
+        @Test
+        @DisplayName("a write that fails part-way is still checked: what landed is removed")
+        void failedWriteIsChecked() {
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            doAnswer(inv -> {
+                fence.tombstoneConversation("c1");
+                throw new HealthStoreException("partial", null);
+            }).when(outcomes).upsert(any());
+            assertThrows(HealthStoreException.class, () -> evaluator.evaluate("c1", null));
+            verify(outcomes, atLeastOnce()).deleteSessions(eq("c1"), eq(List.of(0)));
+        }
+
+        @Test
+        @DisplayName("the drain barrier waits for an evaluation in flight")
+        void drainWaitsForEvaluation() throws Exception {
+            CountDownLatch inUpsert = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            doAnswer(inv -> {
+                inUpsert.countDown();
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            }).when(outcomes).upsert(any());
+            Thread worker = new Thread(() -> evaluator.evaluate("c1", null));
+            worker.start();
+            assertTrue(inUpsert.await(5, TimeUnit.SECONDS));
+            assertFalse(evaluator.awaitDrained(Duration.ofMillis(50)), "an evaluation is in flight");
+            release.countDown();
+            assertTrue(evaluator.awaitDrained(Duration.ofSeconds(5)));
+            worker.join(5_000);
         }
 
         @Test

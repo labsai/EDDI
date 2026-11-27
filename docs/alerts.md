@@ -372,16 +372,46 @@ internal id with it), and forgets an administrator or editor as the acknowledger
 events and the author of rules.
 
 Alert work waits in a queue, so content captured before an erasure can reach the
-store after it. The erasure's first step therefore puts up a short-lived **fence**
-for the user on every node (through the same cluster stop broadcast the conversation
-service uses). An `OUTPUT_MATCH` value captured before the erasure started is not
-stored — that alert still fires, without the value. A rating alert for a rating
-given before the erasure started is dropped altogether: no event is written or
-sent. A queued rating alert also reads the rating again and is dropped when the
-rating is gone or has changed. An event written while the fence went up has its
-value or excerpt blanked before it is delivered. A fence lasts 15 minutes, far longer than the queue takes to
-drain; it only ever holds back content captured *before* the erasure, so a later
+store after it. Alerting therefore takes part in the
+[erasure guarantee for asynchronously written data](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data):
+the erasure first writes durable tombstones of the user and of their conversations,
+then waits, on every node, until the alert work queued before them has been
+written (the alert worker's queue is the drain barrier). Only the write is waited
+for: the first delivery of a fresh alert runs on a separate delivery stage
+(`eddi-alerts-delivery-*` threads), which checks the guard again right before the
+send, so a slow Slack or webhook call does not occupy the drain barrier. It can still
+delay the erasure's redaction step, which waits for a send that already claimed the
+event to finish or for its claim to expire (bounded, see below). When that stage's
+queue is full the send is left to the maintenance pass (the event was stored with
+its retry time a claim lease ahead), counted as
+`eddi_alerts_dropped_total{reason="delivery_queue_full"}`. An `OUTPUT_MATCH` value of an erased
+conversation, or captured before the user's erasure, is not stored — that alert
+still fires, without the value. A rating alert of an erased user or conversation is
+dropped altogether: no event is written or sent. A queued rating alert also reads
+the rating again and is dropped when the rating is gone or has changed. An event
+written while the tombstones went up has its value or excerpt removed before it is
+delivered; if that removal fails, a durable pending removal keeps the erasure's
+`alerts` step failed until it is retried successfully. The tombstones last
+`eddi.gdpr.tombstone-retention` (400 days), longer than any event can wait in the
+queue, and hold back only content captured *before* the erasure, so a later
 conversation of a reused id is not affected.
+
+A rating alert that stores a comment excerpt also stores the rater as an internal,
+keyed subject (`k1:` and an HMAC under the tombstone key — never the user id), so the
+rater's erasure finds, blanks and verifies those excerpts directly, even when the
+ratings themselves are already gone. When the key is unavailable the alert is stored
+without the excerpt.
+
+A **permanent conversation delete** — one conversation, or the retention sweep's
+batch — blanks every `OUTPUT_MATCH` value stored from that conversation **and every
+rating comment excerpt** of an alert about it, with the rater subject either
+carries, with the same guarantee: tombstone, drain on every node, blank, verify —
+and the delete fails (and deletes nothing else) when any of it fails. The alert
+itself stays, with its rule, agent, score, tags and time. The excerpt is
+conversation content: the write side already refuses it for a deleted
+conversation, so the delete removes it too, although the rating it was copied from
+may outlive the conversation. A user erasure does the same for every conversation
+of the user.
 
 **No send starts with erased content once an erasure has completed.** Every send —
 the first delivery and each retry, on any node — first takes a short claim on the

@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthSessionQuery;
 import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -378,10 +380,39 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
+    public long countByUserId(String userId) {
+        return count(eq(FIELD_USER, userId), "Could not count a user's health outcomes");
+    }
+
+    @Override
+    public long countByConversationId(String conversationId) {
+        return count(eq(FIELD_CONVERSATION, conversationId), "Could not count a conversation's health outcomes");
+    }
+
+    private long count(Bson filter, String failure) {
+        try {
+            return committed().countDocuments(filter);
+        } catch (MongoException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    /**
+     * The collection read from the primary at majority read concern — what has
+     * committed. For the reads whose answer decides what an erasure does: its
+     * verification counts (a lagging secondary could answer "0 left" while a row is
+     * still stored) and the orphan sweep's scan. The client default
+     * ({@code nearest}) may be a lagging secondary.
+     */
+    private MongoCollection<Document> committed() {
+        return outcomes.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
+    }
+
+    @Override
     public void forEachConversationEvaluatedSince(Instant since, int limit, Consumer<String> consumer) {
         List<Bson> pipeline = List.of(Aggregates.match(gte(FIELD_EVALUATED, Date.from(since))), Aggregates.group("$" + FIELD_CONVERSATION),
                 Aggregates.limit(Math.max(1, limit)));
-        try (MongoCursor<Document> cursor = outcomes.aggregate(pipeline).allowDiskUse(true).iterator()) {
+        try (MongoCursor<Document> cursor = committed().aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
                 Object conversationId = cursor.next().get("_id");
                 if (conversationId != null) {

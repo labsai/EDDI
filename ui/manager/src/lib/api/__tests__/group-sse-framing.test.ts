@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { streamGroupDiscussion, type GroupSSEEvent } from "../groups";
+import { streamGroupDiscussion, type GroupSSEEvent } from "@eddi/app-kit/lib/api/groups";
 
 /**
  * Framing tests for the group SSE reader.

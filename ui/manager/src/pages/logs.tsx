@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -28,11 +28,11 @@ import {
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
-import { historyEntryKey, keyedOldestFirst, logEntryKey } from "@/lib/log-entries";
-import type { LogEntry, DatabaseLogEntry } from "@/lib/api/logs";
-import type { HistoryFilters } from "@/lib/api/logs";
-import { useDeployedAgents } from "@/hooks/use-chat";
-import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
+import { historyEntryKey, keyedOldestFirst, logEntryKey } from "@eddi/app-kit/lib/log-entries";
+import type { LogEntry, DatabaseLogEntry } from "@eddi/app-kit/lib/api/logs";
+import type { HistoryFilters } from "@eddi/app-kit/lib/api/logs";
+import { useDeployedAgents } from "@eddi/app-kit/hooks/use-chat";
+import { getConversationDescriptors, parseConversationUri } from "@eddi/app-kit/lib/api/conversations";
 import { useQuery } from "@tanstack/react-query";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { toIsoWithOffset, formatDateTimeWithZone } from "@/lib/date-format";

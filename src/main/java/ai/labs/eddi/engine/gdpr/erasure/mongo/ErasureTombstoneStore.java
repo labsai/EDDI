@@ -1,0 +1,268 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.gdpr.erasure.mongo;
+
+import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
+import com.mongodb.WriteConcern;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.UpdateOneModel;
+import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.WriteModel;
+import io.quarkus.arc.DefaultBean;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
+import static com.mongodb.client.model.Filters.and;
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
+import static com.mongodb.client.model.Filters.lte;
+import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Updates.set;
+
+/**
+ * MongoDB implementation of {@link IErasureTombstoneStore}: tombstones in
+ * {@code erasuretombstones} (a TTL index on {@code expiresAt} removes expired
+ * ones; {@link #erasedAt} ignores them before that), pending removals in
+ * {@code erasurependingremovals}, the salt in {@code erasuremeta}.
+ * <p>
+ * <b>Every collection is read from the primary with majority read concern and
+ * written with majority write concern</b>, whatever the client defaults are.
+ * The client is built with {@code ReadPreference.nearest()}
+ * ({@code PersistenceModule}): a lagging secondary would answer "no tombstone"
+ * for one the erasure has already committed, and the guarantee would rest on
+ * replication lag.
+ * <p>
+ * <b>The point reads the guard decides on — a tombstone by {@code _id}, a meta
+ * value by {@code _id} — use linearizable read concern</b> on a replica set or
+ * a sharded cluster. Majority alone does not make the answering node confirm it
+ * is still the primary: a primary that has been replaced but not yet noticed
+ * can answer from before an acknowledged tombstone, and neither read would
+ * throw. Each such read is bounded by {@link #POINT_READ_MAX_TIME}; a timeout
+ * throws, and the guard fails closed on it. A standalone server rejects
+ * linearizable reads ("node needs to be a replica set member") and has no
+ * second primary, so there they stay majority reads. The multi-document
+ * pending-removal queries stay majority reads everywhere: linearizability is
+ * defined for single-document reads only.
+ */
+@ApplicationScoped
+@DefaultBean
+public class ErasureTombstoneStore implements IErasureTombstoneStore {
+
+    static final String COLLECTION_TOMBSTONES = "erasuretombstones";
+    static final String COLLECTION_PENDING = "erasurependingremovals";
+    static final String COLLECTION_META = "erasuremeta";
+
+    /** The bound of one linearizable point read; past it the read throws. */
+    static final Duration POINT_READ_MAX_TIME = Duration.ofSeconds(5);
+
+    private final MongoCollection<Document> tombstones;
+    private final MongoCollection<Document> pending;
+    private final MongoCollection<Document> meta;
+    /** {@link #tombstones} and {@link #meta} for the single-document reads. */
+    private final MongoCollection<Document> tombstoneReads;
+    private final MongoCollection<Document> metaReads;
+
+    @Inject
+    public ErasureTombstoneStore(MongoDatabase database) {
+        this.tombstones = primaryMajority(database.getCollection(COLLECTION_TOMBSTONES));
+        this.pending = primaryMajority(database.getCollection(COLLECTION_PENDING));
+        this.meta = primaryMajority(database.getCollection(COLLECTION_META));
+        ReadConcern pointReads = pointReadConcern(database);
+        this.tombstoneReads = tombstones.withReadConcern(pointReads);
+        this.metaReads = meta.withReadConcern(pointReads);
+        tombstones.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_erasuretombstone_ttl").expireAfter(0L, TimeUnit.SECONDS));
+        pending.createIndex(Indexes.ascending("userKey"),
+                new IndexOptions().name("idx_erasurepending_user").partialFilterExpression(exists("userKey", true)));
+        pending.createIndex(Indexes.ascending("conversationId"),
+                new IndexOptions().name("idx_erasurepending_conversation").partialFilterExpression(exists("conversationId", true)));
+        pending.createIndex(Indexes.ascending("createdAt"), new IndexOptions().name("idx_erasurepending_created"));
+        pending.createIndex(Indexes.ascending("nextAttemptAt", "createdAt"), new IndexOptions().name("idx_erasurepending_due"));
+    }
+
+    /**
+     * Primary reads, majority read and write concern: a read from the current
+     * primary sees every write the erasure got acknowledged.
+     */
+    static MongoCollection<Document> primaryMajority(MongoCollection<Document> collection) {
+        return collection.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY)
+                .withWriteConcern(WriteConcern.MAJORITY);
+    }
+
+    /**
+     * Linearizable on a replica set member or a mongos, majority on a standalone
+     * server (which refuses linearizable reads).
+     */
+    static ReadConcern pointReadConcern(MongoDatabase database) {
+        Document hello = database.runCommand(new Document("hello", 1));
+        boolean replicated = hello != null && (hello.get("setName") != null || "isdbgrid".equals(hello.get("msg")));
+        return replicated ? ReadConcern.LINEARIZABLE : ReadConcern.MAJORITY;
+    }
+
+    /** One document by {@code _id}, through a bounded point read. */
+    private static Document byId(MongoCollection<Document> collection, String id) {
+        return collection.find(eq("_id", id)).maxTime(POINT_READ_MAX_TIME.toMillis(), TimeUnit.MILLISECONDS).first();
+    }
+
+    private static String id(Kind kind, String key) {
+        return kind.name() + ":" + key;
+    }
+
+    @Override
+    public void putTombstones(Kind kind, Collection<String> keys, Instant erasedAt, Instant expiresAt) {
+        if (keys == null || keys.isEmpty()) {
+            return;
+        }
+        List<WriteModel<Document>> writes = new ArrayList<>(keys.size());
+        for (String key : keys) {
+            // writtenAt is the database's clock (see erasedAt), and like erasedAt and
+            // expiresAt it only moves later: a write on a primary whose clock is behind
+            // the one that wrote the tombstone must not pull the cutoff back. An update
+            // pipeline, so $$NOW and the stored value meet in one $max ($max skips a
+            // missing field, so the first write takes the database time).
+            List<Bson> update = List.of(new Document("$set",
+                    new Document("kind", new Document("$ifNull", List.of("$kind", kind.name())))
+                            .append("erasedAt", new Document("$max", List.of("$erasedAt", Date.from(erasedAt))))
+                            .append("expiresAt", new Document("$max", List.of("$expiresAt", Date.from(expiresAt))))
+                            .append("writtenAt", new Document("$max", List.of("$writtenAt", "$$NOW")))));
+            writes.add(new UpdateOneModel<>(eq("_id", id(kind, key)), update, new UpdateOptions().upsert(true)));
+        }
+        tombstones.bulkWrite(writes);
+    }
+
+    @Override
+    public Optional<Instant> erasedAt(Kind kind, String key, Instant now) {
+        // By _id alone, the shape a linearizable read is defined for; expiry is checked
+        // here (the TTL monitor removes expired tombstones only eventually).
+        Document found = byId(tombstoneReads, id(kind, key));
+        Date expiresAt = found == null ? null : found.getDate("expiresAt");
+        if (expiresAt == null || !expiresAt.after(Date.from(now))) {
+            return Optional.empty();
+        }
+        Date erased = found.getDate("erasedAt");
+        Date written = found.getDate("writtenAt");
+        Date later = written != null && (erased == null || written.after(erased)) ? written : erased;
+        return Optional.ofNullable(later).map(Date::toInstant);
+    }
+
+    @Override
+    public long deleteExpiredTombstones(Instant now) {
+        return tombstones.deleteMany(lte("expiresAt", Date.from(now))).getDeletedCount();
+    }
+
+    @Override
+    public String putMetaIfAbsent(String name, String value) {
+        Document existing = byId(metaReads, name);
+        if (existing != null) {
+            return existing.getString("value");
+        }
+        try {
+            meta.insertOne(new Document("_id", name).append("value", value));
+            return value;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw e;
+            }
+            // Another node wrote it first: adopt that one. A primary, majority read sees
+            // the winner's acknowledged insert, so this is never null in practice.
+            Document winner = byId(metaReads, name);
+            if (winner == null) {
+                throw new IllegalStateException("The erasure meta value '" + name + "' was neither inserted nor found");
+            }
+            return winner.getString("value");
+        }
+    }
+
+    @Override
+    public Optional<String> meta(String name) {
+        Document found = byId(metaReads, name);
+        return found == null ? Optional.empty() : Optional.ofNullable(found.getString("value"));
+    }
+
+    @Override
+    public void addPendingRemoval(PendingRemoval removal) {
+        Document doc = new Document("writer", removal.writer()).append("rowId", removal.rowId())
+                .append("createdAt", Date.from(removal.createdAt())).append("nextAttemptAt", Date.from(removal.createdAt()));
+        if (removal.userKey() != null) {
+            doc.append("userKey", removal.userKey());
+        }
+        if (removal.conversationId() != null) {
+            doc.append("conversationId", removal.conversationId());
+        }
+        Bson update = new Document("$setOnInsert", doc);
+        pending.updateOne(eq("_id", removal.writer() + ":" + removal.rowId()), update, new UpdateOptions().upsert(true));
+    }
+
+    @Override
+    public List<PendingRemoval> pendingRemovals(String writer, String userKey, String conversationId, Instant dueBy, int limit) {
+        List<PendingRemoval> found = new ArrayList<>();
+        if (limit <= 0) {
+            // MongoDB reads limit(0) as "no limit"; the contract is "at most limit".
+            return found;
+        }
+        Bson filter = filter(writer, userKey, conversationId);
+        Bson sort = Sorts.ascending("createdAt", "_id");
+        if (dueBy != null) {
+            // A record without nextAttemptAt (written before the field existed) is due.
+            filter = and(filter, or(lte("nextAttemptAt", Date.from(dueBy)), exists("nextAttemptAt", false)));
+            sort = Sorts.ascending("nextAttemptAt", "createdAt", "_id");
+        }
+        pending.find(filter).sort(sort).limit(limit)
+                .forEach(doc -> found.add(new PendingRemoval(doc.getString("writer"), doc.getString("rowId"), doc.getString("userKey"),
+                        doc.getString("conversationId"), doc.getDate("createdAt").toInstant())));
+        return found;
+    }
+
+    @Override
+    public long countPendingRemovals(String writer, String userKey, String conversationId) {
+        return pending.countDocuments(filter(writer, userKey, conversationId));
+    }
+
+    @Override
+    public void deferPendingRemoval(String writer, String rowId, Instant notBefore) {
+        pending.updateOne(eq("_id", writer + ":" + rowId), set("nextAttemptAt", Date.from(notBefore)));
+    }
+
+    @Override
+    public boolean removePendingRemoval(String writer, String rowId) {
+        return pending.deleteOne(eq("_id", writer + ":" + rowId)).getDeletedCount() > 0;
+    }
+
+    private static Bson filter(String writer, String userKey, String conversationId) {
+        List<Bson> scope = new ArrayList<>();
+        if (userKey != null) {
+            scope.add(eq("userKey", userKey));
+        }
+        if (conversationId != null) {
+            scope.add(eq("conversationId", conversationId));
+        }
+        List<Bson> clauses = new ArrayList<>();
+        if (writer != null) {
+            clauses.add(eq("writer", writer));
+        }
+        if (!scope.isEmpty()) {
+            clauses.add(scope.size() == 1 ? scope.get(0) : or(scope));
+        }
+        return clauses.isEmpty() ? new Document() : and(clauses);
+    }
+}

@@ -543,10 +543,14 @@ public class HealthReportService {
      */
     public HealthSeries series(Scope scope, List<String> measures, String groupBy, boolean qualityAllowed) {
         Window window = scope.window();
-        List<HealthTurnAggregate> rows = daily(scope.agentId(), window.from(), window.to());
-        String preset = profile(scope.agentId(), rows).preset();
+        // The preset from the same rows as the report's (window and baseline), so one
+        // window gets one default origin set whichever endpoint is asked; the points
+        // come from the window's rows only.
+        List<HealthTurnAggregate> observed = daily(scope.agentId(), window.baseline().from(), window.to());
+        String preset = profile(scope.agentId(), observed).preset();
         List<String> origins = scope.origins() != null ? scope.origins() : HealthPeriods.defaultOrigins(preset);
-        List<HealthTurnAggregate> chosen = rows.stream().filter(selected(scope.version(), origins)).toList();
+        List<HealthTurnAggregate> chosen = observed.stream().filter(r -> window.contains(r.day())).filter(selected(scope.version(), origins))
+                .toList();
 
         Map<String, Map<LocalDate, List<HealthTurnAggregate>>> rowsByGroup = new TreeMap<>(Comparator.nullsFirst(Comparator.naturalOrder()));
         Map<String, Map<LocalDate, HealthUsagePoint>> usageByGroup = new HashMap<>();
@@ -603,7 +607,10 @@ public class HealthReportService {
                     HealthUsage dayUsage = !usageAvailable
                             ? null
                             : u == null ? HealthUsage.EMPTY : new HealthUsage(u.sessions(), u.engagedSessions(), u.turns(), u.distinctUsers(), 0);
-                    RatingStats ratings = grouped ? null : ratingsByDay.getOrDefault(day, qualityAllowed ? RatingStats.EMPTY : null);
+                    // A failed rating read (null) is unavailable, never a measured zero.
+                    RatingStats ratings = grouped || ratingsByDay == null
+                            ? null
+                            : ratingsByDay.getOrDefault(day, qualityAllowed ? RatingStats.EMPTY : null);
                     List<HealthOutcomeCount> dayOutcomes = outcomeDays.getOrDefault(day, List.of());
                     OutcomeStats outcomes = outcomesAvailable
                             ? OutcomeStats.of(dayOutcomes, settings.minOutcomeCoverage()).withPending(pendingHint)
@@ -677,7 +684,8 @@ public class HealthReportService {
             return byDay;
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the daily ratings of agent %s for Agent Health: %s", sanitize(agentId), sanitize(e.getMessage()));
-            return Map.of();
+            // Unavailable, as on the report path: an empty map would read as zero ratings.
+            return null;
         }
     }
 
@@ -752,7 +760,6 @@ public class HealthReportService {
     public HealthCompare compare(String agentId, int fromVersion, int toVersion, int days, List<String> requestedOrigins,
                                  boolean qualityAllowed) {
         int newer = Math.max(fromVersion, toVersion);
-        int older = Math.min(fromVersion, toVersion);
         LocalDate today = today();
         Map<Integer, LocalDate> firstDays = firstDays(agentId, firstTurnOrigins(requestedOrigins));
         LocalDate newerStart = firstDays.get(newer);

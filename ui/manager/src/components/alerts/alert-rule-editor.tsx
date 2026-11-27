@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { OutputMatchBuilder } from "./output-match-builder";
 import { alertErrorCode, useSaveAlertRule, useTestAlertRule } from "@/hooks/use-alerts";
-import { isApiError } from "@/lib/api-client";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import { ruleProblems, throttleProblems } from "@/lib/alert-rules";
 import {
   ALERT_LIMITS,
@@ -20,7 +20,7 @@ import {
   type DigestMode,
   type ErrorKind,
   type TestDelivery,
-} from "@/lib/api/alerts";
+} from "@eddi/app-kit/lib/api/alerts";
 
 const selectClass =
   "h-10 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";

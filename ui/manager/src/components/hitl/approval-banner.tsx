@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -11,19 +12,19 @@ import {
   Pencil,
   Hand,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import {
   argumentsForEditing,
   formatToolArguments,
   parseToolArgumentsForDisplay,
   REDACTION_MARKER,
   sameJsonText,
-} from "@/lib/hitl-format-args";
-import { humanizeToolName, toolArgumentFields } from "@/lib/tool-labels";
-import { ToolArgumentFields } from "@/components/shared/tool-argument-fields";
-import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
-import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
+} from "@eddi/app-kit/lib/hitl-format-args";
+import { humanizeToolName, toolArgumentFields } from "@eddi/app-kit/lib/tool-labels";
+import { ToolArgumentFields } from "@eddi/app-kit/components/shared/tool-argument-fields";
+import { timeoutPolicyLabel, granularityLabel } from "@eddi/app-kit/lib/hitl-labels";
+import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@eddi/app-kit/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
   type ApprovalContextView,
@@ -32,7 +33,7 @@ import {
   type PauseDetails,
   type PendingToolCallView,
   type ToolCallDecision,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { AnswerEditor, ReasonCodeSelect } from "@/components/hitl/answer-editor";
 import { ApprovalContext } from "@/components/hitl/approval-context";
 import { validateEditedAnswer } from "@/lib/hitl-edit";
@@ -890,7 +891,7 @@ export function ApprovalBanner({
       )}
 
       {/* Action buttons */}
-      <div className="flex items-center gap-2">
+      <RowActions className="justify-start">
         <button
           type="button"
           // `pauseDetailsError` belongs here as much as `pauseDetailsPending`:
@@ -943,7 +944,7 @@ export function ApprovalBanner({
             {t("hitl.cancel", "Cancel")}
           </button>
         )}
-      </div>
+      </RowActions>
 
       {/* Confirmation gate — no destructive HITL action fires on a single click. */}
       {confirmDialog && (

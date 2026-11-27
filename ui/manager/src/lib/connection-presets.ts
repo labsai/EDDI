@@ -5,7 +5,7 @@ import {
   type ConnectionConfiguration,
   type OAuthConfig,
   type StaticAuth,
-} from "./api/connections";
+} from "@eddi/app-kit/lib/api/connections";
 
 /**
  * Starting points for a new connection, kept as data.

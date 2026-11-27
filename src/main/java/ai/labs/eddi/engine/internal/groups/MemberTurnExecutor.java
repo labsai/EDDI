@@ -55,14 +55,15 @@ import java.util.stream.Collectors;
  * Extracted from {@code GroupConversationService} (Wave R, R1 step 4) as a pure
  * move — no behavior change.
  * <p>
- * Holds a reference back to the owning {@link GroupConversationService} for two
- * things a member turn cannot do standalone: a {@code GROUP}-type member
- * recurses into a nested sub-discussion via the facade's own public
- * {@code discuss}/{@code cancelDiscussion}, and attachment granting reuses the
+ * Holds a reference back to the owning {@link GroupConversationService} for
+ * what a member turn cannot do standalone: a {@code GROUP}-type member recurses
+ * into a nested sub-discussion via the facade's own public
+ * {@code discuss}/{@code cancelDiscussion}, attachment granting reuses the
  * facade's {@code grantAndInjectAttachments} (widened to {@code public} for
  * this) rather than duplicating its field-injected-{@code IAttachmentStore}
- * construction dance here. Both are pre-existing facade methods, not new
- * coupling introduced by this class.
+ * construction dance here, and the team-budget calls ({@code chargeTeamBudget},
+ * {@code teamBudgetTemplateValues}) live on the facade too. These are
+ * pre-existing facade methods, not new coupling introduced by this class.
  *
  * @author ginccc
  */

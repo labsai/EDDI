@@ -256,6 +256,28 @@ public interface IHealthTurnStore {
     long deleteByConversationId(String conversationId);
 
     /**
+     * Deletes the one row or marker of execution {@code executionId} of
+     * {@code conversationId} — the erasure guard's removal of a row written while
+     * an erasure started. A row that does not exist is a success.
+     *
+     * @return the rows deleted (0 or 1)
+     */
+    long deleteRow(String conversationId, String executionId);
+
+    /**
+     * How many rows <em>and</em> markers of the user are stored, read from what has
+     * committed (MongoDB: the primary, majority read concern) — the verification of
+     * a GDPR erasure.
+     */
+    long countByUserId(String userId);
+
+    /**
+     * How many rows and markers of the conversation are stored, read as
+     * {@link #countByUserId} — the verification of a permanent conversation delete.
+     */
+    long countByConversationId(String conversationId);
+
+    /**
      * Streams to {@code consumer} the distinct conversation ids of the rows whose
      * {@code updatedAt} is at or after {@code since}, and of the discard markers
      * written since then — at most {@code limit} ids, in no particular order. What

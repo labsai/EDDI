@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { recordUnhandledApiRequest } from "@/test/mocks/unhandled-api-recorder";
-import { UNHANDLED_API_REQUESTS_KEY } from "@/test/mocks/unhandled-api";
+import { recordUnhandledApiRequest } from "@eddi/app-kit/test/mocks/unhandled-api-recorder";
+import { UNHANDLED_API_REQUESTS_KEY } from "@eddi/app-kit/test/mocks/unhandled-api";
 
 /**
  * The recorder behind the E2E tier's "no unhandled API calls" guard.

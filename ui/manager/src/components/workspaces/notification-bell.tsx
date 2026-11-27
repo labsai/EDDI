@@ -10,10 +10,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@eddi/app-kit/components/ui/dropdown-menu";
 import { Button } from "@eddi/ui";
-import { cn } from "@/lib/utils";
-import { getErrorMessage } from "@/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   getNotifications,
   getUnreadNotificationCount,
@@ -25,7 +25,7 @@ import { userSubject } from "@/lib/spaces";
 import { isAgentUri, managerChatPath, managerRouteFor } from "@/lib/resource-links";
 import { useSpaces } from "@/hooks/use-spaces";
 import { useUpdateCheckSwitch } from "@/hooks/use-update-check";
-import { UPDATES_PATH } from "@/lib/brand";
+import { UPDATES_PATH } from "@eddi/app-kit/lib/brand";
 
 const NOTIFICATION_KEYS = {
   count: ["workspaces", "notifications", "count"] as const,

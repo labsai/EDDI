@@ -28,6 +28,8 @@ import {
   conversationReducer,
   initialConversationState,
   isConversationAction,
+  RECONNECT_DELAYS_MS,
+  STOP_VERIFY_DELAYS_MS,
   useAgentConversation,
   useConversationContext,
   type AgentConversationState,
@@ -153,7 +155,15 @@ export function ChatProvider({
   children: ReactNode;
   config?: Partial<ChatConfig>;
 }) {
-  const [controller] = useState(() => new AgentConversation({ transport: NO_ROUTE, t }));
+  const [controller] = useState(
+    () =>
+      new AgentConversation({
+        transport: NO_ROUTE,
+        t,
+        stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
+        reconnectDelaysMs: RECONNECT_DELAYS_MS,
+      }),
+  );
   const conversation = useAgentConversation(controller);
   // Lowest to highest: built-in defaults, the deployment brand, the agent's
   // appearance (a seam, empty today), the embedder's config. URL parameters

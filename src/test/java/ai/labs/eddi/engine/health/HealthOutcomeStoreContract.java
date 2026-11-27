@@ -240,17 +240,23 @@ public interface HealthOutcomeStoreContract {
     }
 
     @Test
-    @DisplayName("GDPR: by user found newest first and deleted; by conversation deleted")
+    @DisplayName("GDPR: by user found newest first, counted and deleted; by conversation counted and deleted")
     default void gdpr() {
         store().upsert(List.of(session("c1", 0, "agent", "alice", T0, "api", true, "FAILED", "structural", false, null),
                 session("c1", 9, "agent", "alice", T0.plusSeconds(90_000), "api", true, "FAILED", "structural", false, null),
                 session("c2", 0, "agent", "bob", T0, "api", true, "FAILED", "structural", false, null)));
         assertEquals(List.of(9, 0), store().findByUserId("alice", 10).stream().map(HealthOutcome::sessionNo).toList());
         assertEquals(1, store().findByUserId("alice", 1).size());
+        assertEquals(2, store().countByUserId("alice"));
+        assertEquals(2, store().countByConversationId("c1"));
         assertEquals(2, store().deleteByUserId("alice"));
         assertTrue(store().findByUserId("alice", 10).isEmpty());
+        assertEquals(0, store().countByUserId("alice"));
+        assertEquals(0, store().countByConversationId("c1"));
+        assertEquals(1, store().countByConversationId("c2"));
         assertEquals(1, store().deleteByConversationId("c2"));
         assertTrue(store().findByConversation("c2").isEmpty());
+        assertEquals(0, store().countByConversationId("c2"));
     }
 
     @Test

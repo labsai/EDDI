@@ -1,10 +1,10 @@
-import { isValidIsoDuration, requiresApprovalTimeout } from "./hitl-config";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@eddi/app-kit/lib/hitl-config";
 import { globMatches } from "./glob";
 import {
   MAX_PAUSE_REASON_LENGTH,
   TOOL_SOURCES,
   type ToolApprovalsConfig,
-} from "./api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * Client-side mirror of the backend tool-approval save-time validation
