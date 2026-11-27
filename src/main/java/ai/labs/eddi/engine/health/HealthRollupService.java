@@ -58,9 +58,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * failing.</li>
  * </ol>
  * <b>Idempotent</b>: a day recomputed twice from the same rows produces the
- * same rows, so a retried pass, a duplicated schedule or two nodes racing do no
- * harm. A pass stops after {@link #TIME_BUDGET} and leaves the rest for the
- * next.
+ * same rows, so a retried pass or a duplicated schedule does no harm. One limit
+ * remains: {@link IHealthDailyStore#replaceDay} is not fenced, so a rollup of a
+ * day that stalls past the schedule's lease (the poller's fire timeout, a
+ * wedged store call) and then finishes after a newer rollup of the same day
+ * overwrites that day's rows with what it read earlier; the newer rollup
+ * already cleared the dirty entry, so the day keeps the older counts until it
+ * is next marked. A pass stops after {@link #TIME_BUDGET} and leaves the rest
+ * for the next.
  */
 @ApplicationScoped
 public class HealthRollupService {

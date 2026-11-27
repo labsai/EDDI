@@ -124,9 +124,10 @@ public class HealthSettings {
     }
 
     /**
-     * How often the rollup job turns dirty days into daily rows — also how far
-     * today's numbers may lag, and how long a computed view is cached. Never less
-     * than 15 seconds.
+     * How often the rollup job turns dirty days into daily rows — the normal
+     * cadence at which today's numbers catch up (not a bound: failed or queued days
+     * wait for a later pass), and how long a day may wait before
+     * {@code dataThrough} counts it as behind. Never less than 15 seconds.
      */
     public Duration rollupInterval() {
         return rollupInterval.compareTo(Duration.ofSeconds(15)) < 0 ? Duration.ofSeconds(15) : rollupInterval;

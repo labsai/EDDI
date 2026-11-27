@@ -256,3 +256,25 @@ see the 2026-11-11 entry above) is gone.
   whose row the erasure guard removes now marks the turn's own day. Test: `failedWriteRemovalMarksTheTurnsDay`.
 - `HealthTurnGdprParticipant` drops its conversation-store agent fallback: it runs after the cascade deleted the
   user's conversations, so the lookup could only ever find nothing.
+
+## 🐛 fix(health): review follow-ups — removal days, series preset and ratings, docs (2026-11-27)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthErasureWriter.removeRow` (a pending removal's retry): when the conversation's days cannot be read, the delete
+  still marks the conversation's agent's retained days (read from the conversation store, as `eraseConversation`
+  does), or warns when neither is known. It used to mark nothing. Test: `removeRowWithUnreadableDays`.
+- `HealthTurnRecorder`: the erasure guard's removal reads the day the row is stored on just before deleting it, so a
+  resumed row whose upsert committed and then threw has its first day marked, not only the turn's. Test:
+  `failedWriteRemovalMarksTheStoredDay`.
+- `HealthReportService.series` picks the default-origin preset from the same rows as the report (window and
+  baseline), so one window gets one origin set on every endpoint; the points still come from the window. A failed
+  daily rating read is now unavailable (`null`) rather than an empty map that read as zero ratings. Tests:
+  `seriesPresetMatchesTheReport`, `seriesRatingReadFailure`.
+- Docs: the rollup interval is the normal cadence, not a bound on how far today's numbers lag; the erasure has no
+  agent fallback for days it cannot read (stale text from before the merge); the admin skill attributes failures by
+  the agent's own failure classes, an incident day being supporting context only.
+- `HealthRollupService`'s comment states the remaining race: `replaceDay` is not fenced, so a rollup stalled past the
+  schedule lease can overwrite a newer rollup of the same day. A fence in both stores is a follow-up.
+- Tests: `HealthDirtyDaysTest` stops its flusher in a `finally`; `HealthQueryCacheTest` waits until every caller is
+  parked in the cache instead of sleeping 500 ms.

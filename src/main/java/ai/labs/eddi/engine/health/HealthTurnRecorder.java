@@ -343,13 +343,22 @@ public class HealthTurnRecorder {
     private boolean afterWrite(HealthTurn turn, String executionId, Set<LocalDate> days, Admission admission) {
         String conversationId = turn.conversationId();
         return erasureGuard.afterWrite(HealthErasureWriter.NAME, HealthErasureWriter.rowId(conversationId, executionId), admission, () -> {
-            long deleted = store.get().deleteRow(conversationId, executionId);
+            IHealthTurnStore turns = store.get();
+            // The day the row is stored on, read just before the delete: a resumed row
+            // keeps its first day, which a write that failed after committing (or whose
+            // own day read failed) never learned. Never in the way of the delete.
+            Set<LocalDate> stored = storedDays(turns, conversationId, List.of(executionId), null);
+            long deleted = turns.deleteRow(conversationId, executionId);
             // The rollup may already have counted the row: its days are re-rolled now.
-            // A write that failed before its days were read (it may still have
-            // committed) falls back to the turn's own day.
-            Set<LocalDate> marked = days.isEmpty() && turn.day() != null ? Set.of(turn.day()) : Set.copyOf(days);
+            // With no day read at all, the turn's own day.
+            Set<LocalDate> marked = new HashSet<>(days);
+            marked.addAll(stored);
+            if (marked.isEmpty() && turn.day() != null) {
+                marked.add(turn.day());
+            }
             if (deleted > 0 && dirtyDays != null && turn.agentId() != null && !marked.isEmpty()) {
-                dirtyDays.markDeletedRows(conversationId, List.of(turn.agentId()), new HealthDeletedRows(deleted, Map.of(turn.agentId(), marked)));
+                dirtyDays.markDeletedRows(conversationId, List.of(turn.agentId()),
+                        new HealthDeletedRows(deleted, Map.of(turn.agentId(), Set.copyOf(marked))));
             }
         });
     }

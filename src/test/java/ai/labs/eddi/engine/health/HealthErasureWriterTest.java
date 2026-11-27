@@ -99,6 +99,28 @@ class HealthErasureWriterTest {
         verify(dirty, never()).markDeletedRows(eq("empty"), any(), any());
     }
 
+    @Test
+    @DisplayName("a row removal whose day read fails still marks its days, through the conversation's agent")
+    void removeRowWithUnreadableDays() throws Exception {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        when(conversations.loadListingSummaries(List.of("conv")))
+                .thenReturn(Map.of("conv", new ConversationListingSummary("conv", "user", null, null, "agent", 1, 2)));
+        HealthErasureWriter marking = new HealthErasureWriter(recorder, store, instance(dirty), instance(conversations));
+        when(store.agentDaysOfConversation("conv")).thenThrow(new HealthStoreException("store down", null));
+        when(store.deleteRow("conv", "exec")).thenReturn(1L);
+
+        marking.removeRow(HealthErasureWriter.rowId("conv", "exec"));
+
+        verify(dirty).markDeletedRows("conv", List.of("agent"), new HealthDeletedRows(1L, null));
+
+        // Neither days nor agent: still handed over, so markDeletedRows logs the WARN.
+        when(store.agentDaysOfConversation("gone")).thenThrow(new HealthStoreException("store down", null));
+        when(store.deleteRow("gone", "exec")).thenReturn(1L);
+        marking.removeRow(HealthErasureWriter.rowId("gone", "exec"));
+        verify(dirty).markDeletedRows("gone", List.of(), new HealthDeletedRows(1L, null));
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> Instance<T> instance(T bean) {
         Instance<T> instance = mock(Instance.class);

@@ -195,16 +195,18 @@ They are recomputed, never incremented:
    days are read just before the delete). When those days cannot be read, the
    delete still goes ahead and **every retained day** of the conversation's
    agent is marked instead, with a WARN — the agent comes from the
-   conversation (purge), the row (the recorder's clean-up) or the sweep's
-   candidate read. A purge that can read neither the agent nor the days
+   conversation (purge, and a pending removal's retry while the conversation
+   still exists), the row (the recorder's clean-up, which also reads the day the
+   row is stored on just before deleting it) or the sweep's candidate read. A purge that can read neither the agent nor the days
    (MongoDB only, since PostgreSQL returns the days with the delete) **keeps** the
    rows, with a WARN. The next orphan sweep then deletes them and marks their
    agent's days, because its candidate read names the agent. Kept rows
    captured within `eddi.health.orphan-sweep-window` are removed by that sweep;
    older ones expire with `eddi.health.facts-retention`. An erasure deletes the
-   user's rows the same way; its fallback is the agents of the user's
-   conversations, noted at the erasure's first step while those conversations
-   still exist (see [GDPR](#gdpr)). Daily rows older than
+   user's rows the same way, but has no agent fallback: the rows of the user's
+   own conversations are erased first, in the cascade's conversation step, with
+   each conversation's agent known; for rows left after that whose days cannot
+   be read, nothing is re-rolled (a WARN; see [GDPR](#gdpr)). Daily rows older than
    `eddi.health.facts-retention` cannot be recomputed at all (see below).
    These marks are written to the store at once, not on the five-second flush,
    because the self-heal cannot find a deleted row; a failed write is retried
@@ -269,7 +271,10 @@ schedule at the next start.
 `dataThrough` in a report is the day before the earliest day of the agent that
 has waited for the rollup longer than one rollup interval, else today: a day
 marked a moment ago is waiting for the next pass, not behind. **Today's numbers
-may lag by up to one rollup interval.** Daily rows are kept
+normally trail by about one rollup interval** — that is the cadence, not a
+bound: a day whose rollup failed waits for a later pass, a pass stops after 90
+seconds with the rest still queued, and the views cache what they read for
+`eddi.health.cache-ttl`; `dataThrough` says how far the numbers are complete. Daily rows are kept
 `eddi.health.daily-retention` (730 days) and hold no personal data (no user or
 conversation id); an erasure removes a user's counts from them at the next pass,
 for days within `eddi.health.facts-retention` (90 days). **Older daily rows
@@ -333,7 +338,8 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
 ending today, or `from`/`to` (both, at most 90 days, not after today);
 `version=<n>`; `origin=<id>` repeatable. Without `origin` the **preset's**
-default applies: an agent with interactive traffic (or none) is `support` and
+default applies: an agent with interactive traffic in the period or its
+baseline (or none) is `support` and
 counts the interactive origins (`api`, `v1`, `mcp`, `email`, `slack`); an agent
 driven only by schedules, webhooks, A2A, groups or delegation is `task` and
 counts every origin but `agent-test`. `agent-test` is counted only when named.
@@ -462,7 +468,7 @@ caller: `read_agent_health`, `list_agent_health` and
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days. Also the oldest day the rollup recomputes, and how far back sessions and users are counted |
 | `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each row was **captured** on the turn's thread (its `updatedAt`, set before the row is queued for the health worker): the conversations of those rows are checked, and the rows of those that no longer exist deleted |
 | `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. The sweep keeps no cursor, so the excess is **not** guaranteed a later check: what leaves the window unchecked stays until `eddi.health.facts-retention` |
-| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — how far today's numbers may lag. At least 15 s; read when the schedule is created |
+| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — the normal cadence at which today's numbers catch up, not a bound on their lag (failed or queued days wait for a later pass). At least 15 s; read when the schedule is created |
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept |
 | `eddi.health.cache-ttl` | `60s` | How long the views cache what they read from the stores; `0` switches the cache off |
 | `eddi.health.apdex-t` | `4s` | Apdex threshold T (satisfied ≤ T, tolerating ≤ 4T); applies to days rolled up after a change |
@@ -512,14 +518,15 @@ Turn rows are personal data about a user's use of an agent:
   participant `agentHealthTurns`. Group member conversations are owned by the
   discussion's user and are covered by the same erasure. The delete returns the
   (agent, day)s of the deleted rows, and those days are re-rolled without the
-  user. If the days cannot be read, the rows are deleted all the same and every
-  retained day of the user's agents is re-rolled instead. The rows of the user's
-  own conversations are normally gone before the participant runs: the cascade
-  erases them through the erasure guarantee while the conversations still exist
-  (below), with each conversation's agent known. For what is left, unreadable
-  days cannot be re-rolled — the conversations are gone by then, so no agent can
-  be looked up: a WARN is logged and the daily rows keep the user's counts until
-  a later re-roll of those days or `eddi.health.daily-retention`. That alone
+  user. If the days cannot be read, the rows are deleted all the same, but the
+  participant has no agent to fall back on, so those days are **not** re-rolled.
+  The rows of the user's own conversations are normally gone before the
+  participant runs: the cascade erases them through the erasure guarantee while
+  the conversations still exist (below), with each conversation's agent known,
+  and an unreadable day set there re-rolls every retained day of that agent.
+  For what the participant deletes itself, unreadable days leave a WARN and the
+  daily rows keep the user's counts until a later re-roll of those days or
+  `eddi.health.daily-retention`. That alone
   never fails the step: the rows
   (the only personal data) are gone; the participant then verifies that no row,
   marker or pending removal of the user is left. Only days within

@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.health.report.HealthReports.Series;
 import ai.labs.eddi.engine.health.report.HealthReports.SeriesPoint;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
+import ai.labs.eddi.engine.ratings.model.RatingGroupBy;
 import ai.labs.eddi.engine.ratings.model.RatingSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -234,6 +235,44 @@ class HealthReportServiceTest {
         HealthPortfolioSessions old = service.portfolioSessions(List.of("b"), new Window(TODAY.minusDays(120), TODAY.minusDays(100))).get("b");
         assertNull(old.interactiveNow());
         assertNull(old.allBefore());
+    }
+
+    @Test
+    @DisplayName("series pick the preset from the report's rows (window and baseline), and draw points from the window only")
+    void seriesPresetMatchesTheReport() {
+        Window window = last(3);
+        LocalDate inBaseline = window.baseline().from();
+        // Interactive traffic in the baseline only, automated traffic in the window.
+        when(daily.find("agent", inBaseline, TODAY)).thenReturn(List.of(row(inBaseline, 1, "api", 10), row(TODAY, 1, "schedule", 30)));
+
+        AgentHealth report = service.report(new Scope("agent", window, null, null), "Support", false);
+        HealthSeries series = service.series(new Scope("agent", window, null, null), List.of("agentFailureRate"), "none", false);
+
+        assertEquals("support", report.preset());
+        Series failures = series.series().get(0);
+        // The support preset excludes the schedule turns, as in the report; the
+        // baseline's api row is not a point.
+        assertEquals(3, failures.points().size());
+        assertTrue(failures.points().stream().allMatch(p -> p.value() == null && p.n() == 0));
+        verify(daily, never()).find("agent", window.from(), TODAY);
+    }
+
+    @Test
+    @DisplayName("series: a failed rating read is unavailable, not a measured zero; a day without ratings in a good read is zero")
+    void seriesRatingReadFailure() {
+        when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 1, "api", 40)));
+        when(turns.dailyUsage(any(), any())).thenReturn(List.of(new HealthUsagePoint(TODAY, null, 5, 4, 40, 3)));
+        when(ratings.summarize(any(), eq(RatingGroupBy.DAY))).thenReturn(List.of());
+
+        Series good = service.series(new Scope("agent", last(2), null, null), List.of("ratingResponseRate"), "none", true).series().get(0);
+        assertEquals(0.0, good.points().get(1).value());
+        assertEquals(5, good.points().get(1).n());
+
+        when(ratings.summarize(any(), eq(RatingGroupBy.DAY))).thenThrow(new IllegalStateException("ratings down"));
+        HealthReportService fresh = new HealthReportService(turns, daily, dirty, markers, ratings, testRuns, deployments,
+                HealthSettings.defaults(), Clock.fixed(NOW, ZoneOffset.UTC));
+        Series failed = fresh.series(new Scope("agent", last(2), null, null), List.of("ratingResponseRate"), "none", true).series().get(0);
+        assertTrue(failed.points().stream().allMatch(p -> p.value() == null && p.n() == 0));
     }
 
     @Test

@@ -118,8 +118,11 @@ public class HealthErasureWriter implements AsyncErasureWriter {
             LOGGER.debugf("Could not read the days of an Agent Health row before its removal: %s", e.getMessage());
         }
         long deleted = store.deleteRow(conversationId, rowId.substring(separator + 1));
-        if (deleted > 0 && agentDays != null) {
-            markDeleted(conversationId, List.of(), new HealthDeletedRows(deleted, agentDays));
+        if (deleted > 0) {
+            // Unknown days fall back to the conversation's agent, as in eraseConversation;
+            // with neither, markDeletedRows warns.
+            String agentId = agentDays != null ? null : agentOf(conversationId);
+            markDeleted(conversationId, agentId == null ? List.of() : List.of(agentId), new HealthDeletedRows(deleted, agentDays));
         }
     }
 

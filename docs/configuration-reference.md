@@ -304,7 +304,7 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily. Also the oldest day the rollup can recompute, and the reach of people and session counts |
 | `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each health row was captured (not written): the conversations of those rows are checked against the conversation store, and the rows of those that no longer exist deleted |
 | `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. No cursor is kept, so the excess is not guaranteed a later check and may stay until `eddi.health.facts-retention` |
-| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` system job turns dirty agent days into daily rows — how far today's numbers may lag. At least 15 s; read when the schedule is created |
+| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` system job turns dirty agent days into daily rows — the normal cadence at which today's numbers catch up, not a bound on their lag (failed or queued days wait for a later pass). At least 15 s; read when the schedule is created |
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept; swept daily |
 | `eddi.health.cache-ttl` | `60s` | How long the health views cache what they read from the stores (per query and agent, never per caller); `0` switches the cache off |
 | `eddi.health.apdex-t` | `4s` | The Apdex threshold T: a turn of at most T satisfies, one of at most 4T is tolerated. Applies to days rolled up after a change |
