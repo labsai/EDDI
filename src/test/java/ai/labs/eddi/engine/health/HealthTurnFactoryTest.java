@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -83,6 +84,20 @@ class HealthTurnFactoryTest {
         assertEquals(NOW, turn.timestamp());
         assertEquals(1234L, turn.durationMs());
         assertFalse(turn.discarded());
+    }
+
+    @Test
+    @DisplayName("H3: the self-reported outcome is carried when it is one the tool may claim, ignored otherwise")
+    void selfReportedOutcome() {
+        ConversationMemory memory = memory("user-1");
+        memory.startNextStep();
+        assertNull(turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, "ESCALATED");
+        assertEquals("ESCALATED", turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, "ASSUMED_RESOLVED");
+        assertNull(turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, 42);
+        assertNull(turn(memory).selfReportedOutcome());
     }
 
     @Test
@@ -360,19 +375,22 @@ class HealthTurnFactoryTest {
     }
 
     @Test
-    @DisplayName("actions are copied, capped in number and length")
+    @DisplayName("actions are copied, capped in number and length — of too many, the last ones, where a mapped ending action is")
     void actions() {
         ConversationMemory memory = memory("u");
         List<String> many = new ArrayList<>();
-        many.add("x".repeat(500));
         IntStream.range(0, 60).forEach(i -> many.add("action_" + i));
+        many.add("x".repeat(500));
+        many.add("ESCALATED");
         memory.getCurrentStep().set(MemoryKeys.ACTIONS, many);
 
         HealthTurn turn = turn(memory);
 
         assertEquals(HealthTurnFactory.MAX_ACTIONS, turn.actions().size());
-        assertEquals(HealthTurnFactory.MAX_ACTION_LENGTH, turn.actions().get(0).length());
-        assertEquals("action_0", turn.actions().get(1));
+        assertEquals("ESCALATED", turn.actions().get(HealthTurnFactory.MAX_ACTIONS - 1), "the last action survives the cap");
+        assertEquals(HealthTurnFactory.MAX_ACTION_LENGTH, turn.actions().get(HealthTurnFactory.MAX_ACTIONS - 2).length());
+        assertEquals("action_30", turn.actions().get(0), "the first ones are dropped, the order kept");
+        assertEquals(List.of("a", "b"), HealthTurnFactory.actions(Arrays.asList("a", null, "b")));
     }
 
     @Test

@@ -18,9 +18,11 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -119,6 +121,47 @@ class HealthErasureWriterTest {
         when(store.deleteRow("gone", "exec")).thenReturn(1L);
         marking.removeRow(HealthErasureWriter.rowId("gone", "exec"));
         verify(dirty).markDeletedRows("gone", List.of(), new HealthDeletedRows(1L, null));
+    }
+
+    @Test
+    @DisplayName("session outcomes are rows of the same writer: removed by their own id, erased and counted with the conversation, drained")
+    void sessionOutcomes() throws Exception {
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        HealthOutcomeEvaluator evaluator = mock(HealthOutcomeEvaluator.class);
+        HealthErasureWriter both = new HealthErasureWriter(recorder, store, null, null, instance(outcomes), instance(evaluator));
+
+        String id = HealthErasureWriter.sessionRowId("conv", 3);
+        assertEquals("session:conv|3", id);
+        both.removeRow(id);
+        verify(outcomes).deleteSessions("conv", List.of(3));
+        verify(store, never()).deleteRow(anyString(), anyString());
+        assertThrows(IllegalArgumentException.class, () -> both.removeRow("session:conv|x"));
+        assertThrows(IllegalArgumentException.class, () -> both.removeRow("session:conv"));
+
+        when(store.deleteConversationReturningDays("conv")).thenReturn(new HealthDeletedRows(2L, null));
+        when(outcomes.deleteByConversationId("conv")).thenReturn(3L);
+        assertEquals(5, both.eraseConversation("conv"));
+        when(store.countByConversationId("conv")).thenReturn(1L);
+        when(outcomes.countByConversationId("conv")).thenReturn(2L);
+        assertEquals(3, both.countForConversation("conv"));
+        // A conversation without turn rows still has its sessions erased.
+        when(store.deleteConversationReturningDays("only-sessions")).thenReturn(null);
+        when(outcomes.deleteByConversationId("only-sessions")).thenReturn(1L);
+        assertEquals(1, both.eraseConversation("only-sessions"));
+
+        when(recorder.awaitDrained(any())).thenReturn(true);
+        when(evaluator.awaitDrained(any())).thenReturn(false);
+        assertFalse(both.awaitDrained(Duration.ofSeconds(1)), "an evaluation in flight keeps the barrier open");
+        when(evaluator.awaitDrained(any())).thenReturn(true);
+        assertTrue(both.awaitDrained(Duration.ofSeconds(1)));
+        when(recorder.awaitDrained(any())).thenReturn(false);
+        assertFalse(both.awaitDrained(Duration.ofSeconds(1)));
+    }
+
+    @Test
+    @DisplayName("a session removal without an outcome store fails, so it stays pending")
+    void sessionRemovalWithoutStore() {
+        assertThrows(IllegalStateException.class, () -> writer.removeRow(HealthErasureWriter.sessionRowId("conv", 0)));
     }
 
     @SuppressWarnings("unchecked")

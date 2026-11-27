@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
@@ -112,6 +113,31 @@ public interface IHealthTurnStore {
 
     /** A conversation's rows, oldest step first, at most {@code limit}. */
     List<HealthTurn> findByConversation(String conversationId, int limit);
+
+    /**
+     * A conversation's rows of the steps {@code fromStep} (inclusive) to
+     * {@code toStep} (exclusive; {@code null} for no end), discarded ones included,
+     * oldest step first, at most {@code limit} — the first ones when there are
+     * more. What the outcome evaluation reads for the sessions it (re)judges; a
+     * caller that gets {@code limit} rows knows the range was cut.
+     */
+    List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit);
+
+    /**
+     * The conversations with rows written in [{@code since}, {@code until}), each
+     * with the newest {@code updatedAt} of those rows, ordered by it and then by
+     * conversation id (oldest first), at most {@code limit} — the outcome
+     * evaluation's incremental feed. With {@code afterConversationId}, only the
+     * entries after the pair ({@code since}, {@code afterConversationId}) in that
+     * order: a caller that gets {@code limit} entries continues with the last
+     * entry's {@code lastUpdatedAt} and conversation id, a gapless page even when
+     * more than a page of conversations share one {@code lastUpdatedAt}.
+     *
+     * @param afterConversationId
+     *            the last conversation of the previous page, or {@code null} for
+     *            every entry from {@code since} on
+     */
+    List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit);
 
     /**
      * An agent's rows of the UTC days {@code from} to {@code to} (both inclusive),

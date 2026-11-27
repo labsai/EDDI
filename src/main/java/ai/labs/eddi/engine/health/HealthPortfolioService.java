@@ -85,6 +85,9 @@ public class HealthPortfolioService {
                 .byAgent(ids.isEmpty() ? List.of() : reports.dailyRows(ids, baseline.from(), window.to()));
         Map<String, HealthPortfolioSessions> traffic = ids.isEmpty() ? Map.of() : reports.portfolioSessions(ids, window);
         double nowExposure = reports.exposureDays(window);
+        // While outcomes are still being evaluated (a backfill), session counts are
+        // partial: their change is not presented as real.
+        boolean sessionsPending = reports.outcomesPendingHint(window) != null;
         double beforeExposure = baseline.days();
 
         Map<LocalDate, Map<String, Set<String>>> hits = new TreeMap<>();
@@ -117,11 +120,11 @@ public class HealthPortfolioService {
             }
             // Relative to the baseline at the window's exposure (today is not over yet).
             Double delta = null;
-            if (sessions != null && sessionsBefore != null) {
+            if (sessions != null && sessionsBefore != null && !sessionsPending) {
                 double expected = sessionsBefore * (nowExposure / beforeExposure);
                 delta = expected > 0 ? (sessions - expected) / expected : null;
             }
-            String hint = sessions == null ? HealthMeasures.HINT_USAGE_UNAVAILABLE : null;
+            String hint = sessions == null ? HealthMeasures.HINT_USAGE_UNAVAILABLE : sessionsPending ? reports.outcomesPendingHint(window) : null;
             long trafficKey = sessions != null ? sessions : nowTotals.turns();
             collectHits(agent.agentId(), now, window, hits);
             rows.add(new Row(new PortfolioItem(agent.agentId(), agent.agentName(), null, preset, null, sessions, delta, key, false, hint), worsening,

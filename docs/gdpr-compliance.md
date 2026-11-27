@@ -234,6 +234,18 @@ each of their conversations, and every node drains its asynchronous writers — 
     (730 days) removes them; they hold no user id or content. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
+19. **Agent Health session outcomes** (`agentHealthOutcomes`) — **permanently deleted** by the
+    `agentHealthOutcomes` participant: every session row whose user is the erased user. A row holds
+    the conversation id, session number, agent and version, origin, times, counts, the session's
+    outcome and its evidence, and the action names of its last turn — no text. Rows also go when
+    their conversation is deleted, and expire with the turn rows (`eddi.health.facts-retention`).
+    They are derived from turn rows, which the erasure deletes too, and are guarded by
+    [the erasure guarantee](#the-erasure-guarantee-for-asynchronously-written-data) as rows of
+    the same async writer (`agentHealthTurns`): the outcome evaluations in flight are drained,
+    every write is guarded, and the participant verifies that no session or pending removal of the
+    user is left; otherwise the step `agentHealthOutcomes` fails and a re-run finishes it. The export carries
+    them under `sessions` in the `agentHealthOutcomes` section of `additionalData`, newest first, at
+    most 10,000; past that the section says `"truncated": true`
 
 #### The erasure guarantee for asynchronously written data
 
@@ -305,7 +317,8 @@ How it holds:
 4. **Delete, then verify.** The writer's participant deletes the user's rows and then
    checks — on MongoDB again from the primary — that none is left and no pending
    removal of the user remains; otherwise its step fails (`alerts` for alert events,
-   `agentHealthTurns` for Agent Health turn rows).
+   `agentHealthTurns` for Agent Health turn rows, `agentHealthOutcomes` for their session
+   outcomes).
    Two checks do not depend on a participant at all. Before the conversations are
    deleted, every writer's rows *of the user's conversations* are deleted and counted
    (`asyncWriteConversations`), which reaches a row that names a conversation but not
@@ -462,7 +475,7 @@ consequence of a deployment condition the guarantee states it relies on:
    during the rollout.
 
 **For a new async writer** (an `AsyncErasureWriter` bean — alerts and Agent Health
-turn rows are the two so far), the contract is:
+are the two so far; Agent Health's covers its turn rows and its session outcomes), the contract is:
 
 - **Queue through a `DrainBarrier`** (`barrier.execute(executor, task)`) and answer
   `awaitDrained` with `barrier.awaitDrained(timeout)`. Any executor that runs every
@@ -552,6 +565,9 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
 - Agent Health turn rows of the user's conversations (`agentHealthTurns`: conversation, step,
   agent and version, origin, time, cost, tokens, duration, outcome, LLM failure classes, tool and
   guardrail counts, actions; capped at 10,000)
+- Agent Health session outcomes of the user's conversations (`agentHealthOutcomes`: conversation,
+  session number, agent and version, origin, start and end, turns, cost, failed turns, outcome,
+  evidence, the last turn's actions; capped at 10,000)
 - Conversation ratings the user gave (`conversationRatings`: conversation and step,
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)

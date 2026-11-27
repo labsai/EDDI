@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.ErasureIncompleteException;
 import ai.labs.eddi.engine.health.HealthDirtyDays;
+import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -87,6 +88,14 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<HealthDirtyDays> healthDirtyDays;
+
+    /**
+     * Agent Health session outcomes of an agent-test conversation, deleted with its
+     * turn rows (best effort, like them); every other purge erases them through
+     * {@link #erasureGuard} ({@code HealthErasureWriter}). Null when built by hand.
+     */
+    @Inject
+    Instance<IHealthOutcomeStore> healthOutcomeStore;
 
     /**
      * The erasure guarantee for rows written asynchronously about the conversation
@@ -347,6 +356,15 @@ public class ConversationPurgeService {
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
                     sanitize(conversationId), sanitize(e.getMessage()));
+        }
+        if (healthOutcomeStore == null || !healthOutcomeStore.isResolvable()) {
+            return;
+        }
+        try {
+            healthOutcomeStore.get().deleteByConversationId(conversationId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not delete the Agent Health sessions of deleted conversation %s; the orphan sweep or the health retention "
+                    + "removes them: %s", sanitize(conversationId), sanitize(e.getMessage()));
         }
     }
 

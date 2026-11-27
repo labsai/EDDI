@@ -155,7 +155,8 @@ final class McpToolTiers {
 
         // Agent Health reads (McpHealthTools): the REST /agents/{agentId}/health and
         // /health/agents tier. VIEW on the agent still applies per call
-        put(tiers, McpRoles.HEALTH_READ, "read_agent_health", "list_agent_health", "compare_agent_versions_health");
+        put(tiers, McpRoles.HEALTH_READ, "read_agent_health", "list_agent_health", "compare_agent_versions_health",
+                "list_agent_health_sessions", "suggest_outcome_mappings");
 
         return Collections.unmodifiableMap(tiers);
     }
