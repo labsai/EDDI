@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.ErasureIncompleteException;
 import ai.labs.eddi.engine.health.HealthDirtyDays;
+import ai.labs.eddi.engine.health.IHealthEventStore;
 import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
@@ -96,6 +97,13 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<IHealthOutcomeStore> healthOutcomeStore;
+
+    /**
+     * Agent Health business events matched to the conversation (H5), deleted with
+     * its sessions; null when built by hand.
+     */
+    @Inject
+    Instance<IHealthEventStore> healthEventStore;
 
     /**
      * The erasure guarantee for rows written asynchronously about the conversation
@@ -337,6 +345,28 @@ public class ConversationPurgeService {
      * conversation's own delete.
      */
     void deleteHealthTurns(String conversationId, String agentId) {
+        // Each store on its own: one that is missing or fails never keeps the others'
+        // rows.
+        deleteTurnRows(conversationId, agentId);
+        if (healthOutcomeStore != null && healthOutcomeStore.isResolvable()) {
+            try {
+                healthOutcomeStore.get().deleteByConversationId(conversationId);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not delete the Agent Health sessions of deleted conversation %s; the orphan sweep or the health "
+                        + "retention removes them: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            }
+        }
+        if (healthEventStore != null && healthEventStore.isResolvable()) {
+            try {
+                healthEventStore.get().deleteByConversationId(conversationId);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not delete the Agent Health business events of deleted conversation %s; the health retention removes "
+                        + "them: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            }
+        }
+    }
+
+    private void deleteTurnRows(String conversationId, String agentId) {
         if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
             return;
         }
@@ -356,15 +386,6 @@ public class ConversationPurgeService {
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
                     sanitize(conversationId), sanitize(e.getMessage()));
-        }
-        if (healthOutcomeStore == null || !healthOutcomeStore.isResolvable()) {
-            return;
-        }
-        try {
-            healthOutcomeStore.get().deleteByConversationId(conversationId);
-        } catch (RuntimeException e) {
-            LOGGER.warnf("Could not delete the Agent Health sessions of deleted conversation %s; the orphan sweep or the health retention "
-                    + "removes them: %s", sanitize(conversationId), sanitize(e.getMessage()));
         }
     }
 

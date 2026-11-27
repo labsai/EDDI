@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.Admission;
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
+import ai.labs.eddi.engine.health.model.HealthEvent;
 import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
@@ -21,6 +22,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -203,16 +205,22 @@ public class HealthOutcomeEvaluator {
     private final AtomicReference<Instant> lastRatingWarn = new AtomicReference<>();
     private ExecutorService ownedExecutor;
     /**
-     * When the feed first failed to evaluate a conversation, by this node's clock:
-     * the retry limit runs from then, not from the turn's capture, so a backfilled
-     * turn captured days ago is retried as long as a fresh one. Bounded and per
-     * node — on another node the limit starts again, which only retries longer.
+     * The matched business events (H5) — they decide outcomes above everything
+     * else. Field-injected and null-checked: tests build this class by hand.
      */
+    @Inject
+    Instance<IHealthEventStore> eventStore;
     /**
      * The failure the direct retries took last, where the next pass's retries start
      * after.
      */
     private volatile String lastRetried;
+    /**
+     * When the feed first failed to evaluate a conversation, by this node's clock:
+     * the retry limit runs from then, not from the turn's capture, so a backfilled
+     * turn captured days ago is retried as long as a fresh one. Bounded and per
+     * node — on another node the limit starts again, which only retries longer.
+     */
     private final Cache<String, FeedFailure> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
             .build();
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
@@ -666,7 +674,7 @@ public class HealthOutcomeEvaluator {
         LazyRatings ratings = new LazyRatings(conversationId);
         List<HealthOutcome> sessions = new ArrayList<>(HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live,
                 origin, version -> configPolicy.windowOf(origin, configOf(configs, agentId, version)), version -> configOf(configs, agentId, version),
-                knownFirstOutput, firstSessionNo, ratings, evaluatedAt)));
+                knownFirstOutput, firstSessionNo, ratings, evaluatedAt, events(conversationId, from, to))));
         int deleteBefore = to == null ? Integer.MAX_VALUE : to;
         if (truncated && !sessions.isEmpty()) {
             // The last session read may go on past the rows read: leave it as stored.
@@ -779,6 +787,25 @@ public class HealthOutcomeEvaluator {
         } catch (RuntimeException e) {
             throw new HealthStoreException("Could not read the ratings of a conversation", e);
         }
+    }
+
+    /**
+     * The business events matched into the range {@code from} (inclusive) to
+     * {@code to} (exclusive, {@code null} for open) — read only when an event store
+     * exists. A read failure fails the evaluation (it is retried): judging without
+     * them would let a weaker source overwrite an external outcome.
+     */
+    List<HealthEvent> events(String conversationId, int from, Integer to) {
+        if (eventStore == null || !eventStore.isResolvable()) {
+            return List.of();
+        }
+        List<HealthEvent> events = new ArrayList<>();
+        for (HealthEvent e : eventStore.get().findMatchedByConversation(conversationId)) {
+            if (e.matchedStep() != null && e.matchedStep() >= from && (to == null || e.matchedStep() < to)) {
+                events.add(e);
+            }
+        }
+        return events;
     }
 
     private Resolved configOf(Map<Integer, Resolved> configs, String agentId, Integer version) {

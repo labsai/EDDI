@@ -62,13 +62,29 @@ import java.util.List;
  *            the actions of the session's last turn — for mapping suggestions
  * @param evaluatedAt
  *            when this version of the row was computed
+ * @param refs
+ *            the business references the session's turns carried
+ *            ({@link HealthTurn#refs()}, stored form, at most
+ *            {@code HealthRefs.MAX_SESSION_REFS}) — what outcome events are
+ *            matched by
  */
 public record HealthOutcome(String conversationId, int sessionNo, String agentId, Integer agentVersion, String userId, String origin,
         boolean engaged, Instant startedAt, Instant endedAt, int turns, double costUsd, int failures, String outcome, String evidence,
-        boolean provisional, LocalDate day, Instant dueAt, Integer firstOutputStep, List<String> lastActions, Instant evaluatedAt) {
+        boolean provisional, LocalDate day, Instant dueAt, Integer firstOutputStep, List<String> lastActions, Instant evaluatedAt,
+        List<String> refs) {
 
     public HealthOutcome {
         lastActions = lastActions == null ? List.of() : List.copyOf(lastActions);
+        refs = refs == null ? List.of() : List.copyOf(refs);
+    }
+
+    /** A session without business references (H3). */
+    public HealthOutcome(String conversationId, int sessionNo, String agentId, Integer agentVersion, String userId, String origin, boolean engaged,
+            Instant startedAt, Instant endedAt, int turns, double costUsd, int failures, String outcome, String evidence, boolean provisional,
+            LocalDate day, Instant dueAt, Integer firstOutputStep, List<String> lastActions, Instant evaluatedAt) {
+        this(conversationId, sessionNo, agentId, agentVersion, userId, origin, engaged, startedAt, endedAt, turns, costUsd, failures, outcome,
+                evidence,
+                provisional, day, dueAt, firstOutputStep, lastActions, evaluatedAt, List.of());
     }
 
     /**

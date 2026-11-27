@@ -160,6 +160,7 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
         row.put("userInput", t.userInput());
         row.put("actions", t.actions());
         row.put("discarded", t.discarded());
+        row.put("refs", t.refs());
         return row;
     }
 }

@@ -16,6 +16,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -134,6 +135,36 @@ public interface IRestAgentHealth {
                              @QueryParam("limit") Integer limit,
                              @Parameter(description = "nextCursor of the previous page")
                              @QueryParam("cursor") String cursor);
+
+    @GET
+    @Path("/export")
+    @Produces({MediaType.APPLICATION_JSON, "text/csv"})
+    @Operation(summary = "Export an agent's health as data", description = "kind=daily (default): one row per UTC day of the period — turns, "
+            + "failures, cost, tokens, the sessions that ended and how (the resolution in its four parts), and per declared business event "
+            + "type the matched events and their value sum. Requires VIEW. kind=sessions: one row per session that ended in the period (the "
+            + "drill-down's rows plus the business references they carried, in the form stored — hashed when the agent hashes them), at most "
+            + "10 000; follows the drill-down rule (EDIT on the agent and conversation review enabled). format=csv (fixed column order, a "
+            + "header row) or json. Never conversation content, never user ids.")
+    @APIResponse(responseCode = "200", description = "The export, as CSV or JSON.")
+    @APIResponse(responseCode = "400", description = "A query parameter is invalid; the message names it.")
+    @APIResponse(responseCode = "403", description = "The caller may not view this agent; for kind=sessions {\"reason\": \"FORBIDDEN\"} "
+            + "without EDIT, {\"reason\": \"REVIEW_DISABLED\"} when conversation review is off.")
+    @APIResponse(responseCode = "404", description = "No such agent.")
+    Response export(@PathParam("agentId") String agentId,
+                    @Parameter(description = "json or csv (default json)")
+                    @QueryParam("format") String format,
+                    @Parameter(description = "daily or sessions (default daily)")
+                    @QueryParam("kind") String kind,
+                    @Parameter(description = "7d, 30d or 90d (default 30d), ending today (UTC)")
+                    @QueryParam("period") String period,
+                    @Parameter(description = "First day YYYY-MM-DD (with to; at most 90 days)")
+                    @QueryParam("from") String from,
+                    @Parameter(description = "Last day YYYY-MM-DD (with from)")
+                    @QueryParam("to") String to,
+                    @Parameter(description = "Only this agent version")
+                    @QueryParam("version") Integer version,
+                    @Parameter(description = "Origins to include (repeatable); default: the preset's set")
+                    @QueryParam("origin") List<String> origins);
 
     @GET
     @Path("/outcome-suggestions")

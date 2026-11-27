@@ -26,27 +26,35 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link AsyncErasureWriter}).
  * <p>
  * The guarded rows are the turn rows and discard markers of
- * {@link IHealthTurnStore} and the session outcomes of
- * {@link IHealthOutcomeStore}: each names the user and the conversation it
- * describes, and is <em>deleted</em>, not blanked.
+ * {@link IHealthTurnStore}, the session outcomes of {@link IHealthOutcomeStore}
+ * and the business events of {@link IHealthEventStore}: each names the user or
+ * the conversation it describes, and is <em>deleted</em>, not blanked.
  * <ul>
- * <li>The barrier is the health worker's queue ({@link HealthTurnRecorder}) and
- * the outcome evaluations in flight ({@link HealthOutcomeEvaluator}).</li>
+ * <li>The barrier is the health worker's queue ({@link HealthTurnRecorder}),
+ * the outcome evaluations in flight ({@link HealthOutcomeEvaluator}), the event
+ * matches in flight ({@link HealthEventMatcher}) and the event ingests in
+ * flight ({@link HealthEventIngest}).</li>
  * <li>{@link HealthTurnRecorder} calls {@code beforeWrite} before it writes a
  * turn's row and markers and {@code afterWrite} for each of them right after;
  * {@link HealthOutcomeEvaluator} does the same for the sessions of a
- * conversation.</li>
- * <li>User erasure: {@link HealthTurnGdprParticipant} and
- * {@link HealthOutcomeGdprParticipant} each delete and verify their rows.</li>
+ * conversation, {@link HealthEventMatcher} for the match that writes a
+ * session's user onto an event, and {@link HealthEventIngest} for an event that
+ * names a conversation.</li>
+ * <li>User erasure: {@link HealthTurnGdprParticipant},
+ * {@link HealthOutcomeGdprParticipant} and {@link HealthEventGdprParticipant}
+ * each delete and verify their rows.</li>
  * </ul>
  * A turn row is named in a pending removal as
  * {@code <conversationId>|<executionId>} ({@link #rowId}), the same pair that
  * keys it in both stores; a session as
- * {@code session:<conversationId>|<sessionNo>} ({@link #sessionRowId}).
- * Sessions are one writer with the turn rows, not a second one: they are
- * derived from those rows, by the same feature, and an erasure must drain and
- * verify both. Their deletes mark no day dirty — the daily rows hold no outcome
- * counts (outcome reports read the session rows themselves).
+ * {@code session:<conversationId>|<sessionNo>} ({@link #sessionRowId}); an
+ * event as {@code event:<conversationId>|<eventId>} ({@link #eventRowId}) —
+ * removed only while it names that conversation. Sessions and events are one
+ * writer with the turn rows, not further ones: they are derived from or joined
+ * to those rows, by the same feature, in the same rollup pass, and an erasure
+ * must drain and verify all of them. Their deletes mark no day dirty — the
+ * daily rows hold no outcome or event counts (outcome reports and business
+ * measures read the session and event rows themselves).
  * <p>
  * <b>Daily rows.</b> Every delete here marks the days of the deleted rows dirty
  * ({@link HealthDirtyDays#markDeletedRows}), so the rollup recomputes them
@@ -86,15 +94,34 @@ public class HealthErasureWriter implements AsyncErasureWriter {
     /** Whose evaluations in flight the barrier waits for; null-checked. */
     private final Instance<HealthOutcomeEvaluator> evaluator;
 
+    /** The business events; null-checked. */
+    private final Instance<IHealthEventStore> events;
+
+    /** Whose matches in flight the barrier waits for; null-checked. */
+    private final Instance<HealthEventMatcher> matcher;
+
+    /** Whose ingests in flight the barrier waits for; null-checked. */
+    private final Instance<HealthEventIngest> ingest;
+
     @Inject
     public HealthErasureWriter(HealthTurnRecorder recorder, IHealthTurnStore store, Instance<HealthDirtyDays> dirtyDays,
-            Instance<IConversationMemoryStore> conversations, Instance<IHealthOutcomeStore> outcomes, Instance<HealthOutcomeEvaluator> evaluator) {
+            Instance<IConversationMemoryStore> conversations, Instance<IHealthOutcomeStore> outcomes, Instance<HealthOutcomeEvaluator> evaluator,
+            Instance<IHealthEventStore> events, Instance<HealthEventMatcher> matcher, Instance<HealthEventIngest> ingest) {
         this.recorder = recorder;
         this.store = store;
         this.dirtyDays = dirtyDays;
         this.conversations = conversations;
         this.outcomes = outcomes;
         this.evaluator = evaluator;
+        this.events = events;
+        this.matcher = matcher;
+        this.ingest = ingest;
+    }
+
+    /** Without the business events. */
+    public HealthErasureWriter(HealthTurnRecorder recorder, IHealthTurnStore store, Instance<HealthDirtyDays> dirtyDays,
+            Instance<IConversationMemoryStore> conversations, Instance<IHealthOutcomeStore> outcomes, Instance<HealthOutcomeEvaluator> evaluator) {
+        this(recorder, store, dirtyDays, conversations, outcomes, evaluator, null, null, null);
     }
 
     /** Without the session outcomes. */
@@ -121,6 +148,19 @@ public class HealthErasureWriter implements AsyncErasureWriter {
         return SESSION_PREFIX + conversationId + "|" + sessionNo;
     }
 
+    /** Marks a business event's row id apart from a turn row id. */
+    static final String EVENT_PREFIX = "event:";
+
+    /**
+     * The id of the business event {@code eventId} as a row of
+     * {@code conversationId}: an event id is the sender's, so two conversations'
+     * events can share it, and a removal must reach only the one it was recorded
+     * for. Conversation ids hold no {@code |}.
+     */
+    public static String eventRowId(String conversationId, String eventId) {
+        return EVENT_PREFIX + conversationId + "|" + eventId;
+    }
+
     @Override
     public String name() {
         return NAME;
@@ -133,13 +173,29 @@ public class HealthErasureWriter implements AsyncErasureWriter {
             return false;
         }
         HealthOutcomeEvaluator sessions = resolved(evaluator);
-        return sessions == null || sessions.awaitDrained(Duration.ofNanos(Math.max(0L, deadline - System.nanoTime())));
+        if (sessions != null && !sessions.awaitDrained(left(deadline))) {
+            return false;
+        }
+        HealthEventMatcher matches = resolved(matcher);
+        if (matches != null && !matches.awaitDrained(left(deadline))) {
+            return false;
+        }
+        HealthEventIngest ingests = resolved(ingest);
+        return ingests == null || ingests.awaitDrained(left(deadline));
+    }
+
+    private static Duration left(long deadline) {
+        return Duration.ofNanos(Math.max(0L, deadline - System.nanoTime()));
     }
 
     @Override
     public void removeRow(String rowId) {
         if (rowId != null && rowId.startsWith(SESSION_PREFIX)) {
             removeSession(rowId);
+            return;
+        }
+        if (rowId != null && rowId.startsWith(EVENT_PREFIX)) {
+            removeEvent(rowId);
             return;
         }
         // Conversation ids are hex: the first separator ends one.
@@ -186,12 +242,35 @@ public class HealthErasureWriter implements AsyncErasureWriter {
         sessions.deleteSessions(id.substring(0, separator), List.of(sessionNo));
     }
 
+    /** Removes one business event ({@link #eventRowId}); idempotent. */
+    private void removeEvent(String rowId) {
+        String row = rowId.substring(EVENT_PREFIX.length());
+        int separator = row.indexOf('|');
+        if (separator <= 0 || separator == row.length() - 1) {
+            throw new IllegalArgumentException("Not an Agent Health event row id: " + rowId);
+        }
+        String conversationId = row.substring(0, separator);
+        String id = row.substring(separator + 1);
+        IHealthEventStore businessEvents = resolved(events);
+        if (businessEvents == null) {
+            // Never report a removal that did not run: it stays pending.
+            throw new IllegalStateException("No Agent Health event store to remove an event from");
+        }
+        businessEvents.deleteInConversation(id, conversationId);
+    }
+
     @Override
     public long eraseConversation(String conversationId) {
         long erased = eraseTurns(conversationId);
         IHealthOutcomeStore sessions = resolved(outcomes);
         if (sessions != null) {
             erased += sessions.deleteByConversationId(conversationId);
+        }
+        IHealthEventStore businessEvents = resolved(events);
+        if (businessEvents != null) {
+            // Matched and pending alike: a pending event naming the conversation names
+            // it too.
+            erased += businessEvents.deleteByConversationId(conversationId);
         }
         return erased;
     }
@@ -247,6 +326,8 @@ public class HealthErasureWriter implements AsyncErasureWriter {
     @Override
     public long countForConversation(String conversationId) {
         IHealthOutcomeStore sessions = resolved(outcomes);
-        return store.countByConversationId(conversationId) + (sessions == null ? 0L : sessions.countByConversationId(conversationId));
+        IHealthEventStore businessEvents = resolved(events);
+        return store.countByConversationId(conversationId) + (sessions == null ? 0L : sessions.countByConversationId(conversationId))
+                + (businessEvents == null ? 0L : businessEvents.countByConversationId(conversationId));
     }
 }

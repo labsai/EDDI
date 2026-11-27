@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
+import ai.labs.eddi.engine.health.model.HealthEvent;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -39,6 +41,15 @@ import java.util.function.Function;
  * <p>
  * <b>Outcome</b>, highest precedence first:
  * <ol>
+ * <li><b>external</b> (H5) — a business event matched to the session whose type
+ * {@code healthConfig.outcomeEvents} maps to an outcome (under the config of
+ * the session's last version): {@code external_event} when it was matched by a
+ * reference, {@code conversation_id_event} when it named the conversation. It
+ * overrides every other source, the agent's own declarations included. Of
+ * several, the one that happened last ({@code at}, then receipt) decides — a
+ * business object's latest state is its truth ({@code order.placed} then
+ * {@code order.refunded}). Provisional while the window is open, like an
+ * explicit outcome;</li>
  * <li><b>explicit</b> — the last action of the session mapped in
  * {@code healthConfig.outcomes} ({@code agent_action}); otherwise the last
  * claim of {@code report_conversation_outcome} ({@code self_reported}, weak).
@@ -112,8 +123,23 @@ public final class HealthSessionEvaluator {
      *            re-keyed)
      */
     public record Input(String conversationId, List<HealthTurn> turns, String origin, Function<Integer, Duration> windowOf,
-            Function<Integer, Resolved> configOf, Integer knownFirstOutputStep, Integer firstSessionNo, Ratings ratings, Instant now) {
+            Function<Integer, Resolved> configOf, Integer knownFirstOutputStep, Integer firstSessionNo, Ratings ratings, Instant now,
+            List<HealthEvent> events) {
+
+        public Input {
+            events = events == null ? List.of() : List.copyOf(events);
+        }
+
+        /** Without business events (H3). */
+        public Input(String conversationId, List<HealthTurn> turns, String origin, Function<Integer, Duration> windowOf,
+                Function<Integer, Resolved> configOf, Integer knownFirstOutputStep, Integer firstSessionNo, Ratings ratings, Instant now) {
+            this(conversationId, turns, origin, windowOf, configOf, knownFirstOutputStep, firstSessionNo, ratings, now, List.of());
+        }
     }
+
+    /** The event that happened last decides: by {@code at}, then by receipt. */
+    static final Comparator<HealthEvent> EVENT_ORDER = Comparator.comparing(HealthEvent::at, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(HealthEvent::receivedAt, Comparator.nullsFirst(Comparator.naturalOrder()));
 
     private HealthSessionEvaluator() {
     }
@@ -179,12 +205,22 @@ public final class HealthSessionEvaluator {
         for (int i = 0; i < sessions.size(); i++) {
             List<HealthTurn> rows = sessions.get(i);
             int sessionNo = i == 0 && in.firstSessionNo() != null ? in.firstSessionNo() : rows.get(0).stepIndex();
-            out.add(session(in, rows, sessionNo, firstOutput));
+            // A matched event belongs to the session whose steps hold the step it was
+            // matched at (the first session takes anything before it too).
+            int fromStep = i == 0 ? Integer.MIN_VALUE : rows.get(0).stepIndex();
+            int toStep = i + 1 < sessions.size() ? sessions.get(i + 1).get(0).stepIndex() : Integer.MAX_VALUE;
+            List<HealthEvent> events = new ArrayList<>();
+            for (HealthEvent e : in.events()) {
+                if (e != null && e.matchedStep() != null && e.matchedStep() >= fromStep && e.matchedStep() < toStep) {
+                    events.add(e);
+                }
+            }
+            out.add(session(in, rows, sessionNo, firstOutput, events));
         }
         return out;
     }
 
-    private static HealthOutcome session(Input in, List<HealthTurn> rows, int sessionNo, Integer firstOutput) {
+    private static HealthOutcome session(Input in, List<HealthTurn> rows, int sessionNo, Integer firstOutput, List<HealthEvent> events) {
         HealthTurn last = rows.get(rows.size() - 1);
         Instant startedAt = null;
         Instant endedAt = null;
@@ -204,24 +240,53 @@ public final class HealthSessionEvaluator {
         }
         Instant closesAt = endedAt.plus(in.windowOf().apply(last.agentVersion()));
         boolean closed = !in.now().isBefore(closesAt);
+        Resolved config = in.configOf().apply(last.agentVersion());
         Decision decision = evaluated(in.origin())
-                ? decide(rows, last, closed, in.configOf().apply(last.agentVersion()), in.ratings(), sessionNo, startedAt, closesAt)
+                ? decide(rows, last, closed, config, in.ratings(), sessionNo, startedAt, closesAt, decisive(events, config))
                 : new Decision(null, null, !closed);
         Instant dueAt = decision.provisional() ? closesAt : null;
         List<String> actions = last.actions();
         List<String> lastActions = actions.size() > MAX_LAST_ACTIONS ? actions.subList(actions.size() - MAX_LAST_ACTIONS, actions.size()) : actions;
         return new HealthOutcome(in.conversationId(), sessionNo, last.agentId(), last.agentVersion(), last.userId(), in.origin(), engaged, startedAt,
                 endedAt, rows.size(), cost, failures, decision.outcome(), decision.evidence(), decision.provisional(),
-                LocalDate.ofInstant(endedAt, ZoneOffset.UTC), dueAt, firstOutput, lastActions, in.now());
+                LocalDate.ofInstant(endedAt, ZoneOffset.UTC), dueAt, firstOutput, lastActions, in.now(),
+                HealthRefs.union(rows.stream().map(HealthTurn::refs).toList()));
+    }
+
+    /**
+     * The event that decides a session's outcome: of its matched events whose type
+     * the config maps to an outcome, the one that happened last; {@code null} when
+     * none does.
+     */
+    static HealthEvent decisive(List<HealthEvent> events, Resolved config) {
+        Resolved c = config == null ? Resolved.DEFAULTS : config;
+        HealthEvent decisive = null;
+        for (HealthEvent e : events) {
+            if (c.outcomeOfEvent(e.eventType()) != null && (decisive == null || EVENT_ORDER.compare(e, decisive) >= 0)) {
+                decisive = e;
+            }
+        }
+        return decisive;
     }
 
     /** An outcome, its evidence, and whether it can still change. */
     record Decision(String outcome, String evidence, boolean provisional) {
     }
 
-    /** The precedence of the class comment, for one judged session. */
+    /** The precedence of the class comment, without business events. */
     static Decision decide(List<HealthTurn> rows, HealthTurn last, boolean closed, Resolved config, Ratings ratings, int sessionNo, Instant startedAt,
                            Instant closesAt) {
+        return decide(rows, last, closed, config, ratings, sessionNo, startedAt, closesAt, null);
+    }
+
+    /**
+     * The precedence of the class comment, for one judged session.
+     *
+     * @param external
+     *            the decisive matched event ({@link #decisive}), or {@code null}
+     */
+    static Decision decide(List<HealthTurn> rows, HealthTurn last, boolean closed, Resolved config, Ratings ratings, int sessionNo, Instant startedAt,
+                           Instant closesAt, HealthEvent external) {
         Resolved c = config == null ? Resolved.DEFAULTS : config;
         // 1. Explicit: the last mapped action, else the last self-report.
         String mapped = null;
@@ -242,6 +307,12 @@ public final class HealthSessionEvaluator {
         boolean agentClosed = (last.actions().contains(IConversation.CONVERSATION_END) || last.actions().contains(IConversation.STOP_CONVERSATION))
                 && !last.failed() && !last.paused();
         boolean settled = closed || agentClosed;
+        // 0. External: a matched business event outranks everything the agent said.
+        String externalOutcome = external == null ? null : c.outcomeOfEvent(external.eventType());
+        if (externalOutcome != null) {
+            String evidence = external.byConversation() ? HealthOutcomes.EVIDENCE_CONVERSATION_ID_EVENT : HealthOutcomes.EVIDENCE_EXTERNAL_EVENT;
+            return new Decision(externalOutcome, evidence, !settled);
+        }
         if (mapped != null) {
             return new Decision(mapped, HealthOutcomes.EVIDENCE_AGENT_ACTION, !settled);
         }

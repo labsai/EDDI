@@ -45,9 +45,9 @@ public final class HealthOutcomes {
      * Read from the shape of the session after its window: a question left open, …
      */
     public static final String EVIDENCE_INFERRED = "inferred";
-    /** Reserved for H5 (outcome events matched by reference). */
+    /** A business event matched by a reference the session set (H5). */
     public static final String EVIDENCE_EXTERNAL_EVENT = "external_event";
-    /** Reserved for H5 (outcome events matched by conversation id). */
+    /** A business event that named the session's conversation (H5). */
     public static final String EVIDENCE_CONVERSATION_ID_EVENT = "conversation_id_event";
     /** Reserved for H6 (a sampled judge). */
     public static final String EVIDENCE_JUDGED = "judged";

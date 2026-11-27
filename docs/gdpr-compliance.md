@@ -245,7 +245,30 @@ each of their conversations, and every node drains its asynchronous writers — 
     every write is guarded, and the participant verifies that no session or pending removal of the
     user is left; otherwise the step `agentHealthOutcomes` fails and a re-run finishes it. The export carries
     them under `sessions` in the `agentHealthOutcomes` section of `additionalData`, newest first, at
-    most 10,000; past that the section says `"truncated": true`
+    most 10,000; past that the section says `"truncated": true`. Turn and session rows also carry the
+    agent's **business references** (`refs`, e.g. `orderId=A-123`, or a salted hash when the agent sets
+    `healthConfig.hashRefs`), exported with them
+20. **Agent Health business events** (`agentHealthEvents`) — **permanently deleted** by the
+    `agentHealthEvents` participant: every event an external system reported through a
+    `health-outcomes` webhook target that was **matched** to one of the user's sessions (a matched
+    event carries the session's user). An event holds the integration id, agent, event type, the
+    business reference in its stored form (plain, or a salted hash), an optional number and times — no
+    text. An event that matched nothing names no user; it can no longer match once the erasure deleted
+    the user's conversations and sessions, and is deleted when `eddi.health.event-match-window` (72 h)
+    passes. Events are rows of the `agentHealthTurns` async writer of the
+    [erasure guarantee](#the-erasure-guarantee-for-asynchronously-written-data): the erasure waits
+    for the matches and ingests in flight, a match is not written for a tombstoned user or
+    conversation, a match written while the erasure starts is deleted again, and the step verifies
+    with a committed count that no event of the user is left. Events naming a deleted conversation
+    (pending ones too) go with it, verified the same way. A pending event that names only a business
+    reference names no user and is **not** removed by the erasure: with an agent that does not hash
+    references, its plain value (e.g. an order id) stays stored until it matches — it can no longer
+    match the erased user's sessions — or the 72 h match window ends. A sessions export of Agent
+    Health checks each row against the tombstones at most 1 second before handing it to the response
+    stream, so it withholds the rows of an erased user it read before the erasure; a row handed on
+    within that second after the erasure began, or still in the response buffer, is not recalled.
+    Events expire with the turn rows. The export carries them under `events` in
+    the `agentHealthEvents` section, newest first, at most 10,000 ([details](agent-health.md#business-outcomes))
 
 #### The erasure guarantee for asynchronously written data
 
@@ -652,6 +675,10 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - New conversation creation is blocked → returns **403 Forbidden**
 - Message processing (`say`) is blocked → returns **403 Forbidden**
 - Existing data is preserved (not deleted)
+- Ratings are refused (403), and **Agent Health business events** about the user's sessions are
+  dropped when they are matched: nothing new is derived from a restricted user's conversations
+  (counted as `eddi_health_events_total{outcome="restricted"}`; a restriction that cannot be read
+  keeps the event pending — fail closed)
 - Restriction status is stored as a user memory entry under the reserved key
   `_gdpr_processing_restricted` (category `gdpr`). Keys starting with `_gdpr_` are
   reserved for this bookkeeping: agents (`rememberFact`/`forgetFact`), property

@@ -283,7 +283,10 @@ sessions that ran on v8. Absent, every default applies.
   "outcomes": { "order_confirmed": "RESOLVED", "handoff_human": "ESCALATED", "out_of_scope": "DEFLECTED" },
   "assumeResolvedOnSilence": true,
   "inactivityWindowHours": { "email": 96 },
-  "selfReportTool": false
+  "selfReportTool": false,
+  "externalRefs": ["orderId", "ticketId"],
+  "outcomeEvents": { "order.placed": "RESOLVED", "ticket.reopened": "FAILED", "order.refunded": "NONE" },
+  "hashRefs": false
 }
 ```
 
@@ -292,6 +295,9 @@ sessions that ran on v8. Absent, every default applies.
 | `outcomes` | `{}` | Action → `RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED` or `ABANDONED`. A session in which the agent emitted a mapped action ends with that outcome (evidence `agent_action` — the strongest signal there is today); with several, the last one counts. At most 100 mappings, action names ≤ 128 characters. `CONVERSATION_END` and `STOP_CONVERSATION` may be mapped (unmapped they count as `ASSUMED_RESOLVED` from `agent_closed`); `CONVERSATION_START`, `PAUSE_CONVERSATION` and `CONTINUE_CONVERSATION` cannot — they say nothing about how a conversation went |
 | `assumeResolvedOnSilence` | `true` | A session that went quiet after a successful last turn — no mapped outcome, no open question, no negative rating — counts as `ASSUMED_RESOLVED` with evidence `silence`. `false` records `ENDED_QUIETLY` instead. Either way the resolution rate shows how much rests on silence |
 | `inactivityWindowHours` | `{}` | Origin → hours of quiet after which a session closes (1–720), overriding the deployment's 24 h (`eddi.health.session-window`) and e-mail's 72 h (`eddi.health.email-session-window`) |
+| `externalRefs` | `[]` | Property names whose values identify the business object a conversation is about (`orderId`, `ticketId`); at most 10. When a turn ends with one of them set — by `property.json`, an HTTP call's `postResponse` or the model — its value is recorded on the turn's health row, and outcome events from a [`health-outcomes` webhook target](webhook-triggers.md#business-outcome-events-health-outcomes-targets) are matched by it. A secret (`scope: secret`, vaulted) is never recorded; values over 128 characters are not either. Names that look like personal identifiers (`email`, `phone`, `mobile`, `iban`, `ssn`, `passport`, `address`, `first_name`, … — matched as whole words) are **refused** unless `hashRefs` is on. A name no `property.json` of the agent's workflows sets is saved with the warning `X-Eddi-Warnings: health-ref-not-set:<name>` |
+| `outcomeEvents` | `{}` | Business event type → `RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED`, `ABANDONED`, or `NONE` (counted, decides nothing). A matched event of a mapped type decides its session's outcome above **every** other source — evidence `external_event` (by reference) or `conversation_id_event`; of several, the one that happened last. Declared types are the agent's business measures (`event:<type>`). At most 50 types |
+| `hashRefs` | `false` | Store and match `externalRefs` values only as salted HMAC-SHA256 hashes (a per-deployment salt in the vault's metadata store): nothing in Agent Health then holds the value, identifier-like names are allowed, and exports show the hash |
 | `selfReportTool` | `false` | Offer the model the built-in tool `report_conversation_outcome` (`RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED`; no reason text). The LLM task must also set `enableBuiltInTools: true`, and name `report_conversation_outcome` in `builtInToolsWhitelist` if it uses one. Its claims are weak evidence (`self_reported`), below a mapped action and never counted as confirmed |
 
 **What the defaults do.** With no `healthConfig` an agent still gets outcomes: a
@@ -305,7 +311,9 @@ most sessions and are not mapped yet.
 
 The save is refused (400 naming the field) for an unknown outcome, a reserved
 action that cannot be mapped, an empty or overlong action name, more than 100
-mappings, or a window of an unknown origin or outside 1–720 hours. A `create`
+mappings, or a window of an unknown origin or outside 1–720 hours, an
+`externalRefs` name that is not a property name, repeated or identifier-like (without
+`hashRefs`), more than 10 refs, or an `outcomeEvents` type or value that is not one. A `create`
 or `merge` ZIP import runs the same checks before it writes anything, snippets
 and connections included, and is refused with the same 400. An `upgrade` import
 or a sync that adopts the source agent's settings runs every check the agent

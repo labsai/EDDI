@@ -139,6 +139,7 @@ const HEALTH_READS = [
   "GET /agents/{agentId}/health/compare",
   "GET /agents/{agentId}/health/sessions",
   "GET /agents/{agentId}/health/outcome-suggestions",
+  "GET /agents/{agentId}/health/export",
   "GET /health/agents",
 ] as const;
 
@@ -1034,8 +1035,8 @@ export function grantsOversightReads(endpoints: readonly string[]): boolean {
 
 /**
  * Whether the Agent Health reads are granted — usage, the report, its series,
- * the version compare, the session drill-down, the outcome suggestions and the
- * portfolio. The prompt's health section names all seven, so it is shown only
+ * the version compare, the session drill-down, the outcome suggestions, the export and the
+ * portfolio. The prompt's health section names all eight, so it is shown only
  * when every one is held.
  */
 export function grantsHealthReads(endpoints: readonly string[]): boolean {
