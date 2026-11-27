@@ -25,17 +25,29 @@ help, because nothing is decoded.
   refuses a new key once it holds the cap (`getXrefTable()`), so a header listing millions of numbers is refused like
   any other over-cap file. `BoundedPdfLoaderTest` has a hand-written file with no `startxref` and an object stream
   listing 200 objects: refused at cap 50, loaded at cap 5000.
-- **Object-stream headers are capped before they are read.** `PDFObjectStreamParser` reads a header into a map of
-  up to `/N` entries before the first one reaches the guarded table, in a rebuild (`readObjectNumbers`) and on the
-  ordinary path (`parseAllObjects`, whose objects PDFBox then keeps). Five million short entries decode to under
-  50 MB, inside the decode budgets, but need hundreds of MB of heap. The loader now swaps the parser's `COSDocument`
-  for one that creates every stream it reads from the file as a counted stream: opening its decoded view, which is
-  where the object-stream parser starts, adds the stream's `/N` (read as PDFBox reads it, so an indirect `/N` counts)
-  to a per-document total, once per stream, and refuses the file past the same cap. Tests: an object stream declaring
-  `/N 200` whose header lists one object is refused at cap 50 and loads at 5000; two streams of `/N 30` load at cap
-  60 and are refused at 59; an intact file whose catalog sits in an object stream, read through a cross-reference
-  stream, loads with `/N 1` and is refused with `/N 60` at cap 50, strict and lenient, direct and indirect `/N`; and
-  `/N 1000000` is refused through `PdfTextExtractor` at the default cap.
+- **Object-stream headers are capped before they are read.** `PDFObjectStreamParser` reads a header into a map
+  before the first entry reaches the guarded table, in a rebuild (`readObjectNumbers`) and on the ordinary path
+  (`parseAllObjects`, whose objects PDFBox then keeps). The map is not presized: it holds one entry per pair read,
+  until `/N` pairs are read or `/First` is reached, so `/N` is the bound the cap can use. Five million short entries
+  decode to under 50 MB, inside the decode budgets, but need hundreds of MB of heap. The loader now swaps the
+  parser's `COSDocument` for one that creates every stream it reads from the file as a counted stream. Opening its
+  decoded view, which is where the object-stream parser starts, adds the stream's `/N` to a per-document total, once
+  per stream (keyed by where its data starts), and refuses the file past the same cap. `/N` is read as PDFBox reads
+  it, so an indirect `/N` counts. Tests: an object stream declaring `/N 200` whose header lists one object is
+  refused at cap 50 and loads at 5000; two streams of `/N 30` load at cap 60 and are refused at 59; an intact file
+  whose catalog sits in an object stream, read through a cross-reference stream, loads with `/N 1` and is refused
+  with `/N 60` at cap 50, strict and lenient, direct and indirect `/N`; and `/N 1000000` is refused through
+  `PdfTextExtractor` at the default cap.
+- **A refusal PDFBox swallows is still reported.** `PDFont.getSpaceWidth()` and `LegacyPDFStreamEngine` catch
+  every exception around a font's space width, so an over-cap object stream first reached there was logged and
+  ignored, and the extractors returned the text read so far as if the file were whole. Memory stayed bounded, since
+  the document refuses every later object stream. `BoundedPdfLoader.requireWithinCap(PDDocument)` now reports
+  whether a refusal happened. The loader calls it after the parse, and `PdfTextExtractor` and the three
+  `AttachmentTextExtractor` readers call it after reading. Test: a font whose `/MissingWidth` is the one object of an
+  over-cap object stream, read only for the space width. `PDFTextStripper` alone returns "Hello"; `requireWithinCap`,
+  `PdfTextExtractor` and both `AttachmentTextExtractor.extractPdfText` variants refuse it.
+- **Stream cache fallback kept in view.** If the caller's stream cache function fails, the loader now falls back to
+  a memory-only cache itself, as `COSDocument` does, so the streams it creates use the same cache as the document.
 - **Both loads from a byte array use it:** `PdfTextExtractor` (document ingestion) and `AttachmentTextExtractor`, which
   `PdfReaderTool`, `readAttachment` and the attachment forwarder read through. No `Loader.loadPDF` call remains in
   `src/main/java`. The class is public because the attachment extractor is in another package.

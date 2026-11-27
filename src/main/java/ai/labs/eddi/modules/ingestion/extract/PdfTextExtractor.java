@@ -155,6 +155,9 @@ public class PdfTextExtractor implements DocumentTextExtractor {
                     break;
                 }
             }
+            // PDFBox swallows a refusal raised inside a few of its own catch-alls, so
+            // text read after one is not returned as if the file were whole.
+            BoundedPdfLoader.requireWithinCap(document);
             return Extraction.capped(markdown.toString(), limits.maxCharacters());
         } catch (InvalidPasswordException e) {
             // The other way PDFBox refuses an encrypted file. Without this the

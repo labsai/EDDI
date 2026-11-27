@@ -10,6 +10,7 @@ import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObjectKey;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.cos.ICOSParser;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.io.RandomAccessReadView;
@@ -18,7 +19,9 @@ import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdfparser.PDFParser;
 import org.apache.pdfbox.pdfparser.XrefTrailerResolver;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.jboss.logging.Logger;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.HashSet;
@@ -45,17 +48,26 @@ import java.util.Set;
  *
  * <p>
  * Object streams are counted before their header is read. PDFBox reads the
- * header of an object stream into a map of its own, up to the stream's
- * {@code /N} entries, before one of them reaches the table: a lenient rebuild
- * does so for every object stream it finds, and an ordinary file the first time
- * it reads an object from one, keeping that stream's objects afterwards. Five
- * million short entries decode to under 50 MB, inside the stream decode limits,
- * yet their map takes hundreds of MB of heap. So every stream the parser reads
- * from the file adds its {@code /N}, once per stream, to a total for the
+ * header of an object stream into a map of its own before one of its entries
+ * reaches the table, one entry per pair it reads, until it has read {@code /N}
+ * pairs or reached {@code /First}: a lenient rebuild does so for every object
+ * stream it finds, and an ordinary file the first time it reads an object from
+ * one, keeping that stream's objects afterwards. Five million short entries
+ * decode to under 50 MB, inside the stream decode limits, yet their map takes
+ * hundreds of MB of heap. {@code /N} is the bound the cap can use. So every
+ * stream the parser reads from the file adds its {@code /N} to a total for the
  * document when its decoded view is opened, which is where PDFBox's
- * object-stream parser starts, and the document is refused once the total
- * passes the same cap. {@code /N} is read the way PDFBox reads it, so an
- * indirect one counts too.
+ * object-stream parser starts, once per stream (keyed by where its data
+ * starts), and the document is refused once the total passes the same cap.
+ * {@code /N} is read the way PDFBox reads it, so an indirect one counts too.
+ *
+ * <p>
+ * PDFBox catches every exception in a few places, around a font's space width
+ * among them, so a refusal raised while an object is first read there would be
+ * logged and ignored. Each later object stream is refused too, so memory stays
+ * bounded, but the text read so far would be returned as if the file were
+ * whole. {@link #requireWithinCap} says whether a refusal happened: the loader
+ * calls it after the parse, and every caller after it has read the document.
  *
  * <p>
  * Not covered: a lenient rebuild first collects the objects it finds in maps of
@@ -70,6 +82,8 @@ import java.util.Set;
  * {@code modules.llm.tools.impl} reads PDFs too.
  */
 public final class BoundedPdfLoader {
+
+    private static final Logger LOGGER = Logger.getLogger(BoundedPdfLoader.class);
 
     /**
      * Cross-reference entries one document may declare. Measured to keep the map
@@ -111,14 +125,36 @@ public final class BoundedPdfLoader {
     static PDDocument load(RandomAccessRead source, StreamCacheCreateFunction streamCache, long maxXrefEntries,
                            boolean lenient)
             throws IOException {
+        PDDocument document;
         try {
-            return new BoundedParser(source, streamCache, maxXrefEntries).parse(lenient);
+            document = new BoundedParser(source, streamCache, maxXrefEntries).parse(lenient);
         } catch (XrefLimitExceeded e) {
             closeQuietly(source, e);
             throw tooManyObjects(maxXrefEntries, e);
         } catch (IOException | RuntimeException | Error e) {
             closeQuietly(source, e);
             throw e;
+        }
+        try {
+            requireWithinCap(document);
+        } catch (UnreadableDocumentException e) {
+            closeQuietly(document, e);
+            throw e;
+        }
+        return document;
+    }
+
+    /**
+     * Refuses a document whose object streams passed the cap while it was read,
+     * even where PDFBox caught the refusal and carried on. Call it after reading a
+     * document this class loaded, before using what was read.
+     *
+     * @throws UnreadableDocumentException
+     *             if the document was refused at any point
+     */
+    public static void requireWithinCap(PDDocument document) {
+        if (document.getDocument() instanceof BoundedDocument bounded && bounded.exceeded) {
+            throw tooManyObjects(bounded.maxEntries, null);
         }
     }
 
@@ -128,7 +164,7 @@ public final class BoundedPdfLoader {
                 + "files and upload those.", cause);
     }
 
-    private static void closeQuietly(RandomAccessRead source, Throwable failure) {
+    private static void closeQuietly(Closeable source, Throwable failure) {
         try {
             source.close();
         } catch (IOException e) {
@@ -153,7 +189,10 @@ public final class BoundedPdfLoader {
 
     /**
      * Remembers the cache it creates, so that {@link BoundedDocument} can give its
-     * streams the one {@link COSDocument} keeps privately.
+     * streams the one {@link COSDocument} keeps privately. Where the given function
+     * fails, it falls back to a memory-only cache itself, as {@code COSDocument}
+     * would, so that the fallback is the one remembered rather than one only
+     * {@code COSDocument} holds.
      */
     private static final class CapturingCache implements StreamCacheCreateFunction {
         private final StreamCacheCreateFunction delegate;
@@ -165,7 +204,12 @@ public final class BoundedPdfLoader {
 
         @Override
         public RandomAccessStreamCache create() throws IOException {
-            created = delegate.create();
+            try {
+                created = delegate.create();
+            } catch (IOException e) {
+                LOGGER.warn("Could not create the PDF stream cache; using a memory-only cache instead", e);
+                created = IOUtils.createMemoryOnlyStreamCache().create();
+            }
             return created;
         }
     }
@@ -206,13 +250,13 @@ public final class BoundedPdfLoader {
         }
 
         /**
-         * Adds an object stream's {@code /N} to the document's total, once per stream
-         * (a rebuild and a later read of the same object create two instances of it),
-         * and refuses the document past the cap. Any stream with a {@code /First} is
-         * taken for one: PDFBox reads whatever an entry points at as an object stream,
-         * whatever its {@code /Type}, and cannot read one without {@code /First}. Once
-         * refused, every object stream is refused, should anything inside PDFBox
-         * swallow the first refusal.
+         * Adds an object stream's {@code /N} to the document's total, once per stream,
+         * keyed by where its data starts (a rebuild and a later read of the same object
+         * create two instances of it), and refuses the document past the cap. Any
+         * stream with a {@code /First} is taken for one: PDFBox reads whatever an entry
+         * points at as an object stream, whatever its {@code /Type}, and cannot read
+         * one without {@code /First}. Once refused, every object stream is refused,
+         * should anything inside PDFBox swallow the first refusal.
          */
         void charge(COSStream stream, long startPosition) {
             if (!stream.containsKey(COSName.FIRST)) {

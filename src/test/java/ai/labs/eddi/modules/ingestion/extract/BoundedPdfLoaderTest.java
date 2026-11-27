@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class BoundedPdfLoaderTest {
+public class BoundedPdfLoaderTest {
 
     /**
      * About 150 bytes: one cross-reference stream with zero-width fields declaring
@@ -167,6 +167,38 @@ class BoundedPdfLoaderTest {
                 .contains("Hello"));
     }
 
+    @Test
+    @DisplayName("a refusal PDFBox swallows inside getSpaceWidth() is still reported once the document has been read")
+    void refusalSwallowedByPdfBoxIsReportedAfterReading() throws IOException {
+        byte[] pdf = spaceWidthInObjectStreamPdf(60);
+
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(pdf),
+                IOUtils.createMemoryOnlyStreamCache(), 50, true)) {
+            // The premise: PDFBox catches the refusal and carries on with a guessed
+            // width, so the stripper alone returns the text as if nothing happened.
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+            var refused = assertThrows(UnreadableDocumentException.class,
+                    () -> BoundedPdfLoader.requireWithinCap(document));
+            assertTrue(refused.getMessage().contains("declares more than 50 objects"), refused.getMessage());
+        }
+        try (PDDocument document = BoundedPdfLoader.load(new RandomAccessReadBuffer(spaceWidthInObjectStreamPdf(1)),
+                IOUtils.createMemoryOnlyStreamCache(), 50, true)) {
+            assertEquals("Hello", new PDFTextStripper().getText(document).strip());
+            BoundedPdfLoader.requireWithinCap(document);
+        }
+    }
+
+    @Test
+    @DisplayName("the ingestion PDF extractor refuses a file whose refusal PDFBox swallowed, instead of returning its text")
+    void swallowedRefusalThroughTextExtractor() {
+        var refused = assertThrows(UnreadableDocumentException.class,
+                () -> new PdfTextExtractor().extract(spaceWidthInObjectStreamPdf(1_000_000), ExtractionLimits.defaults()));
+        assertTrue(refused.getMessage().contains("declares more than " + BoundedPdfLoader.DEFAULT_MAX_XREF_ENTRIES
+                + " objects"), refused.getMessage());
+        assertTrue(new PdfTextExtractor().extract(spaceWidthInObjectStreamPdf(1), ExtractionLimits.defaults())
+                .contains("Hello"));
+    }
+
     /**
      * The five objects of {@link #fiveObjectPdf()} and an object stream whose
      * header lists {@code listed} object numbers, with no cross-reference table and
@@ -210,40 +242,84 @@ class BoundedPdfLoaderTest {
     static byte[] compressedCatalogPdf(int declared, boolean indirectN) {
         var out = new ByteArrayOutputStream();
         write(out, "%PDF-1.5\n");
-        long[] offsets = new long[9];
+        long[] offsets = new long[indirectN ? 9 : 8];
         for (int i = 1; i < PAGE_OBJECTS.size(); i++) {
             offsets[i + 1] = out.size();
             write(out, (i + 1) + " 0 obj\n" + PAGE_OBJECTS.get(i) + "\nendobj\n");
         }
-        String header = "1 0 ";
-        String body = header + PAGE_OBJECTS.get(0);
-        String n = indirectN ? "8 0 R" : String.valueOf(declared);
+        offsets[1] = -6;
         offsets[6] = out.size();
-        write(out, "6 0 obj\n<</Type/ObjStm/N " + n + "/First " + header.length() + "/Length " + body.length()
-                + ">>stream\n" + body + "\nendstream\nendobj\n");
-        int size = indirectN ? 9 : 8;
+        writeObjectStream(out, 6, 1, PAGE_OBJECTS.get(0), indirectN ? "8 0 R" : String.valueOf(declared));
         if (indirectN) {
             offsets[8] = out.size();
             write(out, "8 0 obj\n" + declared + "\nendobj\n");
         }
-        offsets[7] = out.size();
-        var entries = new ByteArrayOutputStream();
-        for (int i = 0; i < size; i++) {
-            if (i == 0) {
-                entries.writeBytes(new byte[]{0, 0, 0, 0, 0, (byte) 0xFF, (byte) 0xFF});
-            } else if (i == 1) {
-                entries.writeBytes(new byte[]{2, 0, 0, 0, 6, 0, 0});
-            } else {
-                long offset = offsets[i];
-                entries.writeBytes(new byte[]{1, (byte) (offset >> 24), (byte) (offset >> 16), (byte) (offset >> 8),
-                        (byte) offset, 0, 0});
-            }
-        }
-        write(out, "7 0 obj\n<</Type/XRef/Size " + size + "/W[1 4 2]/Root 1 0 R/Length " + entries.size()
-                + ">>stream\n");
-        out.writeBytes(entries.toByteArray());
-        write(out, "\nendstream\nendobj\nstartxref\n" + offsets[7] + "\n%%EOF\n");
+        appendXrefStream(out, offsets, 7);
         return out.toByteArray();
+    }
+
+    /**
+     * An intact PDF 1.5 file reading "Hello", whose font descriptor's
+     * {@code /MissingWidth} is object 9, the one object of object stream 7, which
+     * declares {@code declared} objects. The font's {@code /Widths} cover every
+     * glyph the page shows but not the space, so the first and only read of object
+     * 9 happens inside {@code PDFont.getSpaceWidth()}, which catches every
+     * exception, logs it and assumes a width.
+     */
+    public static byte[] spaceWidthInObjectStreamPdf(int declared) {
+        String widths = "500 ".repeat('o' - 'H' + 1);
+        List<String> objects = List.of(
+                PAGE_OBJECTS.get(0),
+                PAGE_OBJECTS.get(1),
+                PAGE_OBJECTS.get(2),
+                PAGE_OBJECTS.get(3),
+                "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/FirstChar " + (int) 'H' + "/LastChar " + (int) 'o'
+                        + "/Widths[" + widths + "]/FontDescriptor 6 0 R>>",
+                "<</Type/FontDescriptor/FontName/Helvetica/Flags 32/MissingWidth 9 0 R>>");
+        var out = new ByteArrayOutputStream();
+        write(out, "%PDF-1.5\n");
+        long[] offsets = new long[10];
+        for (int i = 0; i < objects.size(); i++) {
+            offsets[i + 1] = out.size();
+            write(out, (i + 1) + " 0 obj\n" + objects.get(i) + "\nendobj\n");
+        }
+        offsets[7] = out.size();
+        writeObjectStream(out, 7, 9, "250", String.valueOf(declared));
+        offsets[9] = -7;
+        appendXrefStream(out, offsets, 8);
+        return out.toByteArray();
+    }
+
+    /**
+     * Object stream {@code number} holding the one object {@code member},
+     * {@code body}, and declaring {@code n} as its {@code /N}.
+     */
+    private static void writeObjectStream(ByteArrayOutputStream out, int number, int member, String body, String n) {
+        String header = member + " 0 ";
+        String data = header + body;
+        write(out, number + " 0 obj\n<</Type/ObjStm/N " + n + "/First " + header.length() + "/Length "
+                + data.length() + ">>stream\n" + data + "\nendstream\nendobj\n");
+    }
+
+    /**
+     * Writes a cross-reference stream as object {@code xrefObject} and points
+     * {@code startxref} at it. {@code offsets[i]} is object i's offset, or minus
+     * the number of the object stream holding it as its first object; entry 0 is
+     * free, and the stream's own entry is filled in here.
+     */
+    private static void appendXrefStream(ByteArrayOutputStream out, long[] offsets, int xrefObject) {
+        offsets[xrefObject] = out.size();
+        var entries = new ByteArrayOutputStream();
+        entries.writeBytes(new byte[]{0, 0, 0, 0, 0, (byte) 0xFF, (byte) 0xFF});
+        for (int i = 1; i < offsets.length; i++) {
+            long value = Math.abs(offsets[i]);
+            entries.writeBytes(new byte[]{(byte) (offsets[i] < 0 ? 2 : 1), (byte) (value >> 24), (byte) (value >> 16),
+                    (byte) (value >> 8), (byte) value, 0, 0});
+        }
+        write(out, xrefObject + " 0 obj\n<</Type/XRef/Size " + offsets.length + "/W[1 4 2]/Root 1 0 R/Length "
+                + entries.size() + ">>stream\n");
+        out.writeBytes(entries.toByteArray());
+        write(out, "\nendstream\nendobj\nstartxref\n" + offsets[xrefObject] + "\n%%EOF\n");
     }
 
     private static final String PAGE_CONTENT = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";

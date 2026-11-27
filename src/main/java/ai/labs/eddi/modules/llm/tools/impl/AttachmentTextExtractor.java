@@ -127,7 +127,9 @@ public class AttachmentTextExtractor {
      * a "PDF bomb": PDFBox decodes every stream into a buffer it sizes itself, so
      * {@link #withDecodeBudget} wraps every use of a loaded document. And
      * {@link BoundedPdfLoader} caps the cross-reference entries PDFBox stores,
-     * which a 150-byte file could otherwise push into the billions.
+     * which a 150-byte file could otherwise push into the billions. Every reader
+     * calls {@link BoundedPdfLoader#requireWithinCap} once it is done, because
+     * PDFBox can swallow that refusal.
      */
     private static PDDocument loadPdf(byte[] pdfBytes) throws IOException {
         StreamCacheCreateFunction tempFileCache = IOUtils.createTempFileOnlyStreamCache();
@@ -265,6 +267,7 @@ public class AttachmentTextExtractor {
             stripper.setStartPage(1);
             stripper.setEndPage(lastPage);
             String text = stripper.getText(document);
+            BoundedPdfLoader.requireWithinCap(document);
             LOGGER.debugf("Extracted %d characters from PDF (%d of %d pages)",
                     text.length(), lastPage, totalPages);
             return cap(text, cap);
@@ -299,6 +302,7 @@ public class AttachmentTextExtractor {
             stripper.setStartPage(startPage);
             stripper.setEndPage(effectiveEnd);
             String text = stripper.getText(document);
+            BoundedPdfLoader.requireWithinCap(document);
             LOGGER.debugf("Extracted text from PDF pages %d-%d (%d characters)",
                     startPage, effectiveEnd, text.length());
             return cap(text, cap);
@@ -320,7 +324,9 @@ public class AttachmentTextExtractor {
             String subject = info != null ? info.getSubject() : null;
             String creator = info != null ? info.getCreator() : null;
             Calendar creationDate = info != null ? info.getCreationDate() : null;
-            return new PdfInfo(document.getNumberOfPages(), title, author, subject, creator, creationDate);
+            int pages = document.getNumberOfPages();
+            BoundedPdfLoader.requireWithinCap(document);
+            return new PdfInfo(pages, title, author, subject, creator, creationDate);
         }
     }
 
