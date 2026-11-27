@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -31,13 +33,16 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.SocketTimeoutException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -189,6 +194,91 @@ class StreamingLegacyChatExecutorRetryTest {
                     eventSink, task(3), JsonResponseFormatPolicy.DISABLED, memory));
 
             assertEquals(0, calls.get());
+        }
+    }
+
+    // ==================== Agent Health ====================
+
+    @Nested
+    @DisplayName("Retries reported to Agent Health")
+    class RetryReporting {
+
+        /** A retry the observer handed over, with whether its loop recovered. */
+        private record Seen(FailureClass failureClass, boolean recovered) {
+        }
+
+        private List<Seen> run(Runnable call) {
+            List<Seen> seen = new ArrayList<>();
+            try (var binding = RetryObserver.bind((retries, recovered) -> retries.forEach(c -> seen.add(new Seen(c, recovered))))) {
+                call.run();
+            }
+            return seen;
+        }
+
+        @Test
+        @DisplayName("a provider error retried into an answer is a recovered retry, classified like every other path")
+        void errorThenSuccess() {
+            var calls = new AtomicInteger();
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    if (calls.incrementAndGet() == 1) {
+                        handler.onError(new SocketTimeoutException("read timed out"));
+                    } else {
+                        handler.onPartialResponse("Hello");
+                        handler.onCompleteResponse(complete("Hello", FinishReason.STOP));
+                    }
+                }
+            };
+
+            var seen = run(() -> assertEquals("Hello", assertDoesNotThrow(() -> executor.execute(model, messages(), eventSink, task(2))).response()));
+
+            assertEquals(List.of(new Seen(FailureClass.TIMEOUT, true)), seen);
+        }
+
+        @Test
+        @DisplayName("errors on every attempt: the retries recovered nothing")
+        void errorsExhausted() {
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    handler.onError(new SocketTimeoutException("read timed out"));
+                }
+            };
+
+            var seen = run(() -> assertThrows(LifecycleException.class, () -> executor.execute(model, messages(), eventSink, task(3))));
+
+            assertEquals(List.of(new Seen(FailureClass.TIMEOUT, false), new Seen(FailureClass.TIMEOUT, false)), seen);
+        }
+
+        @Test
+        @DisplayName("an empty timed-out attempt retried into another empty timeout is a TIMEOUT retry that recovered nothing")
+        void emptyTimeoutsExhausted() {
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    // No tokens, no response, no error — pure timeout
+                }
+            };
+            var task = task(2);
+            task.setStreamingTimeoutSeconds(1);
+
+            var seen = run(() -> assertThrows(LifecycleException.class, () -> executor.execute(model, messages(), eventSink, task)));
+
+            assertEquals(List.of(new Seen(FailureClass.TIMEOUT, false)), seen);
+        }
+
+        @Test
+        @DisplayName("nothing retried, nothing reported")
+        void noRetry() {
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    handler.onCompleteResponse(complete("Hi", FinishReason.STOP));
+                }
+            };
+
+            assertTrue(run(() -> assertDoesNotThrow(() -> executor.execute(model, messages(), eventSink, task(3)))).isEmpty());
         }
     }
 

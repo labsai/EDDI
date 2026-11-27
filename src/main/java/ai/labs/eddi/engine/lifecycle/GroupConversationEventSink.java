@@ -177,6 +177,33 @@ public final class GroupConversationEventSink {
         public SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
             this(agentId, displayName, response, phaseIndex, phaseName, null, null, null);
         }
+
+        /**
+         * The event closing the turn that produced {@code entry}, on every path
+         * (sequential, peer-targeted, parallel): an answered turn carries its content
+         * and no outcome, any other turn no content and its outcome — {@code TIMED_OUT}
+         * → {@link #OUTCOME_TIMEOUT}, {@code SKIPPED} → {@link #OUTCOME_SKIPPED},
+         * {@code FAILED} → {@link #OUTCOME_ERROR}.
+         */
+        public static SpeakerCompleteEvent of(GroupConversation.TranscriptEntry entry, int phaseIndex, String phaseName,
+                                              String targetAgentId, String targetDisplayName) {
+            String outcome = outcomeOf(entry);
+            return new SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(), outcome == null ? entry.content() : null,
+                    phaseIndex, phaseName, targetAgentId, targetDisplayName, outcome);
+        }
+
+        /** The wire outcome of a transcript entry; {@code null} when it answered. */
+        public static String outcomeOf(GroupConversation.TranscriptEntry entry) {
+            if (entry == null || entry.outcome() == null) {
+                return null;
+            }
+            return switch (entry.outcome()) {
+                case ANSWERED -> null;
+                case TIMED_OUT -> OUTCOME_TIMEOUT;
+                case SKIPPED -> OUTCOME_SKIPPED;
+                case FAILED -> OUTCOME_ERROR;
+            };
+        }
     }
 
     public record PhaseCompleteEvent(int phaseIndex, String phaseName) {
@@ -185,7 +212,26 @@ public final class GroupConversationEventSink {
     public record SynthesisStartEvent(String moderatorAgentId) {
     }
 
-    public record GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer) {
+    /**
+     * @param outcome
+     *            how the round ended ({@code ANSWERED}, {@code NO_ANSWER},
+     *            {@code FAILED}); {@code null} where it was not decided (a
+     *            rejection, a discussion ended elsewhere by an older node)
+     * @param outcomeReason
+     *            the short stable code next to it, or {@code null}
+     */
+    public record GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer,
+            GroupConversation.DiscussionOutcome outcome, String outcomeReason) {
+
+        /** Without an outcome. */
+        public GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer) {
+            this(state, synthesizedAnswer, null, null);
+        }
+
+        /** The terminal event of {@code gc} as it stands. */
+        public static GroupCompleteEvent of(GroupConversation gc) {
+            return new GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer(), gc.getOutcome(), gc.getOutcomeReason());
+        }
     }
 
     public record GroupErrorEvent(String error) {

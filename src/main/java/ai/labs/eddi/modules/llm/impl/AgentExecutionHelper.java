@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -33,7 +34,9 @@ class AgentExecutionHelper {
      * Executes a generic action with retry logic based on task configuration.
      */
     static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription) throws LifecycleException {
-        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription);
+        try (var modelCall = RetryObserver.modelCall()) {
+            return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription);
+        }
     }
 
     /**
@@ -42,7 +45,9 @@ class AgentExecutionHelper {
      */
     static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs)
             throws LifecycleException {
-        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs);
+        try (var modelCall = RetryObserver.modelCall()) {
+            return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs);
+        }
     }
 
     /**
@@ -52,7 +57,9 @@ class AgentExecutionHelper {
     static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs,
                                   TurnDeadline deadline)
             throws LifecycleException {
-        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline);
+        try (var modelCall = RetryObserver.modelCall()) {
+            return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline);
+        }
     }
 
     /**
@@ -62,7 +69,9 @@ class AgentExecutionHelper {
     static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs,
                                   TurnDeadline deadline, BooleanSupplier cancelled)
             throws LifecycleException {
-        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline, cancelled);
+        try (var modelCall = RetryObserver.modelCall()) {
+            return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline, cancelled);
+        }
     }
 
     /**
