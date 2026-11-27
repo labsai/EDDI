@@ -60,6 +60,7 @@
 - [User Events — the Per-User Event Stream](user-events.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Alerts](alerts.md)
+- [Agent Health](agent-health.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)

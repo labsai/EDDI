@@ -109,7 +109,7 @@ public final class StoreParameterChecks {
             "database_logs", "deployments", "eddi_schedule_fire_logs",
             "eddi_schedules", "email_mailbox_notices", "email_mailbox_state",
             "email_message_ledger", "email_suppressions", "erasure_meta", "erasure_pending_removals", "erasure_tombstones", "global_variables",
-            "group_lesson_history", "group_outcomes",
+            "group_lesson_history", "group_outcomes", "health_turns",
             "hitl_tool_execution_journal", "migration_log", "model_price_catalog", "rag_ingested_files", "rag_ingestion_documents",
             "rag_ingestion_runs", "rag_ingestion_sources", "resources", "resources_history", "secret_vault_deks", "secret_vault_meta",
             "secret_vault_secrets", "slack_hitl_approval_records", "spend_control_changes", "system_settings", "team_budget_months",
