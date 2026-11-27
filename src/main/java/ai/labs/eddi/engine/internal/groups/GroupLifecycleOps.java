@@ -965,6 +965,10 @@ public class GroupLifecycleOps {
         }
         try {
             conversationStore.updateIfState(gc, expected);
+            // Unlike the failure counter above, the unanswered meter counts the round
+            // only once its FAILED outcome is stored: a result a cross-pod cancel
+            // discarded is not an unanswered round.
+            DiscussionOutcomes.countUnanswered(gc);
         } catch (IResourceStore.ResourceModifiedException | IGroupConversationStore.GroupConversationGoneException e) {
             LOGGER.infof("Not failing group conversation %s — another writer made it terminal or deleted it",
                     LogSanitizer.sanitize(gc.getId()));

@@ -9,11 +9,14 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DiscussionOutcome;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -55,13 +58,15 @@ class GroupConversationServiceSettlementTest {
     private IGroupConversationStore conversationStore;
     private IAgentGroupStore groupStore;
     private GroupConversationService service;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
         conversationStore = mock(IGroupConversationStore.class);
         groupStore = mock(IAgentGroupStore.class);
+        meters = new SimpleMeterRegistry();
         service = new GroupConversationService(groupStore, conversationStore, mock(IConversationService.class),
-                mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(),
+                mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), meters,
                 mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), null,
                 new CallerIdentityContext(null, null), "default", 3);
     }
@@ -198,5 +203,47 @@ class GroupConversationServiceSettlementTest {
 
         assertEquals(1, gc.getAnsweredRounds());
         assertEquals(GroupConversationState.COMPLETED, gc.getState(), "an earlier round answered: the discussion stays continuable");
+    }
+
+    private static TranscriptEntry memberTurn(String agent, TurnOutcome outcome) {
+        return TranscriptEntry.notAnswered(agent, agent, 0, "Opinions", TranscriptEntryType.SKIPPED, outcome, "not answered", null);
+    }
+
+    private double failures() {
+        return meters.counter("eddi_group_discussion_failure_count").count();
+    }
+
+    /**
+     * The failure counter counts the failed round, not the failed discussion: a
+     * continuation in which every member failed counts although an earlier answer
+     * keeps the discussion COMPLETED.
+     */
+    @Test
+    void aFailedContinuationOfAnAnsweredDiscussion_isCountedAsAFailure() throws Exception {
+        var gc = running();
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        gc.getTranscript().add(memberTurn("a", TurnOutcome.FAILED));
+        var phases = List.of(new DiscussionPhase("Opinions", PhaseType.OPINION));
+
+        // startPhaseIndex == phases.size(): settle the round the transcript holds.
+        var result = service.executeDiscussion(gc, new AgentGroupConfiguration(), phases, "Q?", null, 1);
+
+        assertEquals(GroupConversationState.COMPLETED, result.getState());
+        assertEquals(DiscussionOutcome.FAILED, result.getOutcome());
+        assertEquals(1.0, failures());
+    }
+
+    /** A round no member answered because every turn was skipped broke nothing. */
+    @Test
+    void aRoundWhoseMembersWereAllSkipped_isNotAFailure() throws Exception {
+        var gc = running();
+        gc.getTranscript().add(memberTurn("a", TurnOutcome.SKIPPED));
+        var phases = List.of(new DiscussionPhase("Opinions", PhaseType.OPINION));
+
+        var result = service.executeDiscussion(gc, new AgentGroupConfiguration(), phases, "Q?", null, 1);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, result.getOutcome());
+        assertEquals(0.0, failures());
     }
 }

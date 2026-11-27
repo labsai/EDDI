@@ -200,3 +200,14 @@ settled is not merged into the stored record (needs a field-level merge write); 
 still records a failure in a parallel phase rather than stopping it (unchanged, pinned by a test); a
 phase whose turns the cap skipped entirely still pauses at its `requiresApproval` gate; a sole
 `SYNTHESIS` phase whose turn fails settles `NO_ANSWER` / `SYNTHESIS_FAILED`, not `FAILED`.
+
+**Review follow-ups (2026-11-27).** `eddi_group_discussion_failure_count` counts every round whose
+outcome is `FAILED` on the normal settlement path too. Before, it counted there only when the whole
+discussion failed, so a continuation whose members all failed after an earlier answer was missed,
+although `failConversation` and the no-progress failure already counted such rounds. A `NO_ANSWER`
+round, for example one in which every member was skipped, is still not a failure.
+`eddi_group_discussion_unanswered_total` now also counts a round that failed with an error
+(`failConversation`) and a no-progress TASK failure, in both cases only after the conditional write
+commits. A result discarded by a cross-pod cancel is not counted. [`metrics.md`](../metrics.md) now
+says what each counter counts, and how cut-short rounds (`TURN_LIMIT_REACHED`,
+`COST_CEILING_REACHED`) are counted.

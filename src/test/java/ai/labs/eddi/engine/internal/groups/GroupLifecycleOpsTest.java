@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -464,6 +465,47 @@ class GroupLifecycleOpsTest {
         assertEquals(GroupConversationState.CANCELLED, gc.getState());
         assertNull(gc.getOutcome(), "no FAILED outcome next to a CANCELLED state the persisted record never got");
         assertNull(gc.getOutcomeReason());
+    }
+
+    private static double unanswered(SimpleMeterRegistry registry) {
+        return registry.find(DiscussionOutcomes.METER_UNANSWERED).counters().stream().mapToDouble(c -> c.count()).sum();
+    }
+
+    /** What failConversation adds to the unanswered meter. */
+    private double unansweredAfterFailing(GroupConversationState persistedState, Exception writeFailure) throws Exception {
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            var ops = ops();
+            var gc = gc();
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = gc();
+            persisted.setState(persistedState);
+            doReturn(persisted).when(conversationStore).read("gc-1");
+            if (writeFailure != null) {
+                doThrow(writeFailure).when(conversationStore).updateIfState(any(), any());
+            }
+            ops.failConversation(gc);
+            return unanswered(registry);
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    @Test
+    void failConversation_countsTheFailedRoundAsUnanswered_onceTheWriteCommits() throws Exception {
+        assertEquals(1.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, null));
+    }
+
+    @Test
+    void failConversation_aCancelAlreadyStored_isNotAnUnansweredRound() throws Exception {
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.CANCELLED, null));
+    }
+
+    @Test
+    void failConversation_aLostConditionalWrite_isNotAnUnansweredRound() throws Exception {
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, new IResourceStore.ResourceModifiedException("lost")));
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, new IResourceStore.ResourceStoreException("down")));
     }
 
     @Test

@@ -37,6 +37,7 @@ import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DiscussionOutcome;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -1799,8 +1800,12 @@ public class GroupConversationService implements IGroupConversationService, User
                 throw e;
             }
             // Counted only now, past the conditional write: a result a cross-pod cancel
-            // discarded is not a failed or unanswered round.
-            if (noMemberAnswered) {
+            // discarded is not a failed or unanswered round. The failure counter counts
+            // the failed ROUND, as failConversation and the no-progress failure do, so a
+            // failed continuation of an answered discussion counts although the
+            // discussion stays COMPLETED; a NO_ANSWER round is only in the unanswered
+            // meter.
+            if (gc.getOutcome() == DiscussionOutcome.FAILED) {
                 counterGroupFailure.increment();
             }
             DiscussionOutcomes.countUnanswered(gc);

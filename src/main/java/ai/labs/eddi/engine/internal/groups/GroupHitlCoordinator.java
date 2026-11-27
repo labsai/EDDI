@@ -357,6 +357,7 @@ public class GroupHitlCoordinator {
         // H14a: only while still running — a cancel committed elsewhere must win.
         RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
         counterGroupFailure.increment();
+        DiscussionOutcomes.countUnanswered(gc);
         deleteGroupHitlTimeoutSchedule(gc.getId());
         if (discussionFails) {
             cleanupAfterTerminalState(gc);
