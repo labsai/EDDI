@@ -3,7 +3,7 @@ import {
   approveSpendControlChange,
   getPendingSpendControlChanges,
   rejectSpendControlChange,
-} from "@/lib/api/spend-control";
+} from "@eddi/app-kit/lib/api/spend-control";
 
 const spendControlKeys = {
   pending: ["spend-control", "pending"] as const,

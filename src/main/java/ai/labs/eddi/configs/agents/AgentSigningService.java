@@ -42,7 +42,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>Tampered inter-agent context — messages between agents modified in
  * flight</li>
  * <li>Audit repudiation — proves which agent actually generated a particular
- * output</li>
+ * output ({@code engine.audit.AuditAgentSigner}, checked by
+ * {@code /auditstore/verify})</li>
  * </ul>
  * <p>
  * Key lifecycle:
@@ -95,16 +96,16 @@ public class AgentSigningService {
      * no key".
      *
      * <p>
-     * The miss is the frequent case: most agents have no key, and the audit ledger
-     * signs every entry it writes — three per turn — so without remembering it each
-     * entry of a keyless agent cost a vault lookup, i.e. a database read, only to
-     * learn the same thing again. A key that was found expires on the same clock:
-     * it used to be kept for the life of the process, so a key replaced or removed
-     * in the vault by anything but this node's own {@link #deleteKeyPair} was never
-     * picked up, and this node went on signing with the old one — every signature
-     * then failing verification against the new public key. A key added, replaced
-     * or removed in the vault is now picked up within the TTL; this node's own
-     * {@link #generateKey} and delete take effect at once.
+     * The miss is remembered too: the audit ledger signs several entries per turn,
+     * so without it each entry of an agent whose key is missing from the vault cost
+     * a vault lookup, i.e. a database read, only to learn the same thing again. A
+     * key that was found expires on the same clock: it used to be kept for the life
+     * of the process, so a key replaced or removed in the vault by anything but
+     * this node's own {@link #deleteKeyPair} was never picked up, and this node
+     * went on signing with the old one — every signature then failing verification
+     * against the new public key. A key added, replaced or removed in the vault is
+     * now picked up within the TTL; this node's own {@link #generateKey} and delete
+     * take effect at once.
      * </p>
      */
     static final long KEY_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
@@ -319,21 +320,24 @@ public class AgentSigningService {
     }
 
     /**
-     * Sign a message payload using the agent's private key.
+     * Sign a message payload using one of the agent's private keys.
      *
      * @param tenantId
      *            the tenant identifier
      * @param agentId
      *            the agent identifier
+     * @param keyVersion
+     *            the key version to sign with, {@code <= 0} for the legacy
+     *            unversioned key
      * @param payload
      *            the message to sign
      * @return Base64-encoded signature
      * @throws AgentSigningException
      *             if signing fails
      */
-    public String sign(String tenantId, String agentId, String payload) throws AgentSigningException {
+    public String sign(String tenantId, String agentId, int keyVersion, String payload) throws AgentSigningException {
         try {
-            PrivateKey privateKey = loadPrivateKey(tenantId, agentId, 0);
+            PrivateKey privateKey = loadPrivateKey(tenantId, agentId, keyVersion);
 
             Signature sig = Signature.getInstance(ALGORITHM);
             sig.initSign(privateKey);
@@ -359,22 +363,23 @@ public class AgentSigningService {
 
     /**
      * As {@link #sign}, for callers that sign when they can and carry on unsigned
-     * when the agent has no key: the audit ledger, which signs every entry on the
+     * when the agent has no key: the audit ledger, which signs entries on the
      * turn's thread. While a "no key" answer is remembered (see
      * {@link #KEY_CACHE_TTL_NANOS}) this returns {@code null} without throwing,
      * where {@link #sign} would still build three exceptions per entry.
      *
-     * @return Base64-encoded signature, or {@code null} if the agent has no key
+     * @return Base64-encoded signature, or {@code null} if the vault holds no key
+     *         of that version
      * @throws AgentSigningException
      *             if a key exists but signing failed, or the vault could not answer
      */
-    public String signIfKeyPresent(String tenantId, String agentId, String payload) throws AgentSigningException {
-        Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKey(tenantId, agentId));
+    public String signIfKeyPresent(String tenantId, String agentId, int keyVersion, String payload) throws AgentSigningException {
+        Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKeyFor(tenantId, agentId, keyVersion));
         if (cached != null && cached.isEmpty()) {
             return null;
         }
         try {
-            return sign(tenantId, agentId, payload);
+            return sign(tenantId, agentId, keyVersion, payload);
         } catch (AgentSigningException e) {
             if (e.getCause() instanceof ISecretProvider.SecretNotFoundException) {
                 return null;
@@ -616,7 +621,7 @@ public class AgentSigningService {
      *             wrapping the original cause, so callers can report precisely
      */
     private PrivateKey loadPrivateKey(String tenantId, String agentId, int keyVersion) {
-        String cacheKeyStr = keyVersion > 0 ? versionedCacheKey(tenantId, agentId, keyVersion) : cacheKey(tenantId, agentId);
+        String cacheKeyStr = cacheKeyFor(tenantId, agentId, keyVersion);
 
         Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKeyStr);
         if (cached != null) {
@@ -661,6 +666,14 @@ public class AgentSigningService {
 
     private static String versionedCacheKey(String tenantId, String agentId, int keyVersion) {
         return cacheKey(tenantId, agentId) + ";v=" + keyVersion;
+    }
+
+    /**
+     * The cache key of a version as signing names it: {@code <= 0} is the legacy
+     * key.
+     */
+    private static String cacheKeyFor(String tenantId, String agentId, int keyVersion) {
+        return keyVersion > 0 ? versionedCacheKey(tenantId, agentId, keyVersion) : cacheKey(tenantId, agentId);
     }
 
     /**

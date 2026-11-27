@@ -16,16 +16,16 @@ import {
   Rocket,
   X,
 } from "lucide-react";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { describeSaveError } from "@/lib/save-error";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { EditableTitle } from "@/components/shared/editable-title";
 import {
   useWorkflow,
@@ -34,14 +34,14 @@ import {
   useDeleteWorkflow,
   useWorkflowVersions,
 } from "@/hooks/use-workflows";
-import { useAgent } from "@/hooks/use-agents";
-import { deleteResource, type ResourceTypeConfig } from "@/lib/api/resources";
+import { useAgent } from "@eddi/app-kit/hooks/use-agents";
+import { deleteResource, type ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
 import { buildStepResourceLink } from "@/lib/workflow-step-links";
 
-import { parseResourceUri } from "@/lib/api/agents";
-import type { WorkflowExtension } from "@/lib/api/workflows";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import type { WorkflowExtension } from "@eddi/app-kit/lib/api/workflows";
 import { addWorkflowStep } from "@/lib/workflow-steps";
-import { parseVersionFromLocation } from "@/lib/api/location-version";
+import { parseVersionFromLocation } from "@eddi/app-kit/lib/api/location-version";
 import {
   PipelineBuilder,
   type PipelineItem,
@@ -51,10 +51,10 @@ import {
   type AddExtensionResult,
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
-import { getAgent, updateAgent, type Agent } from "@/lib/api/agents";
-import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { getAgent, updateAgent, type Agent } from "@eddi/app-kit/lib/api/agents";
+import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
 import {
   ParserEditor,
 } from "@/components/editors/parser-editor";

@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { MessageSquareText, Star, ThumbsUp, Users } from "lucide-react";
-import { StatCard } from "@/components/workforce/analytics/stat-card";
-import { cn } from "@/lib/utils";
-import { LOW_SAMPLE_THRESHOLD, type RatingSummary } from "@/lib/api/ratings";
+import { StatCard } from "@eddi/app-kit/components/workforce/analytics/stat-card";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { LOW_SAMPLE_THRESHOLD, type RatingSummary } from "@eddi/app-kit/lib/api/ratings";
 import { countDelta, percent, pointDelta } from "./feedback-utils";
 
 interface OverviewProps {

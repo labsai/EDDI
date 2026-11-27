@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -122,6 +123,8 @@ class RestAgentStoreTest {
     private AgentSigningService agentSigningService;
     @Mock
     private IAgentFactory agentFactory;
+    @Mock
+    private VaultGrantService vaultGrantService;
 
     private RestAgentStore restAgentStore;
 
@@ -130,7 +133,7 @@ class RestAgentStoreTest {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                 capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), agentSigningService, agentFactory, "default",
-                mock(AgentCascadeService.class));
+                mock(AgentCascadeService.class), vaultGrantService);
         // The Agent is live at v1: a cascade is only allowed against the CURRENT
         // version, since it tears down workflows and schedules before the delete —
         // the only place the version used to be checked — has run.
@@ -236,6 +239,57 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("a permanent delete drops the agent's cached versions even with no live deployment")
+        void permanentDeleteInvalidatesCachesWithoutDeployment() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(agentFactory).invalidateAgentCaches(AGENT_ID);
+            verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a soft delete leaves the cached versions alone")
+        void softDeleteKeepsCaches() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            verify(agentFactory, never()).invalidateAgentCaches(anyString());
+        }
+
+        @Test
+        @DisplayName("a permanent delete removes the agent from every vault grant")
+        void permanentDeleteRevokesVaultGrants() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(vaultGrantService).revokeDeletedAgent(eq(AGENT_ID), any());
+        }
+
+        @Test
+        @DisplayName("a soft delete keeps the vault grants, so a restored agent is still granted")
+        void softDeleteKeepsVaultGrants() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            verify(vaultGrantService, never()).revokeDeletedAgent(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a permanent delete that fails keeps the vault grants of the agent it did not delete")
+        void refusedPermanentDeleteKeepsVaultGrants() throws Exception {
+            doThrow(new IllegalStateException("store unavailable")).when(AgentStore).deleteAllPermanently(AGENT_ID);
+
+            assertThrows(RuntimeException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, true, false));
+
+            verify(vaultGrantService, never()).revokeDeletedAgent(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a failed grant sweep does not fail the delete that already happened")
+        void failedGrantSweepDoesNotFailDelete() throws Exception {
+            when(vaultGrantService.revokeDeletedAgent(anyString(), any())).thenThrow(new IllegalStateException("vault down"));
+
+            assertDoesNotThrow(() -> restAgentStore.deleteAgent(AGENT_ID, 1, true, false));
+        }
+
+        @Test
         @DisplayName("a refused delete leaves the Agent running")
         void refusedDeleteKeepsAgentRunning() throws Exception {
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
@@ -281,7 +335,7 @@ class RestAgentStoreTest {
             doThrow(new ForbiddenException("no")).when(denyingGuard).requireAccess(eq("agent-x"), eq(AccessLevel.EDIT), any());
             var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default",
-                    mock(AgentCascadeService.class));
+                    mock(AgentCascadeService.class), mock(VaultGrantService.class));
 
             assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
@@ -892,7 +946,7 @@ class RestAgentStoreTest {
             signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
             store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
-                    mock(AgentCascadeService.class));
+                    mock(AgentCascadeService.class), mock(VaultGrantService.class));
             when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
         }
 
@@ -1224,7 +1278,7 @@ class RestAgentStoreTest {
             signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
             store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
-                    mock(AgentCascadeService.class));
+                    mock(AgentCascadeService.class), mock(VaultGrantService.class));
             stored = new AgentConfiguration();
             stored.setWorkflows(new ArrayList<>());
             // A fresh copy per read, as the real store deserializes one: the endpoint
@@ -1510,7 +1564,7 @@ class RestAgentStoreTest {
             signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
             store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
-                    mock(AgentCascadeService.class));
+                    mock(AgentCascadeService.class), mock(VaultGrantService.class));
             v1 = signing.generateKey("default", AGENT_ID, 1);
             v2 = signing.generateKey("default", AGENT_ID, 2);
             var identity = new AgentConfiguration.AgentIdentity();

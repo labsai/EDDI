@@ -1,5 +1,5 @@
 import { parseRedactedJson } from "@/lib/redacted-json";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * Reads a gated `POST /agentstore/agents/{id}/cascade` request into the form an

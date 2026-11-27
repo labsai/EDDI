@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   browserHandlers,
   devAssetPassthrough,
-} from "@/test/mocks/browser-handlers";
+} from "@eddi/app-kit/test/mocks/browser-handlers";
 
 const ORIGIN = "http://localhost:3000";
 

@@ -38,7 +38,7 @@ vi.mock("@/hooks/use-logs", () => ({
   useInstanceId: vi.fn().mockReturnValue({ data: { instanceId: "test-instance-123" } }),
 }));
 
-vi.mock("@/hooks/use-chat", () => ({
+vi.mock("@eddi/app-kit/hooks/use-chat", () => ({
   useDeployedAgents: vi.fn().mockReturnValue({
     data: [
       { id: "agent1", name: "Test Agent" },
@@ -50,7 +50,7 @@ vi.mock("@/hooks/use-onboarding", () => ({
   useOnboarding: vi.fn().mockReturnValue(vi.fn()),
 }));
 
-vi.mock("@/lib/api/conversations", () => ({
+vi.mock("@eddi/app-kit/lib/api/conversations", () => ({
   getConversationDescriptors: vi.fn().mockResolvedValue([]),
   parseConversationUri: vi.fn((uri: string) => uri.split("/").pop() ?? ""),
 }));

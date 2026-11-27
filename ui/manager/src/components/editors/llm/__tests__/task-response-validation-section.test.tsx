@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { TaskResponseValidationSection } from "@/components/editors/llm/task-response-validation-section";
-import type { LlmTask } from "@/components/editors/llm/types";
+import type { LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 const emptyTask: LlmTask = {
   type: "openai",

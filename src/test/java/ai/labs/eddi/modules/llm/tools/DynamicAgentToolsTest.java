@@ -1013,10 +1013,33 @@ class DynamicAgentToolsTest {
             // Act
             String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
 
-            // Assert
-            assertTrue(result.contains("✅"), "Should contain success marker (tool itself succeeded)");
-            assertTrue(result.contains("ERROR state") || result.contains("failed to produce output"),
-                    "Should indicate the agent entered ERROR state");
+            // Assert — an ERROR without output is a failure, reported as one. It used to
+            // be a "✅ Agent response" wrapping the placeholder "[Agent failed to produce
+            // output — ...]", which the delegating model could take for the other agent's
+            // answer. Now: the tool's failure marker and a fixed text that says outright
+            // there is no answer.
+            assertEquals("❌ Agent '" + AGENT_ID + "' failed to produce an answer: its conversation (" + CONVERSATION_ID
+                    + ") ended in ERROR. This is not the agent's answer; retry later or proceed without it.", result);
+            assertFalse(result.contains("✅"), "a failed delegation must not carry the success marker");
+            assertFalse(result.contains("Agent response"), "nothing may read as the other agent's answer");
+        }
+
+        @Test
+        @DisplayName("ERROR conversation state with an empty-string output is still a failure")
+        void converseWithAgent_errorStateEmptyOutput_returnsErrorMessage() throws Exception {
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.ERROR);
+            var output = new ConversationOutput();
+            output.put("output", List.of(""));
+            snapshot.setConversationOutputs(List.of(output));
+
+            stubSayWithSnapshot(snapshot);
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
+
+            assertTrue(result.startsWith("❌ Agent '" + AGENT_ID + "' failed to produce an answer"), result);
+            assertFalse(result.contains("[no response]"), result);
         }
 
         @Test
@@ -1251,6 +1274,33 @@ class DynamicAgentToolsTest {
             verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.undeployed);
             verify(deploymentStore, never()).setDeploymentInfo(eq("test"), any(), any(), any());
             verify(deploymentStore, never()).setDeploymentInfo(any(), eq("created-2"), any(), any());
+        }
+
+        @Test
+        void teardownAgent_flipsTheRecordBeforeLeavingTheRegistry() throws Exception {
+            // The sweep deploys what is recorded deployed and not served: a sweep
+            // between a registry drop and the record write would deploy it again.
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(record("created-1", 1, Environment.production)));
+
+            tool.teardownAgent("created-1", false);
+
+            var order = inOrder(deploymentStore, agentFactory);
+            order.verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.undeployed);
+            order.verify(agentFactory).undeployAgent(Environment.production, "created-1", null);
+        }
+
+        @Test
+        void teardownAgent_failedRegistryRemovalPutsTheRecordsBack() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(record("created-1", 1, Environment.production), record("created-1", 2, Environment.production)));
+            doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(Environment.production, "created-1", null);
+
+            String result = tool.teardownAgent("created-1", false);
+
+            assertTrue(result.contains("Failed to undeploy"), result);
+            verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.deployed);
+            verify(deploymentStore).setDeploymentInfo("production", "created-1", 2, DeploymentInfo.DeploymentStatus.deployed);
         }
 
         private static DeploymentInfo record(String agentId, int version, Environment environment) {

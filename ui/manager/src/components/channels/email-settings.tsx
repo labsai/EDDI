@@ -1,8 +1,8 @@
 import { useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { useConnectionDescriptors } from "@/hooks/use-connections";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { useConnectionDescriptors } from "@eddi/app-kit/hooks/use-connections";
 import {
   EMAIL_ATTACHMENT_MODES,
   EMAIL_DEFAULTS,

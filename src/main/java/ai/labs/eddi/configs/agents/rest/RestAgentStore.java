@@ -31,6 +31,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -80,6 +81,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final AgentCascadeService agentCascadeService;
     private final IAgentFactory agentFactory;
     private final String defaultTenantId;
+    private final VaultGrantService vaultGrantService;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
@@ -91,7 +93,8 @@ public class RestAgentStore implements IRestAgentStore {
             AgentSigningService agentSigningService,
             IAgentFactory agentFactory,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
-            AgentCascadeService agentCascadeService) {
+            AgentCascadeService agentCascadeService, VaultGrantService vaultGrantService) {
+        this.vaultGrantService = vaultGrantService;
         this.agentCascadeService = agentCascadeService;
         this.agentFactory = agentFactory;
         this.resourceAccessGuard = resourceAccessGuard;
@@ -486,6 +489,19 @@ public class RestAgentStore implements IRestAgentStore {
         // delete must leave a running Agent running.
         undeployLiveDeployments(id, liveDeployments);
 
+        // undeployAgent drops cached versions only for deployments that were live. A
+        // permanent delete with none must still drop them, or a version of the deleted
+        // agent stays readable from the cache (CWE-636: an audit entry signed with a
+        // key
+        // revoked later would verify VALID).
+        if (Boolean.TRUE.equals(permanent)) {
+            try {
+                agentFactory.invalidateAgentCaches(id);
+            } catch (Exception e) {
+                log.warnf("Failed to drop cached versions of permanently deleted Agent %s: %s", sanitize(id), sanitize(e.getMessage()));
+            }
+        }
+
         if (cascadeTargets != null) {
             try {
                 int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);
@@ -543,6 +559,19 @@ public class RestAgentStore implements IRestAgentStore {
             // failed leaves a vault entry that no keys[] entry names. See
             // AgentSigningService.versionsToSweep.
             agentSigningService.deleteKeyPair(defaultTenantId, id, signingKeyVersions);
+        }
+
+        // Permanent deletes ONLY, by the rule above: a soft delete can be undone, and
+        // the restored Agent must still be granted what it was granted. A permanent one
+        // cannot, and its id left on a secret's allowedAgents is a grant to nobody that
+        // reads as a grant to someone — every replaced Platform Operator used to leave
+        // one behind. Never widens a grant; see VaultGrantService.revokeDeletedAgent.
+        if (Boolean.TRUE.equals(permanent) && vaultGrantService != null) {
+            try {
+                vaultGrantService.revokeDeletedAgent(id, resourceAccessGuard.currentPrincipal());
+            } catch (Exception e) {
+                log.warnf("Failed to remove permanently deleted Agent %s from vault grants: %s", sanitize(id), sanitize(e.getMessage()));
+            }
         }
 
         // A record left behind makes the runtime retry a

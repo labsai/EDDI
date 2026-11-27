@@ -30,7 +30,9 @@ import java.util.function.Consumer;
  * DELETE at all, and UPDATE only for the two GDPR Art. 17 mutations the
  * contract permits: {@link #pseudonymizeByUserId} and {@link #redactEntry}.
  * <p>
- * Activated via {@code @DefaultBean}.
+ * Selected at runtime by {@code DataStoreProducers} when
+ * {@code eddi.datastore.type=postgres}; the bean itself is
+ * {@code @DefaultBean}.
  *
  * @author ginccc
  * @since 6.0.0

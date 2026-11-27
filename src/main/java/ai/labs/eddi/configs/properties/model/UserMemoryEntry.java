@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.model;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 
 import java.time.Instant;
@@ -26,6 +27,15 @@ import java.util.Objects;
  * {@code self}/{@code group}, plus the shared {@code global} one — and those
  * can disagree. Dream's contradiction detection records that disagreement in
  * {@link #assessment()} instead of picking a winner.
+ * <p>
+ * {@code sourceAgentId} is the entry's owner: the agent that created it. A
+ * global entry is shared, and a later write by another agent replaces its value
+ * but keeps the owner, so who wrote the value it holds is
+ * {@code lastWriterAgentId}: the agent whose write produced it, {@code null}
+ * when the user or an admin wrote it. The stores record the writer an entry
+ * names, so a write on behalf of an agent other than the owner names both. An
+ * entry stored before writers were recorded reads back with its owner as
+ * writer.
  *
  * @param conflicted
  *            mirror of {@code assessment == CONTESTED}, kept because existing
@@ -50,7 +60,7 @@ import java.util.Objects;
  */
 public record UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
         List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
-        Assessment assessment, String supersededBy, List<String> sourceEntryIds) {
+        Assessment assessment, String supersededBy, List<String> sourceEntryIds, String lastWriterAgentId) {
 
     /**
      * Where an entry stands against the other entries holding the same key. Only
@@ -98,7 +108,19 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     }
 
     /**
-     * The shape before {@code sourceEntryIds}: an entry with no recorded sources.
+     * An entry about to be written, or one read back whose writer is its owner:
+     * {@code sourceAgentId} wrote the value.
+     */
+    public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
+            List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
+            Assessment assessment, String supersededBy, List<String> sourceEntryIds) {
+        this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
+                updatedAt, assessment, supersededBy, sourceEntryIds, sourceAgentId);
+    }
+
+    /**
+     * The shape before {@code sourceEntryIds}: an entry with no recorded sources,
+     * whose writer is its owner.
      */
     public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
             List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
@@ -108,8 +130,19 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     }
 
     /**
+     * An {@link Assessment#ACCEPTED} entry with no recorded sources, written by
+     * {@code lastWriterAgentId}.
+     */
+    public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
+            List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
+            String lastWriterAgentId) {
+        this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
+                updatedAt, Assessment.ACCEPTED, null, List.of(), lastWriterAgentId);
+    }
+
+    /**
      * The shape before {@code assessment} and {@code supersededBy}: an
-     * {@link Assessment#ACCEPTED} entry.
+     * {@link Assessment#ACCEPTED} entry whose writer is its owner.
      */
     public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
             List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
@@ -123,13 +156,14 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      */
     public UserMemoryEntry withAssessment(Assessment newAssessment, String newSupersededBy) {
         return new UserMemoryEntry(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId,
-                newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy, sourceEntryIds);
+                newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy, sourceEntryIds,
+                lastWriterAgentId);
     }
 
     /** This entry with other recorded sources. Nothing else changes. */
     public UserMemoryEntry withSourceEntryIds(List<String> newSourceEntryIds) {
         return new UserMemoryEntry(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted,
-                accessCount, createdAt, updatedAt, assessment, supersededBy, newSourceEntryIds);
+                accessCount, createdAt, updatedAt, assessment, supersededBy, newSourceEntryIds, lastWriterAgentId);
     }
 
     /**
@@ -155,13 +189,29 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
         return withAssessment(Assessment.ACCEPTED, null);
     }
 
+    /**
+     * Whether an agent other than {@code agentId} wrote the value this entry holds
+     * ({@link #lastWriterAgentId}). One the user or an admin wrote names no agent,
+     * and a team's lessons ({@link IUserMemoryStore#TEAM_OWNER_PREFIX}) are the
+     * engine's, distilled from the team's records under its records rule. A reader
+     * that requires peer verification is shown no entry another agent wrote: no
+     * signature covers it.
+     */
+    public boolean writtenByAgentOtherThan(String agentId) {
+        if (userId != null && userId.startsWith(IUserMemoryStore.TEAM_OWNER_PREFIX)) {
+            return false;
+        }
+        return lastWriterAgentId != null && !lastWriterAgentId.isBlank() && !lastWriterAgentId.equals(agentId);
+    }
+
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");
 
     /**
-     * Creates an entry from a {@link Property} with user memory metadata. Used when
-     * flushing longTerm properties with non-null visibility to the usermemories
-     * collection.
+     * Creates an entry from a {@link Property} with user memory metadata. The
+     * property's own visibility wins; {@code defaultVisibility} applies only when
+     * it has none. The entry carries no group ids, so a {@code group} entry built
+     * here is not readable through group overlap — use the overload below for that.
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
                                                Visibility defaultVisibility) {

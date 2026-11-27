@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 describe("useUnsavedChangesGuard", () => {
   let addSpy: ReturnType<typeof vi.spyOn>;

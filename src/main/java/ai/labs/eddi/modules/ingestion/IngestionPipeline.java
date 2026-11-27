@@ -86,9 +86,6 @@ public class IngestionPipeline {
 
     private static final Logger LOGGER = Logger.getLogger(IngestionPipeline.class);
 
-    /**
-     * Metadata key that ties a segment back to its document, used to replace it.
-     */
     /** Cap on third-party text copied into vector metadata. */
     private static final int MAX_TITLE_LENGTH = 300;
 
@@ -119,6 +116,9 @@ public class IngestionPipeline {
      */
     Duration progressReportInterval = Duration.ofSeconds(2);
 
+    /**
+     * Metadata key that ties a segment back to its document, used to replace it.
+     */
     public static final String METADATA_DOCUMENT_ID = "documentId";
     public static final String METADATA_URL = "url";
     public static final String METADATA_TITLE = "title";
@@ -947,10 +947,6 @@ public class IngestionPipeline {
     }
 
     /**
-     * How long a run may be in flight before it is treated as abandoned: its own
-     * time budget plus a margin, so a slow but healthy run is never reaped.
-     */
-    /**
      * The start time before which a still-RUNNING run of this source counts as
      * abandoned — for {@link IIngestionStateStore#reapStaleRuns}. Every caller
      * reaps against this one cut-off, so a read that reaps cannot disagree with a
@@ -968,6 +964,10 @@ public class IngestionPipeline {
         return Instant.now().plus(staleRunThreshold(source));
     }
 
+    /**
+     * How long a run may be in flight before it is treated as abandoned: its own
+     * time budget plus a margin, so a slow but healthy run is never reaped.
+     */
     private static Duration staleRunThreshold(IngestionSource source) {
         return Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()).plus(STALE_RUN_MARGIN);
     }

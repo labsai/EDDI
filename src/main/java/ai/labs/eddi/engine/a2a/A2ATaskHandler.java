@@ -65,10 +65,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <strong>Tasks and conversations.</strong> A context is one conversation; a
  * task is one turn in it. A task a peer opens without naming a context gets a
  * fresh conversation, and that conversation's id is the context id it is handed
- * back. Server-issued task ids are {@code <conversationId>_<random>}, and every
- * turn carries its task id in the input context ({@value #CONTEXT_TASK_ID}), so
- * a task can be found again in the conversation store when the
- * {@link IA2ATaskStore} has forgotten it — after a restart, or on another node.
+ * back. Server-issued task ids are {@code <conversationId>_<random>} (a pre-0.2
+ * peer chooses its own id, or gets a random UUID), and every turn carries its
+ * task id in the input context ({@value #CONTEXT_TASK_ID}), so a task can be
+ * found again in the conversation store when the {@link IA2ATaskStore} has
+ * forgotten it — after a restart, or on another node.
  * <p>
  * <strong>States.</strong> The answer to a task is decided by how its own turn
  * ended, never by what the conversation last said: an ERROR turn is

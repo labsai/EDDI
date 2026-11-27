@@ -33,7 +33,7 @@ import org.jboss.logmanager.ExtLogRecord;
  * <p>
  * Log records are captured via {@link LogCaptureFilter}, a Quarkus
  * {@code @LoggingFilter} that intercepts every log record in the JBoss
- * LogManager workflow and pushes it to this store.
+ * LogManager pipeline and pushes it to this store.
  * </p>
  *
  * <p>
@@ -179,7 +179,7 @@ public class BoundedLogStore {
 
     /**
      * Called by {@link LogCaptureFilter} for every log record passing through the
-     * Quarkus logging workflow.
+     * Quarkus logging pipeline.
      *
      * @param record
      *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
