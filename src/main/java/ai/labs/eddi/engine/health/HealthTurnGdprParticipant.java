@@ -7,13 +7,16 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Joins GDPR erasure and export for the Agent Health turn rows.
@@ -41,8 +44,19 @@ import java.util.Map;
  * <p>
  * The export carries the user's rows, newest first, under {@code turns}; past
  * {@link #MAX_EXPORTED_TURNS} the section is marked
- * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates (a later phase)
- * hold no personal data and are not part of either.
+ * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates hold no personal
+ * data and are not part of either; the days of the erased rows are marked
+ * dirty, so the rollup recomputes them without the user. The rows of the user's
+ * own conversations are normally gone already — the cascade erases them through
+ * {@link HealthErasureWriter#eraseConversation} before the snapshots are
+ * deleted, which marks their days with the agent known — so this delete takes
+ * what is left. Its days come with the delete
+ * ({@link IHealthTurnStore#deleteByUserIdReturningDays}); when they cannot be
+ * read the delete still runs, but nothing can be re-rolled — this step runs
+ * after the cascade deleted the user's conversations, so no agent can be looked
+ * up there either: a WARN, and the daily rows keep the user's counts until a
+ * later re-roll of those days or {@code eddi.health.daily-retention}. That does
+ * not fail the step — the rows, the only personal data, are gone.
  */
 @ApplicationScoped
 public class HealthTurnGdprParticipant implements IGdprParticipant {
@@ -52,6 +66,14 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
 
     private final IHealthTurnStore store;
     private final ErasureGuard erasureGuard;
+
+    /**
+     * Marks the days of the erased rows dirty, so the daily rows lose the user's
+     * counts at the next rollup. Field-injected and null-checked: tests build this
+     * class by hand.
+     */
+    @Inject
+    Instance<HealthDirtyDays> dirtyDays;
 
     @Inject
     public HealthTurnGdprParticipant(IHealthTurnStore store, ErasureGuard erasureGuard) {
@@ -74,11 +96,16 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
         if (userId == null || userId.isBlank()) {
             return 0L;
         }
-        long deleted = store.deleteByUserId(userId);
+        HealthDeletedRows deleted = store.deleteByUserIdReturningDays(userId);
+        long count = deleted == null ? 0L : deleted.deleted();
+        if (dirtyDays != null && dirtyDays.isResolvable() && count > 0) {
+            dirtyDays.get().markErasedRows(Set.of(), deleted);
+        }
+        // Verified whatever the delete answered: the count is what decides.
         if (erasureGuard != null) {
             erasureGuard.verifyUserErased(HealthErasureWriter.NAME, userId, () -> store.countByUserId(userId));
         }
-        return deleted;
+        return count;
     }
 
     @Override

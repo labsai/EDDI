@@ -4,15 +4,26 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,9 +60,72 @@ class HealthErasureWriterTest {
         assertEquals("agentHealthTurns", writer.name());
         when(recorder.awaitDrained(Duration.ofSeconds(1))).thenReturn(true);
         assertTrue(writer.awaitDrained(Duration.ofSeconds(1)));
-        when(store.deleteByConversationId("conv")).thenReturn(3L);
+        when(store.deleteConversationReturningDays("conv")).thenReturn(new HealthDeletedRows(3L, Map.of()));
         when(store.countByConversationId("conv")).thenReturn(0L);
         assertEquals(3L, writer.eraseConversation("conv"));
         assertEquals(0L, writer.countForConversation("conv"));
+    }
+
+    @Test
+    @DisplayName("every delete marks the days of the deleted rows dirty, the conversation's agent the fallback for unknown days")
+    void marksDeletedDays() throws Exception {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        when(conversations.loadListingSummaries(List.of("conv")))
+                .thenReturn(Map.of("conv", new ConversationListingSummary("conv", "user", null, null, "agent", 1, 2)));
+        HealthErasureWriter marking = new HealthErasureWriter(recorder, store, instance(dirty), instance(conversations));
+
+        HealthDeletedRows unknown = new HealthDeletedRows(2L, null);
+        when(store.deleteConversationReturningDays("conv")).thenReturn(unknown);
+        assertEquals(2L, marking.eraseConversation("conv"));
+        verify(dirty).markDeletedRows("conv", List.of("agent"), unknown);
+
+        // Known days need no agent lookup.
+        HealthDeletedRows known = new HealthDeletedRows(1L, Map.of("agent", Set.of(LocalDate.of(2026, 11, 9))));
+        when(store.deleteConversationReturningDays("known")).thenReturn(known);
+        marking.eraseConversation("known");
+        verify(conversations, never()).loadListingSummaries(List.of("known"));
+        verify(dirty).markDeletedRows("known", List.of(), known);
+
+        Map<String, Set<LocalDate>> days = Map.of("agent", Set.of(LocalDate.of(2026, 11, 10)));
+        when(store.agentDaysOfConversation("conv")).thenReturn(days);
+        when(store.deleteRow("conv", "exec")).thenReturn(1L);
+        marking.removeRow(HealthErasureWriter.rowId("conv", "exec"));
+        verify(dirty).markDeletedRows("conv", List.of(), new HealthDeletedRows(1L, days));
+
+        // Nothing deleted, nothing marked.
+        when(store.deleteConversationReturningDays("empty")).thenReturn(new HealthDeletedRows(0L, Map.of()));
+        assertEquals(0L, marking.eraseConversation("empty"));
+        verify(dirty, never()).markDeletedRows(eq("empty"), any(), any());
+    }
+
+    @Test
+    @DisplayName("a row removal whose day read fails still marks its days, through the conversation's agent")
+    void removeRowWithUnreadableDays() throws Exception {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        when(conversations.loadListingSummaries(List.of("conv")))
+                .thenReturn(Map.of("conv", new ConversationListingSummary("conv", "user", null, null, "agent", 1, 2)));
+        HealthErasureWriter marking = new HealthErasureWriter(recorder, store, instance(dirty), instance(conversations));
+        when(store.agentDaysOfConversation("conv")).thenThrow(new HealthStoreException("store down", null));
+        when(store.deleteRow("conv", "exec")).thenReturn(1L);
+
+        marking.removeRow(HealthErasureWriter.rowId("conv", "exec"));
+
+        verify(dirty).markDeletedRows("conv", List.of("agent"), new HealthDeletedRows(1L, null));
+
+        // Neither days nor agent: still handed over, so markDeletedRows logs the WARN.
+        when(store.agentDaysOfConversation("gone")).thenThrow(new HealthStoreException("store down", null));
+        when(store.deleteRow("gone", "exec")).thenReturn(1L);
+        marking.removeRow(HealthErasureWriter.rowId("gone", "exec"));
+        verify(dirty).markDeletedRows("gone", List.of(), new HealthDeletedRows(1L, null));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> Instance<T> instance(T bean) {
+        Instance<T> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(bean);
+        return instance;
     }
 }

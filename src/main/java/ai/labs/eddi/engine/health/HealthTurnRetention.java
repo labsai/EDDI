@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import io.quarkus.scheduler.Scheduled;
@@ -17,15 +18,19 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * The daily Agent Health housekeeping: deletes turn rows older than
- * {@code eddi.health.facts-retention} (90 days by default), and removes the
- * rows of conversations that no longer exist (the orphan sweep).
+ * {@code eddi.health.facts-retention} (90 days by default), daily rows and
+ * change markers older than {@code eddi.health.daily-retention} (730 days), and
+ * removes the rows of conversations that no longer exist (the orphan sweep).
  * <p>
  * <b>Why a plain {@code @Scheduled} sweep and not a
  * {@code ScheduleFireExecutor} system job</b> (the {@code alerts-maintenance}
@@ -71,20 +76,34 @@ public class HealthTurnRetention {
 
     private final IHealthTurnStore store;
     private final Instance<IConversationMemoryStore> conversations;
+    private final IHealthDailyStore dailyStore;
+    private final IHealthMarkerStore markerStore;
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
 
+    /** Marks the days of orphaned rows for a re-roll; null when built by hand. */
     @Inject
-    public HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, HealthSettings settings,
-            HealthMetrics metrics) {
-        this(store, conversations, settings, metrics, Clock.systemUTC());
+    Instance<HealthDirtyDays> dirtyDays;
+
+    @Inject
+    public HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, IHealthDailyStore dailyStore,
+            IHealthMarkerStore markerStore, HealthSettings settings, HealthMetrics metrics) {
+        this(store, conversations, dailyStore, markerStore, settings, metrics, Clock.systemUTC());
     }
 
+    /** Turn rows and orphans only — for tests. */
     HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, HealthSettings settings, HealthMetrics metrics,
             Clock clock) {
+        this(store, conversations, null, null, settings, metrics, clock);
+    }
+
+    HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, IHealthDailyStore dailyStore,
+            IHealthMarkerStore markerStore, HealthSettings settings, HealthMetrics metrics, Clock clock) {
         this.store = store;
         this.conversations = conversations;
+        this.dailyStore = dailyStore;
+        this.markerStore = markerStore;
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
@@ -106,6 +125,29 @@ public class HealthTurnRetention {
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Failed to delete expired Agent Health turn rows; the next daily sweep retries");
         }
+        LocalDate dailyCutoff = dailyCutoff();
+        if (dailyStore != null) {
+            try {
+                long deleted = dailyStore.deleteOlderThan(dailyCutoff);
+                if (deleted > 0) {
+                    LOGGER.infof("Deleted %d Agent Health daily row(s) from before %s", deleted, dailyCutoff);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health daily rows; the next daily sweep retries");
+            }
+        }
+        if (markerStore != null) {
+            try {
+                markerStore.deleteOlderThan(dailyCutoff.atStartOfDay(ZoneOffset.UTC).toInstant());
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health change markers; the next daily sweep retries");
+            }
+        }
+    }
+
+    /** The first UTC day whose daily rows and markers are kept. */
+    LocalDate dailyCutoff() {
+        return LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(settings.dailyRetentionDays());
     }
 
     /**
@@ -121,10 +163,20 @@ public class HealthTurnRetention {
         }
         Instant since = clock.instant().minus(settings.orphanSweepWindow());
         int max = settings.orphanSweepMax();
+        // Conversation -> the agents of its recent rows, so an orphan whose days cannot
+        // be read at delete time can still have its agents' days re-rolled.
+        Map<String, Set<String>> agentsOf = new LinkedHashMap<>();
         List<String> candidates = new ArrayList<>();
         try {
-            // One more than the cap, to tell "exactly the cap" from "more than it".
-            store.forEachConversationUpdatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), candidates::add);
+            // One more than the cap, to tell "exactly the cap" from "more than it". The
+            // limit counts (conversation, agent) pairs; nearly always one per conversation.
+            store.forEachConversationAgentUpdatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), (conversationId, agentId) -> {
+                Set<String> agents = agentsOf.computeIfAbsent(conversationId, k -> new LinkedHashSet<>());
+                if (agentId != null) {
+                    agents.add(agentId);
+                }
+            });
+            candidates.addAll(agentsOf.keySet());
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the conversations of recent Agent Health turn rows; the next daily sweep retries: %s",
                     sanitize(e.getMessage()));
@@ -140,6 +192,7 @@ public class HealthTurnRetention {
         long removed = 0;
         int unanswered = 0;
         int failedDeletes = 0;
+        int noAgent = 0;
         for (int from = 0; from < candidates.size(); from += BATCH) {
             List<String> batch = candidates.subList(from, Math.min(candidates.size(), from + BATCH));
             Map<String, ConversationListingSummary> existing;
@@ -158,16 +211,34 @@ public class HealthTurnRetention {
                 if (existing.containsKey(conversationId)) {
                     continue;
                 }
+                Set<String> agents = agentsOf.getOrDefault(conversationId, Set.of());
+                if (agents.isEmpty()) {
+                    // No agent to re-roll if the days cannot be read at delete time:
+                    // never delete blind. The rows wait for the next sweep (or the
+                    // retention).
+                    noAgent++;
+                    continue;
+                }
+                HealthDeletedRows deleted;
                 try {
-                    removed += store.deleteByConversationId(conversationId);
+                    deleted = store.deleteConversationReturningDays(conversationId);
                 } catch (RuntimeException e) {
                     failedDeletes++;
+                    continue;
+                }
+                removed += deleted == null ? 0 : deleted.deleted();
+                if (dirtyDays != null && dirtyDays.isResolvable()) {
+                    dirtyDays.get().markDeletedRows(conversationId, agents, deleted);
                 }
             }
         }
         metrics.dropped(HealthMetrics.REASON_ORPHANED, removed);
         if (removed > 0) {
             LOGGER.infof("Removed %d Agent Health turn row(s) of conversations that no longer exist", removed);
+        }
+        if (noAgent > 0) {
+            LOGGER.warnf("The Agent Health orphan sweep left %d orphaned conversation(s) whose rows name no agent: their daily rows could "
+                    + "not be re-rolled, so they are kept for the next sweep", noAgent);
         }
         if (unanswered > 0 || failedDeletes > 0) {
             LOGGER.warnf("The Agent Health orphan sweep could not check %d conversation(s) and could not clean up %d; the next daily sweep "

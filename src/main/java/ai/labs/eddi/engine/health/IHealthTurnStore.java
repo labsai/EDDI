@@ -4,12 +4,20 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
+import ai.labs.eddi.engine.health.model.HealthUsage;
+import ai.labs.eddi.engine.health.model.HealthUsagePoint;
+import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -38,19 +46,48 @@ import java.util.function.Consumer;
  * arrived yet, so a delayed write cannot bring a discarded execution back. A
  * marker has no {@code timestamp} and no reads return it.</li>
  * </ul>
+ * <b>Late writes.</b> A row that reaches the store long after its capture
+ * ({@code HealthTurnRecorder} judges it) is written with a
+ * {@code lateWrittenAt} stamp: the time of the write, stored beside the row
+ * (MongoDB {@code writtenAt}, PostgreSQL {@code written_at_ms}) and matched by
+ * {@link #forEachAgentDayUpdatedSince}. The rollup's self-heal finds rows by
+ * {@code updatedAt}, the capture time, and its watermark may already be past a
+ * late row's; the stamp lets it find the row by the time it was written
+ * instead, in the same write as the row itself — so a late row needs no dirty
+ * mark to survive a stopping node. Only late rows carry it (a later on-time
+ * write of the row removes it), so the index on it holds the rare late rows
+ * only and an on-time write costs nothing extra.
+ * <p>
  * Every method throws {@link HealthStoreException} when the store fails.
  */
 public interface IHealthTurnStore {
 
     /** Inserts the row, or replaces it under the rules above. */
-    void upsert(HealthTurn turn);
+    default void upsert(HealthTurn turn) {
+        upsert(turn, null);
+    }
+
+    /**
+     * As {@link #upsert(HealthTurn)}; a non-null {@code lateWrittenAt} stamps the
+     * row as written late, at that time (see the class comment), and a null one
+     * removes an earlier stamp. A write ignored as stale changes nothing.
+     */
+    void upsert(HealthTurn turn, Instant lateWrittenAt);
 
     /**
      * Inserts the row unless one with its key exists — for an unsettled turn (an
      * abandoned wait, a cancelled turn), which must never replace what the
      * conversation kept.
      */
-    void insertIfAbsent(HealthTurn turn);
+    default void insertIfAbsent(HealthTurn turn) {
+        insertIfAbsent(turn, null);
+    }
+
+    /**
+     * As {@link #insertIfAbsent(HealthTurn)}; an inserted row carries the
+     * {@code lateWrittenAt} stamp when it is non-null.
+     */
+    void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt);
 
     /**
      * Marks the executions {@code executionIds} of {@code replacing}'s conversation
@@ -60,7 +97,18 @@ public interface IHealthTurnStore {
      *
      * @return the executions marked
      */
-    long markDiscarded(HealthTurn replacing, Collection<String> executionIds);
+    default long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+        return markDiscarded(replacing, executionIds, null);
+    }
+
+    /**
+     * As {@link #markDiscarded(HealthTurn, Collection)}. The time of the discard —
+     * what the self-heal matches a newly discarded row by — is
+     * {@code lateWrittenAt} when it is non-null (a late write: {@code replacing}'s
+     * capture time may be behind the self-heal watermark), else {@code replacing}'s
+     * {@code updatedAt}.
+     */
+    long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt);
 
     /** A conversation's rows, oldest step first, at most {@code limit}. */
     List<HealthTurn> findByConversation(String conversationId, int limit);
@@ -77,6 +125,100 @@ public interface IHealthTurnStore {
      * holding them all in memory — what a rollup of that day reads.
      */
     void forEachByAgentAndDay(String agentId, LocalDate day, Consumer<HealthTurn> consumer);
+
+    /**
+     * The UTC days the given executions of a conversation are stored on — the days
+     * a write to them changed, which the rollup must recompute. A resumed turn
+     * keeps the day it was first recorded on, which is not the day of the write.
+     * Executions with no row (or only a discard marker) are skipped.
+     */
+    Set<LocalDate> daysOf(String conversationId, Collection<String> executionIds);
+
+    /**
+     * Sessions, engagement and people of one agent over a period, counted in the
+     * database from the non-discarded rows.
+     *
+     * @param lookbackFrom
+     *            the first day searched for earlier turns of the period's users
+     *            ({@link HealthUsage#returningUsers()}); not after
+     *            {@code query.from()}
+     */
+    HealthUsage usage(HealthUsageQuery query, LocalDate lookbackFrom);
+
+    /**
+     * {@link #usage} per day — and per version or origin when {@code groupBy} is
+     * {@code version} / {@code origin}; {@code null} or {@code none} for no
+     * grouping. Only days with rows appear, in no particular order. Returning users
+     * are not counted per day.
+     */
+    List<HealthUsagePoint> dailyUsage(HealthUsageQuery query, String groupBy);
+
+    /**
+     * The portfolio's traffic in one pass: for each agent, the distinct
+     * conversations with a turn in the baseline ({@code baselineFrom} to the day
+     * before {@code windowFrom}) and in the window ({@code windowFrom} to
+     * {@code to}), over the {@code interactive} origins and over all of
+     * {@code origins}. Agents without rows are absent.
+     */
+    Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom, LocalDate to,
+                                                           Collection<String> interactive, Collection<String> origins);
+
+    /**
+     * Streams the distinct (agent, day) pairs of the rows written, or first
+     * discarded, in [{@code since}, {@code until}) — at most {@code limit} — to
+     * {@code consumer}. A discard keeps the row's write time (the write-ordering
+     * guard), so the time it was first discarded is stored separately and matched
+     * here; so is a late row's {@code lateWrittenAt} stamp, since its
+     * {@code updatedAt} is its capture time. What the rollup's self-heal pass
+     * re-marks dirty, so a dirty mark lost on a node (a hard kill before its flush)
+     * never leaves a day stale.
+     */
+    void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer);
+
+    /**
+     * The (agent, day) pairs a user's rows are on, at most {@code limit} pairs —
+     * read before an erasure deletes them, so the daily rows of those days are
+     * recomputed without the user.
+     */
+    Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit);
+
+    /**
+     * The (agent, day) pairs a conversation's rows are on — read before a delete.
+     */
+    Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId);
+
+    /**
+     * Deletes a conversation's rows and markers and answers the (agent, day) pairs
+     * they were on — atomically where the store can (PostgreSQL
+     * {@code DELETE ... RETURNING}), else read just before the delete. The delete
+     * never depends on the read: when the days cannot be read they are {@code null}
+     * and the rows are deleted all the same.
+     */
+    HealthDeletedRows deleteConversationReturningDays(String conversationId);
+
+    /**
+     * As {@link #deleteConversationReturningDays}, but deletes nothing — and
+     * answers {@code null} — when the days cannot be read: for a caller that does
+     * not know the conversation's agent either, so nothing could be re-rolled. The
+     * rows are then left to the orphan sweep, whose candidate read names the agent.
+     * On PostgreSQL the days come with the delete, so this never keeps anything.
+     */
+    HealthDeletedRows deleteConversationIfDaysKnown(String conversationId);
+
+    /**
+     * As {@link #forEachConversationUpdatedSince}, with the agent id each
+     * conversation's recent rows carry ({@code null} when a row has none) — what
+     * the orphan sweep needs to re-roll an orphan's days when they cannot be read
+     * at delete time. A conversation with rows of two agents is passed once per
+     * agent.
+     */
+    void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer);
+
+    /**
+     * As {@link #deleteConversationReturningDays}, for every row of a user — the
+     * GDPR erasure. The delete never depends on reading the days.
+     */
+    HealthDeletedRows deleteByUserIdReturningDays(String userId);
 
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);

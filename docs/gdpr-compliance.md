@@ -226,7 +226,12 @@ each of their conversations, and every node drains its asynchronous writers — 
     worker is an async writer (`agentHealthTurns`) — its queue is drained, every write is guarded,
     and the participant verifies that no row, discard marker or pending removal of the user is left;
     otherwise the step `agentHealthTurns` fails and a re-run finishes it
-    ([details](agent-health.md#gdpr)). The export
+    ([details](agent-health.md#gdpr)). The days of the deleted rows are marked dirty so the
+    daily aggregates are recomputed without the user (the cascade erases the rows of the user's
+    conversations with each conversation's agent known; should their days be unreadable, that
+    agent's daily aggregates are recomputed in full — they hold no personal data). Daily aggregates older than `eddi.health.facts-retention` (90 days) cannot be
+    recomputed: the user's contribution to their counts stays until `eddi.health.daily-retention`
+    (730 days) removes them; they hold no user id or content. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.snippets.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.health.HealthChangeMarkers;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -14,6 +15,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
@@ -33,6 +35,13 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     private final IPromptSnippetStore snippetStore;
     private final RestVersionInfo<PromptSnippet> restVersionInfo;
     private final PromptSnippetService snippetService;
+
+    /**
+     * Agent Health change markers; field-injected and null-checked so the unit
+     * tests that build this class by hand need not provide one.
+     */
+    @Inject
+    Instance<HealthChangeMarkers> healthMarkers;
 
     @Inject
     public RestPromptSnippetStore(IPromptSnippetStore snippetStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -62,6 +71,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response updateSnippet(String id, Integer version, PromptSnippet snippet) {
         Response response = restVersionInfo.update(id, version, snippet);
         snippetService.invalidateCache();
+        markSnippetChange();
         return response;
     }
 
@@ -69,6 +79,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response createSnippet(PromptSnippet snippet) {
         Response response = restVersionInfo.create(snippet);
         snippetService.invalidateCache();
+        markSnippetChange();
         return response;
     }
 
@@ -76,7 +87,14 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response deleteSnippet(String id, Integer version, Boolean permanent) {
         Response response = restVersionInfo.delete(id, version, permanent);
         snippetService.invalidateCache();
+        markSnippetChange();
         return response;
+    }
+
+    private void markSnippetChange() {
+        if (healthMarkers != null && healthMarkers.isResolvable()) {
+            healthMarkers.get().snippetChanged();
+        }
     }
 
     @Override

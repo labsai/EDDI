@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
 import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -28,16 +29,22 @@ import org.mockito.InOrder;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -234,6 +241,105 @@ class HealthTurnRecorderTest {
     }
 
     @Test
+    @DisplayName("a resumed turn marks the day its row is stored on (the first-recorded day), not the day of the resume")
+    void marksTheStoredDayDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate firstDay = LocalDate.of(2026, 11, 9);
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory(), null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a late row is written with the time of its write in the same write, its undo too; its days are only noted, like any row's")
+    void lateRowCarriesItsWriteTime() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate day = LocalDate.of(2026, 11, 10);
+        Instant captured = CLOCK.instant();
+        Instant written = captured.plus(Duration.ofMinutes(2));
+        AtomicReference<Instant> now = new AtomicReference<>(captured);
+        Clock moving = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        // The worker reaches the store two minutes after the capture.
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
+            @Override
+            void write(HealthTurnFactory.Capture capture) {
+                now.set(written);
+                super.write(capture);
+            }
+        };
+        try {
+            marking.record(memory, null, null, null, false);
+            InOrder order = inOrder(store);
+            order.verify(store, timeout(5_000)).upsert(argThat(turn -> captured.equals(turn.updatedAt())), eq(written));
+            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")), eq(written));
+            verify(dirty, timeout(5_000).times(2)).note("agent-1", Set.of(day));
+            verify(store, never()).upsert(any());
+            verify(dirty, never()).markDeleted(any());
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a row reaching the store within half the self-heal grace of its capture is written without the stamp")
+    void onTimeRowIsNotStamped() {
+        HealthTurn turn = HealthTurnFactory.capture(memory(), null, null, null, CLOCK.instant(), false).turn();
+        HealthTurnRecorder at = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2)));
+        HealthTurnRecorder after = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)));
+        try {
+            assertNull(at.lateWrittenAt(turn));
+            assertEquals(CLOCK.instant().plus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)), after.lateWrittenAt(turn));
+        } finally {
+            at.shutdown();
+            after.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("an undo marks the days of the discarded executions too; an unreadable day falls back to the capture's")
+    void marksDiscardedDaysDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate undoneDay = LocalDate.of(2026, 11, 8);
+        when(store.daysOf(eq("conv-1"), any())).thenThrow(new HealthStoreException("down", null)).thenReturn(Set.of(undoneDay));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory, null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(LocalDate.of(2026, 11, 10)));
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(undoneDay));
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
     @DisplayName("a turn whose snapshot was not stored is inserted only if absent, never as paused, and discards nothing")
     void uncommittedIsUnsettled() throws Exception {
         ConversationMemory memory = memory();
@@ -375,6 +481,35 @@ class HealthTurnRecorderTest {
         }
 
         @Test
+        @DisplayName("a row the guard removes again after its write has its days marked dirty at once")
+        void removedRowMarksItsDays() throws Exception {
+            HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+            LocalDate day = LocalDate.of(2026, 11, 10);
+            when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
+            doReturn(1L).when(store).deleteRow(any(), any());
+            CountDownLatch writing = new CountDownLatch(1);
+            doAnswer(inv -> {
+                writing.countDown();
+                release.await(30, TimeUnit.SECONDS);
+                return null;
+            }).when(store).upsert(any());
+            HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), guard, HealthSettings.defaults(), new HealthMetrics(registry),
+                    dirty, CLOCK);
+            try {
+                marking.record(memory(), null, null, null, false);
+                assertTrue(writing.await(5, TimeUnit.SECONDS));
+                guard.tombstoneUser("user-1", List.of("conv-1"));
+                release.countDown();
+
+                verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
+                verify(dirty, timeout(5_000)).markDeletedRows(eq("conv-1"), eq(List.of("agent-1")),
+                        eq(new HealthDeletedRows(1L, Map.of("agent-1", Set.of(day)))));
+            } finally {
+                marking.shutdown();
+            }
+        }
+
+        @Test
         @DisplayName("a failed write is still checked: a row it may have stored is removed")
         void failedWriteStillGuarded() {
             doAnswer(inv -> {
@@ -387,6 +522,54 @@ class HealthTurnRecorderTest {
 
             verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
             assertTrueEventually(() -> dropped(HealthMetrics.REASON_STORE_ERROR) == 1.0);
+        }
+
+        @Test
+        @DisplayName("a write that failed before its days were read still has the removed row's day (the turn's own) marked")
+        void failedWriteRemovalMarksTheTurnsDay() {
+            HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+            doReturn(1L).when(store).deleteRow(any(), any());
+            doAnswer(inv -> {
+                // The upsert committed, then timed out; the erasure started meanwhile.
+                guard.tombstoneConversation("conv-1");
+                throw new HealthStoreException("timeout", null);
+            }).when(store).upsert(any());
+            HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), guard, HealthSettings.defaults(), new HealthMetrics(registry),
+                    dirty, CLOCK);
+            try {
+                marking.record(memory(), null, null, null, false);
+
+                verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
+                verify(dirty, timeout(5_000)).markDeletedRows(eq("conv-1"), eq(List.of("agent-1")),
+                        eq(new HealthDeletedRows(1L, Map.of("agent-1", Set.of(LocalDate.of(2026, 11, 10))))));
+            } finally {
+                marking.shutdown();
+            }
+        }
+
+        @Test
+        @DisplayName("a resumed row whose write committed and then failed has the day it is stored on marked, not only the turn's")
+        void failedWriteRemovalMarksTheStoredDay() {
+            HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+            // The row was first recorded the day before: the upsert keeps that day.
+            LocalDate storedDay = LocalDate.of(2026, 11, 9);
+            when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(storedDay));
+            doReturn(1L).when(store).deleteRow(any(), any());
+            doAnswer(inv -> {
+                guard.tombstoneConversation("conv-1");
+                throw new HealthStoreException("timeout", null);
+            }).when(store).upsert(any());
+            HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), guard, HealthSettings.defaults(), new HealthMetrics(registry),
+                    dirty, CLOCK);
+            try {
+                marking.record(memory(), null, null, null, false);
+
+                verify(store, timeout(5_000)).deleteRow(eq("conv-1"), any());
+                verify(dirty, timeout(5_000)).markDeletedRows(eq("conv-1"), eq(List.of("agent-1")),
+                        eq(new HealthDeletedRows(1L, Map.of("agent-1", Set.of(storedDay)))));
+            } finally {
+                marking.shutdown();
+            }
         }
 
         @Test

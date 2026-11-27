@@ -108,6 +108,16 @@ final class McpRoles {
      */
     static final List<String> BUDGET_READ = List.of(ADMIN, EDITOR, VIEWER);
 
+    /**
+     * Agent Health reads — one agent's report, the portfolio, the version compare:
+     * the {@code @RolesAllowed} of {@code IRestAgentHealth} and
+     * {@code IRestHealthPortfolio}, which admit {@code eddi-viewer} like
+     * {@code /agents/{agentId}/usage} (counts and rates, no conversation content).
+     * VIEW on the agent still applies per call, and the quality section follows the
+     * ratings rule.
+     */
+    static final List<String> HEALTH_READ = List.of(ADMIN, EDITOR, VIEWER);
+
     private McpRoles() {
     }
 }

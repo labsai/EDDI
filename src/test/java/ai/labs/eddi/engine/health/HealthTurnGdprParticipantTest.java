@@ -7,15 +7,19 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -40,15 +44,54 @@ class HealthTurnGdprParticipantTest {
                 true, false);
     }
 
+    @SuppressWarnings("unchecked")
+    private static <T> Instance<T> instance(T bean) {
+        Instance<T> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(bean != null);
+        when(instance.get()).thenReturn(bean);
+        return instance;
+    }
+
+    private HealthDirtyDays dirtyDays() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        participant.dirtyDays = instance(dirty);
+        return dirty;
+    }
+
     @Test
     @DisplayName("erasure deletes the user's rows; a blank user erases nothing")
     void erase() {
-        when(store.deleteByUserId("user-1")).thenReturn(7L);
+        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(new HealthDeletedRows(7L, Map.of()));
         assertEquals(7L, participant.erase("user-1"));
         assertEquals(0L, participant.erase(" "));
         assertEquals(0L, participant.erase(null));
-        verify(store).deleteByUserId("user-1");
+        verify(store).deleteByUserIdReturningDays("user-1");
         assertEquals("agentHealthTurns", participant.name());
+    }
+
+    @Test
+    @DisplayName("the days the delete returned are marked")
+    void daysKnown() {
+        HealthDirtyDays dirty = dirtyDays();
+        HealthDeletedRows deleted = new HealthDeletedRows(3L, Map.of("agent", Set.of(LocalDate.of(2026, 11, 10))));
+        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(deleted);
+
+        assertEquals(3L, participant.erase("user-1"));
+        verify(dirty).markErasedRows(Set.of(), deleted);
+    }
+
+    @Test
+    @DisplayName("unknown days: the erasure still succeeds, and markErasedRows gets no agent (it warns)")
+    void unknownDays() {
+        HealthDirtyDays dirty = dirtyDays();
+        HealthDeletedRows unknown = new HealthDeletedRows(2L, null);
+        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(unknown);
+
+        assertEquals(2L, participant.erase("user-1"));
+        verify(dirty).markErasedRows(Set.of(), unknown);
+
+        participant.dirtyDays = null;
+        assertEquals(2L, participant.erase("user-1"));
     }
 
     @Test
@@ -56,10 +99,11 @@ class HealthTurnGdprParticipantTest {
     void eraseVerifies() {
         ErasureGuard guard = TestErasureGuards.withoutWriters();
         HealthTurnGdprParticipant guarded = new HealthTurnGdprParticipant(store, guard);
-        when(store.deleteByUserId("user-1")).thenReturn(2L);
+        when(store.deleteByUserIdReturningDays("user-1")).thenReturn(new HealthDeletedRows(2L, Map.of()));
         when(store.countByUserId("user-1")).thenReturn(0L);
         assertEquals(2L, guarded.erase("user-1"));
 
+        when(store.deleteByUserIdReturningDays("user-2")).thenReturn(new HealthDeletedRows(0L, Map.of()));
         when(store.countByUserId("user-2")).thenReturn(1L);
         assertThrows(IllegalStateException.class, () -> guarded.erase("user-2"));
     }
@@ -92,6 +136,6 @@ class HealthTurnGdprParticipantTest {
         Map<String, Object> section = (Map<String, Object>) participant.export("heavy");
         assertEquals(HealthTurnGdprParticipant.MAX_EXPORTED_TURNS, ((List<?>) section.get("turns")).size());
         assertTrue((Boolean) section.get(UserDataExport.SECTION_TRUNCATED));
-        verify(store, never()).deleteByUserId(anyString());
+        verify(store, never()).deleteByUserIdReturningDays(anyString());
     }
 }

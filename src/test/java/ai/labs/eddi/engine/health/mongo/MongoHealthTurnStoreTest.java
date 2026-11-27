@@ -5,14 +5,20 @@
 package ai.labs.eddi.engine.health.mongo;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.AggregateIterable;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.WriteModel;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
@@ -26,17 +32,22 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -62,7 +73,53 @@ class MongoHealthTurnStoreTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         collection = mock(MongoCollection.class);
+        // The committed reads (primary, majority) see the same collection here.
+        when(collection.withReadPreference(any())).thenReturn(collection);
+        when(collection.withReadConcern(any())).thenReturn(collection);
         store = new MongoHealthTurnStore(collection);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the erasure- and rollup-relevant reads go to the primary at majority, never the client default")
+    void erasureRelevantReadsAreCommitted() {
+        MongoCollection<Document> primary = mock(MongoCollection.class);
+        MongoCollection<Document> committed = mock(MongoCollection.class);
+        when(collection.withReadPreference(ReadPreference.primary())).thenReturn(primary);
+        when(primary.withReadConcern(ReadConcern.MAJORITY)).thenReturn(committed);
+        AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(committed.aggregate(anyList())).thenReturn(aggregate);
+        when(aggregate.allowDiskUse(anyBoolean())).thenReturn(aggregate);
+        when(aggregate.iterator()).thenReturn(cursor);
+        when(cursor.hasNext()).thenReturn(true, false, true, false);
+        when(cursor.next()).thenReturn(new Document("_id", new Document("a", "agent").append("d", "2026-11-10")));
+        FindIterable<Document> found = mock(FindIterable.class);
+        MongoCursor<Document> rows = mock(MongoCursor.class);
+        when(committed.find(any(Bson.class))).thenReturn(found);
+        when(found.iterator()).thenReturn(rows);
+        when(found.projection(any())).thenReturn(found);
+        when(committed.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
+        when(collection.deleteMany(any())).thenReturn(DeleteResult.acknowledged(1));
+
+        assertEquals(Map.of("agent", Set.of(LocalDate.of(2026, 11, 10))), store.agentDaysOfConversation("conv"));
+        assertTrue(store.deleteConversationReturningDays("conv").daysKnown());
+        store.forEachByAgentAndDay("agent", LocalDate.of(2026, 11, 10), turn -> {
+        });
+        // The days a write touched, and the rollup's and orphan sweep's window scans.
+        store.daysOf("conv", List.of("exec"));
+        Instant since = Instant.parse("2026-11-08T00:00:00Z");
+        store.forEachAgentDayUpdatedSince(since, since.plusSeconds(3600), 10, (agent, day) -> {
+        });
+        store.forEachConversationAgentUpdatedSince(since, 10, (conversation, agent) -> {
+        });
+        store.forEachConversationUpdatedSince(since, 10, conversation -> {
+        });
+
+        verify(committed, times(5)).aggregate(anyList());
+        verify(committed, times(2)).find(any(Bson.class));
+        verify(collection, never()).aggregate(anyList());
+        verify(collection, never()).find(any(Bson.class));
     }
 
     @Test
@@ -157,6 +214,21 @@ class MongoHealthTurnStoreTest {
     }
 
     @Test
+    @DisplayName("a discard sets discardedAt once, when the row flips, and never touches updatedAt")
+    void discardPipeline() {
+        Date now = new Date(1_000L);
+        Document set = (Document) ((Document) MongoHealthTurnStore.discardPipeline(turn(false), "a", now).get(0)).get("$set");
+        assertFalse(set.containsKey(MongoHealthTurnStore.FIELD_UPDATED));
+        Document discardedAt = (Document) set.get(MongoHealthTurnStore.FIELD_DISCARDED_AT);
+        List<?> branches = (List<?>) discardedAt.get("$cond");
+        assertEquals(new Document("$eq", List.of("$" + MongoHealthTurnStore.FIELD_DISCARDED, true)), branches.get(0));
+        assertEquals(new Document("$ifNull", List.of("$" + MongoHealthTurnStore.FIELD_DISCARDED_AT, new Document("$literal", now))),
+                branches.get(1));
+        assertEquals(new Document("$literal", now), branches.get(2));
+        assertEquals(new Document("$literal", true), set.get(MongoHealthTurnStore.FIELD_DISCARDED));
+    }
+
+    @Test
     @DisplayName("the day range is an inclusive string range on the agent")
     void dayRange() {
         String rendered = render(MongoHealthTurnStore.agentDayRange("agent", LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 10))).toJson();
@@ -184,6 +256,21 @@ class MongoHealthTurnStoreTest {
         verify(collection, times(3)).deleteMany(filters.capture());
         assertEquals("user", render(filters.getAllValues().get(0)).getString("userId").getValue());
         assertEquals("conv", render(filters.getAllValues().get(1)).getString("conversationId").getValue());
+    }
+
+    @Test
+    @DisplayName("unreadable days: the returning delete still deletes (days null); the if-known delete keeps the rows")
+    void unreadableDays() {
+        when(collection.aggregate(anyList())).thenThrow(new MongoException("down"));
+        when(collection.deleteMany(any(Bson.class))).thenReturn(DeleteResult.acknowledged(2));
+
+        assertNull(store.deleteConversationIfDaysKnown("conv"));
+        verify(collection, never()).deleteMany(any(Bson.class));
+
+        HealthDeletedRows deleted = store.deleteConversationReturningDays("conv");
+        assertEquals(2L, deleted.deleted());
+        assertFalse(deleted.daysKnown());
+        assertFalse(store.deleteByUserIdReturningDays("user").daysKnown());
     }
 
     @Test
@@ -229,5 +316,71 @@ class MongoHealthTurnStoreTest {
         when(collection.aggregate(anyList())).thenThrow(new MongoException("down"));
         assertThrows(HealthStoreException.class, () -> store.forEachConversationUpdatedSince(Instant.now(), 10, id -> {
         }));
+    }
+
+    @Test
+    @DisplayName("a late write stamps writtenAt in the same pipeline; an on-time one removes the stamp")
+    void lateWriteStamp() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        BsonDocument late = render(MongoHealthTurnStore.replacePipeline(turn(false), written).get(0)).getDocument("$set");
+        assertEquals(written.toEpochMilli(), late.getDocument(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getDateTime("$literal").getValue());
+        BsonDocument onTime = render(MongoHealthTurnStore.replacePipeline(turn(false)).get(0)).getDocument("$set");
+        assertEquals("$$REMOVE", onTime.getString(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getValue(),
+                "an on-time write leaves no stamp behind, so the sparse index holds late rows only");
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent sets the stamp on insert only when the write is late")
+    void insertIfAbsentStamp() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        store.insertIfAbsent(turn(false), written);
+        store.insertIfAbsent(turn(false));
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(collection, times(2)).updateOne(any(Bson.class), update.capture(), any(UpdateOptions.class));
+        BsonDocument late = render(update.getAllValues().get(0)).getDocument("$setOnInsert");
+        assertEquals(written.toEpochMilli(), late.getDateTime(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getValue());
+        assertFalse(render(update.getAllValues().get(1)).getDocument("$setOnInsert").containsKey(MongoHealthTurnStore.FIELD_WRITTEN_LATE));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("a late discard is timed by the write, an on-time one by the replacing turn's capture")
+    void lateDiscardTime() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        store.markDiscarded(turn(false), List.of("a"), written);
+        store.markDiscarded(turn(false), List.of("a"));
+        ArgumentCaptor<List<WriteModel<Document>>> writes = ArgumentCaptor.forClass(List.class);
+        verify(collection, times(2)).bulkWrite(writes.capture());
+        assertEquals(new Document("$literal", Date.from(written)), discardTime(writes.getAllValues().get(0)));
+        assertEquals(new Document("$literal", Date.from(turn(false).updatedAt())), discardTime(writes.getAllValues().get(1)));
+    }
+
+    private static Object discardTime(List<WriteModel<Document>> writes) {
+        UpdateOneModel<Document> model = (UpdateOneModel<Document>) writes.get(0);
+        Document set = (Document) ((Document) model.getUpdatePipeline().get(0)).get("$set");
+        return ((List<?>) ((Document) set.get(MongoHealthTurnStore.FIELD_DISCARDED_AT)).get("$cond")).get(2);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the self-heal matches rows written, discarded, or written late in the window")
+    void selfHealMatchesTheStamp() {
+        AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(collection.aggregate(anyList())).thenReturn(aggregate);
+        when(aggregate.allowDiskUse(anyBoolean())).thenReturn(aggregate);
+        when(aggregate.iterator()).thenReturn(cursor);
+
+        store.forEachAgentDayUpdatedSince(Instant.parse("2026-11-10T11:00:00Z"), Instant.parse("2026-11-10T11:10:00Z"), 10, (a, d) -> {
+        });
+
+        ArgumentCaptor<List<Bson>> pipeline = ArgumentCaptor.forClass(List.class);
+        verify(collection).aggregate(pipeline.capture());
+        String match = render(pipeline.getValue().get(0)).toJson();
+        for (String field : List.of(MongoHealthTurnStore.FIELD_UPDATED, MongoHealthTurnStore.FIELD_DISCARDED_AT,
+                MongoHealthTurnStore.FIELD_WRITTEN_LATE)) {
+            assertTrue(match.contains("{\"" + field + "\": {\"$gte\""), field + " in " + match);
+            assertTrue(match.contains("{\"" + field + "\": {\"$lt\""), field + " in " + match);
+        }
     }
 }

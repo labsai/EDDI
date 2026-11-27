@@ -18,7 +18,9 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentSetup;
 import ai.labs.eddi.engine.api.IRestAlertEvents;
+import ai.labs.eddi.engine.api.IRestAgentHealth;
 import ai.labs.eddi.engine.api.IRestConversationRatingAdmin;
+import ai.labs.eddi.engine.api.IRestHealthPortfolio;
 import ai.labs.eddi.engine.api.IRestDocs;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestLogAdmin;
@@ -101,7 +103,8 @@ class McpRoleTierParityTest {
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
             McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
             McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
-            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class, McpVersionTools.class};
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class, McpVersionTools.class,
+            McpHealthTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -163,6 +166,9 @@ class McpRoleTierParityTest {
     /** Team budget reads: REST's admin/editor/viewer tier. */
     private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
+    /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
+    private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health");
+
     /**
      * Authoring: McpAdminTools minus schedules, config reads, group configuration,
      * and the authoring tools of the smaller classes. Listed explicitly, not as a
@@ -193,14 +199,18 @@ class McpRoleTierParityTest {
 
     private static Map<List<String>, Set<String>> recordByTier() {
         Map<List<String>, Set<String>> record = new LinkedHashMap<>();
-        record.put(McpRoles.HITL, HITL_TOOLS);
-        record.put(McpRoles.ADMIN_ONLY, ADMIN_ONLY_TOOLS);
-        record.put(McpRoles.CONVERSE, CONVERSE_TOOLS);
-        record.put(McpRoles.OBSERVE, OBSERVE_TOOLS);
-        record.put(McpRoles.DOCS, DOCS_TOOLS);
-        record.put(McpRoles.OVERSIGHT, OVERSIGHT_TOOLS);
-        record.put(McpRoles.BUDGET_READ, BUDGET_READ_TOOLS);
-        record.put(McpRoles.AUTHOR, AUTHOR_TOOLS);
+        // HEALTH_READ and BUDGET_READ are equal role lists, so equal keys: merge,
+        // never overwrite, or one tier's tools would vanish from the record.
+        List.of(Map.entry(McpRoles.HITL, HITL_TOOLS), Map.entry(McpRoles.ADMIN_ONLY, ADMIN_ONLY_TOOLS),
+                Map.entry(McpRoles.CONVERSE, CONVERSE_TOOLS), Map.entry(McpRoles.OBSERVE, OBSERVE_TOOLS),
+                Map.entry(McpRoles.DOCS, DOCS_TOOLS), Map.entry(McpRoles.OVERSIGHT, OVERSIGHT_TOOLS),
+                Map.entry(McpRoles.BUDGET_READ, BUDGET_READ_TOOLS), Map.entry(McpRoles.HEALTH_READ, HEALTH_READ_TOOLS),
+                Map.entry(McpRoles.AUTHOR, AUTHOR_TOOLS))
+                .forEach(e -> record.merge(e.getKey(), e.getValue(), (a, b) -> {
+                    Set<String> union = new TreeSet<>(a);
+                    union.addAll(b);
+                    return union;
+                }));
         return record;
     }
 
@@ -226,6 +236,9 @@ class McpRoleTierParityTest {
         }
         if (BUDGET_READ_TOOLS.contains(tool)) {
             return McpRoles.BUDGET_READ;
+        }
+        if (HEALTH_READ_TOOLS.contains(tool)) {
+            return McpRoles.HEALTH_READ;
         }
         if (AUTHOR_TOOLS.contains(tool)) {
             return McpRoles.AUTHOR;
@@ -540,6 +553,8 @@ class McpRoleTierParityTest {
         mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
         mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
         mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
+        mirrors.put(IRestAgentHealth.class, McpRoles.HEALTH_READ); // read_agent_health, compare_agent_versions_health
+        mirrors.put(IRestHealthPortfolio.class, McpRoles.HEALTH_READ); // list_agent_health
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());

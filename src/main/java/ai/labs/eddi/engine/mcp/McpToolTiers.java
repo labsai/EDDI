@@ -153,6 +153,10 @@ final class McpToolTiers {
         // Team budget reads (McpTeamBudgetTools)
         put(tiers, McpRoles.BUDGET_READ, "read_team_budget", "list_team_budgets");
 
+        // Agent Health reads (McpHealthTools): the REST /agents/{agentId}/health and
+        // /health/agents tier. VIEW on the agent still applies per call
+        put(tiers, McpRoles.HEALTH_READ, "read_agent_health", "list_agent_health", "compare_agent_versions_health");
+
         return Collections.unmodifiableMap(tiers);
     }
 

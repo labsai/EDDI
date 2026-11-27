@@ -7,10 +7,18 @@ package ai.labs.eddi.engine.health;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import ai.labs.eddi.engine.health.model.HealthDirtyDay;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Micrometer meters for Agent Health collection, exposed at {@code /q/metrics}:
@@ -28,7 +36,17 @@ import java.util.concurrent.ThreadPoolExecutor;
  * {@code HealthTurnRetention}). {@code orphaned} counts rows, the others
  * records;</li>
  * <li>{@code eddi.health.queue.depth} — records waiting for the health worker
- * (a gauge registered by {@code HealthTurnRecorder}).</li>
+ * (a gauge registered by {@code HealthTurnRecorder});</li>
+ * <li>{@code eddi.health.rollup.duration} — a timer per rollup pass;</li>
+ * <li>{@code eddi.health.rollup.days} / {@code eddi.health.rollup.rows} — agent
+ * days recomputed and daily rows written;</li>
+ * <li>{@code eddi.health.rollup.failures} — agent days whose rollup failed
+ * (retried next pass);</li>
+ * <li>{@code eddi.health.rollup.pending} /
+ * {@code eddi.health.rollup.lag.seconds} — gauges read from the shared
+ * dirty-day queue when scraped (cached for {@link #BACKLOG_CACHE}), so every
+ * node reports the same cluster-wide backlog: agent days still waiting, and the
+ * age in seconds of the oldest of them.</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -54,8 +72,27 @@ public class HealthMetrics {
      */
     static final String REASON_ORPHANED = "orphaned";
 
+    static final String ROLLUP_DURATION = "eddi.health.rollup.duration";
+    static final String ROLLUP_DAYS = "eddi.health.rollup.days";
+    static final String ROLLUP_ROWS = "eddi.health.rollup.rows";
+    static final String ROLLUP_FAILURES = "eddi.health.rollup.failures";
+    static final String ROLLUP_PENDING = "eddi.health.rollup.pending";
+    static final String ROLLUP_LAG = "eddi.health.rollup.lag.seconds";
+
     private final MeterRegistry registry;
     private final Counter recorded;
+    private final Timer rollupDuration;
+    private final Counter rollupDays;
+    private final Counter rollupRows;
+    private final Counter rollupFailures;
+    /** How long one read of the backlog serves the gauges. */
+    static final Duration BACKLOG_CACHE = Duration.ofSeconds(10);
+
+    private final AtomicReference<Backlog> backlog = new AtomicReference<>();
+
+    /** One read of the dirty-day queue. */
+    private record Backlog(Instant readAt, double pending, double lagSeconds) {
+    }
 
     @Inject
     public HealthMetrics(MeterRegistry registry) {
@@ -67,6 +104,52 @@ public class HealthMetrics {
         dropped0(REASON_SHUTDOWN);
         dropped0(REASON_ERASED);
         dropped0(REASON_ORPHANED);
+        this.rollupDuration = Timer.builder(ROLLUP_DURATION).description("Agent Health rollup passes").register(registry);
+        this.rollupDays = Counter.builder(ROLLUP_DAYS).description("Agent days the health rollup recomputed").register(registry);
+        this.rollupRows = Counter.builder(ROLLUP_ROWS).description("Daily health rows the rollup wrote").register(registry);
+        this.rollupFailures = Counter.builder(ROLLUP_FAILURES).description("Agent days whose health rollup failed").register(registry);
+    }
+
+    /**
+     * Registers the backlog gauges over the shared queue. A store that cannot be
+     * read reports NaN (no value), never a stale number.
+     */
+    void registerBacklog(IHealthDirtyDayStore store, Clock clock) {
+        Gauge.builder(ROLLUP_PENDING, () -> backlog(store, clock).pending()).description("Agent days waiting for the health rollup")
+                .register(registry);
+        Gauge.builder(ROLLUP_LAG, () -> backlog(store, clock).lagSeconds())
+                .description("Age of the oldest agent day waiting for the health rollup").register(registry);
+    }
+
+    private Backlog backlog(IHealthDirtyDayStore store, Clock clock) {
+        Instant now = clock.instant();
+        Backlog last = backlog.get();
+        if (last != null && last.readAt().plus(BACKLOG_CACHE).isAfter(now)) {
+            return last;
+        }
+        Backlog read;
+        try {
+            long pending = store.count();
+            double lag = 0;
+            if (pending > 0) {
+                List<HealthDirtyDay> oldest = store.oldest(1);
+                if (!oldest.isEmpty() && oldest.get(0).markedAt() != null) {
+                    lag = Math.max(0, Duration.between(oldest.get(0).markedAt(), now).toSeconds());
+                }
+            }
+            read = new Backlog(now, pending, lag);
+        } catch (RuntimeException e) {
+            read = new Backlog(now, Double.NaN, Double.NaN);
+        }
+        backlog.set(read);
+        return read;
+    }
+
+    void rolledUp(long days, long rows, long failures, Duration took) {
+        rollupDays.increment(days);
+        rollupRows.increment(rows);
+        rollupFailures.increment(failures);
+        rollupDuration.record(took);
     }
 
     void registerQueueDepth(ThreadPoolExecutor executor) {
