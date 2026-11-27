@@ -2307,7 +2307,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         ConversationState conversationState = conversationMemoryStore.getConversationState(conversationId);
         if (conversationState == null) {
             conversationStateCache.remove(conversationId);
-            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", conversationId));
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         cacheConversationState(conversationId, conversationState);
         return conversationState;

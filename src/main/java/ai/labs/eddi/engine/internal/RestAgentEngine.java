@@ -578,7 +578,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (AgentDeploymentFailedException e) {
             // Before its superclass: a deployment that failed on the server is a server
             // fault (503), not a missing deployment (404).
-            LOGGER.warn("Agent deployment failed for conversation " + conversationId + ": " + e.getMessage());
+            LOGGER.warnf("Agent deployment failed for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
             response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.APPLICATION_JSON)
                     .entity(Map.of("error", AGENT_DEPLOYMENT_FAILED, "message", "The agent's deployment failed on the server")).build());
         } catch (AgentNotReadyException e) {
