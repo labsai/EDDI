@@ -36,6 +36,7 @@ import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -2000,7 +2001,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI, transaction)).toList();
+        // An imported ruleset exists already (it was exported from a working agent):
+        // a retired condition config is accepted with a WARN, as on deploy.
+        return configs.stream()
+                .map(c -> ExistingRuleSetWrite.call(() -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI, transaction)))
+                .toList();
     }
 
     private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs, ImportTransaction transaction) {
@@ -2034,8 +2039,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
-        return updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config, store::updateRuleSet,
-                transaction);
+        // The scope is entered inside the callback: updateTracked also calls it for
+        // the compensation, which runs after this method has returned.
+        return updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config,
+                (id, version, document) -> ExistingRuleSetWrite.call(() -> store.updateRuleSet(id, version, document)), transaction);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {

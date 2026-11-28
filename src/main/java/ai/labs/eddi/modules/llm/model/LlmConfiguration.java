@@ -438,6 +438,18 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private AgentOpsConfig agentOps;
 
         /**
+         * How this task treats PDF documents: structure, splitting into units, sharing
+         * with other agents, the library, large documents. Absent means today's
+         * behaviour. Every key is nullable (unset = the deployment default
+         * {@code eddi.documents.defaults.<path>}); a key that is not available in this
+         * version is refused at save. See {@link DocumentsConfig} and
+         * {@code docs/langchain.md} for which keys are available.
+         *
+         * @since 6.8.0
+         */
+        private DocumentsConfig documents;
+
+        /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
          * 120000 (two minutes).
          * <p>
@@ -1226,6 +1238,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public AgentOpsConfig getAgentOps() {
             return agentOps;
+        }
+
+        public DocumentsConfig getDocuments() {
+            return documents;
+        }
+
+        public void setDocuments(DocumentsConfig documents) {
+            this.documents = documents;
         }
 
         public void setAgentOps(AgentOpsConfig agentOps) {

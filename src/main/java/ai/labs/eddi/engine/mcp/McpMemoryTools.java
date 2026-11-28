@@ -86,7 +86,7 @@ public class McpMemoryTools {
                                    @ToolArg(description = "Maximum number of entries to return (default: 50, max: 200)",
                                             required = false) Integer limit,
                                    @ToolArg(description = "Number of entries to skip, for paging (default: 0)", required = false) Integer offset) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_user_memories"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
@@ -129,7 +129,7 @@ public class McpMemoryTools {
                                      @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)",
                                               required = false) String order,
                                      @ToolArg(description = "Maximum number of entries (default: 50)", required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_visible_memories"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
@@ -175,7 +175,7 @@ public class McpMemoryTools {
                                      @ToolArg(description = "Search query (required)") String query,
                                      @ToolArg(description = "Maximum number of entries to return (default: 50, max: 200)",
                                               required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("search_user_memories"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
@@ -207,7 +207,7 @@ public class McpMemoryTools {
     @Tool(name = "get_memory_by_key", description = "Get a specific memory entry by its key name.")
     public String getMemoryByKey(@ToolArg(description = "User ID (required)") String userId,
                                  @ToolArg(description = "Memory key name (required)") String key) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_memory_by_key"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
@@ -239,7 +239,7 @@ public class McpMemoryTools {
                                             required = false) String visibility,
                                    @ToolArg(description = "Comma-separated group IDs (optional; required for 'group' visibility, which no one can read without one)",
                                             required = false) String groupIds) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("upsert_user_memory"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         if (key == null || key.isBlank())
@@ -278,7 +278,7 @@ public class McpMemoryTools {
     @Tool(name = "delete_user_memory", description = "Delete a specific memory entry by its database ID.")
     @McpAudited(target = 0)
     public String deleteUserMemory(@ToolArg(description = "Memory entry ID (required)") String entryId) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_user_memory"));
         if (entryId == null || entryId.isBlank())
             return errorJson("entryId is required");
         try {
@@ -308,7 +308,7 @@ public class McpMemoryTools {
     @McpAudited(subject = 0)
     public String deleteAllUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                         @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_all_user_memories"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         if (!"CONFIRM".equals(confirmation)) {
@@ -328,7 +328,7 @@ public class McpMemoryTools {
 
     @Tool(name = "count_user_memories", description = "Count the number of memory entries for a user.")
     public String countUserMemories(@ToolArg(description = "User ID (required)") String userId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("count_user_memories"));
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);

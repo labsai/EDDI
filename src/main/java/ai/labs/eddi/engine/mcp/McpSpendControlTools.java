@@ -90,7 +90,7 @@ public class McpSpendControlTools {
             + "fingerprint (pass it to update_tenant_quota), the current usage (conversations today, API calls this minute, this "
             + "month's cost and reserved USD) and the remaining monthly budget. Without tenantId: the deployment's default tenant.")
     public String readTenantQuota(@ToolArg(description = "Tenant id (default: the deployment's tenant)", required = false) String tenantId) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_tenant_quota"));
         try {
             String id = service.tenant(tenantId);
             TenantQuota stored = service.readQuota(id);
@@ -133,7 +133,7 @@ public class McpSpendControlTools {
                                     @ToolArg(description = "ALLOW, REFUSE_WHEN_BUDGETED or REFUSE (default: keep)",
                                              required = false) String unpricedPolicy,
                                     @ToolArg(description = "Why (required, at most 1000 characters; kept in the audit ledger)") String reason) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("update_model_prices"));
         if (expectedRevision == null) {
             return errorJson("expectedRevision is required: read the catalog first (read_model_prices)", SpendControlException.BAD_REQUEST, null);
         }
@@ -173,7 +173,7 @@ public class McpSpendControlTools {
                                     @ToolArg(description = "Monthly cost budget in USD, -1 = unlimited", required = false) Double maxMonthlyCostUsd,
                                     @ToolArg(description = "Whether the quota is enforced", required = false) Boolean enabled,
                                     @ToolArg(description = "Why (required, at most 1000 characters; kept in the audit ledger)") String reason) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("update_tenant_quota"));
         try {
             Outcome outcome = service.changeTenantQuota(tenantId, expectedFingerprint, maxConversationsPerDay, maxAgentsPerTenant,
                     maxApiCallsPerMinute, maxMonthlyCostUsd, enabled, reason, SpendControlChangeService.name(identity), CHANNEL);
@@ -199,7 +199,7 @@ public class McpSpendControlTools {
             + "EXPIRED or ALL",
                                                    required = false) String status,
                                           @ToolArg(description = "At most this many, 1..100 (default 20)", required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_spend_control_changes"));
         try {
             SpendControlChange.Status filter = status == null || status.isBlank()
                     ? SpendControlChange.Status.PENDING
@@ -221,7 +221,7 @@ public class McpSpendControlTools {
     @McpAudited(target = 0)
     public String withdrawSpendControlChange(@ToolArg(description = "The changeId (required)") String changeId,
                                              @ToolArg(description = "Why (required)") String reason) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("withdraw_spend_control_change"));
         try {
             return jsonSerialization.serialize(summary(service.withdraw(changeId, reason, SpendControlChangeService.name(identity))));
         } catch (SpendControlException e) {

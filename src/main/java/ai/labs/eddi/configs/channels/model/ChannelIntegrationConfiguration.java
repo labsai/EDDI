@@ -48,12 +48,12 @@ public class ChannelIntegrationConfiguration {
     }
 
     /**
-     * Platform type. Validated server-side against registered adapters. Currently
-     * supported: {@code "slack"}, {@code "webhook"}, {@code "email"}. Future:
-     * {@code "teams"}, {@code "discord"}.
+     * Platform type. Validated server-side against the registered
+     * {@code ChannelTypeDescriptor} beans. Built in: {@code "slack"},
+     * {@code "webhook"}, {@code "email"}.
      * <p>
      * Deliberately a String (not an enum) so downstream forks can register custom
-     * adapters without recompiling core.
+     * adapters by adding a descriptor bean.
      */
     public String getChannelType() {
         return channelType;
@@ -69,10 +69,13 @@ public class ChannelIntegrationConfiguration {
      * <ul>
      * <li><b>slack:</b> {@code channelId}, {@code botToken},
      * {@code signingSecret}</li>
-     * <li><b>teams:</b> {@code channelId}, {@code appId}, {@code appPassword},
-     * {@code serviceUrl}</li>
-     * <li><b>discord:</b> {@code guildId}, {@code channelId}, {@code botToken},
-     * {@code publicKey}</li>
+     * <li><b>Connection-backed types</b> (new adapters, e.g. a future {@code teams}
+     * or {@code discord}): ids and options only, exactly the keys the type's
+     * {@code ChannelTypeDescriptor} declares. That declaration must include
+     * {@code connection}, the EDDI connection that holds the credential, next to
+     * the adapter's own keys; the registry refuses a descriptor that omits it. Any
+     * other key is refused at save time, a plaintext token as much as a
+     * {@code ${vault:...}} reference.</li>
      * <li><b>webhook:</b> {@code signingSecret} (required, a vault reference),
      * {@code signatureScheme}, {@code signatureHeader}, {@code signatureEncoding},
      * {@code signaturePrefix}, {@code eventTypeHeader}, {@code eventTypePath},
@@ -84,7 +87,8 @@ public class ChannelIntegrationConfiguration {
      * {@code address}, ... — see {@link EmailChannelSettings}. No secrets: the
      * credentials come from the named connection.</li>
      * </ul>
-     * Secret values should use vault references: {@code ${vault:key-name}}.
+     * Slack and webhook secret values should use vault references:
+     * {@code ${vault:key-name}}.
      * <p>
      * <b>Optional HITL (human-in-the-loop) keys — slack only:</b>
      * <ul>

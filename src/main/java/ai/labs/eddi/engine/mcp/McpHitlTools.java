@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.hitl.HitlPlanBinding;
 import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
@@ -157,7 +158,7 @@ public class McpHitlTools {
     public String listPendingApprovals(
                                        @ToolArg(description = "Max entries to return (default: 200, capped at 1000)", required = false,
                                                 defaultValue = "200") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_pending_approvals"));
         try {
             int effectiveLimit = parseIntOrDefault(limit, 200);
             var result = hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
@@ -184,7 +185,7 @@ public class McpHitlTools {
                                     @ToolArg(description = "Conversation ID") String conversationId,
                                     @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                              defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_approval_status"));
         if (conversationId == null || conversationId.isBlank()) {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
@@ -307,7 +308,7 @@ public class McpHitlTools {
                                               required = false) String toolDecisionsJson,
                                      @ToolArg(description = "planHash from get_approval_status — the exact plan this decision is for",
                                               required = false) String planHash) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("resume_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -340,6 +341,10 @@ public class McpHitlTools {
                     + "\",\"verdict\":\"" + parsed.name() + "\"}";
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call needs a mandatory approval this caller cannot give; the pause is
+            // untouched. Fixed text.
+            return errorJson(safeMessage(e, "A mandatory approval this caller cannot give is required"), "FORBIDDEN", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Conversation not found", "NOT_FOUND", null);
         } catch (IConversationService.PlanMismatchException e) {
@@ -379,7 +384,7 @@ public class McpHitlTools {
     @McpAudited(target = 0)
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -430,7 +435,7 @@ public class McpHitlTools {
                                             @ToolArg(description = "Group ID") String groupId,
                                             @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                      defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_group_pending_approvals"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -450,7 +455,7 @@ public class McpHitlTools {
     public String listAllGroupPendingApprovals(
                                                @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                         defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_all_group_pending_approvals"));
         try {
             var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
             meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
@@ -470,7 +475,7 @@ public class McpHitlTools {
                                          @ToolArg(description = "Group conversation ID") String conversationId,
                                          @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                                   defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_group_approval_status"));
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
@@ -610,7 +615,7 @@ public class McpHitlTools {
                                              required = false) String taskDecisionsJson,
                                     @ToolArg(description = "planHash from get_group_approval_status — the exact plan this decision is for",
                                              required = false) String planHash) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("approve_group_phase"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -727,7 +732,7 @@ public class McpHitlTools {
                                                  required = false) String content,
                                         @ToolArg(description = "For a TIE_BREAK pause: exactly one of the pendingOptions",
                                                  required = false) String choice) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("submit_group_human_input"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -777,7 +782,7 @@ public class McpHitlTools {
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_group_discussion"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -802,7 +807,7 @@ public class McpHitlTools {
             }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
             return cancelled
-                    ? "{\"status\":\"CANCELLED\"}"
+                    ? "{\"status\":\"" + cancelStatus(conversationId) + "\"}"
                     : errorJson("Group conversation is already in a terminal state — nothing to cancel",
                             "WRONG_STATE", null);
         } catch (ForbiddenException e) {
@@ -815,6 +820,27 @@ public class McpHitlTools {
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);
             return errorJson("Failed to cancel group discussion", "INTERNAL", null);
+        }
+    }
+
+    /**
+     * The truth about a cancel just accepted: {@code CANCELLING} while the
+     * discussion still runs (it stops before its next turn), otherwise the state it
+     * ended in — {@code CANCELLED}, or {@code COMPLETED}/{@code FAILED} when it
+     * finished before the cancel landed. Unreadable reads as {@code CANCELLING}:
+     * the accepted signal does not establish that execution has stopped, so a
+     * terminal status needs a successful read.
+     */
+    private String cancelStatus(String conversationId) {
+        try {
+            var state = groupConversationService.readGroupConversation(conversationId).getState();
+            if (state == GroupConversation.GroupConversationState.IN_PROGRESS || state == GroupConversation.GroupConversationState.SYNTHESIZING
+                    || state == GroupConversation.GroupConversationState.CREATED) {
+                return "CANCELLING";
+            }
+            return state != null ? state.name() : "CANCELLING";
+        } catch (Exception e) {
+            return "CANCELLING";
         }
     }
 

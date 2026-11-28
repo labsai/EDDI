@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -51,6 +52,9 @@ final class McpToolUtils {
     /**
      * Check that the current caller has the required role. When authorization is
      * disabled ({@code authEnabled=false}), no check is performed.
+     * <p>
+     * No MCP tool gate uses this any more: each tool calls {@link #requireAnyRole}
+     * with its tier from {@link McpToolTiers}.
      *
      * @param identity
      *            the current security identity
@@ -513,7 +517,7 @@ final class McpToolUtils {
                 // until someone decides it is.
                 || e instanceof AgentSetupService.AgentSetupException || e instanceof AgentCascadeService.CascadeException
                 || e instanceof SpendControlException || e instanceof ReviewRefusalException || e instanceof McpReviewArguments.BadArgument
-                || e instanceof QuotaRefusal
+                || e instanceof QuotaRefusal || e instanceof MandatoryApprovalRefusedException
                 || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
                 // A discussion refusal the engine authored ("no phases are defined", the
                 // depth limit) — but not one that wraps an underlying failure, whose
@@ -550,8 +554,8 @@ final class McpToolUtils {
      * caller, describing what the caller got wrong. A 5xx entity is not written to
      * that contract and can carry endpoint, datastore or configuration detail, so
      * it falls through to the message below and is never lifted verbatim. Every MCP
-     * tool that reaches this point is already behind {@code requireRole}, but "the
-     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * tool that reaches this point is already behind its role gate, but "the caller
+     * is an admin" is a reason to answer usefully, not a reason to stop
      * distinguishing the two.
      */
     static String describe(Throwable cause) {

@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApproverCheck;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
@@ -339,6 +341,20 @@ class RestAgentEngineHitlTest {
 
             assertEquals(409, response.getStatus());
             assertTrue(String.valueOf(response.getEntity()).contains("pauseId no longer current"));
+        }
+
+        @Test
+        @DisplayName("an approval of a mandatory call this approver cannot give → 403 with the fixed refusal text")
+        void mandatoryApprovalRefusedIs403() throws Exception {
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+            doThrow(new MandatoryApprovalRefusedException(MandatoryApproverCheck.REFUSED_NOT_USER))
+                    .when(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+
+            Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
+
+            assertEquals(403, response.getStatus());
+            assertEquals(MandatoryApproverCheck.REFUSED_NOT_USER, response.getEntity());
         }
 
         @Test

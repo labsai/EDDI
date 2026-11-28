@@ -61,6 +61,8 @@ export function UnregisteredOperators({
       environment,
       agentName: candidate.name,
       failure: isGrantFailure(candidate.failure) ? candidate.failure : undefined,
+      // An operator's key is granted to the operator, never widened to every agent.
+      offerAllowAll: false,
     };
     const refresh = () => void queryClient.invalidateQueries({ queryKey: operatorKeys.all });
     deploy(options)
@@ -251,6 +253,7 @@ export function RegisteredOperatorHealth({
       version: config.version!,
       environment: config.environment,
       failure: isGrantFailure(failure) ? failure : undefined,
+      offerAllowAll: false,
     };
     deploy(options)
       .then((outcome) => reportDeployOutcome(outcome, options, t, undefined, refresh))

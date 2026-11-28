@@ -293,7 +293,7 @@ eddi_tool_costs_total{tool="weather"}       # Cost per tool
 
 ```text
 eddi_group_discussion_count_total           # Discussions started
-eddi_group_discussion_failure_count_total   # Discussions failed
+eddi_group_discussion_failure_count_total   # Rounds whose outcome is FAILED (see below), whether or not the discussion stays COMPLETED
 eddi_group_discussion_duration_seconds      # Duration (timer)
 eddi_group_cost_dollars                     # Cumulative discussion cost (gauge)
 eddi_group_cost_ceiling_hit_total           # maxCostPerDiscussion reached
@@ -305,9 +305,38 @@ eddi_group_close_count_total                # Conversations closed to further ro
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_approved_action_total{outcome}   # phase.onApproved calls: succeeded|failed|outcome_unknown|skipped
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
+eddi_group_verify_unanswered_total          # VERIFY passes whose verifier did not answer (tasks failed, not verified)
+eddi_group_discussion_unanswered_total{outcome,reason}  # Rounds that ended NO_ANSWER or FAILED, once stored (see below)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
+
+What the two round counters count. Every round of a discussion, a continuation included, ends
+with an `outcome` (`ANSWERED`, `NO_ANSWER` or `FAILED`) and a `reason`; see
+[Group Conversations](group-conversations.md).
+
+- **`eddi_group_discussion_failure_count_total`** counts each round whose outcome is `FAILED`:
+  member turns ran and none answered because they failed or timed out (`NO_MEMBER_ANSWERED`),
+  the run failed with an error (`DISCUSSION_ERROR`), or a TASK approval cycle made no progress
+  (`NO_PROGRESS`). It counts the round, not the discussion. A failed continuation of a discussion
+  that answered earlier counts, although the discussion stays `COMPLETED`. A `NO_ANSWER` round is
+  not a failure and is not counted here: members were all skipped, the synthesis did not answer,
+  or no decision was reached. A `DISCUSSION_ERROR` round is counted as soon as its error reaches
+  the failure handler, before the stored state is checked, so it is counted even when another
+  pod has already stored a cancel (for example a continuation whose configuration fails to load).
+  The exception is an error from a member turn that the run sees only after re-reading a stored
+  cancel: the run then stops as superseded and is not counted. Settled rounds and `NO_PROGRESS`
+  failures are counted only once their result is stored.
+- **`eddi_group_discussion_unanswered_total{outcome,reason}`** counts each round that ended
+  `NO_ANSWER` or `FAILED`, once that outcome is stored. A round whose result was discarded
+  because a cancel won the conditional write is not counted. This includes rounds that fail with an
+  error (`DISCUSSION_ERROR`) and no-progress failures (`NO_PROGRESS`). A result rejected at an
+  approval gate (`REJECTED_BY_HUMAN`, `APPROVAL_TIMED_OUT`) is not counted.
+- **Cut-short rounds.** `TURN_LIMIT_REACHED` and `COST_CEILING_REACHED` are never a `FAILED`
+  outcome. A cut-short round is in the unanswered meter under that reason only when it ended
+  `NO_ANSWER`. A cut-short round that still answered is in neither meter. A cut-short round
+  whose member turns ran and all failed is `FAILED` with reason `NO_MEMBER_ANSWERED`, and so it
+  is in both meters.
 
 ### Standing Team (Cadence) Metrics
 
@@ -732,7 +761,11 @@ eddi_attachment_forwarded_total             # Attachments converted to LLM conte
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
 eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
+eddi_attachment_shared_total                # Files shared from one conversation to another; tag: path (delegation, nested_group, …)
+eddi_attachment_share_refused_total         # Share requests refused; tag: reason (not_found, depth, shares_per_turn, …)
 ```
+
+The share meters are recorded by `AttachmentShareService`; the full tag lists are in [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).
 
 ### Outbound HTTP Metrics
 
@@ -934,7 +967,7 @@ eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the s
 eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
 eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
 eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
-eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
+eddi_alerts_dropped_total           # Alert work dropped because a queue was full; tag: reason (queue_full: evaluation dropped; delivery_queue_full: first send left to the maintenance pass)
 eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
 ```
 
@@ -943,6 +976,53 @@ No tag carries an agent id (a rule over every agent would mint a series per agen
 worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana alert
 rule on `outcome="gave_up"` is in the
 [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
+
+### Agent Health Metrics
+
+```text
+eddi_health_recorded_total          # Agent Health turn rows written
+eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown|erased|orphaned)
+eddi_health_queue_depth             # Gauge: turn records waiting for the health worker
+```
+
+No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
+`queue_full` means the health worker cannot keep up with the turn rate (raise
+`eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
+that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
+or removed because their user was erased or their conversation deleted — `erased` by the
+[erasure guarantee](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) on the health worker, `orphaned` by
+the daily orphan sweep (rows of purged agent-test conversations, the one delete outside the guarantee). `erased` also counts
+writes the guard refused because the erasure tombstones could not be read (fail closed): a rising `erased` together with
+`eddi_gdpr_guard_writes_skipped_total{reason="check_failed"}` is a tombstone-store fault, not erasures. A dropped row is a gap in
+the health views, never a slower or failed turn. See [Agent Health](agent-health.md).
+
+### GDPR Erasure Guarantee Metrics
+
+```text
+eddi_gdpr_guard_writes_skipped_total        # Guarded async writes not stored because their user or conversation was erased; tag: reason (tombstone|check_failed)
+eddi_gdpr_guard_self_deletions_total        # Rows an async writer removed again because an erasure started while it wrote them; tag: writer
+eddi_gdpr_guard_pending_removals_total      # Pending removals of erased rows; tag: outcome (recorded|cleared|record_failed)
+eddi_gdpr_guard_drain_seconds               # Timer: how long an erasure or permanent conversation delete waited for this node's async writers (_count, _sum, _max)
+eddi_gdpr_guard_drain_timeouts_total        # Drain barriers an async writer did not pass within eddi.gdpr.drain-timeout; tag: writer
+eddi_gdpr_guard_key_mismatch_total          # The tombstone key did not match the stored check value; every guarded operation fails closed until it is restored
+eddi_gdpr_guard_pending_backlog             # Gauge: pending removals stored, for every node, as counted by this node's last maintenance pass (every 5 minutes); NaN before the first
+```
+
+`eddi_gdpr_guard_key_mismatch_total` must stay at zero: any increase means the
+tombstone key changed and erasures are failing — see
+[The tombstone key](gdpr-compliance.md#the-tombstone-key) for the operator action.
+`check_failed` and `record_failed` should stay at zero: the first means the
+tombstone store could not be read and a write was skipped to be safe, the second
+that a row of an erased user could neither be removed nor recorded for a retry (the
+erasure's own delete still reaches it). The `pending_removals_total` counters are
+removal *activity* of one process: they start at zero after a restart while the
+stored removals stay, so `recorded` minus `cleared` is not the backlog — it can read
+zero with removals outstanding, or go negative when a pass clears removals recorded
+before the restart. The backlog is `eddi_gdpr_guard_pending_backlog`, a count of what
+is actually stored; every node reports the same deployment-wide number, so chart its
+`max`. Each pending removal keeps erasures of its user or conversation failing until
+the five-minute retry clears it, and one that fails again moves to the back of the
+retry queue. A drain timeout fails the erasure or delete that waited. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).
 
 ### Agent Identity & Signing Metrics
 
@@ -1017,6 +1097,9 @@ eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags:
 eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
 eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
+eddi_channel_config_rejected_total          # Channel integration saves refused by type validation; tags: type, reason
+eddi_channel_config_keys_dropped_total      # Undeclared platformConfig keys the router dropped from stored documents; tag: type
+eddi_channel_credential_refused_total       # Channel sends whose connection could not be resolved; tags: type, reason
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
@@ -1029,6 +1112,20 @@ a load signal, not a configuration one). `type` is the observer's
 target type — `AGENT` today, since observe mode is refused on anything else —
 not the channel platform. A rising throttle share with a flat `MATCHED` share is
 an observer whose triggers are too broad for its budget.
+
+The three `eddi_channel_config_*` / `eddi_channel_credential_*` counters cover
+connection-backed channel types, whose credential comes from an EDDI
+connection rather than `platformConfig`. `type` is a registered channel type
+id, or `other` for an unknown one. A save's `reason` is a short refusal code
+such as `platform_config` (an undeclared key), `routing_key_taken`,
+`connection_not_usable` or `application_needs_edit`, and a send's is the
+lower-cased `ConnectionException` reason (`target_not_allowed`,
+`unsupported_placement`, …). A
+non-zero dropped-key count means a document reached the store without save
+validation (a direct store write). It is counted once per document version and
+key, not on every refresh. A credential refusal means the connection changed
+after the integration was saved, for example it was switched to `PER_USER` or
+its allowlist no longer covers the platform.
 
 ### Backup, Export & Sync Metrics
 
@@ -1182,6 +1279,22 @@ eddi_connection_oauth_callback_count_total  # OAuth callback outcomes; tags: out
 eddi_connection_token_refresh_count_total   # Token endpoint outcomes; tag: outcome (success, minted, invalid_grant, transient)
 eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: outcome (claimed, awaited, lease_released, lease_expired)
 ```
+
+### Organization Context Metrics
+
+These count how EDDI binds the organization (org) each piece of work runs for. Organizations are
+being built in phases: this release runs single mode only (`eddi.org.mode`, see
+[configuration-reference.md](configuration-reference.md#groups-tenancy--variables)).
+
+```text
+eddi_org_context_fallback_total             # Org lookups that found no binding and used the default org (single mode); tag: site (class#method). Expected to stay 0
+eddi_org_platform_scope_total               # Entries into OrgScope.platform, the audited way to cross orgs; tag: reason
+```
+
+A non-zero `eddi_org_context_fallback_total` is harmless in single mode, but the `site` it names
+has to be fixed before multi mode can be enabled. To keep the series bounded, only the first 200
+call sites and the first 100 reasons get a tag of their own. Later ones are counted under
+`(overflow)`.
 
 ### Deployed Agents
 
