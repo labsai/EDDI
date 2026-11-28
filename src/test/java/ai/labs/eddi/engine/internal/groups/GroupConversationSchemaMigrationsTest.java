@@ -65,6 +65,21 @@ class GroupConversationSchemaMigrationsTest {
         assertEquals(GroupConversation.CURRENT_SCHEMA_VERSION, result.getSchemaVersion());
     }
 
+    /**
+     * {@code inheritedMaxTurns} is a resume-consumed cap (v6): a pod that predates
+     * it must refuse such a document rather than resume the child under its own,
+     * looser limit — so the version has to be above the last one that lacked it.
+     */
+    @Test
+    void inheritedMaxTurnsDocuments_claimAVersionAboveFive() throws Exception {
+        var child = gc(GroupConversation.CURRENT_SCHEMA_VERSION);
+        child.setInheritedMaxTurns(7);
+
+        assertTrue(child.getSchemaVersion() > 5, "a v5 pod must see a document carrying inheritedMaxTurns as newer than it understands");
+        var result = GroupConversationSchemaMigrations.prepareForResume(child);
+        assertEquals(7, result.getInheritedMaxTurns(), "resuming on this version keeps the inherited cap");
+    }
+
     @Test
     void prepareForResume_olderVersion_migratesForwardToCurrent() throws Exception {
         // A fixture "old" document — one artificial version below current. With no
