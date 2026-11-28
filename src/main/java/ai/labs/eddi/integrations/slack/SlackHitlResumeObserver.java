@@ -108,6 +108,17 @@ public class SlackHitlResumeObserver {
         }
 
         String botToken = channelTargetRouter.getBotToken("slack", route.channelId());
+        // The fallback is for a DM only, and needs positive evidence that the route IS
+        // one: a Slack DM's conversation id starts with 'D'. An unowned channel may
+        // simply be one whose integration was removed while the approval was pending;
+        // another app serving the same agent must not post into it with its token.
+        if ((botToken == null || botToken.isBlank()) && isDirectMessageChannel(route.channelId())
+                && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
+            botToken = dmBotToken(mapping, route, conversationId);
+            if (botToken == null) {
+                return;
+            }
+        }
         if (botToken == null || botToken.isBlank()) {
             LOGGER.debugf("No bot token for Slack channel %s — cannot deliver HITL outcome", sanitize(route.channelId()));
             return;
@@ -147,6 +158,50 @@ public class SlackHitlResumeObserver {
         for (int i = 0; delivered && i < continuationChunks.size(); i++) {
             delivered = postSafe(auth, route.channelId(), route.threadTs(), continuationChunks.get(i));
         }
+    }
+
+    /**
+     * The token for a DM, whose channel id belongs to no integration and so has
+     * none of its own. The app that signed the DM is recorded on the mapping
+     * ({@link UserConversation#getChannelSigner()}), and exactly that app's token
+     * is used — never one of another app that serves the same agent. A mapping an
+     * earlier release wrote names no app: then the token is used only when exactly
+     * one app (with or without a usable token) serves the agent in the user's
+     * workspace. A channel an integration owns but left without a token is not a DM
+     * and never reaches here: it stays silent rather than borrowing another app's
+     * credentials.
+     *
+     * @return the token, or {@code null} — with one WARN naming only ids — when it
+     *         cannot be told which app's token to use
+     */
+    private String dmBotToken(UserConversation mapping, SlackRoute route, String conversationId) {
+        String signer = mapping.getChannelSigner();
+        String token;
+        if (signer != null && !signer.isBlank()) {
+            token = channelTargetRouter.getBotTokenForSignerKey("slack", signer);
+        } else {
+            String agentId = route.agentId() != null ? route.agentId() : mapping.getAgentId();
+            token = agentId == null ? null : channelTargetRouter.getBotTokenForTarget("slack", agentId, teamOf(mapping.getUserId()));
+        }
+        if (token == null || token.isBlank()) {
+            LOGGER.warnf("No bot token can be chosen for the DM %s of conversation %s (%s) — its HITL outcome is not posted",
+                    sanitize(route.channelId()), sanitize(conversationId),
+                    signer != null && !signer.isBlank()
+                            ? "the app that signed it has no usable token now"
+                            : "the mapping names no signing app and the agent is not served by exactly one");
+            return null;
+        }
+        return token;
+    }
+
+    /**
+     * Whether {@code channelId} is a direct message. Slack gives a DM's
+     * conversation an id starting with {@code D} (public channels {@code C},
+     * private channels and group DMs {@code G} or {@code C}); the stored route
+     * carries nothing else that says "DM".
+     */
+    static boolean isDirectMessageChannel(String channelId) {
+        return channelId != null && channelId.length() > 1 && channelId.charAt(0) == 'D';
     }
 
     private static boolean isError(SimpleConversationMemorySnapshot snapshot) {
@@ -245,7 +300,7 @@ public class SlackHitlResumeObserver {
             return null;
         }
         String threadTs = THREAD_KEY_MAIN.equals(threadKey) ? null : threadKey;
-        return new SlackRoute(channelId, threadTs);
+        return new SlackRoute(channelId, threadTs, parts[3].isBlank() ? null : parts[3]);
     }
 
     /** @return whether Slack accepted the message */
@@ -258,7 +313,29 @@ public class SlackHitlResumeObserver {
         }
     }
 
-    /** Parsed Slack routing from a stored managed-conversation intent. */
-    record SlackRoute(String channelId, String threadTs) {
+    /**
+     * Parsed Slack routing from a stored managed-conversation intent.
+     *
+     * @param agentId
+     *            the agent or group the thread runs, from a {@code channel:slack:}
+     *            intent; {@code null} for a follow-up intent, which does not carry
+     *            it
+     */
+    record SlackRoute(String channelId, String threadTs, String agentId) {
+        SlackRoute(String channelId, String threadTs) {
+            this(channelId, threadTs, null);
+        }
+    }
+
+    /**
+     * The workspace of an EDDI user id {@code slack:<team>:<user>}, or {@code null}
+     * for a team-less {@code slack:<user>}.
+     */
+    static String teamOf(String eddiUserId) {
+        if (eddiUserId == null || !eddiUserId.startsWith(SlackUserIdentity.PREFIX)) {
+            return null;
+        }
+        String[] parts = eddiUserId.substring(SlackUserIdentity.PREFIX.length()).split(":", 2);
+        return parts.length == 2 && !parts[0].isBlank() ? parts[0] : null;
     }
 }

@@ -13,6 +13,7 @@ public class UserConversation {
     private Deployment.Environment environment;
     private String agentId;
     private String conversationId;
+    private String channelSigner;
 
     public UserConversation() {
     }
@@ -65,5 +66,21 @@ public class UserConversation {
 
     public void setConversationId(String conversationId) {
         this.conversationId = conversationId;
+    }
+
+    /**
+     * For a mapping a channel adapter wrote: a reference to the app (integration or
+     * legacy connector) whose credentials started the conversation — for Slack
+     * {@code integration:<name>} or {@code legacy:<channelId>}. It lets a reply
+     * that is posted later without an inbound event (the outcome of an approval in
+     * a DM) use exactly that app's bot token. Not a credential. {@code null} for
+     * every other mapping and for one an earlier release stored: "unknown".
+     */
+    public String getChannelSigner() {
+        return channelSigner;
+    }
+
+    public void setChannelSigner(String channelSigner) {
+        this.channelSigner = channelSigner;
     }
 }

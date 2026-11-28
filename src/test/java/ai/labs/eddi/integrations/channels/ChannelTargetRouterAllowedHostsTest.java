@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.integrations.slack.SlackConfig;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
@@ -54,13 +55,16 @@ class ChannelTargetRouterAllowedHostsTest {
     private SecretResolver secretResolver;
     private ISecretProvider secretProvider;
     private ChannelTargetRouter router;
+    private IChannelIntegrationStore channelStore;
+    private IDocumentDescriptorStore descriptorStore;
+    private IDeploymentStatusReader agentAdmin;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
-        var channelStore = mock(IChannelIntegrationStore.class);
-        var descriptorStore = mock(IDocumentDescriptorStore.class);
-        var agentAdmin = mock(IDeploymentStatusReader.class);
+        channelStore = mock(IChannelIntegrationStore.class);
+        descriptorStore = mock(IDocumentDescriptorStore.class);
+        agentAdmin = mock(IDeploymentStatusReader.class);
         secretResolver = mock(SecretResolver.class);
         secretProvider = mock(ISecretProvider.class);
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
@@ -112,5 +116,42 @@ class ChannelTargetRouterAllowedHostsTest {
     void unrestrictedTokenResolves() throws Exception {
         tokenAllowedAt(null);
         assertEquals("xoxb-live", router.getBotToken("slack", CHANNEL_ID));
+    }
+
+    /**
+     * The check used to be made against a fixed {@code https://slack.com/api/}
+     * while the client sent to {@code eddi.slack.api-base-url}: a secret allowed
+     * only at slack.com went, as a Bearer token, to whatever host that property
+     * named. The router now judges against the same {@link SlackConfig} the client
+     * sends through.
+     */
+    @Test
+    @DisplayName("a botToken allowed only at slack.com is withheld when the Slack API base URL points elsewhere")
+    void tokenAllowedAtSlackIsWithheldFromAnotherBaseUrl() throws Exception {
+        tokenAllowedAt(List.of("slack.com"));
+        var elsewhere = routerSendingTo("https://slack-proxy.example.org/api/");
+
+        assertNull(elsewhere.getBotToken("slack", CHANNEL_ID));
+        verify(secretResolver, never()).resolveValue(TOKEN_REF);
+    }
+
+    @Test
+    @DisplayName("a botToken allowed at the configured base URL's host resolves")
+    void tokenAllowedAtTheConfiguredHostResolves() throws Exception {
+        tokenAllowedAt(List.of("slack-proxy.example.org"));
+
+        assertEquals("xoxb-live", routerSendingTo("https://slack-proxy.example.org/api/").getBotToken("slack", CHANNEL_ID));
+        // ...and the same entry is no longer good for slack.com itself.
+        assertNull(router.getBotToken("slack", CHANNEL_ID));
+    }
+
+    @SuppressWarnings("unchecked")
+    private ChannelTargetRouter routerSendingTo(String apiBaseUrl) {
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.<String, ChannelTarget>getCache(anyString(), any(Duration.class))).thenReturn(mock(ICache.class));
+        SlackConfig slackConfig = mock(SlackConfig.class);
+        when(slackConfig.getApiBaseUrl()).thenReturn(apiBaseUrl);
+        return new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, mock(IAgentStore.class), secretResolver,
+                new VaultHostAllowlist(secretProvider), cacheFactory, slackConfig);
     }
 }

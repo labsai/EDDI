@@ -139,7 +139,7 @@ For the bot to accept DMs, you must enable the Messages Tab:
 4. Subscribe to **Bot Events**:
    - `app_mention` — triggers when the bot is @mentioned in a channel
    - `message.im` — triggers on direct messages to the bot
-   - `message.channels` — enables thread-reply continuity without @mention
+   - `message.channels` — enables thread-reply continuity without @mention. The bot answers an unmentioned reply **only in a thread it already takes part in** (see [When the bot answers](#when-the-bot-answers)); replies in threads between people are ignored
 5. Click **Save Changes**
 
 ---
@@ -256,6 +256,34 @@ carries over; only the conversation's own state starts again. Two messages arriv
 ended thread end up in the same new conversation. See
 [Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
 
+### When the bot answers
+
+With `message.channels` subscribed, Slack sends EDDI **every** message of the channel, so the bot decides what is addressed to it:
+
+| Message | Answered? |
+|---|---|
+| A message that mentions the bot (`@EDDI`, at the start or anywhere in the text) | Yes — through the `app_mention` event |
+| An unmentioned top-level channel message | **No** (unless an [observer](#observe-mode-passive-watching) is configured for the channel) |
+| An unmentioned reply in a thread the bot **takes part in** | Yes |
+| An unmentioned reply in a thread the bot does not take part in (a thread between people) | **No** — nothing is sent to the model; counted in `eddi_slack_thread_replies_ignored_total` |
+| A direct message | Yes |
+
+The bot **takes part in a thread** when it was mentioned in it, or has answered in it (including an observer's answer). EDDI knows this from the thread's target lock (24 hours, shared across nodes in a cluster) and from the replying user's own conversation mapping for the thread, which is stored in the database. A restart of a single node clears the locks, so afterwards a thread revives for the people who had already talked to the bot in it (their mapping is found and the lock is restored); someone who had not must mention the bot once.
+
+A reply under a **group discussion's agent message** (expanded mode) is a follow-up to that agent. The node that ran the discussion holds its context for **two hours**, in memory. On that node, within that time, anyone's reply there is answered as a follow-up. Elsewhere — another node of a cluster, after the two hours, after a restart — only a person who has already followed up in that thread is answered: their follow-up conversation is stored in the database and is continued with the same agent. Anyone else's unmentioned reply there is ignored, like any reply in a thread the bot takes no part in.
+
+What an unmentioned thread reply costs EDDI, per reply:
+
+| Reply | Work |
+|---|---|
+| In a thread the bot takes part in | One thread-lock read (a KV read in a cluster), then the turn |
+| Ignored, the first time for this person in this thread | One thread-lock read, a memory lookup, and one database read per target of the channel's integration (for a channel only a legacy connector serves, its one target) plus one for a group follow-up — two per target for a Slack user id that may still own a mapping written before user ids were namespaced (the raw id is looked up too, so such a thread still revives) |
+| Ignored again, by the same person in the same thread within 5 minutes | One thread-lock read and a memory lookup — no database read |
+
+"This person has no part in this thread" is remembered on the node for 5 minutes (at most 10,000 entries); it is checked only after the lock, so a mention in the thread — on any node — takes effect at once, and it is forgotten on every node as soon as a conversation for that person and thread is started.
+
+A mention counts only when it names **this bot** (the bot's own user id from the event envelope). A message that mentions another person ("`@alice` look at this") is not a mention of the bot: in a thread the bot takes part in it is answered like any reply, in any other thread it is ignored. A message that mentions the bot is answered once, however Slack delivers it (as `message` and `app_mention`, in either order). If an event envelope carries no bot id, a thread reply that mentions someone is not set aside for `app_mention` (Slack sends none for a mention of another person): it is answered when the bot takes part in the thread, and a mention of the bot that also arrives as `app_mention` is still answered once.
+
 ### Direct Messages (DMs)
 
 Send a message directly to the bot — no @mention needed:
@@ -265,6 +293,10 @@ Hello, what can you do?
 ```
 
 DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. A DM signed by a legacy per-agent connector goes to the legacy connector holding that secret, never to a new-style integration. Replies in a DM thread keep the thread's agent and are answered with the credentials of the app that signed them, provided that app serves the agent.
+
+A DM's channel id belongs to no integration, so there is no channel to read a bot token from. Every message the bot sends into a DM — the answer, an error or timeout notice, the help text — uses the bot token of the app that signed the DM. For a DM signed by a legacy per-agent connector, whose signing secret several connectors may share (one Slack app distributed to several workspaces has one secret and a token per workspace), a notice is sent only when all those connectors hold the same token.
+
+The outcome of an approval is posted later, without an event to read the signer from. The app that signed the DM is therefore recorded with the thread's conversation mapping (`channelSigner`: the integration's name, or the legacy connector's channel), and the outcome is posted with exactly that app's token — if that app has no usable token any more, nothing is posted. A conversation started before this was recorded falls back to the one app that serves the conversation's agent in the user's workspace — counting apps whose token is not usable — and if there is not exactly one, nothing is posted rather than guessed; the log says so once, naming only ids.
 
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
@@ -541,11 +573,31 @@ earlier with one gets approval cards without buttons until it is renamed). See
 
 ### Retry Logic
 
-All Slack API calls use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Failed messages are logged but don't crash the event handler.
+The text messages the **event handler** posts — answers, notices, the help text — use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Those two settings apply to nothing else: the other posts (listed below) make one attempt, so raising them does not recover, for example, the outcome of an approval that Slack refused. Failed messages are logged but don't crash the event handler.
+
+When Slack rate-limits a message the event handler posts (an answer, a notice, the help text — HTTP 429), EDDI waits for the `Retry-After` Slack names before the next attempt instead of its own shorter backoff — at most 30 seconds, so a worker is never parked for long; a longer request is waited out for 30 seconds and tried again. A `Retry-After` that is not a number of seconds is ignored. Approval cards, the messages of a group discussion and the outcome of a resumed approval are posted once and not retried after a 429.
+
+### Slow answers
+
+A turn that does not finish within `eddi.slack.request-timeout-seconds` (default 60) is not abandoned. The thread is told "That is taking longer than 60 seconds. I'll post the answer in this thread when it is ready.", and when the turn completes its answer is posted to the thread — **once**, with the same handling as an answer that came in time (a pause still gets its approval card). If the turn ended in an error the thread gets a failure notice instead, and a turn still running after `eddi.slack.late-answer-window-seconds` (default 900) — counted from the moment the first wait gave up, not from when the notice got through — is given up on with a notice asking the user to ask again. The outcomes are counted in `eddi_slack_late_answers_total{outcome=posted|failed|expired}` ([Metrics](metrics.md#slack-metrics)).
+
+If the turn was dropped because its conversation had ended in the meantime (an undeploy, the idle sweep), the thread gets a fresh conversation and the message is sent to it again — as it would be in time — and that answer is waited for within what is left of the window, without a second "taking longer" line. A message sent while an earlier one of the same thread is still running waits behind it, so it usually gets its own "taking longer" line too.
+
+Waiting costs a callback on the turn and an entry in the JVM's shared delay scheduler for the window — no thread or timer of EDDI's own — and at most 200 turns are waited for at once on a node; past that, or with `eddi.slack.late-answer-window-seconds=0`, the thread gets the former notice ("ask again in a moment, or raise `eddi.slack.request-timeout-seconds`") and a late answer is not posted. Pending late answers live in memory: a restart of the node drops them, and so does shutting it down.
+
+An [observer](#observe-mode-passive-watching) is never announced as late — nobody addressed it. Its turn is waited for silently, up to the window on top of the request timeout; the answer is posted (and the thread locked to the observer) only if it comes. Its whole spend is charged to its daily budget: a turn still running after the window posts nothing, and what it spends after that is charged when it ends.
+
+### Who can reach what
+
+The Slack integration scopes by **channel**, not by person. A channel message reaches only the targets of the integration that owns the channel. A **direct message** is not tied to any channel: it is routed by the Slack app that signed it (the app the user DMed) to that integration's default target — or, with a trigger keyword, to any of that integration's targets. So every member of the workspace who can DM the app reaches every target of its integration, whatever channels the integration lists, and EDDI has no per-target or per-user access control of its own on this path; restrict who can install or message the app in Slack if that matters. This is current behaviour, documented here; it is not changed by the thread and mention rules above.
+
+### Testing against a fake Slack
+
+`eddi.slack.api-base-url` (default `https://slack.com/api/`) is where EDDI sends every Web API call, so a Slack-compatible test double can stand in for Slack: point it at `http://localhost:<port>/api/` (plain `http` is accepted for a loopback address only; anything else must be `https`). The value is checked at startup. **Every bot token of every Slack integration is sent to that URL** — setting it is a deployment-level trust decision, never something to point at a host you do not operate. A vaulted bot token whose `allowedHosts` names only `slack.com` is not used while the URL points elsewhere; add the test double's or proxy's host to the secret's `allowedHosts` if it should be. EDDI's own tests use an in-process fake of this API (`FakeSlackApi`) to run the client and the event handler through posted answers, `ok:false`, rate limits and late answers. See the [Configuration Reference](configuration-reference.md#slack).
 
 ### Event Deduplication
 
-Slack retries webhook deliveries on timeout. EDDI uses an in-memory cache (`ICache`) to deduplicate events by `event_id`, preventing duplicate processing.
+Slack retries webhook deliveries on timeout. EDDI uses an in-memory cache (`ICache`, shared through the `DEDUP` bucket in a cluster) to deduplicate events by `event_id`, preventing duplicate processing. A message that mentions the bot arrives as two events with different ids (`message` and `app_mention`); a second key, `msg:<workspace>:<channel>:<ts>`, makes them one turn. The cache keeps both for 10 minutes and is sized for about 100 keys per second (120,000 entries), so a key outlives Slack's retries under load.
 
 ### Follow-up Memory Management
 
@@ -567,7 +619,7 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 
 2. **Conversation State**: Conversations are stored in the database and every turn takes the conversation's cluster-wide lease, so any replica handles a follow-up message, in order.
 
-3. **Group Discussion Affinity**: A group discussion runs on the replica that received the trigger, and `SlackGroupDiscussionListener` streams from there directly to the Slack API. Follow-up context is cached on that replica: a follow-up routed to a different replica falls back to a standard conversation (no context injection, but no error). Routing follow-ups to the discussion's replica is not implemented.
+3. **Group Discussion Affinity**: A group discussion runs on the replica that received the trigger, and `SlackGroupDiscussionListener` streams from there directly to the Slack API. Follow-up context is cached on that replica, so an unmentioned reply under an agent's message that reaches a different replica is handled as described in [When the bot answers](#when-the-bot-answers): a person who has already followed up in that thread has a stored follow-up conversation, which is continued with the same agent; anyone else's first unmentioned reply there is ignored (that replica holds no group listener, no thread lock and no mapping for them) and they must mention the bot. Routing follow-ups to the discussion's replica is not implemented.
 
 4. **When NATS is unreachable**: deduplication degrades to the replica's own cache, so a Slack retry that lands on another replica may be answered twice; the rest keeps working as described in [Clustering](clustering.md).
 

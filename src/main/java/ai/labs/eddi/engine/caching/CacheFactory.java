@@ -68,7 +68,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
      * none.
      */
     static final Set<String> INVALIDATED = Set.of("agentTriggers", "userConversations", "conversationState",
-            "gdprProcessingRestrictions");
+            "gdprProcessingRestrictions", "slack-thread-nonparticipants");
 
     @Inject
     ClusterConfig clusterConfig;
@@ -292,7 +292,19 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // schemes the only replay protection there is: at the 1_000 default ~500
             // deliveries in the 10-minute window from one tenant's integration
             // evicted another's keys, and a captured request then ran again.
-            Map.entry("webhook-event-dedup", 10_000L));
+            Map.entry("webhook-event-dedup", 10_000L),
+
+            // Floor only, like the webhook cache - the real capacity is derived from
+            // the TTL, see RATE_SIZED_CACHES. Every event of every Slack app takes a
+            // key, and every message one more; at the 1,000 default a busy channel
+            // evicted keys before Slack's retries (after 1 and 5 minutes) arrived, and
+            // the retry was processed a second time.
+            Map.entry("slack-event-dedup", 10_000L),
+
+            // SlackEventHandler: "this user has no part in this thread", 5 minutes.
+            // Keyed by channel, thread and user, so occupancy is the human threads
+            // active in that window times their posters.
+            Map.entry("slack-thread-nonparticipants", 10_000L));
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
 
@@ -310,6 +322,15 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
      * {@code WebhookEventHandler.DEDUP_REFUSE_AT}.
      */
     public static final int WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND = 100;
+
+    /**
+     * Peak sustained rate of dedup keys the Slack event cache is sized to hold, per
+     * second across ALL Slack apps: an event writes its {@code event_id}, and a
+     * message one more key, so this is roughly 50 messages per second (a mention
+     * arrives as two events and one message key). At the 10-minute TTL the cache
+     * holds 120,000 keys.
+     */
+    public static final int SLACK_PEAK_DEDUP_KEYS_PER_SECOND = 100;
 
     /**
      * Head-room multiplier applied on top of the steady-state occupancy of a
@@ -338,7 +359,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
      */
     private static final Map<String, Integer> RATE_SIZED_CACHES = Map.of(
             "nonce-replay-protection", NONCE_PEAK_SIGNED_RPS,
-            "webhook-event-dedup", WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND);
+            "webhook-event-dedup", WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND,
+            "slack-event-dedup", SLACK_PEAK_DEDUP_KEYS_PER_SECOND);
 
     /**
      * Maximum entry count for {@code cacheName} when built with {@code ttl}
