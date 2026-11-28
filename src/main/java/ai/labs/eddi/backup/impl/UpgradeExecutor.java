@@ -1812,10 +1812,33 @@ public class UpgradeExecutor {
                     + (resp == null ? "" : " (HTTP " + resp.getStatus() + ")")
                     + ", so the workflows and extensions written by this run are not deployed");
             return null;
+        } catch (ForbiddenException refused) {
+            return refusedAgentWrite(agentId, refused, outcome);
+        } catch (WebApplicationException e) {
+            // The oversight guard refuses with the JAX-RS ForbiddenException (a 403
+            // WebApplicationException), the access guard with Quarkus' (above).
+            if (e.getResponse() != null && e.getResponse().getStatus() == Response.Status.FORBIDDEN.getStatusCode()) {
+                return refusedAgentWrite(agentId, e, outcome);
+            }
+            LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
+            throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The agent write was refused (403) — an admin changed the target's oversight,
+     * say, after the preflight check. The workflows and extensions are written by
+     * then, so the caller gets the result that lists them as not deployed rather
+     * than a bare failure that hides them.
+     */
+    private static URI refusedAgentWrite(String agentId, RuntimeException refused, Outcome outcome) {
+        LOGGER.warnf("Agent config update of %s refused: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(refused.getMessage()));
+        outcome.failed(agentId, "agent", null, "the agent update was refused (" + refused.getMessage()
+                + "), so the workflows and extensions written by this run are not deployed");
+        return null;
     }
 
     /**

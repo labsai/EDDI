@@ -60,6 +60,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -122,6 +123,15 @@ public class McpToolProviderManager {
      * Agent Card cache in {@link A2AToolProviderManager}.
      */
     private final Map<String, CachedTools> toolCache = new ConcurrentHashMap<>();
+
+    /**
+     * How many times the client under a key was evicted after a listing limit. A
+     * discovery publishes its executors only if no eviction happened since it
+     * began: the client they are bound to may be closed by then. Read and bumped
+     * inside {@code toolCache.compute} for the key, so the check and the write are
+     * atomic with respect to the eviction.
+     */
+    private final Map<String, Long> listingEvictions = new ConcurrentHashMap<>();
 
     /** Cached discovery result for one server, with the time it was captured. */
     record CachedTools(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, long timestamp) {
@@ -469,6 +479,8 @@ public class McpToolProviderManager {
             }
 
             try {
+                String toolCacheKey = cacheKey(serverConfig);
+                long evictionsBefore = listingEvictions.getOrDefault(toolCacheKey, 0L);
                 // Discover tools — McpToolProvider returns ToolProviderResult
                 ToolProviderResult result = probe ? probeToolsFromServer(serverConfig) : fetchToolsFromServer(serverConfig);
 
@@ -530,8 +542,12 @@ public class McpToolProviderManager {
                 }
 
                 if (!probe) {
-                    toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
-                            System.currentTimeMillis()));
+                    var discovered = new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors), System.currentTimeMillis());
+                    // Not cached when the client the executors are bound to was evicted (and
+                    // closed) after a listing limit while this discovery ran: a cache hit
+                    // creates no client, so it would serve the closed one until the TTL.
+                    toolCache.compute(toolCacheKey,
+                            (key, previous) -> listingEvictions.getOrDefault(key, 0L) == evictionsBefore ? discovered : previous);
                 }
                 mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
@@ -757,18 +773,25 @@ public class McpToolProviderManager {
     }
 
     /**
-     * Drops the client under {@code key} once one of its listings passed a bound,
-     * so the next turn starts on a fresh client instead of one a hostile server has
-     * already driven to its limit. Closed at once, like {@link #closeClient}.
+     * Drops {@code origin}, the client under {@code key}, once one of its listings
+     * passed a bound, so the next turn starts on a fresh client instead of one a
+     * hostile server has already driven to its limit. Closed at once, like
+     * {@link #closeClient}. Bound to the client that exceeded the limit: a callback
+     * that runs late, after a replacement was installed under the same key, closes
+     * only its own client and leaves the replacement and its cached tools alone.
      */
-    private void evictAfterListingLimit(String key) {
-        toolCache.remove(key);
-        McpClient client = clientCache.remove(key);
-        if (client == null) {
-            return;
+    private void evictAfterListingLimit(String key, McpClient origin) {
+        if (origin == null) {
+            return; // a limit during construction: the client was never cached
+        }
+        if (clientCache.remove(key, origin)) {
+            toolCache.compute(key, (k, cached) -> {
+                listingEvictions.merge(k, 1L, Long::sum);
+                return null;
+            });
         }
         try {
-            client.close();
+            origin.close();
         } catch (Exception e) {
             LOGGER.debugf("Error closing MCP client after a listing limit for '%s': %s", sanitize(UriRedactor.redactUri(urlOfKey(key))),
                     sanitize(e.getMessage()));
@@ -1130,7 +1153,12 @@ public class McpToolProviderManager {
      * closed.
      */
     McpClient getOrCreateClient(McpServerConfig config) {
-        return clientCache.computeIfAbsent(cacheKey(config), key -> createClient(config, () -> evictAfterListingLimit(key)));
+        return clientCache.computeIfAbsent(cacheKey(config), key -> {
+            AtomicReference<McpClient> self = new AtomicReference<>();
+            McpClient client = createClient(config, () -> evictAfterListingLimit(key, self.get()));
+            self.set(client);
+            return client;
+        });
     }
 
     /**

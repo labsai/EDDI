@@ -28,6 +28,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -219,6 +220,20 @@ class UpgradeExecutorDescriptorTest {
         assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType())),
                 "a refused agent write must be reported, got: " + result.failures());
         assertEquals(0, result.updated(), "neither the workflow nor the LLM is reachable from any deployed agent");
+    }
+
+    @Test
+    @DisplayName("an agent write the oversight guard refuses (403) is an agent failure in the result, not an escaping exception")
+    void agentWriteRefusedByTheOversightGuardIsReported() throws Exception {
+        givenTargetAt(3);
+        // An admin changed the target's oversight after the preflight check passed.
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), eq(false))).thenThrow(new ForbiddenException("oversight changed"));
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("refused")),
+                "a refused agent write must be reported, got: " + result.failures());
+        assertEquals(0, result.updated(), "what this run wrote is not deployed");
     }
 
     @Test

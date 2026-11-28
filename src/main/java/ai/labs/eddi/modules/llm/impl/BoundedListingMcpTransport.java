@@ -25,6 +25,9 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
@@ -95,8 +98,33 @@ final class BoundedListingMcpTransport implements McpTransport {
     }
 
     BoundedListingMcpTransport(McpTransport delegate, Limits limits, Runnable onExceeded, LongSupplier nanoClock) {
-        this(delegate, limits, onExceeded, nanoClock,
-                (nanos, task) -> CompletableFuture.delayedExecutor(nanos, TimeUnit.NANOSECONDS).execute(task));
+        this(delegate, limits, onExceeded, nanoClock, BoundedListingMcpTransport::scheduleDeadline);
+    }
+
+    /**
+     * One daemon timer thread for every transport's deadlines. A cancelled task is
+     * removed from its queue at once, so a page that completed early does not keep
+     * its response reachable until the deadline would have passed.
+     */
+    private static final ScheduledThreadPoolExecutor DEADLINES = deadlineTimer();
+
+    private static ScheduledThreadPoolExecutor deadlineTimer() {
+        var timer = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "mcp-listing-deadline");
+            thread.setDaemon(true);
+            return thread;
+        });
+        timer.setRemoveOnCancelPolicy(true);
+        return timer;
+    }
+
+    /**
+     * The default {@link DeadlineScheduler}: the timer only hands the task on, so a
+     * slow eviction never holds up the other deadlines.
+     */
+    private static Runnable scheduleDeadline(long nanos, Runnable task) {
+        ScheduledFuture<?> scheduled = DEADLINES.schedule(() -> ForkJoinPool.commonPool().execute(task), nanos, TimeUnit.NANOSECONDS);
+        return () -> scheduled.cancel(false);
     }
 
     BoundedListingMcpTransport(McpTransport delegate, Limits limits, Runnable onExceeded, LongSupplier nanoClock,
@@ -110,12 +138,12 @@ final class BoundedListingMcpTransport implements McpTransport {
     }
 
     /**
-     * Runs a task once {@code nanos} have passed. A seam, so a test can fire the
-     * deadline itself.
+     * Runs a task once {@code nanos} have passed, and returns what cancels it. A
+     * seam, so a test can fire the deadline itself.
      */
     @FunctionalInterface
     interface DeadlineScheduler {
-        void schedule(long nanos, Runnable task);
+        Runnable schedule(long nanos, Runnable task);
     }
 
     /** The wrapped transport (tests). */
@@ -202,12 +230,17 @@ final class BoundedListingMcpTransport implements McpTransport {
         // refused above, and a first page starts with the whole of it. The owner is
         // told
         // only when the timeout wins — a page that completed first evicts nothing.
-        deadlineScheduler.schedule(Math.max(remainingNanos, 1L), () -> {
+        Runnable cancelDeadline = deadlineScheduler.schedule(Math.max(remainingNanos, 1L), () -> {
             if (mapped.completeExceptionally(limitException(method, "longer than " + limits.deadline().toMillis() + " ms"))) {
                 notifyExceeded();
                 source.cancel(true);
             }
         });
+        // A page that completes first releases its timer: the task holds both futures,
+        // and with them the raw response, until it runs or is cancelled.
+        if (cancelDeadline != null) {
+            mapped.whenComplete((response, failure) -> cancelDeadline.run());
+        }
         return mapped;
     }
 

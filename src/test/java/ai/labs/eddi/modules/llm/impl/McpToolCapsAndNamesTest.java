@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
@@ -16,15 +17,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -168,6 +173,73 @@ class McpToolCapsAndNamesTest {
         assertEquals(1, probed.failures().size());
         verify(manager).probeToolsFromServer(any());
     }
+    @Nested
+    @DisplayName("eviction after a listing limit")
+    class ListingLimitEviction {
+
+        /** The onListingLimit callbacks handed to each client built, in order. */
+        private final List<Runnable> limitCallbacks = new ArrayList<>();
+
+        private McpToolProviderManager managerBuilding(McpClient... clients) {
+            var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
+            doAnswer(invocation -> {
+                limitCallbacks.add(invocation.getArgument(2));
+                return mock(McpTransport.class);
+            }).when(manager).boundedTransport(any(), any(), any());
+            var next = new ArrayList<>(List.of(clients));
+            doAnswer(invocation -> next.removeFirst()).when(manager).buildClient(any());
+            return manager;
+        }
+
+        @Test
+        @DisplayName("a late callback of an evicted client closes only that client, never its replacement")
+        void lateCallbackLeavesTheReplacement() throws Exception {
+            McpClient first = mock(McpClient.class);
+            McpClient second = mock(McpClient.class);
+            var manager = managerBuilding(first, second);
+
+            assertSame(first, manager.getOrCreateClient(config()));
+            Runnable firstLimit = limitCallbacks.getFirst();
+            firstLimit.run(); // the first client's listing passed a bound: evicted
+            assertSame(second, manager.getOrCreateClient(config()), "the next turn builds a replacement");
+
+            firstLimit.run(); // a second, paused callback of the FIRST client resumes
+
+            assertSame(second, manager.getOrCreateClient(config()), "the replacement stays cached");
+            verify(second, never()).close();
+            verify(first, atLeastOnce()).close();
+        }
+
+        @Test
+        @DisplayName("a discovery whose client was evicted while it ran does not cache executors bound to the closed client")
+        void discoveryDoesNotCacheAfterEviction() {
+            McpClient client = mock(McpClient.class);
+            var manager = managerBuilding(client);
+            ToolExecutor executor = (request, memoryId) -> "ok";
+            doAnswer(invocation -> {
+                manager.getOrCreateClient(invocation.getArgument(0));
+                limitCallbacks.getFirst().run(); // the listing passes its bound mid-discovery
+                return resultOf(Map.of(ToolSpecification.builder().name("t").build(), executor));
+            }).when(manager).fetchToolsFromServer(any());
+
+            manager.discoverTools(List.of(config()));
+
+            assertEquals(0, manager.getCachedToolServerCount(), "a cache hit would serve the closed client until the TTL");
+        }
+
+        @Test
+        @DisplayName("a discovery with no eviction still caches its tools")
+        void discoveryCachesWithoutEviction() {
+            var manager = managerBuilding(mock(McpClient.class));
+            ToolExecutor executor = (request, memoryId) -> "ok";
+            doReturn(resultOf(Map.of(ToolSpecification.builder().name("t").build(), executor))).when(manager).fetchToolsFromServer(any());
+
+            manager.discoverTools(List.of(config()));
+
+            assertEquals(1, manager.getCachedToolServerCount());
+        }
+    }
+
     @Test
     @DisplayName("a client whose construction fails (e.g. the initialize handshake times out) has its transport closed")
     void failedConstructionClosesTheTransport() throws Exception {

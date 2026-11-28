@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -101,14 +102,24 @@ class McpCallsTaskResultScreeningTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     @DisplayName("an injected instruction is redacted, and the JSON still parses into the same shape")
     void directiveRedacted() throws Exception {
-        task.execute(memory, config());
+        // The production serializer, not the permissive stub: redaction that broke a
+        // quote or a brace must fail here.
+        var realTask = new McpCallsTask(mock(IResourceClientLibrary.class), memoryItemConverter, new JsonSerialization(new ObjectMapper()),
+                manager, prePostUtils, toolExecutionService);
 
-        String stored = storedText();
-        assertFalse(stored.toLowerCase().contains("ignore all previous instructions"), stored);
-        assertTrue(stored.contains(RemoteTextGovernor.REDACTED));
-        assertTrue(stored.startsWith("{\"weather\":\"sunny."), "the value keeps its key and its benign text: " + stored);
+        realTask.execute(memory, config());
+
+        ArgumentCaptor<Object> stored = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils).createMemoryEntry(eq(step), stored.capture(), eq("weatherCallResponse"), eq("mcpCalls"));
+        Map<String, Object> value = (Map<String, Object>) stored.getValue();
+        assertEquals(Set.of("weather"), value.keySet(), "the shape a designer templates against: " + value);
+        String weather = (String) value.get("weather");
+        assertFalse(weather.toLowerCase().contains("ignore all previous instructions"), weather);
+        assertTrue(weather.contains(RemoteTextGovernor.REDACTED), weather);
+        assertTrue(weather.startsWith("sunny."), "the value keeps its benign text: " + weather);
     }
 
     @Test

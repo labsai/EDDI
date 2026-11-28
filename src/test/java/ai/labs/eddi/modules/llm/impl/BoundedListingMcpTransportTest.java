@@ -228,7 +228,7 @@ class BoundedListingMcpTransportTest {
         var clock = new AtomicLong();
         var sent = new AtomicInteger();
         var transport = new BoundedListingMcpTransport(answering(page(1, "next"), sent),
-                new BoundedListingMcpTransport.Limits(100, 1000, Duration.ofSeconds(30)), null, clock::get, (nanos, task) -> {
+                new BoundedListingMcpTransport.Limits(100, 1000, Duration.ofSeconds(30)), null, clock::get, (nanos, task) -> () -> {
                 });
 
         transport.sendRequest(list(null)).join();
@@ -247,11 +247,16 @@ class BoundedListingMcpTransportTest {
         when(delegate.sendRequest(any(McpCallContext.class))).thenReturn(pending);
         var exceeded = new AtomicInteger();
         var timers = new ArrayList<Runnable>();
-        var transport = new BoundedListingMcpTransport(delegate, LIMITS, exceeded::incrementAndGet, System::nanoTime,
-                (nanos, task) -> timers.add(task));
+        var cancelled = new AtomicInteger();
+        var transport = new BoundedListingMcpTransport(delegate, LIMITS, exceeded::incrementAndGet, System::nanoTime, (nanos, task) -> {
+            timers.add(task);
+            return cancelled::incrementAndGet;
+        });
 
         CompletableFuture<String> result = transport.sendRequest(list(null));
+        assertEquals(0, cancelled.get(), "pending: the deadline stays armed");
         pending.complete(page(1, null));
+        assertEquals(1, cancelled.get(), "completed: its timer is released, and with it the response it holds");
         timers.forEach(Runnable::run);
 
         assertEquals(page(1, null), result.get(5, TimeUnit.SECONDS));
