@@ -439,6 +439,18 @@ describe("a key lives exactly as long as the outcome is unsettled", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
+  it("without a host (the controller's own notices) the unknown-outcome stream error keeps the key too", async () => {
+    const { transport, keys } = setup([
+      () => events(ev("error", { message: "store down", code: "turn_not_stored", reason: "store_failure" })),
+      () => events(done([reply("stored after all")])),
+    ]);
+    const c = await opened(transport);
+    await c.send("yes");
+    expect(texts(c).slice(-1)[0] ?? "").toContain("normally will not");
+    await c.send("yes");
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("a stream error that settled the turn (no code, it failed) does not keep it", async () => {
     const { transport, keys } = setup([
       () => events(ev("token", "half"), ev("error", { message: "upstream died" })),

@@ -1556,6 +1556,9 @@ export class AgentConversation {
       });
     } else if (cls === "unknownOutcome") {
       // It may or may not have been stored: the message stays and the user decides.
+      // The retry must carry the same key, so the backend can answer it from the
+      // first attempt (the host-less twin of the kept key in `readStream`).
+      turn.keepSubmission = true;
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
       dispatch({
         type: "ADD_MESSAGE",
