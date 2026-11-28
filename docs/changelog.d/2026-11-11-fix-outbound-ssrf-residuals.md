@@ -154,7 +154,9 @@ docs: [`security.md`](../security.md), [`hitl-oversight.md`](../hitl-oversight.m
   3.0 says a Reference Object's siblings are ignored. The merge keeps the stricter bound, so it can only
   narrow what the generated tool sends, never admit a value the referenced schema refuses, and
   `expressBooleanPropertySchemasFor30` exists to carry such merges through 3.0.
-- **A name one `allOf` part forbids stays forbidden** (the 2026-11-25 review's outside-diff finding): a
-  closed part (`additionalProperties: false`, or closed because it forbids a property) now limits the
-  merged object to the names it declares, and the merge is closed; before, another part's `true`
-  reopened it and the forbidden name was sendable.
+- **A name one `allOf` part forbids stays forbidden** (the 2026-11-25 review's outside-diff finding):
+  the names a part forbids (property schema `false`, through component references and nested `allOf`)
+  are removed from the merged object, from its `required`, and the merge is closed; before, another
+  part's `true` reopened it and a part declaring the same name made it sendable. Only forbidden names
+  are removed: a part closed by an explicit `additionalProperties: false` does not strip the other
+  parts' properties.

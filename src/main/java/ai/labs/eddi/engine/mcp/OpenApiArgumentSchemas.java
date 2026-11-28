@@ -255,11 +255,11 @@ final class OpenApiArgumentSchemas {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();
         Boolean additional = null;
-        // A closed part (additionalProperties false, or closed because it forbids a
-        // property) admits only the names it declares, whatever another part allows:
-        // allOf applies every part. Without this, a part that forbids "legacy" closed
-        // itself, another part's "true" reopened the merge, and "legacy" was sendable.
-        Set<String> closedTo = null;
+        // A name one part forbids (its schema is false) stays forbidden in the merge:
+        // allOf applies every part. Without this, the part closed itself, another
+        // part's "true" reopened the merge, and a part declaring the same name made it
+        // sendable again.
+        Set<String> forbidden = new HashSet<>();
         List<Schema> parts = new ArrayList<>(schema.getAllOf());
         if (schema.getProperties() != null && !schema.getProperties().isEmpty()) {
             Schema<Object> own = new Schema<>();
@@ -287,20 +287,12 @@ final class OpenApiArgumentSchemas {
             }
             if (Boolean.TRUE.equals(converted.get("additionalProperties"))) {
                 additional = true;
-            } else if (Boolean.FALSE.equals(converted.get("additionalProperties"))) {
-                Set<String> declared = converted.get("properties") instanceof Map<?, ?> partProperties
-                        ? new HashSet<>((Set<String>) partProperties.keySet())
-                        : new HashSet<>();
-                if (closedTo == null) {
-                    closedTo = declared;
-                } else {
-                    closedTo.retainAll(declared);
-                }
             }
+            forbidden.addAll(forbiddenNames(part, openAPI, 0));
         }
-        if (closedTo != null) {
-            properties.keySet().retainAll(closedTo);
-            required.removeIf(name -> !properties.containsKey(name));
+        if (!forbidden.isEmpty()) {
+            properties.keySet().removeAll(forbidden);
+            required.removeIf(forbidden::contains);
             additional = false;
         }
         Map<String, Object> out = new LinkedHashMap<>();
@@ -314,6 +306,39 @@ final class OpenApiArgumentSchemas {
             out.put("additionalProperties", additional);
         }
         return out;
+    }
+
+    /**
+     * The names an object part forbids - properties whose schema is false - through
+     * component references and nested {@code allOf}, a bounded number of hops deep.
+     */
+    private static Set<String> forbiddenNames(Schema<?> part, OpenAPI openAPI, int hops) {
+        Set<String> names = new HashSet<>();
+        if (part == null || hops > MAX_DEPTH) {
+            return names;
+        }
+        String ref = part.get$ref();
+        if (ref != null) {
+            if (ref.startsWith(SCHEMA_REF_PREFIX) && openAPI != null && openAPI.getComponents() != null
+                    && openAPI.getComponents().getSchemas() != null) {
+                names.addAll(forbiddenNames(openAPI.getComponents().getSchemas().get(ref.substring(SCHEMA_REF_PREFIX.length())), openAPI,
+                        hops + 1));
+            }
+            return names;
+        }
+        if (part.getProperties() != null) {
+            part.getProperties().forEach((name, schema) -> {
+                if (isFalseSchema(schema)) {
+                    names.add(name);
+                }
+            });
+        }
+        if (part.getAllOf() != null) {
+            for (Schema<?> nested : part.getAllOf()) {
+                names.addAll(forbiddenNames(nested, openAPI, hops + 1));
+            }
+        }
+        return names;
     }
 
     /**
