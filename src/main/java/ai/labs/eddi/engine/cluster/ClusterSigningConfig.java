@@ -35,6 +35,11 @@ import java.util.Optional;
  * a signed RPC may be; also the window in which a repeated nonce is refused.
  * Events use the event retention instead, because a reconnecting node
  * legitimately receives events that old.</li>
+ * <li>{@code eddi.cluster.signing.max-remembered-nonces} — how many unexpired
+ * nonces a node remembers against a replay. A nonce is kept until its own
+ * message expires; a node holding this many refuses further signed messages
+ * (counted as {@code nonce_capacity}) rather than forget a nonce that could
+ * still be replayed.</li>
  * </ul>
  * Field-injected with defaults, like {@link ClusterConfig}; tests use
  * {@link #of}.
@@ -60,6 +65,12 @@ public class ClusterSigningConfig {
     @ConfigProperty(name = "eddi.cluster.signing.max-age", defaultValue = "60s")
     Duration maxAge = Duration.ofSeconds(60);
 
+    /** Default of {@code eddi.cluster.signing.max-remembered-nonces}. */
+    public static final long DEFAULT_MAX_REMEMBERED_NONCES = 500_000L;
+
+    @ConfigProperty(name = "eddi.cluster.signing.max-remembered-nonces", defaultValue = "500000")
+    long maxRememberedNonces = DEFAULT_MAX_REMEMBERED_NONCES;
+
     public static ClusterSigningConfig of(String key, List<String> previousKeys, boolean required, Duration maxAge) {
         ClusterSigningConfig config = new ClusterSigningConfig();
         config.key = Optional.ofNullable(key).filter(k -> !k.isBlank());
@@ -83,5 +94,15 @@ public class ClusterSigningConfig {
 
     public Duration maxAge() {
         return maxAge;
+    }
+
+    public long maxRememberedNonces() {
+        return maxRememberedNonces;
+    }
+
+    /** For tests: a small nonce capacity, so it can be reached. */
+    public ClusterSigningConfig withMaxRememberedNonces(long max) {
+        this.maxRememberedNonces = max;
+        return this;
     }
 }

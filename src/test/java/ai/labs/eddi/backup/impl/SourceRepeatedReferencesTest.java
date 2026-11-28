@@ -76,6 +76,11 @@ class SourceRepeatedReferencesTest {
 
         private final Map<String, String> bodyByPath = new LinkedHashMap<>();
         private final Map<String, Integer> requestsByPath = new ConcurrentHashMap<>();
+        /**
+         * Status a path prefix answers with instead of 200, its body served all the
+         * same.
+         */
+        private final Map<String, Integer> statusByPath = new LinkedHashMap<>();
         private HttpClient httpClient;
 
         @BeforeEach
@@ -91,7 +96,12 @@ class SourceRepeatedReferencesTest {
                         .map(Map.Entry::getValue)
                         .orElse(null);
                 HttpResponse<String> response = mock(HttpResponse.class);
-                when(response.statusCode()).thenReturn(body == null ? 404 : 200);
+                int status = statusByPath.entrySet().stream()
+                        .filter(entry -> path.startsWith(entry.getKey()))
+                        .map(Map.Entry::getValue)
+                        .findFirst()
+                        .orElse(body == null ? 404 : 200);
+                when(response.statusCode()).thenReturn(status);
                 when(response.body()).thenReturn(body == null ? "" : body);
                 return response;
             }).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
@@ -151,6 +161,49 @@ class SourceRepeatedReferencesTest {
             assertTrue(failure.getMessage().contains(RemoteApiResourceSource.MAX_REQUESTS_PROPERTY), failure.getMessage());
             int sent = requestsByPath.values().stream().mapToInt(Integer::intValue).sum();
             assertEquals(RemoteApiResourceSource.DEFAULT_MAX_REQUESTS, sent, "no request past the budget");
+        }
+
+        @Test
+        @DisplayName("a source serving many large documents fails the sync once their total passes the response budget")
+        void totalResponseBudgetEndsTheSync() {
+            int distinct = 50;
+            bodyByPath.put("/agentstore/agents/" + AGENT_ID, workflowRefs(1));
+            bodyByPath.put("/workflowstore/workflows/" + WORKFLOW_ID, IntStream.range(0, distinct)
+                    .mapToObj(i -> "{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/"
+                            + String.format("%024x", i) + "?version=1\"}}")
+                    .collect(Collectors.joining(",", "{\"workflowSteps\":[", "]}")));
+            // Every LLM document is well under the per-response cap; together they are
+            // not under the (here lowered) total budget.
+            bodyByPath.put("/llmstore/llms/", "{\"tasks\":[],\"description\":\"" + "x".repeat(1_000) + "\"}");
+
+            var source = source().withMaxTotalResponseBytes(10_000);
+            var failure = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readWorkflows);
+
+            assertTrue(failure.getMessage().contains(RemoteApiResourceSource.MAX_TOTAL_RESPONSE_BYTES_PROPERTY), failure.getMessage());
+            int sent = requestsByPath.values().stream().mapToInt(Integer::intValue).sum();
+            assertTrue(sent < distinct, "the sync stopped reading at the budget, after " + sent + " requests");
+        }
+
+        @Test
+        @DisplayName("error bodies count against the total response budget too: a source failing every reference still runs out")
+        void errorBodiesCountAgainstTheBudget() {
+            int distinct = 50;
+            bodyByPath.put("/agentstore/agents/" + AGENT_ID, workflowRefs(1));
+            bodyByPath.put("/workflowstore/workflows/" + WORKFLOW_ID, IntStream.range(0, distinct)
+                    .mapToObj(i -> "{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/"
+                            + String.format("%024x", i) + "?version=1\"}}")
+                    .collect(Collectors.joining(",", "{\"workflowSteps\":[", "]}")));
+            // Every LLM read fails with a large error page; a failed extension is
+            // skipped, so only the budget can stop the sync reading on.
+            bodyByPath.put("/llmstore/llms/", "x".repeat(1_000));
+            statusByPath.put("/llmstore/llms/", 500);
+
+            var source = source().withMaxTotalResponseBytes(10_000);
+            var failure = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readWorkflows);
+
+            assertTrue(failure.getMessage().contains(RemoteApiResourceSource.MAX_TOTAL_RESPONSE_BYTES_PROPERTY), failure.getMessage());
+            int sent = requestsByPath.values().stream().mapToInt(Integer::intValue).sum();
+            assertTrue(sent < distinct, "the sync stopped reading at the budget, after " + sent + " requests");
         }
     }
 

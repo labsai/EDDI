@@ -337,6 +337,38 @@ public class RemoteApiResourceSource implements IResourceSource {
     private final int maxRequests = maxRequests();
     private int requestsSent;
 
+    /**
+     * The most response characters one sync reads from its source, all requests
+     * together: {@value #MAX_TOTAL_RESPONSE_BYTES_PROPERTY}, default
+     * {@value #DEFAULT_MAX_TOTAL_RESPONSE_BYTES}. Every document read is kept for
+     * the rest of the sync ({@link #documentsByPath}), so the per-response cap
+     * times the request budget — 16 MiB times 10,000 — was the only bound on the
+     * heap one sync could take, and a source serving many large documents decided
+     * it. Counted in characters of the decoded body, which for the ASCII JSON a
+     * source serves is one per byte.
+     */
+    static final String MAX_TOTAL_RESPONSE_BYTES_PROPERTY = "eddi.backup.sync.max-total-response-bytes";
+    static final long DEFAULT_MAX_TOTAL_RESPONSE_BYTES = 256L * 1024 * 1024;
+
+    private long maxTotalResponseBytes = maxTotalResponseBytes();
+    private long responseBytesRead;
+
+    /** For tests: the total budget, so it can be crossed without megabytes. */
+    RemoteApiResourceSource withMaxTotalResponseBytes(long maxBytes) {
+        this.maxTotalResponseBytes = maxBytes;
+        return this;
+    }
+
+    static long maxTotalResponseBytes() {
+        try {
+            long configured = ConfigProvider.getConfig().getOptionalValue(MAX_TOTAL_RESPONSE_BYTES_PROPERTY, Long.class)
+                    .orElse(DEFAULT_MAX_TOTAL_RESPONSE_BYTES);
+            return configured > 0 ? configured : DEFAULT_MAX_TOTAL_RESPONSE_BYTES;
+        } catch (RuntimeException e) {
+            return DEFAULT_MAX_TOTAL_RESPONSE_BYTES;
+        }
+    }
+
     static int maxRequests() {
         try {
             int configured = ConfigProvider.getConfig().getOptionalValue(MAX_REQUESTS_PROPERTY, Integer.class)
@@ -965,11 +997,24 @@ public class RemoteApiResourceSource implements IResourceSource {
             OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken, peerSsrf).header("Accept", "application/json").build();
             OutboundResponse<String> response = sendJson(http, request);
 
+            // Counted before the status: an error body was read just the same, and
+            // the callers skip a failed document and go on to the next one, so a
+            // source answering every reference with a large error page would
+            // otherwise never reach the budget.
+            String body = response.body();
+            responseBytesRead += body == null ? 0 : body.length();
             if (response.status() != 200) {
+                if (responseBytesRead > maxTotalResponseBytes) {
+                    throw totalBudgetExceeded();
+                }
                 throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.status());
             }
-
-            return response.body();
+            if (responseBytesRead > maxTotalResponseBytes) {
+                // Fails the whole sync like the request budget: skipping this one
+                // document would let the upgrade read the rest as removed.
+                throw totalBudgetExceeded();
+            }
+            return body;
         } catch (InterruptedException e) {
             // Restore the flag before unwinding: readWorkflows catches per-workflow
             // failures and carries on, so a swallowed interrupt meant a cancelled or
@@ -982,6 +1027,12 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
             throw new RemoteReadException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
+    }
+
+    /** The total read budget ran out; see {@link #maxTotalResponseBytes}. */
+    private RequestBudgetExceededException totalBudgetExceeded() {
+        return new RequestBudgetExceededException("The sync stopped after reading more than " + maxTotalResponseBytes + " bytes from "
+                + baseUrl + " (" + MAX_TOTAL_RESPONSE_BYTES_PROPERTY + "): the source serves more than this instance reads for one sync");
     }
 
     private static String normalizeBaseUrl(String url) {
