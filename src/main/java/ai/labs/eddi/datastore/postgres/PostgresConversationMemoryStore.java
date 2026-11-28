@@ -1296,6 +1296,25 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public List<String> findConversationIdsByState(ConversationState state, int limit) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ? LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, state.name());
+            ps.setInt(2, Math.max(1, limit));
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> ids = new ArrayList<>();
+                while (rs.next()) {
+                    ids.add(rs.getString("id"));
+                }
+                return ids;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to find conversations by state", e);
+        }
+    }
+
+    @Override
     public List<String> findConversationIdsByState(ConversationState state) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
