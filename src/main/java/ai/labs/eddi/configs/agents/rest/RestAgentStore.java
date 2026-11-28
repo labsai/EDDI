@@ -33,6 +33,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -82,6 +83,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final AgentCascadeService agentCascadeService;
     private final IAgentFactory agentFactory;
     private final String defaultTenantId;
+    private final VaultGrantService vaultGrantService;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
@@ -91,15 +93,34 @@ public class RestAgentStore implements IRestAgentStore {
     private final ResourceInUseGuard inUseGuard;
 
     /**
-     * Without the open-conversation guard: for unit tests that do not delete. The
-     * container uses the constructor below.
+     * Without the open-conversation guard and without vault-grant cleanup: for unit
+     * tests that do not delete. The container uses the last constructor below.
      */
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
             IDeploymentStore deploymentStore, ResourceAccessGuard resourceAccessGuard, AgentSigningService agentSigningService,
             IAgentFactory agentFactory, String defaultTenantId, AgentCascadeService agentCascadeService) {
         this(agentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService,
-                deploymentStore, resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, agentCascadeService, null);
+                deploymentStore, resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, agentCascadeService, null, null);
+    }
+
+    /** Without the open-conversation guard: for unit tests of the other paths. */
+    public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
+            IDeploymentStore deploymentStore, ResourceAccessGuard resourceAccessGuard, AgentSigningService agentSigningService,
+            IAgentFactory agentFactory, String defaultTenantId, AgentCascadeService agentCascadeService, VaultGrantService vaultGrantService) {
+        this(agentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService,
+                deploymentStore, resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, agentCascadeService, vaultGrantService,
+                null);
+    }
+
+    /** Without vault-grant cleanup: for unit tests of the delete guard. */
+    public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
+            IDeploymentStore deploymentStore, ResourceAccessGuard resourceAccessGuard, AgentSigningService agentSigningService,
+            IAgentFactory agentFactory, String defaultTenantId, AgentCascadeService agentCascadeService, ResourceInUseGuard inUseGuard) {
+        this(agentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService,
+                deploymentStore, resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, agentCascadeService, null, inUseGuard);
     }
 
     @Inject
@@ -110,8 +131,9 @@ public class RestAgentStore implements IRestAgentStore {
             AgentSigningService agentSigningService,
             IAgentFactory agentFactory,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
-            AgentCascadeService agentCascadeService,
+            AgentCascadeService agentCascadeService, VaultGrantService vaultGrantService,
             ResourceInUseGuard inUseGuard) {
+        this.vaultGrantService = vaultGrantService;
         this.inUseGuard = inUseGuard;
         this.agentCascadeService = agentCascadeService;
         this.agentFactory = agentFactory;
@@ -611,6 +633,19 @@ public class RestAgentStore implements IRestAgentStore {
             // failed leaves a vault entry that no keys[] entry names. See
             // AgentSigningService.versionsToSweep.
             agentSigningService.deleteKeyPair(defaultTenantId, id, signingKeyVersions);
+        }
+
+        // Permanent deletes ONLY, by the rule above: a soft delete can be undone, and
+        // the restored Agent must still be granted what it was granted. A permanent one
+        // cannot, and its id left on a secret's allowedAgents is a grant to nobody that
+        // reads as a grant to someone — every replaced Platform Operator used to leave
+        // one behind. Never widens a grant; see VaultGrantService.revokeDeletedAgent.
+        if (Boolean.TRUE.equals(permanent) && vaultGrantService != null) {
+            try {
+                vaultGrantService.revokeDeletedAgent(id, resourceAccessGuard.currentPrincipal());
+            } catch (Exception e) {
+                log.warnf("Failed to remove permanently deleted Agent %s from vault grants: %s", sanitize(id), sanitize(e.getMessage()));
+            }
         }
 
         // A record left behind makes the runtime retry a
