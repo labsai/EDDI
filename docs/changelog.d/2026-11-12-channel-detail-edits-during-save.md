@@ -17,6 +17,7 @@ kept, the new version is marked as already seeded so the seeding effect leaves i
 page stays dirty with the newer edit; the next save goes against the new version. A save with no
 further typing behaves as before, and a navigation to another channel or version still seeds
 from that one.
+A save that returns after the user navigated to another version (the guard lets query-only moves through) now leaves that version's form, baseline and URL alone: the save records the route and seed generation it was sent from and only touches the form if both are unchanged.
 
 ### Relation to #1358
 

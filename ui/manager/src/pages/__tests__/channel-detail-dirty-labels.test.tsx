@@ -54,10 +54,11 @@ describe("ChannelDetailPage - unsaved changes and labels", () => {
 });
 
 function WithVersionJump() {
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   return (
     <>
       <button type="button" data-testid="go-v3" onClick={() => setSearchParams({ version: "3" })} />
+      <span data-testid="route-version">{searchParams.get("version")}</span>
       <ChannelDetailPage />
     </>
   );
@@ -121,6 +122,40 @@ describe("ChannelDetailPage - edits made while a save is in flight", () => {
     await waitFor(() => expect(screen.getByTestId("save-channel-btn")).not.toBeDisabled());
     await new Promise((r) => setTimeout(r, 150));
     expect(screen.getByTestId("channel-name-input")).toHaveValue("Engineering Slack one");
+    expect(beforeUnload()).toBe(false);
+  });
+
+  it("leaves the form and URL to the version navigated to while the PUT was pending", async () => {
+    const store = storeWithGatedPut();
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) => {
+        if (new URL(request.url).searchParams.get("version") !== "3") return undefined;
+        return HttpResponse.json({
+          name: "Version Three",
+          channelType: "slack",
+          platformConfig: { channelId: "C333" },
+          targets: [{ name: "default", type: "AGENT", targetId: "agent1", triggers: [], observeMode: false, observeConfig: null }],
+          defaultTargetName: "default",
+        });
+      }),
+    );
+    renderPage("/manage/channels/ch1?version=1", <WithVersionJump />, "/manage/channels/:id");
+    const user = userEvent.setup();
+    const name = await screen.findByTestId("channel-name-input");
+    await user.type(name, " one");
+    await user.click(screen.getByTestId("save-channel-btn"));
+    await waitFor(() => expect(store.sent()).not.toBeNull());
+
+    // Query-only navigation passes the guard; the other version loads.
+    await user.click(screen.getByTestId("go-v3"));
+    await waitFor(() => expect(screen.getByTestId("channel-name-input")).toHaveValue("Version Three"));
+    store.release();
+
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).not.toBeDisabled());
+    await new Promise((r) => setTimeout(r, 150));
+    // Still version 3, shown as version 3: the save's reply moved neither.
+    expect(screen.getByTestId("route-version")).toHaveTextContent("3");
+    expect(screen.getByTestId("channel-name-input")).toHaveValue("Version Three");
     expect(beforeUnload()).toBe(false);
   });
 
