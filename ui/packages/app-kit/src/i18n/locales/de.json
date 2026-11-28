@@ -31,7 +31,11 @@
     "initFailedBody": "Der Manager konnte die Anmeldung nicht abschließen. Der Anmeldedienst ist möglicherweise nicht erreichbar oder Ihre Sitzung wurde abgelehnt.",
     "signInAgain": "Erneut anmelden",
     "sessionExpiredTitle": "Ihre Sitzung ist abgelaufen.",
-    "sessionExpiredBody": "Nicht gespeicherte Änderungen sind noch auf dieser Seite – kopieren Sie, was Sie brauchen, bevor Sie sich erneut anmelden."
+    "sessionExpiredBody": "Nicht gespeicherte Änderungen sind noch auf dieser Seite – kopieren Sie, was Sie brauchen, bevor Sie sich erneut anmelden.",
+    "logout": "Abmelden",
+    "userMenu": "Benutzermenü",
+    "signedIn": "Angemeldet",
+    "initFailedBodyWorkforce": "Workforce konnte die Anmeldung nicht abschließen. Der Anmeldedienst ist möglicherweise nicht erreichbar oder Ihre Sitzung wurde abgelehnt."
   },
   "nav": {
     "modeManager": "Manager",

@@ -219,6 +219,27 @@ describe("useSendMessage — a stream stays bound to its own transcript", () => 
     expect(state.isProcessing).toBe(false);
   });
 
+  it("an awaiting_approval frame after part of the reply keeps the reply and raises the pause banner", async () => {
+    h.frames = [
+      { type: "token", data: "Let me check that" },
+      {
+        type: "error",
+        data: JSON.stringify({ code: "awaiting_approval", message: "Conversation is awaiting human approval" }),
+      },
+    ];
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "book it" }).catch(() => {});
+    });
+
+    const state = useChatStore.getState();
+    // The turn ran: the question and what arrived of the reply stay.
+    expect(state.messages.some((m) => m.role === "user" && m.content === "book it")).toBe(true);
+    expect(state.messages.some((m) => m.role === "agent" && m.content.includes("Let me check that"))).toBe(true);
+    expect(state.isPaused).toBe(true);
+  });
+
   it("honours an input field requested by a streamed reply", async () => {
     h.frames = [
       doneFrame({

@@ -414,7 +414,33 @@ class ApiClient {
     return response;
   }
 
-  /** Get current auth header (if set). Used by modules that need raw fetch (SSE, text/plain). */
+  /**
+   * Renew the token if it is about to expire — for the one transport that cannot
+   * go through {@link authorizedFetch} (an XMLHttpRequest upload with progress).
+   */
+  async ensureFreshToken(): Promise<void> {
+    await this.refreshToken(false);
+  }
+
+  /** Report a 401 that survived a fresh token (raises the "session expired" state). */
+  reportUnauthorized(): void {
+    this.unauthorizedHandler?.();
+  }
+
+  /**
+   * A request was answered 401: force one token refresh, as every `ApiClient`
+   * call and {@link authorizedFetch} do. Resolves true when the caller should
+   * send the request once more. Without a refresher (auth disabled) nothing is
+   * reported, as there; a refresh that fails reports the session as expired.
+   */
+  async recoverFromUnauthorized(): Promise<boolean> {
+    if (!this.tokenRefresher) return false;
+    const refreshed = await this.refreshToken(true);
+    if (!refreshed) this.unauthorizedHandler?.();
+    return refreshed;
+  }
+
+  /** Get current auth header (if set). Prefer {@link authorizedFetch}: this one never renews the token. */
   getAuthHeader(): Record<string, string> {
     const auth = this.headers["Authorization"];
     return auth ? { Authorization: auth } : {};

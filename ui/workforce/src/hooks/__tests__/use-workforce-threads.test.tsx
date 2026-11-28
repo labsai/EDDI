@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
+import { threadsStorageKey } from "@eddi/app-kit/lib/workforce-threads-storage";
 
 /**
  * Thread bookkeeping for the Workforce 1:1 view, persisted to localStorage.
@@ -8,7 +9,8 @@ import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
  * starts a new one, so a lost or mismatched entry silently strands a thread.
  */
 
-const STORAGE_KEY = "workforce-threads";
+// No sign-in in these tests: the anonymous principal's key.
+const STORAGE_KEY = threadsStorageKey(null);
 const read = () => JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 
 beforeEach(() => {

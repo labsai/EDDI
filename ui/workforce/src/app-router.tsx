@@ -14,7 +14,7 @@ export function createAppRouter(queryClient: QueryClient) {
     {
       path: "*",
       element: (
-        <AppProviders queryClient={queryClient}>
+        <AppProviders queryClient={queryClient} app="workforce">
           <App />
         </AppProviders>
       ),

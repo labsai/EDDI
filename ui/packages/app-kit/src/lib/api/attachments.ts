@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, ApiClientError } from "../api-client";
 import { seg } from "./path-segment";
 
 /*
@@ -159,6 +159,25 @@ function uploadWithProgress(
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<AttachmentResult> {
+  // A 401 gets what every other request gets: one forced token refresh and one
+  // retry, and "session expired" only when that does not help.
+  return sendWithProgress(url, formData, onProgress, signal).catch(async (error: unknown) => {
+    if (!(error instanceof AttachmentError) || error.status !== 401 || signal?.aborted) throw error;
+    if (!(await api.recoverFromUnauthorized())) throw error;
+    return sendWithProgress(url, formData, onProgress, signal).catch((retryError: unknown) => {
+      if (retryError instanceof AttachmentError && retryError.status === 401) api.reportUnauthorized();
+      throw retryError;
+    });
+  });
+}
+
+/** One XMLHttpRequest upload; a 401 rejects like any other status (the caller recovers). */
+function sendWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<AttachmentResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(cancelledError());
@@ -233,12 +252,14 @@ export async function uploadAttachment(
   formData.append("file", file);
 
   if (onProgress && file.size >= PROGRESS_MIN_BYTES && typeof XMLHttpRequest !== "undefined") {
+    // XMLHttpRequest cannot go through the refreshing client: renew the token first.
+    await api.ensureFreshToken();
     return uploadWithProgress(`${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`, formData, onProgress, signal);
   }
 
   let response: Response;
   try {
-    response = await fetch(
+    response = await api.authorizedFetch(
       `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
       {
         method: "POST",
@@ -250,9 +271,12 @@ export async function uploadAttachment(
   } catch (networkError) {
     if (signal?.aborted) throw cancelledError();
     throw new AttachmentError(
-      networkError instanceof Error
-        ? `Network error: ${networkError.message}`
-        : "Network error: unable to reach server",
+      // The client already words a network failure ("Network error: …").
+      networkError instanceof ApiClientError
+        ? networkError.message
+        : networkError instanceof Error
+          ? `Network error: ${networkError.message}`
+          : "Network error: unable to reach server",
       0,
     );
   }
@@ -272,7 +296,7 @@ export async function uploadAttachment(
 export async function listAttachments(
   conversationId: string,
 ): Promise<AttachmentMeta[]> {
-  const response = await fetch(
+  const response = await api.authorizedFetch(
     `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { headers: api.getAuthHeader() },
   );
@@ -303,7 +327,7 @@ export async function downloadAttachment(
   conversationId: string,
   storageRef: string,
 ): Promise<Blob> {
-  const response = await fetch(getAttachmentDownloadUrl(conversationId, storageRef), {
+  const response = await api.authorizedFetch(getAttachmentDownloadUrl(conversationId, storageRef), {
     headers: api.getAuthHeader(),
   });
   if (!response.ok) throw await toAttachmentError(response);
@@ -318,7 +342,7 @@ export async function deleteAttachment(
   conversationId: string,
   storageRef: string,
 ): Promise<void> {
-  const response = await fetch(getAttachmentDownloadUrl(conversationId, storageRef), {
+  const response = await api.authorizedFetch(getAttachmentDownloadUrl(conversationId, storageRef), {
     method: "DELETE",
     headers: api.getAuthHeader(),
   });
@@ -334,7 +358,7 @@ export async function deleteAttachment(
 export async function deleteAllAttachments(
   conversationId: string,
 ): Promise<number> {
-  const response = await fetch(
+  const response = await api.authorizedFetch(
     `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { method: "DELETE", headers: api.getAuthHeader() },
   );

@@ -47,6 +47,29 @@ export interface HttpClientOptions {
   fetch?: FetchLike;
   /** Default: an {@link ApiError} carrying the status and the raw body. */
   createError?: ErrorFactory;
+  /**
+   * Send the `Idempotency-Key` header to an API on ANOTHER origin. Default: off.
+   * A custom header makes the browser preflight the request, and the backend
+   * must list it in `quarkus.http.cors.headers` (`idempotency-key`; the default
+   * list does) — otherwise every send fails. The same origin never needs it.
+   */
+  idempotencyKeys?: boolean;
+}
+
+/**
+ * Whether `baseUrl` is the page's own origin: empty or relative, or an absolute
+ * URL with the same origin as `location`. Without a `location` (no browser) only
+ * an empty or relative base counts.
+ */
+export function isSameOrigin(baseUrl: string): boolean {
+  if (!baseUrl.trim()) return true;
+  const loc = (globalThis as { location?: { href?: string; origin?: string } }).location;
+  try {
+    if (!loc?.href) return !/^[a-z][a-z0-9+.-]*:|^\/\//i.test(baseUrl.trim());
+    return new URL(baseUrl, loc.href).origin === (loc.origin ?? new URL(loc.href).origin);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -128,8 +151,10 @@ export class HttpClient {
   private auth: AuthProvider | null;
   private readonly fetchImpl: FetchLike | undefined;
   private readonly createError: ErrorFactory;
+  private crossOriginIdempotency: boolean;
 
   constructor(options: HttpClientOptions = {}) {
+    this.crossOriginIdempotency = options.idempotencyKeys === true;
     this.baseUrl = (options.baseUrl ?? "").replace(/\/$/, "");
     this.auth = options.auth ?? null;
     this.fetchImpl = options.fetch;
@@ -143,6 +168,25 @@ export class HttpClient {
 
   getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  /** Whether this client talks to the page's own origin. */
+  isSameOrigin(): boolean {
+    return isSameOrigin(this.baseUrl);
+  }
+
+  /** Opt in (or out) of sending the idempotency key to another origin. */
+  setIdempotencyKeys(enabled: boolean): void {
+    this.crossOriginIdempotency = enabled;
+  }
+
+  /**
+   * Whether a turn may carry an `Idempotency-Key`: always on the page's own
+   * origin, on another only after an explicit opt-in (the backend must allow the
+   * header, or the preflight fails and every send with it).
+   */
+  sendsIdempotencyKeys(): boolean {
+    return this.isSameOrigin() || this.crossOriginIdempotency;
   }
 
   /** Install (or with null remove) the auth provider. */

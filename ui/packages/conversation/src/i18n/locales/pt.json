@@ -120,5 +120,15 @@
   "conversation.stop.stillRunning": "A parada não alcançou este turno: ele continua em execução em outro servidor e o que ele faz ainda vale. A resposta aparece quando você reabrir a conversa.",
   "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou.",
   "conversation.diagram.label": "Diagrama",
-  "conversation.diagram.source": "Código do diagrama"
+  "conversation.diagram.source": "Código do diagrama",
+  "conversation.send.unknownOutcome": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem, por isso ela permanece acima. Verifique novamente daqui a pouco. Se a enviar de novo dentro de poucos minutos, o agente normalmente não a responderá duas vezes; se já passou mais tempo, veja primeiro a conversa.",
+  "conversation.send.turnFailed": "⚠️ O agente não conseguiu concluir este turno. A sua mensagem está acima — tente novamente para a enviar outra vez.",
+  "conversation.send.empty": "O agente terminou sem dar uma resposta a esta mensagem. Pode reformulá-la ou tentar novamente.",
+  "conversation.reply.revised": "A resposta final difere da pré-visualização que foi sendo apresentada.",
+  "conversation.send.unknownOutcomeStale": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem ou já a ter respondido. Veja a conversa antes de a enviar de novo.",
+  "conversation.send.notStored": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta. A sua mensagem permanece acima. Enviá-la de novo executa o turno outra vez.",
+  "conversation.send.notStoredTooLarge": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta: a conversa está cheia. A sua mensagem permanece acima. Inicie uma nova conversa para continuar.",
+  "conversation.send.notStoredRejected": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa não aceitou os dados. Enviar de novo não ajudará.",
+  "conversation.send.notStoredConflict": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa mudou entretanto. Recarregue a conversa e envie a mensagem de novo.",
+  "conversation.send.conversationFull": "⚠️ A sua mensagem não foi enviada — esta conversa está cheia. Inicie uma nova conversa para continuar."
 }

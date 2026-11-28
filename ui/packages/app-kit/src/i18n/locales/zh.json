@@ -31,7 +31,11 @@
     "initFailedBody": "Manager 无法完成登录。登录服务可能无法访问，或您的会话已被拒绝。",
     "signInAgain": "重新登录",
     "sessionExpiredTitle": "您的会话已过期。",
-    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。"
+    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。",
+    "logout": "退出",
+    "userMenu": "用户菜单",
+    "signedIn": "已登录",
+    "initFailedBodyWorkforce": "Workforce 无法完成登录。登录服务可能无法访问，或你的会话已被拒绝。"
   },
   "nav": {
     "modeManager": "管理器",

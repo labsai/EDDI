@@ -49,9 +49,15 @@ import {
   AgentConversation,
   RECONNECT_DELAYS_MS,
   STOP_VERIFY_DELAYS_MS,
+  ParkedControllers,
   StreamEndedError,
+  turnFailureMessage,
   useAgentConversation,
+  useLeaveGuard,
   type ConversationMessage,
+  type Translate,
+  type TurnFailure,
+  type TurnFailureContext,
 } from "@eddi/conversation";
 import { extractOutputTexts, lastStepIndex, stepIndexes, type ContextMap, type ConversationSnapshot } from "@eddi/core";
 import { toolResultListener } from "@eddi/core/tool-events";
@@ -79,6 +85,9 @@ import {
 } from "@eddi/app-kit/lib/api/attachments";
 import { getAgentDescriptors } from "@eddi/app-kit/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { onSignOut } from "@eddi/app-kit/lib/session-events";
+import { principalOf } from "@eddi/app-kit/lib/workforce-threads-storage";
 import { extractOutputParts, type ConversationOutput, type SimpleConversationStep } from "@eddi/app-kit/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
 import { PauseNotice } from "@eddi/app-kit/components/hitl/pause-notice";
@@ -145,6 +154,13 @@ interface ThreadSendError {
    * pause has to be decided first.
    */
   paused: boolean;
+  /**
+   * Whether Retry may send the turn again. False for a turn that ran and whose
+   * result cannot be saved by sending it again (`turn_not_stored` with
+   * `retryable: false`, e.g. a conversation too large): a retry would only run it
+   * once more. Absent means yes.
+   */
+  canRetry?: boolean;
 }
 
 interface GroupContext {
@@ -688,8 +704,11 @@ interface ThreadTurn {
 /** The page's handlers, read by the controller's hooks at call time. */
 interface ThreadHooks {
   t: TFunction;
-  /** The turn did not produce an answer; `userMessageId` is the question to withdraw on retry. */
-  failed: (message: string, paused: boolean, userMessageId: string | null) => void;
+  /**
+   * The turn did not produce an answer; `userMessageId` is the question to
+   * withdraw on retry, `canRetry` false when Retry must not be offered.
+   */
+  failed: (message: string, paused: boolean, userMessageId: string | null, canRetry?: boolean) => void;
 }
 
 /** The first attachment's name, as the input of a turn that sends only files. */
@@ -697,6 +716,60 @@ function firstAttachmentName(context: ContextMap | undefined): string | undefine
   const value = context?.attachment_0?.value as { fileName?: unknown } | undefined;
   return typeof value?.fileName === "string" ? value.fileName : undefined;
 }
+
+/** What one thread keeps between visits: its controller, its refs and its logs. */
+interface ThreadEntry {
+  controller: AgentConversation;
+  /** A failure or pause notice that arrived while the page was away; shown when it returns. */
+  deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null>;
+  hooksRef: MutableRefObject<ThreadHooks | null>;
+  turnRef: MutableRefObject<ThreadTurn | null>;
+  toolLog: ToolActivityLog;
+  noteLog: TurnNotesLog;
+}
+
+function createThreadEntry(memberId: string): ThreadEntry {
+  const hooksRef: MutableRefObject<ThreadHooks | null> = { current: null };
+  const turnRef: MutableRefObject<ThreadTurn | null> = { current: null };
+  // Files every call under its conversation.
+  const toolLog = new ToolActivityLog({ maxConversations: 5 });
+  const noteLog = new TurnNotesLog();
+  const deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null> = { current: null };
+  return {
+    controller: createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog, deferredRef),
+    deferredRef,
+    hooksRef,
+    turnRef,
+    toolLog,
+    noteLog,
+  };
+}
+
+/**
+ * The threads whose page was left. A turn still running keeps its controller for
+ * the shared grace period (the same one the Manager's chat has), so the exchange
+ * is not discarded by navigating away.
+ */
+const threadRegistry = new ParkedControllers<ThreadEntry>(undefined, {
+  // A parked transcript still shows its sent images on return; their preview
+  // URLs go only when the entry itself does.
+  onDispose: (entry) => revokeSentPreviews(entry.controller.getSnapshot().messages),
+});
+
+/** Release the preview URLs of the images in sent messages. */
+function revokeSentPreviews(messages: readonly { attachments?: readonly { previewUrl?: string }[] }[]): void {
+  messages.forEach((msg) => {
+    msg.attachments?.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    });
+  });
+}
+
+// What a parked thread holds belongs to one person: nothing of it may outlive their
+// session. Sign-out is a page navigation today; this does not depend on that.
+onSignOut(() => threadRegistry.clear());
+/** The person the registry's entries belong to; a different one empties it. */
+let registryPrincipal: string | null | undefined;
 
 /**
  * The member thread on @eddi/conversation's controller (phase 3c): the turn —
@@ -712,6 +785,7 @@ function createThreadConversation(
   turnRef: MutableRefObject<ThreadTurn | null>,
   tools: ToolActivityLog,
   notes: TurnNotesLog,
+  deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null>,
 ): AgentConversation {
   // Filed under the conversation and step on screen when each call finishes.
   const recordToolResult = toolResultListener((result) => {
@@ -722,6 +796,90 @@ function createThreadConversation(
     const { conversationId, messages } = controller.getSnapshot();
     notes.record(conversationId, lastStepIndex(messages), note);
   });
+  /** The failure banner, Retry and pause notice for a turn that did not end with a reply. */
+  const present = (failure: TurnFailure, ctx: TurnFailureContext, hooks: ThreadHooks): boolean => {
+      // Rendered from the controller's classification, shared with the Manager and
+      // the widget — never from the status (a 409 is not always a pause, a 408 is
+      // not a refusal).
+      const sentence = (detail: { code?: string | null; message?: string; retryable?: boolean | null } = {}) =>
+        turnFailureMessage(failure.class, failure.status, hooks.t as unknown as Translate, detail).replace(/^⚠️\s*/u, "");
+      switch (failure.class) {
+        case "ended":
+          // The controller's own handling: the conversation is marked ended and
+          // says so in the transcript.
+          return false;
+        case "paused":
+          // Refused WITHOUT being consumed because the conversation is paused:
+          // the backend never received the message, so it leaves the transcript.
+          // A paused error links to the approvals queue rather than a Retry.
+          ctx.withdraw();
+          hooks.failed(
+            hooks.t(
+              "Workforce.thread.pausedRejected",
+              "This conversation is paused waiting for a human decision, so the message was not sent.",
+            ),
+            true,
+            null,
+          );
+          return true;
+        case "notAccepted":
+          // Never accepted (too large, not found, not allowed, signed out, busy,
+          // unavailable): the message leaves the transcript, the draft comes
+          // back, and Retry sends it once more.
+          ctx.withdraw();
+          hooks.failed(sentence({ code: failure.code, message: failure.message }), false, null);
+          return true;
+        case "notStored":
+          // The turn ran; its reply was not saved. The question stays, and Retry
+          // runs the turn again (or, when the conversation is too large, the
+          // notice says to start a new one).
+          controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+          hooks.failed(
+            sentence({ retryable: failure.retryable }),
+            false,
+            failure.partial ? null : ctx.userMessageId,
+            // Not retryable: sending it again runs the turn again and is not saved either.
+            failure.retryable !== false,
+          );
+          return true;
+        case "unknownOutcome":
+          // The server may have the message and may still be working. It stays on
+          // screen; Retry sends it again with the same Idempotency-Key, so the
+          // turn runs once (or answers from the stored one).
+          controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+          hooks.failed(
+            failure.error instanceof StreamEndedError && failure.partial
+              ? hooks.t(
+                  "Workforce.thread.streamEnded",
+                  "The connection ended before the reply finished. What arrived is above — send again to retry.",
+                )
+              : sentence(),
+            false,
+            failure.partial ? null : ctx.userMessageId,
+          );
+          return true;
+        default:
+          break;
+      }
+      // The question stays on screen next to the error, so the reader sees
+      // what they sent; Retry withdraws it just before re-sending. Not once
+      // tokens arrived: the partial reply stays under the question it answers.
+      controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      // A known stream code has a sentence in the reader's language; the
+      // backend's own text is the fallback rather than something discarded.
+      const message =
+        failure.error instanceof StreamEndedError
+          ? hooks.t(
+              "Workforce.thread.streamEnded",
+              "The connection ended before the reply finished. What arrived is above — send again to retry.",
+            )
+          : failure.error !== undefined
+          ? getErrorMessage(failure.error)
+          : (translateStreamError(failure.code ?? undefined, hooks.t) ?? failure.message);
+      hooks.failed(message, false, failure.partial ? null : ctx.userMessageId);
+      return true;
+  };
+
   const controller: AgentConversation = new AgentConversation({
     stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
     reconnectDelaysMs: RECONNECT_DELAYS_MS,
@@ -729,13 +887,14 @@ function createThreadConversation(
       mode: "conversation",
       // A turn of files only names the first file as its input; the backend
       // reads the files from the context.
-      stream: (conversationId, text, { context, signal }) =>
+      stream: (conversationId, text, { context, signal, idempotencyKey }) =>
         sendMessageStreaming(
           "production",
           memberId,
           conversationId ?? "",
           context ? { input: text || firstAttachmentName(context) || "attachment", context } : { input: text },
           signal,
+          { idempotencyKey },
         ),
       read: (conversationId, currentStepOnly) =>
         readConversation("production", memberId, conversationId, currentStepOnly ?? false) as unknown as Promise<
@@ -767,52 +926,34 @@ function createThreadConversation(
       else if (event.type === "error") turn.error = true;
     },
     onTurnSnapshot: (snapshot) => {
+      if (snapshot.conversationState !== "AWAITING_HUMAN") return;
+      const notify = (hooks: ThreadHooks) =>
+        hooks.failed(
+          hooks.t(
+            "Workforce.thread.pausedForApproval",
+            "This turn is paused waiting for a human decision. It resumes once the request is approved.",
+          ),
+          true,
+          turnRef.current?.tokens ? null : lastUserMessageId(controller),
+        );
+      // Nobody is looking when the page was left while the turn ran: show it on return.
       const hooks = hooksRef.current;
-      if (!hooks || snapshot.conversationState !== "AWAITING_HUMAN") return;
-      hooks.failed(
-        hooks.t(
-          "Workforce.thread.pausedForApproval",
-          "This turn is paused waiting for a human decision. It resumes once the request is approved.",
-        ),
-        true,
-        turnRef.current?.tokens ? null : lastUserMessageId(controller),
-      );
+      if (hooks) notify(hooks);
+      else deferredRef.current = notify;
     },
     presentFailure: (failure, ctx) => {
       const hooks = hooksRef.current;
-      if (!hooks) return true;
-      if (failure.status === 409) {
-        // Refused WITHOUT being consumed because the conversation is paused:
-        // the backend never received the message, so it leaves the transcript.
-        // A paused error links to the approvals queue rather than a Retry.
-        ctx.withdraw();
-        hooks.failed(
-          hooks.t(
-            "Workforce.thread.pausedRejected",
-            "This conversation is paused waiting for a human decision, so the message was not sent.",
-          ),
-          true,
-          null,
-        );
+      if (!hooks) {
+        // An ended conversation is the controller's own handling (the ENDED state
+        // and its notice), whether or not anyone is looking: deferring it would
+        // skip both.
+        if (failure.class === "ended") return false;
+        // The page was left while the turn ran and it failed: keep the failure and
+        // present it when the thread is back, with its question and Retry.
+        deferredRef.current = (back) => void present(failure, ctx, back);
         return true;
       }
-      // The question stays on screen next to the error, so the reader sees
-      // what they sent; Retry withdraws it just before re-sending. Not once
-      // tokens arrived: the partial reply stays under the question it answers.
-      controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-      // A known stream code has a sentence in the reader's language; the
-      // backend's own text is the fallback rather than something discarded.
-      const message =
-        failure.error instanceof StreamEndedError
-          ? hooks.t(
-              "Workforce.thread.streamEnded",
-              "The connection ended before the reply finished. What arrived is above — send again to retry.",
-            )
-          : failure.error !== undefined
-          ? getErrorMessage(failure.error)
-          : (translateStreamError(failure.code ?? undefined, hooks.t) ?? failure.message);
-      hooks.failed(message, false, failure.partial ? null : ctx.userMessageId);
-      return true;
+      return present(failure, ctx, hooks);
     },
   });
   return controller;
@@ -878,17 +1019,26 @@ function WorkforceThread() {
   memberNameRef.current = memberName;
 
   // Local state
-  // The thread's conversation runs on the controller; these read it.
-  const hooksRef = useRef<ThreadHooks | null>(null);
-  const turnRef = useRef<ThreadTurn | null>(null);
-  // One for the page: it files every call under its conversation, so another
-  // advisor's thread simply reads other entries.
-  const [toolLog] = useState(() => new ToolActivityLog({ maxConversations: 5 }));
-  const [noteLog] = useState(() => new TurnNotesLog());
-  const controller = useMemo(
-    () => createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog),
-    [memberId, toolLog, noteLog],
-  );
+  // The thread's conversation runs on its controller, which outlives this page
+  // for a while when a turn is still running (see `threadRegistry`).
+  const principal = principalOf(useAuth().user);
+  // The key names the person too: one person's parked turn is never handed to another.
+  const registryKey = `${principal ?? ""}\u0000${boardId}\u0000${memberId}`;
+  const { entry, resumed } = useMemo(() => {
+    if (registryPrincipal !== undefined && registryPrincipal !== principal) threadRegistry.clear();
+    registryPrincipal = principal;
+    return threadRegistry.acquire(registryKey, () => createThreadEntry(memberId));
+  }, [registryKey, memberId, principal]);
+  const { controller, hooksRef, turnRef, toolLog, noteLog, deferredRef } = entry;
+  /** The page came back to a thread whose turn kept running: show it, do not re-open the thread. */
+  const adoptRef = useRef(resumed);
+  // Per acquisition, not per mount: A -> B -> A changes only the route param, and
+  // the second visit to A must adopt A's parked controller as a remount would.
+  const acquiredRef = useRef(entry);
+  if (acquiredRef.current !== entry) {
+    acquiredRef.current = entry;
+    adoptRef.current = resumed;
+  }
   const conversation = useAgentConversation(controller);
   const conversationId = conversation.conversationId;
   const messages = conversation.messages;
@@ -905,6 +1055,16 @@ function WorkforceThread() {
     return new Map([...at].map(([step, i]) => [i, step]));
   }, [messages, turnNotes]);
   const isLoading = conversation.isProcessing;
+  /** The latest client notice; the live region below announces it. */
+  const latestNotice = useMemo(() => [...messages].reverse().find((m) => m.kind === "notice") ?? null, [messages]);
+  // A live region announces changes, not what it holds when it appears: a notice
+  // already in the transcript on mount (one a parked turn left) is published one
+  // tick after the region is in the DOM.
+  const [mountedNoticeId, setMountedNoticeId] = useState<string | null | undefined>(() => latestNotice?.id);
+  useEffect(() => {
+    const id = window.setTimeout(() => setMountedNoticeId(null), 0);
+    return () => window.clearTimeout(id);
+  }, []);
   const setConversationId = useCallback(
     (id: string | null) => controller.dispatch({ type: "SET_CONVERSATION_ID", id }),
     [controller],
@@ -930,12 +1090,33 @@ function WorkforceThread() {
   /** Which (board, member, attempt) the thread was last initialised for. */
   const initKeyRef = useRef<string | null>(null);
 
-  // Leaving the advisor (or the page) abandons the turn in flight.
-  useEffect(() => () => controller.reset(), [controller]);
+  // Leaving the advisor (or the page) lets a turn in flight finish for a grace
+  // period instead of aborting it: closing the stream makes the server discard the
+  // turn. Coming back within the grace shows it running (or done).
+  useEffect(
+    () => () => {
+      // Nobody is looking from here on: a failure that arrives is kept for the return.
+      entry.hooksRef.current = null;
+      threadRegistry.release(registryKey);
+    },
+    [entry, registryKey],
+  );
+  // Closing or reloading the tab aborts it too, and nothing can bring it back.
+  useLeaveGuard(conversation.isProcessing && !conversation.historyBusy);
+
+  // A failure (or pause) that arrived while the page was away shows now, with the
+  // question and the Retry it belongs to.
+  useEffect(() => {
+    const show = deferredRef.current;
+    if (show && hooksRef.current) {
+      deferredRef.current = null;
+      show(hooksRef.current);
+    }
+  }, [deferredRef, hooksRef]);
 
   hooksRef.current = {
     t,
-    failed: (message, paused, userMessageId) => {
+    failed: (message, paused, userMessageId, canRetry = true) => {
       const turn = turnRef.current;
       setSendError({
         message,
@@ -943,6 +1124,7 @@ function WorkforceThread() {
         retryAttachments: turn?.attachments,
         paused,
         pendingUserMessageId: userMessageId,
+        canRetry,
       });
     },
   };
@@ -951,14 +1133,16 @@ function WorkforceThread() {
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
-  // Revoke all sent-message preview URLs on unmount to prevent SPA memory leaks
+  // Revoke all sent-message preview URLs on unmount to prevent SPA memory leaks —
+  // unless the thread was parked with its turn still running: its transcript (and
+  // the images in it) comes back with the page, and the registry revokes them when
+  // it disposes of the entry. This cleanup runs after the release above.
+  const registryKeyRef = useRef(registryKey);
+  registryKeyRef.current = registryKey;
   useEffect(() => {
     return () => {
-      messagesRef.current.forEach((msg) => {
-        msg.attachments?.forEach((a) => {
-          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-        });
-      });
+      if (threadRegistry.isParked(registryKeyRef.current)) return;
+      revokeSentPreviews(messagesRef.current);
     };
   }, []);
 
@@ -1011,7 +1195,7 @@ function WorkforceThread() {
     } catch {
       // No welcome message — that's fine
     }
-  }, [boardId, memberId, setConversationId, setMessages, controller]);
+  }, [boardId, memberId, setConversationId, setMessages, controller, turnRef]);
 
   const startFreshRef = useRef(startFreshConversation);
   startFreshRef.current = startFreshConversation;
@@ -1031,6 +1215,15 @@ function WorkforceThread() {
     initKeyRef.current = key;
     const isCurrent = () => initKeyRef.current === key;
 
+    // Back to a thread whose turn kept running while the page was away: its
+    // controller holds the transcript and the turn, so there is nothing to re-open.
+    if (adoptRef.current) {
+      adoptRef.current = false;
+      if (controller.getSnapshot().conversationId) {
+        setIsStarting(false);
+        return;
+      }
+    }
     controller.reset();
     turnRef.current = null;
     setSendError(null);
@@ -1081,7 +1274,7 @@ function WorkforceThread() {
     }
 
     init();
-  }, [boardId, memberId, initAttempt, controller, setConversationId, setMessages]);
+  }, [boardId, memberId, initAttempt, controller, turnRef, setConversationId, setMessages]);
 
   /**
    * "New Conversation" — every other chat surface in the Manager has one
@@ -1168,14 +1361,14 @@ function WorkforceThread() {
       }
       if (result.outcome !== "ignored") updateActivityRef.current(boardId, memberId);
     },
-    [conversationId, isLoading, inputPrefill, memberId, boardId, t, controller],
+    [conversationId, isLoading, inputPrefill, memberId, boardId, t, controller, hooksRef, turnRef],
   );
 
   /** Stop generating — the stream ends, what arrived is kept, the server stops the turn. */
   const handleStop = useCallback(() => {
     if (turnRef.current) turnRef.current.stopped = true;
     void controller.stop();
-  }, [controller]);
+  }, [controller, turnRef]);
 
   /**
    * Re-send the turn that failed.
@@ -1584,7 +1777,7 @@ function WorkforceThread() {
                     >
                       {t("Workforce.thread.reviewApprovals", "Review pending approvals")}
                     </AppLink>
-                  ) : (
+                  ) : sendError.canRetry !== false ? (
                     <button
                       type="button"
                       onClick={handleRetry}
@@ -1593,7 +1786,7 @@ function WorkforceThread() {
                     >
                       {t("common.retry", "Retry")}
                     </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setSendError(null)}
@@ -1606,6 +1799,18 @@ function WorkforceThread() {
               </div>
             </div>
           )}
+
+          {/* The client's own notices (the conversation ended, a reply not saved, …)
+              are lines in the transcript, which is not a live region; this one says
+              the latest to assistive technology, once, when it appears. */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="thread-notice-live">
+            {latestNotice && latestNotice.id !== mountedNoticeId ? (
+              // Keyed by the notice: a second notice with the same words is a new
+              // node, so it is announced again. One already there when the region
+              // mounted (a notice from a parked turn) is rendered after it.
+              <span key={latestNotice.id}>{latestNotice.content}</span>
+            ) : null}
+          </div>
 
           <div ref={messagesEndRef} />
         </div>

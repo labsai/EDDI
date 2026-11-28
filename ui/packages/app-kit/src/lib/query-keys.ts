@@ -199,3 +199,38 @@ export const alertKeys = {
   unacknowledged: (agentId?: string) => [...alertKeys.all, "unacknowledged", agentId ?? null] as const,
   rules: (agentId?: string) => [...alertKeys.all, "rules", agentId ?? null] as const,
 } as const;
+
+/**
+ * Everything that shows an agent and must be refreshed when one is created,
+ * deleted, duplicated or renamed: the agent lists (`agentKeys.all`), the chat's
+ * list of deployed agents (cached for 60 s, so a deleted agent stayed pickable)
+ * and the dashboard's counts (30 s). Invalidating only `["agents"]` left the other
+ * two stale.
+ */
+export const AGENT_MUTATION_INVALIDATIONS: readonly (readonly unknown[])[] = [
+  agentKeys.all,
+  chatKeys.deployedAgents,
+  ["dashboard", "stats"],
+];
+
+/**
+ * Everything that shows conversations and must be refreshed when one starts or
+ * is deleted: the conversation lists and their history, the dashboard's "recent
+ * conversations" card and its counts — and the chat's per-agent history
+ * (`chatKeys.history`, cached for 30 s), which a resume also reads: without it a
+ * deleted conversation stayed listed, and resumable, for that long.
+ */
+export const CONVERSATION_MUTATION_INVALIDATIONS: readonly (readonly unknown[])[] = [
+  ["conversations"],
+  chatKeys.history(),
+  ["dashboard", "recent-conversations"],
+  ["dashboard", "stats"],
+];
+
+/** Invalidate every key of a set (`AGENT_MUTATION_INVALIDATIONS`, …). */
+export function invalidateAll(
+  queryClient: { invalidateQueries: (filters: { queryKey: readonly unknown[] }) => unknown },
+  keys: readonly (readonly unknown[])[],
+): void {
+  for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+}

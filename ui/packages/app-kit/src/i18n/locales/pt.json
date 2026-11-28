@@ -31,7 +31,11 @@
     "initFailedBody": "O Manager não conseguiu concluir o login. O serviço de login pode estar inacessível ou sua sessão foi rejeitada.",
     "signInAgain": "Entrar novamente",
     "sessionExpiredTitle": "Sua sessão expirou.",
-    "sessionExpiredBody": "As alterações não salvas continuam nesta página — copie o que precisar antes de entrar novamente."
+    "sessionExpiredBody": "As alterações não salvas continuam nesta página — copie o que precisar antes de entrar novamente.",
+    "logout": "Sair",
+    "userMenu": "Menu do utilizador",
+    "signedIn": "Sessão iniciada",
+    "initFailedBodyWorkforce": "O Workforce não conseguiu concluir o início de sessão. O serviço de início de sessão pode estar inacessível ou a sua sessão pode ter sido rejeitada."
   },
   "nav": {
     "modeManager": "Gerenciador",

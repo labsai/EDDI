@@ -118,6 +118,12 @@ describe("WorkforceThread – retry after a failed turn", () => {
     setupMocks((() => {
       throw { status: 409, message: "conversation is paused" };
     }) as never);
+    // A 409 is a pause only when the conversation reads AWAITING_HUMAN (the
+    // controller reads it; a busy or changed conversation is a plain refusal).
+    vi.spyOn(chatApi, "readConversation").mockResolvedValue({
+      conversationSteps: [],
+      conversationState: "AWAITING_HUMAN",
+    } as any);
 
     await renderAndSend("Why did it break?");
 
@@ -125,6 +131,100 @@ describe("WorkforceThread – retry after a failed turn", () => {
     expect(countOf("Why did it break?")).toBe(0);
     expect(screen.getByTestId("thread-review-approvals")).toBeInTheDocument();
     expect(screen.queryByTestId("thread-retry")).toBeNull();
+  });
+
+
+  it("a 409 that is not a pause is a plain refusal: the question comes back, a Retry is offered", async () => {
+    setupMocks((() => {
+      throw { status: 409, message: "processing another turn" };
+    }) as never);
+    vi.spyOn(chatApi, "readConversation").mockResolvedValue({
+      conversationSteps: [],
+      conversationState: "IN_PROGRESS",
+    } as any);
+
+    await renderAndSend("Why did it break?");
+
+    await waitFor(() => expect(screen.getByTestId("thread-send-error")).toHaveTextContent(/busy|waiting on a decision/i));
+    expect(screen.getByTestId("thread-send-error")).not.toHaveTextContent(/paused waiting/i);
+    expect(countOf("Why did it break?")).toBe(0);
+    expect(screen.getByTestId("thread-retry")).toBeInTheDocument();
+    expect(screen.queryByTestId("thread-review-approvals")).toBeNull();
+  });
+
+  it("a 408 keeps the question (the server may still finish it) and Retry sends it again with the SAME Idempotency-Key", async () => {
+    let call = 0;
+    const keys: Array<string | undefined> = [];
+    const stream = setupMocks(async function* (...args: unknown[]) {
+      call += 1;
+      keys.push((args[5] as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+      if (call === 1) throw { status: 408, message: "timeout" };
+      yield { type: "token", data: "Done now" };
+      yield { type: "done", data: JSON.stringify({ conversationState: "READY", conversationOutputs: [{ output: [{ type: "text", text: "Done now" }] }] }) };
+    });
+    void stream;
+
+    await renderAndSend("Slow question");
+
+    await waitFor(() => expect(screen.getByTestId("thread-send-error")).toHaveTextContent(/No answer has arrived yet/i));
+    // Not withdrawn: the user can see what they sent.
+    expect(countOf("Slow question")).toBe(1);
+
+    await userEvent.setup().click(screen.getByTestId("thread-retry"));
+    await waitFor(() => expect(screen.getByText("Done now")).toBeInTheDocument());
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("announces the controller's notices in a polite live region (a 410: the conversation has ended)", async () => {
+    setupMocks((() => {
+      throw { status: 410, message: "gone" };
+    }) as never);
+
+    await renderAndSend("Anyone there?");
+
+    await waitFor(() => expect(screen.getByTestId("thread-notice-live")).toHaveTextContent(/has ended/i));
+    const region = screen.getByTestId("thread-notice-live");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveAttribute("role", "status");
+  });
+
+  it("announces a repeated notice again: the same words are a new node in the live region", async () => {
+    setupMocks(async function* () {
+      yield { type: "done", data: JSON.stringify({ conversationState: "READY", conversationOutputs: [] }) };
+    });
+
+    await renderAndSend("First");
+    await waitFor(() => expect(screen.getByTestId("thread-notice-live")).toHaveTextContent(/without giving an answer/i));
+    const firstNode = screen.getByTestId("thread-notice-live").firstChild;
+
+    await userEvent.setup().type(screen.getByRole("textbox"), "Second");
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() => expect(screen.getAllByText(/without giving an answer/i).length).toBeGreaterThanOrEqual(3));
+    const region = screen.getByTestId("thread-notice-live");
+    expect(region).toHaveTextContent(/without giving an answer/i);
+    expect(region.firstChild).not.toBe(firstNode);
+  });
+
+  it("offers no Retry for a turn whose result cannot be saved by sending it again (retryable: false)", async () => {
+    setupMocks(async function* () {
+      yield {
+        type: "error",
+        data: JSON.stringify({
+          code: "TURN_NOT_STORED",
+          reason: "conversation_too_large",
+          retryable: false,
+          message: "not stored",
+        }),
+      };
+    });
+
+    await renderAndSend("One more thing");
+
+    await waitFor(() => expect(screen.getByTestId("thread-send-error")).toBeInTheDocument());
+    expect(screen.queryByTestId("thread-retry")).toBeNull();
+    expect(screen.getByTestId("thread-dismiss-error")).toBeInTheDocument();
   });
 
   it("withdraws and re-sends the question when the turn produced nothing", async () => {
