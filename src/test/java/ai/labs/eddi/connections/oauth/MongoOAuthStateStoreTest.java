@@ -144,6 +144,9 @@ class MongoOAuthStateStoreTest {
         assertEquals(REDIRECT_URI, row.getString("redirectUri"));
         assertEquals(RETURN_TO, row.getString("returnTo"));
         assertEquals(NONCE_HASH, row.getString("nonceHash"), "without the browser binding the state is a bearer token the attacker chose");
+        assertEquals("support@company.example", row.getString("mailboxAddress"),
+                "a mailbox link must stay one, or the callback files the grant under the administrator");
+        assertEquals("linker-hash", row.getString("linkerEmailHash"));
         assertEquals(Date.from(CREATED_AT), row.getDate("createdAt"));
         assertEquals(Date.from(EXPIRES_AT), row.getDate("expiresAt"));
         // This absence is what claim()'s $exists branch is written against. Pinning it
@@ -222,6 +225,8 @@ class MongoOAuthStateStoreTest {
         assertEquals(REDIRECT_URI, claimed.getRedirectUri());
         assertEquals(RETURN_TO, claimed.getReturnTo());
         assertEquals(NONCE_HASH, claimed.getNonceHash());
+        assertEquals("support@company.example", claimed.getMailboxAddress());
+        assertEquals("linker-hash", claimed.getLinkerEmailHash());
         assertEquals(CREATED_AT, claimed.getCreatedAt());
         assertEquals(EXPIRES_AT, claimed.getExpiresAt());
         assertEquals(CONSUMED_AT, claimed.getConsumedAt());
@@ -386,6 +391,8 @@ class MongoOAuthStateStoreTest {
         state.setRedirectUri(REDIRECT_URI);
         state.setReturnTo(RETURN_TO);
         state.setNonceHash(NONCE_HASH);
+        state.setMailboxAddress("support@company.example");
+        state.setLinkerEmailHash("linker-hash");
         state.setCreatedAt(CREATED_AT);
         state.setExpiresAt(EXPIRES_AT);
         return state;
@@ -405,6 +412,8 @@ class MongoOAuthStateStoreTest {
                 .append("redirectUri", REDIRECT_URI)
                 .append("returnTo", RETURN_TO)
                 .append("nonceHash", NONCE_HASH)
+                .append("mailboxAddress", "support@company.example")
+                .append("linkerEmailHash", "linker-hash")
                 .append("createdAt", Date.from(CREATED_AT))
                 .append("expiresAt", Date.from(EXPIRES_AT))
                 .append("consumedAt", Date.from(CONSUMED_AT));

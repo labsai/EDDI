@@ -6,9 +6,12 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import {
   isConnectionErrorCode,
+  listMailboxGrants,
   type ConnectionErrorCode,
 } from "@eddi/app-kit/lib/api/connections";
 import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
+import { mailboxGrantsKey } from "@/hooks/use-mailbox-grants";
+import { normalizeMailboxAddress, takePendingMailboxLink } from "@/lib/pending-mailbox-link";
 
 /**
  * What the browser came back from the provider carrying.
@@ -18,6 +21,7 @@ import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
  */
 export type LinkOutcome =
   | { kind: "connected"; connection: string }
+  | { kind: "mailboxLinked"; connection: string }
   | { kind: "error"; code: ConnectionErrorCode | "unknown" }
   | null;
 
@@ -47,16 +51,57 @@ export function useConnectionLinkResult(): LinkOutcome {
   const handled = useRef<string | null>(null);
 
   const connected = searchParams.get("connected");
+  const mailboxLinked = searchParams.get("mailboxLinked");
   const error = searchParams.get("error");
 
   useEffect(() => {
-    if (connected === null && error === null) return;
+    if (connected === null && error === null && mailboxLinked === null) return;
 
-    const token = connected !== null ? `connected:${connected}` : `error:${error}`;
+    const token =
+      connected !== null
+        ? `connected:${connected}`
+        : mailboxLinked !== null
+          ? `mailboxLinked:${mailboxLinked}`
+          : `error:${error}`;
     if (handled.current === token) return;
     handled.current = token;
 
-    if (connected !== null) {
+    if (mailboxLinked !== null) {
+      // An administrator's mailbox link. The list is refetched rather than
+      // trusted: the parameter is a plain URL anyone can hand out.
+      setOutcome({ kind: "mailboxLinked", connection: mailboxLinked });
+      // As for `connected`: the refetch is the check. A hand-made URL, or a grant
+      // unlinked before this page rendered, is met with silence rather than a
+      // success claim; when the list cannot be read (it is eddi-admin only) after a
+      // link this tab started, the toast still fires, an unverifiable success
+      // being far more likely real.
+      // fetchQuery, not refetchQueries: the latter does nothing when no grants
+      // query exists yet, and the toast would then fire unchecked.
+      const announce = () =>
+        toast.success(
+          t("connections.mailbox.linked", {
+            name: mailboxLinked,
+            defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
+          }),
+        );
+      // The mailbox this tab started linking. The callback always returns to the
+      // tab that left, so nothing remembered means a hand-made URL, another tab or
+      // blocked storage: no claim is made then (another mailbox's grant would not
+      // confirm this link), and the panel's refreshed list shows the real state.
+      const pending = takePendingMailboxLink(mailboxLinked);
+      if (pending === null) {
+        void queryClient.invalidateQueries({ queryKey: mailboxGrantsKey(mailboxLinked) });
+      } else {
+        void queryClient
+          .fetchQuery({ queryKey: mailboxGrantsKey(mailboxLinked), queryFn: () => listMailboxGrants(mailboxLinked), staleTime: 0 })
+          .then(
+            (grants) => {
+              if (grants.some((g) => g.usable && normalizeMailboxAddress(g.address) === pending)) announce();
+            },
+            () => announce(),
+          );
+      }
+    } else if (connected !== null) {
       setOutcome({ kind: "connected", connection: connected });
 
       // The list on screen predates the round trip. Status, scopes and expiry
@@ -98,9 +143,10 @@ export function useConnectionLinkResult(): LinkOutcome {
     // (a version, a tab) belongs to the page and must survive.
     const next = new URLSearchParams(searchParams);
     next.delete("connected");
+    next.delete("mailboxLinked");
     next.delete("error");
     setSearchParams(next, { replace: true });
-  }, [connected, error, searchParams, setSearchParams, queryClient, t]);
+  }, [connected, mailboxLinked, error, searchParams, setSearchParams, queryClient, t]);
 
   return outcome;
 }
@@ -149,6 +195,21 @@ function linkErrorMessage(
       return t(
         "connections.error.exchangeFailed",
         "The provider would not complete the link. Try again; if it keeps failing, an administrator needs to check this connection's settings.",
+      );
+    case "mailbox_account_mismatch":
+      return t(
+        "connections.error.mailboxAccountMismatch",
+        "You signed in with an account that is not the mailbox, so nothing was linked. Start again and sign in as the mailbox itself.",
+      );
+    case "mailbox_account_unverified":
+      return t(
+        "connections.error.mailboxAccountUnverified",
+        "The mailbox's account could not be read from the Gmail API (it returned an error or did not answer), so nothing was linked. Check that the Gmail API is enabled for the OAuth client's project and the https://mail.google.com/ scope was granted, then link again.",
+      );
+    case "mailbox_is_own":
+      return t(
+        "connections.error.mailboxIsOwn",
+        "That is your own mailbox, and your own address cannot be linked. Link a dedicated mailbox instead.",
       );
     default:
       return t(

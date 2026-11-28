@@ -123,7 +123,7 @@ class PostgresOAuthStateStoreUnitTest {
         store.deleteExpired();
 
         ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
-        verify(statement, times(4)).execute(ddl.capture());
+        verify(statement, times(6)).execute(ddl.capture());
         List<String> executed = ddl.getAllValues();
 
         assertTrue(executed.get(0).contains("CREATE TABLE IF NOT EXISTS connection_oauth_states"), executed.get(0));
@@ -132,7 +132,11 @@ class PostgresOAuthStateStoreUnitTest {
         // account link would fail on an insert naming a column that does not exist.
         assertTrue(executed.get(1).contains("ADD COLUMN IF NOT EXISTS nonce_hash"), executed.get(1));
         assertTrue(executed.get(2).contains("ADD COLUMN IF NOT EXISTS connection_id VARCHAR(255)"), executed.get(2));
-        assertTrue(executed.get(3).contains("CREATE INDEX IF NOT EXISTS idx_oauth_state_expires"), executed.get(3));
+        // Mailbox links (MAILBOX binding): nullable, so every older row reads as an
+        // ordinary per-user link.
+        assertTrue(executed.get(3).contains("ADD COLUMN IF NOT EXISTS mailbox_address"), executed.get(3));
+        assertTrue(executed.get(4).contains("ADD COLUMN IF NOT EXISTS linker_email_hash"), executed.get(4));
+        assertTrue(executed.get(5).contains("CREATE INDEX IF NOT EXISTS idx_oauth_state_expires"), executed.get(5));
         assertTrue(executed.get(0).contains("connection_id VARCHAR(255),"),
                 "a fresh table carries the column too, nullable so a pre-existing row still maps: " + executed.get(0));
 
@@ -156,7 +160,7 @@ class PostgresOAuthStateStoreUnitTest {
         // Three DDL round trips per swept hour would be pure waste; the volatile flag
         // is what keeps the cost to one per JVM.
         verify(connection, times(1)).createStatement();
-        verify(statement, times(4)).execute(anyString());
+        verify(statement, times(6)).execute(anyString());
     }
 
     @Test
@@ -172,7 +176,7 @@ class PostgresOAuthStateStoreUnitTest {
         store.deleteExpired();
 
         verify(connection, times(2)).createStatement();
-        verify(statement, times(5)).execute(anyString());
+        verify(statement, times(7)).execute(anyString());
     }
 
     @Test
@@ -218,6 +222,9 @@ class PostgresOAuthStateStoreUnitTest {
         verify(preparedStatement, never()).setTimestamp(anyInt(), any());
         assertTrue(sql.getValue().contains("connection_id"), sql.getValue());
         verify(preparedStatement).setString(11, CONNECTION_ID);
+        assertTrue(sql.getValue().contains("mailbox_address, linker_email_hash"), sql.getValue());
+        verify(preparedStatement).setString(12, null);
+        verify(preparedStatement).setString(13, null);
         verify(preparedStatement).executeUpdate();
 
         InOrder order = inOrder(connection);
@@ -297,6 +304,10 @@ class PostgresOAuthStateStoreUnitTest {
         assertEquals(REDIRECT_URI, claimed.getRedirectUri());
         assertEquals(RETURN_TO, claimed.getReturnTo());
         assertEquals(NONCE_HASH, claimed.getNonceHash());
+        // A mailbox link's row comes back as one, or the callback would file the grant
+        // under the administrator who started it.
+        assertEquals("support@company.example", claimed.getMailboxAddress());
+        assertEquals("linker-hash", claimed.getLinkerEmailHash());
         assertEquals(CREATED_AT, claimed.getCreatedAt());
         assertEquals(EXPIRES_AT, claimed.getExpiresAt());
         assertEquals(CONSUMED_AT, claimed.getConsumedAt());
@@ -425,6 +436,8 @@ class PostgresOAuthStateStoreUnitTest {
         when(resultSet.getString("redirect_uri")).thenReturn(REDIRECT_URI);
         when(resultSet.getString("return_to")).thenReturn(RETURN_TO);
         when(resultSet.getString("nonce_hash")).thenReturn(NONCE_HASH);
+        when(resultSet.getString("mailbox_address")).thenReturn("support@company.example");
+        when(resultSet.getString("linker_email_hash")).thenReturn("linker-hash");
         // Answered only when read as UTC wall clocks, as they were written.
         when(resultSet.getTimestamp(eq("created_at"), utc())).thenReturn(Timestamp.from(CREATED_AT));
         when(resultSet.getTimestamp(eq("expires_at"), utc())).thenReturn(Timestamp.from(EXPIRES_AT));

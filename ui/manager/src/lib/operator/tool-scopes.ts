@@ -424,6 +424,14 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /hitl/autonomy",
   "GET /hitl/autonomy/{agentId}/category",
   "GET /hitl/samples/pending-count",
+  // Which dedicated mailboxes a MAILBOX connection has linked, and whether each
+  // grant is usable — "why does my Gmail integration say not connected?". Address,
+  // status and timestamps only, never tokens (eddi-admin). Deliberately NOT
+  // granted: `POST /connections/{name}/mailbox-grants/authorize` (linking is a
+  // browser sign-in AS the mailbox, which no tool can perform) and
+  // `…/mailbox-grants/unlink` (it stops an integration reading mail): both stay
+  // the admin's, on the connection's page.
+  "GET /connections/{name}/mailbox-grants",
 ] as const;
 
 /**

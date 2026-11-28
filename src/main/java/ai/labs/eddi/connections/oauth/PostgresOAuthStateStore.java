@@ -75,6 +75,14 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
     private static final String ADD_CONNECTION_ID_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS connection_id VARCHAR(255)";
 
     /**
+     * Added for mailbox links ({@code Binding.MAILBOX}). Nullable: NULL is an
+     * ordinary per-user link, which every row written before the columns existed
+     * was.
+     */
+    private static final String ADD_MAILBOX_ADDRESS_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS mailbox_address VARCHAR(320)";
+    private static final String ADD_LINKER_EMAIL_HASH_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS linker_email_hash VARCHAR(128)";
+
+    /**
      * Resolved lazily, never at construction.
      * <p>
      * On a MongoDB deployment the datasource bean is INACTIVE, and Quarkus resolves
@@ -99,6 +107,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             statement.execute(CREATE_TABLE);
             statement.execute(ADD_NONCE_COLUMN);
             statement.execute(ADD_CONNECTION_ID_COLUMN);
+            statement.execute(ADD_MAILBOX_ADDRESS_COLUMN);
+            statement.execute(ADD_LINKER_EMAIL_HASH_COLUMN);
             statement.execute(CREATE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -112,8 +122,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         String sql = """
                 INSERT INTO connection_oauth_states
                     (state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to, nonce_hash,
-                     created_at, expires_at, connection_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, expires_at, connection_id, mailbox_address, linker_email_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, state.getState());
@@ -127,6 +137,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             setUtc(statement, 9, state.getCreatedAt());
             setUtc(statement, 10, state.getExpiresAt());
             statement.setString(11, state.getConnectionId());
+            statement.setString(12, state.getMailboxAddress());
+            statement.setString(13, state.getLinkerEmailHash());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to store an OAuth state", e);
@@ -150,7 +162,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                    SET consumed_at = ?
                  WHERE state = ? AND consumed_at IS NULL AND expires_at > ?
                 RETURNING state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to,
-                          nonce_hash, created_at, expires_at, consumed_at, connection_id
+                          nonce_hash, created_at, expires_at, consumed_at, connection_id, mailbox_address, linker_email_hash
                 """;
         Instant now = Instant.now();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -224,6 +236,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         state.setRedirectUri(rows.getString("redirect_uri"));
         state.setReturnTo(rows.getString("return_to"));
         state.setNonceHash(rows.getString("nonce_hash"));
+        state.setMailboxAddress(rows.getString("mailbox_address"));
+        state.setLinkerEmailHash(rows.getString("linker_email_hash"));
         state.setCreatedAt(getUtc(rows, "created_at"));
         state.setExpiresAt(getUtc(rows, "expires_at"));
         state.setConsumedAt(getUtc(rows, "consumed_at"));

@@ -24,6 +24,8 @@ import {
   type EmailProblem,
 } from "@/lib/email-channel";
 import { emailProblemMessage } from "@/lib/email-channel-messages";
+import { useMailboxGrants } from "@/hooks/use-mailbox-grants";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 
 const selectClass =
   "flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary";
@@ -70,11 +72,28 @@ export function EmailPlatformFields({
   const connectionNames = useMemo(
     () =>
       (connections ?? [])
-        .filter((c) => MAIL_AUTH_TYPES.has(c.authType))
+        .filter(
+          (c) =>
+            MAIL_AUTH_TYPES.has(c.authType) ||
+            (c.authType === "OAUTH2_AUTHORIZATION_CODE" && c.binding === "MAILBOX"),
+        )
         .map((c) => c.connectionName)
         .filter((n): n is string => !!n),
     [connections],
   );
+  // A dedicated-mailbox (MAILBOX) connection: is this integration's address
+  // linked? Known only to an administrator (the grant list is eddi-admin) and
+  // only when the connection list could be read; otherwise the save warning
+  // email.mailbox-not-linked says it.
+  const mailboxConnection = (connections ?? []).find(
+    (c) => c.connectionName === pc.connection && c.binding === "MAILBOX",
+  );
+  // eddi-admin only: an editor would get a 403 (an audited admin-endpoint denial)
+  // on every render; it learns the state from the save warning instead.
+  const isAdmin = useHasRole("eddi-admin");
+  const mailboxGrants = useMailboxGrants(pc.connection, !!mailboxConnection && isAdmin);
+  const mailboxAddress = (pc.address ?? "").trim().toLowerCase();
+  const mailboxGrant = mailboxGrants.data?.find((g) => g.address === mailboxAddress);
 
   const problems = new Set(emailConfigProblems(pc));
   const problemFor = (...codes: EmailProblem[]) => {
@@ -165,9 +184,22 @@ export function EmailPlatformFields({
             {connectionNames.map((n) => (<option key={n} value={n} />))}
           </datalist>
           <p className={hintClass}>
-            {t("emailChannel.connectionHint", "Required. The name of an OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) or BASIC (app password) connection whose allowlist contains imaps://<host> or imap://<host>:143.")}
+            {t("emailChannel.connectionHint", "Required. The name of an OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) or BASIC (app password) connection, or of a MAILBOX-bound OAUTH2_AUTHORIZATION_CODE connection on which this address is linked (Google Workspace). Its allowlist must contain imaps://<host> or imap://<host>:143.")}
           </p>
           {problemFor("connectionRequired", "connectionReference")}
+          {mailboxConnection && mailboxGrants.isSuccess && mailboxAddress && (
+            <p
+              className={`text-[10px] ${mailboxGrant?.usable ? "text-muted-foreground" : "text-warning"}`}
+              data-testid={mailboxGrant?.usable ? "email-mailbox-linked" : "email-mailbox-not-linked"}
+            >
+              {mailboxGrant?.usable
+                ? t("emailChannel.mailboxLinked", "This mailbox is linked to the connection.")
+                : t(
+                    "emailChannel.mailboxNotLinked",
+                    "This mailbox is not linked to the connection yet, so it cannot be read. Link it under Connections → Mailbox grants.",
+                  )}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <label htmlFor={`${uid}-address`} className={labelClass}>{t("emailChannel.address", "Mailbox address")}</label>

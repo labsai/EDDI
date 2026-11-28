@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "按用户",
       "service": "共享",
-      "callerSupplied": "由调用方提供"
+      "callerSupplied": "由调用方提供",
+      "mailbox": "专用邮箱"
     },
     "status": {
       "active": "已关联",

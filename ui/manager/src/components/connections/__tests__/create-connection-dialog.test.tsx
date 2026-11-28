@@ -258,6 +258,51 @@ describe("CreateConnectionDialog — the name", () => {
 });
 
 describe("CreateConnectionDialog — a caller-supplied key", () => {
+  it("shows the Gmail-origin error of a MAILBOX connection on the origins step, not as a block on the credentials step", async () => {
+    // The account check defaults to google-gmail-profile, which needs the Gmail API
+    // on the allowlist — a field the user only reaches one step later.
+    const user = userEvent.setup();
+    let sent: Record<string, unknown> | null = null;
+    server.use(
+      http.post("*/connectionstore/connections", async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/connectionstore/connections/new-3?version=1" },
+        });
+      }),
+    );
+    await renderDialog();
+
+    await user.click(screen.getByTestId("auth-type-choice-OAUTH2_AUTHORIZATION_CODE"));
+    const name = screen.getByTestId("create-connection-name");
+    await user.type(name, "gws-mailbox");
+    await user.click(screen.getByTestId("create-connection-next"));
+    await user.click(await screen.findByTestId("create-connection-binding-choice-MAILBOX"));
+    expect(screen.getByTestId("create-connection-account-check")).toHaveValue("google-gmail-profile");
+    await user.type(screen.getByTestId("create-connection-authorization-url"), "https://accounts.google.com/o/oauth2/v2/auth");
+    await user.type(screen.getByTestId("create-connection-token-url"), "https://oauth2.googleapis.com/token");
+    await user.type(screen.getByTestId("create-connection-client-id"), "client-id");
+    await user.type(screen.getByTestId("create-connection-client-secret-input"), "${{vault:gws-secret}");
+
+    // Next is not blocked by the origin-only error.
+    await user.click(screen.getByTestId("create-connection-next"));
+    const origins = await screen.findByTestId("create-connection-origins-input");
+    expect(screen.queryByTestId("create-connection-account-check-error")).not.toBeInTheDocument();
+
+    // On the origins step it is shown and blocks creating until the origin is there.
+    await user.type(origins, "imaps://imap.gmail.com");
+    await user.click(screen.getByTestId("create-connection-submit"));
+    expect(await screen.findByTestId("create-connection-origins-account-check-error")).toBeInTheDocument();
+    expect(sent).toBeNull();
+
+    await user.type(screen.getByTestId("create-connection-origins-input"), "{Enter}https://gmail.googleapis.com");
+    await user.click(screen.getByTestId("create-connection-submit"));
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.binding).toBe("MAILBOX");
+    expect((sent!.oauth as { accountCheck?: string }).accountCheck).toBe("google-gmail-profile");
+  });
+
   it("creates a CALLER_SUPPLIED connection with a header name and no template", async () => {
     // The binding that stores nothing: the wizard must not demand a header
     // value it has nowhere to put, and must not send one either — the backend

@@ -18,13 +18,14 @@
 | --- | --- | --- | --- | --- |
 | **Microsoft 365 dedicated, licensed mailbox** | Supported — the documented path | `OAUTH2_CLIENT_CREDENTIALS` | `outlook.office365.com`, `993` [[M8]](#sources) | `smtp.office365.com`, `587` [[M2]](#sources) |
 | **Microsoft 365 shared mailbox** | **Unverified** — see [Shared mailboxes](#shared-mailboxes) | `OAUTH2_CLIENT_CREDENTIALS` | as above | as above, but see the licence note |
-| **Google Workspace** | No OAuth path today; app password not blocked but **not live-tested** | `BASIC` (app password) | `imap.gmail.com`, `993` [[G1]](#sources) | `smtp.gmail.com`, `465` or `587` [[G1]](#sources) |
+| **Google Workspace** | Dedicated mailbox over OAuth (`MAILBOX` connection), **not live-tested**; app password not blocked but **not live-tested** | `OAUTH2_AUTHORIZATION_CODE` bound `MAILBOX`, or `BASIC` (app password) | `imap.gmail.com`, `993` [[G1]](#sources) | `smtp.gmail.com`, `465` or `587` [[G1]](#sources) |
 | **Personal Gmail** | Best effort: app password, **not live-tested** | `BASIC` (app password) | `imap.gmail.com`, `993` [[G1]](#sources) | `smtp.gmail.com`, `465` or `587` [[G1]](#sources) |
 | **Outlook.com** (personal Microsoft account) | **Not supported** | — | — | — |
 | **Other IMAP hosts** | Supported, if they offer password login over TLS | `BASIC` | the hoster's | the hoster's |
 
-Gmail and Workspace through Google OAuth (an administrator links a dedicated mailbox once) is being built in
-[PR #1476](https://github.com/labsai/EDDI/pull/1476), which is not merged. Domain-wide delegation will not be offered.
+Workspace through Google OAuth (an administrator links a dedicated mailbox once) is the `MAILBOX` connection in
+[Email Integration → Google Workspace](email-integration.md#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator).
+Domain-wide delegation is not offered.
 
 ## What EDDI does, whatever the provider
 
@@ -34,9 +35,11 @@ These are properties of EDDI's code on `main`, not of any provider:
   connection logs in with SASL `XOAUTH2`, the integration's `address` as the user and the access token as the secret —
   the format both Microsoft [[M3]](#sources) and Google [[G2]](#sources) document. The same connection is used for IMAP
   and SMTP (`ImapMailTransport`).
-- **No per-person grants.** An `OAUTH2_AUTHORIZATION_CODE` connection must be bound `PER_USER`, and a mailbox poll runs
-  as no verified user, so such a connection is refused for a mailbox at save time (`ConnectionResolver`). Any provider
-  that offers mailbox OAuth only as a person's consent (Gmail, Outlook.com) therefore has no OAuth path today.
+- **No per-person grants.** A mailbox poll runs as no verified user, so a `PER_USER` connection is refused for a mailbox
+  at save time (`ConnectionResolver`). An `OAUTH2_AUTHORIZATION_CODE` connection reaches a mailbox only bound `MAILBOX`:
+  an administrator links each dedicated mailbox once, and the grant is spent only by the email channel's login
+  ([Email Integration](email-integration.md#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator)). A
+  person's own mailbox (personal Gmail, Outlook.com) has no OAuth path.
 - **Ports.** IMAP `993` (TLS) or `143` (STARTTLS, required); SMTP `587` (STARTTLS, required) or `465` (TLS). A plaintext
   login is never attempted.
 - **Marking processed mail.** `processedAction: flag` sets the keyword `$EddiProcessed`. A folder whose
@@ -114,8 +117,9 @@ fallback signature, so this is an observation, not a documented default. Check t
 "Authenticating email with DKIM" [[G9]](#sources) for the sending domain.
 
 **In EDDI today:** an app password over `BASIC` is not blocked by any code path, but it is **not live-tested**, and the
-admin controls both IMAP and, possibly, app passwords. The OAuth path for a dedicated Workspace mailbox is
-[PR #1476](https://github.com/labsai/EDDI/pull/1476) (open). Gmail and Drive as **tools on each user's own account**
+admin controls both IMAP and, possibly, app passwords. The OAuth path for a dedicated Workspace mailbox is the
+[`MAILBOX` connection](email-integration.md#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator),
+not yet verified against a real tenant. Gmail and Drive as **tools on each user's own account**
 are a separate, working recipe: [Google Workspace](google-workspace.md).
 
 ## Personal Gmail

@@ -150,6 +150,34 @@ class EmailMailboxPollerTest {
     }
 
     @Test
+    @DisplayName("an unlinked dedicated mailbox tells the owners MAILBOX_NOT_LINKED and still backs off")
+    void mailboxNotLinkedNotifiesOwners() {
+        EmailOwnerNotifier notifier = mock(EmailOwnerNotifier.class);
+        poller = new EmailMailboxPoller(directory, processor, state, transport, scheduler, notifier, new SimpleMeterRegistry(), 50,
+                Duration.ofMinutes(2));
+        transport.failure = new MailboxException(MailboxException.Category.NOT_CONNECTED, "the mailbox is not linked", null);
+
+        var report = poller.poll(ID);
+
+        assertTrue(report.failed());
+        verify(notifier).notifyOnce(eq(ID), any(), any(), eq(EmailOwnerNotifier.Reason.MAILBOX_NOT_LINKED), any());
+        assertTrue(state.read(ID).orElseThrow().backoffUntil() != null, "the failure is still recorded and backed off");
+    }
+
+    @Test
+    @DisplayName("any other login failure does not claim the mailbox is unlinked")
+    void otherFailureIsNotMailboxNotLinked() {
+        EmailOwnerNotifier notifier = mock(EmailOwnerNotifier.class);
+        poller = new EmailMailboxPoller(directory, processor, state, transport, scheduler, notifier, new SimpleMeterRegistry(), 50,
+                Duration.ofMinutes(2));
+        transport.failure = new MailboxException(MailboxException.Category.CREDENTIAL, "vault blip", null);
+
+        poller.poll(ID);
+
+        verify(notifier, never()).notifyOnce(any(), any(), any(), eq(EmailOwnerNotifier.Reason.MAILBOX_NOT_LINKED), any());
+    }
+
+    @Test
     @DisplayName("a connection failure is recorded and backs off; the next poll does not connect until it has passed")
     void backoff() {
         transport.failure = new MailboxException(MailboxException.Category.AUTHENTICATION, "login refused", null);

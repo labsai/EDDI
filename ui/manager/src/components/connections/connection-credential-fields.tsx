@@ -1,11 +1,12 @@
 import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyRound, type LucideIcon, UserRoundKey } from "lucide-react";
+import { KeyRound, type LucideIcon, Mailbox, UserRound, UserRoundKey } from "lucide-react";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { HeaderValueField } from "@/components/connections/header-value-field";
 import { ValidationMessage } from "@/components/connections/validation-message";
 import {
+  ACCOUNT_CHECKS,
   isOAuthType,
   legalBindings,
   type ConnectionErrors,
@@ -27,9 +28,11 @@ interface ConnectionCredentialFieldsProps {
   onPatchStatic: (patch: Partial<StaticAuth>) => void;
   onPatchOAuth: (patch: Partial<OAuthConfig>) => void;
   /**
-   * Where a STATIC connection's key comes from — shared, or handed over by the
-   * caller per request. The only auth type with a choice; omitting the handler
-   * renders the current binding without offering to change it.
+   * Where the credential comes from, for the two auth types with a choice:
+   * STATIC (shared, or handed over by the caller per request) and
+   * OAUTH2_AUTHORIZATION_CODE (each user's own account, or a dedicated mailbox
+   * an administrator links). Omitting the handler renders the current binding
+   * without offering to change it.
    */
   onBindingChange?: (binding: Binding) => void;
   /** Only the errors this form should show yet — the caller decides when. */
@@ -78,7 +81,8 @@ export function ConnectionCredentialFields({
     return (
       <div className="space-y-4">
         {draft.authType === "STATIC" && (
-          <StaticBindingChooser
+          <BindingChooser
+            authType="STATIC"
             value={draft.binding}
             onChange={onBindingChange}
             readOnly={readOnly}
@@ -188,8 +192,56 @@ export function ConnectionCredentialFields({
   const jwtBearer = draft.authType === "OAUTH2_JWT_BEARER";
   const signsWithKey = jwtBearer || draft.oauth?.clientAuthMethod === "private_key_jwt";
 
+  const mailbox = draft.authType === "OAUTH2_AUTHORIZATION_CODE" && draft.binding === "MAILBOX";
+
   return (
     <div className="space-y-4">
+      {draft.authType === "OAUTH2_AUTHORIZATION_CODE" && (
+        <BindingChooser
+          authType="OAUTH2_AUTHORIZATION_CODE"
+          value={draft.binding}
+          onChange={onBindingChange}
+          readOnly={readOnly}
+          error={errors.binding}
+          idPrefix={idPrefix}
+          labelClass={labelClass}
+        />
+      )}
+      {mailbox && (
+        <div className="space-y-1.5">
+          <label className={labelClass} htmlFor={fieldId("account-check")}>
+            {t("connections.accountCheck", "Account check")}
+          </label>
+          <select
+            id={fieldId("account-check")}
+            data-testid={`${idPrefix}-account-check`}
+            className="flex h-9 w-full rounded-lg border border-border bg-background px-3 font-mono text-xs"
+            value={draft.oauth?.accountCheck ?? ""}
+            onChange={(e) => onPatchOAuth({ accountCheck: e.target.value || null })}
+            disabled={readOnly}
+            aria-invalid={errors["oauth.accountCheck"] !== undefined || undefined}
+            aria-describedby={fieldId("account-check-error")}
+          >
+            <option value="">{t("connections.accountCheckNone", "Choose how the mailbox is verified")}</option>
+            {ACCOUNT_CHECKS.map((check) => (
+              <option key={check} value={check}>
+                {t("connections.accountCheckGoogle", "google-gmail-profile — the Gmail profile must be the mailbox")}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground">
+            {t(
+              "connections.accountCheckHint",
+              "When a mailbox is linked, and after every token refresh, {{productName}} reads the account from the Gmail API and refuses a grant whose account is not the mailbox. Add https://gmail.googleapis.com to the allowed origins.",
+            )}
+          </p>
+          <ValidationMessage
+            code={errors["oauth.accountCheck"]}
+            id={fieldId("account-check-error")}
+            testId={`${idPrefix}-account-check-error`}
+          />
+        </div>
+      )}
       {draft.authType === "OAUTH2_AUTHORIZATION_CODE" && (
         <div className="space-y-1.5">
           <label className={labelClass} htmlFor={fieldId("authorization-url")}>
@@ -391,26 +443,33 @@ export function ConnectionCredentialFields({
   );
 }
 
-/* ─── Where a STATIC key comes from ─────────────────────────────── */
+/* ─── Where the credential comes from ───────────────────────────── */
 
-const BINDING_ICONS: Record<"SERVICE" | "CALLER_SUPPLIED", LucideIcon> = {
+const BINDING_ICONS: Record<Binding, LucideIcon> = {
   SERVICE: KeyRound,
   CALLER_SUPPLIED: UserRoundKey,
+  PER_USER: UserRound,
+  MAILBOX: Mailbox,
 };
 
 /**
- * `SERVICE` or `CALLER_SUPPLIED` — the one binding decision an author makes.
+ * The binding decision an author makes, for the two auth types that have one.
  *
- * Offered only for STATIC, where both are legal; every other type has exactly
- * one binding and the editor sets it silently. The choice is about authority,
- * not convenience: an agent holding one shared key can reach everything that
- * key can, and only its own reasoning stands between a user and data they
- * should not see. A caller-supplied credential makes the target platform's
+ * STATIC: `SERVICE` or `CALLER_SUPPLIED`. The choice is about authority, not
+ * convenience: an agent holding one shared key can reach everything that key
+ * can, and only its own reasoning stands between a user and data they should
+ * not see. A caller-supplied credential makes the target platform's
  * permissions the boundary instead.
+ *
+ * OAUTH2_AUTHORIZATION_CODE: `PER_USER` (each person links their own account)
+ * or `MAILBOX` (an administrator links dedicated mailboxes for the email
+ * channel). Every other type has exactly one binding and the editor sets it
+ * silently.
  *
  * A real radio group, like the auth-type chooser it sits beside.
  */
-function StaticBindingChooser({
+function BindingChooser({
+  authType,
   value,
   onChange,
   readOnly,
@@ -418,6 +477,7 @@ function StaticBindingChooser({
   idPrefix,
   labelClass,
 }: {
+  authType: "STATIC" | "OAUTH2_AUTHORIZATION_CODE";
   value: Binding;
   onChange?: (binding: Binding) => void;
   readOnly?: boolean;
@@ -427,7 +487,11 @@ function StaticBindingChooser({
 }) {
   const { t } = useTranslation();
   const groupRef = useRef<HTMLDivElement>(null);
-  const options = legalBindings("STATIC");
+  const options = legalBindings(authType);
+  const legend =
+    authType === "STATIC"
+      ? t("connections.bindingChooser", "Where the key comes from")
+      : t("connections.bindingChooserOAuth", "Whose account is linked");
   const disabled = readOnly || !onChange;
 
   const move = (delta: number) => {
@@ -442,13 +506,11 @@ function StaticBindingChooser({
 
   return (
     <fieldset className="space-y-1.5">
-      <legend className={labelClass}>
-        {t("connections.bindingChooser", "Where the key comes from")}
-      </legend>
+      <legend className={labelClass}>{legend}</legend>
       <div
         ref={groupRef}
         role="radiogroup"
-        aria-label={t("connections.bindingChooser", "Where the key comes from")}
+        aria-label={legend}
         aria-invalid={error !== undefined || undefined}
         className="grid gap-2 sm:grid-cols-2"
         onKeyDown={(e) => {
@@ -462,7 +524,7 @@ function StaticBindingChooser({
         }}
       >
         {options.map((binding) => {
-          const Icon = BINDING_ICONS[binding as "SERVICE" | "CALLER_SUPPLIED"];
+          const Icon = BINDING_ICONS[binding];
           const selected = value === binding;
           return (
             <button
@@ -489,15 +551,7 @@ function StaticBindingChooser({
                   {bindingLabel(t, binding)}
                 </span>
                 <span className="block text-[11px] text-muted-foreground">
-                  {binding === "CALLER_SUPPLIED"
-                    ? t(
-                        "connections.bindingChoice.callerSuppliedBody",
-                        "{{productName}} stores nothing. The system calling {{productName}} sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary.",
-                      )
-                    : t(
-                        "connections.bindingChoice.serviceBody",
-                        "One key in the vault, sent for everyone. Simple — but the agent can reach everything that key can.",
-                      )}
+                  {bindingChoiceBody(t, binding)}
                 </span>
               </span>
             </button>
@@ -507,6 +561,31 @@ function StaticBindingChooser({
       <ValidationMessage code={error} testId={`${idPrefix}-binding-error`} />
     </fieldset>
   );
+}
+
+function bindingChoiceBody(t: ReturnType<typeof useTranslation>["t"], binding: Binding): string {
+  switch (binding) {
+    case "CALLER_SUPPLIED":
+      return t(
+        "connections.bindingChoice.callerSuppliedBody",
+        "{{productName}} stores nothing. The system calling {{productName}} sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary.",
+      );
+    case "SERVICE":
+      return t(
+        "connections.bindingChoice.serviceBody",
+        "One key in the vault, sent for everyone. Simple — but the agent can reach everything that key can.",
+      );
+    case "PER_USER":
+      return t(
+        "connections.bindingChoice.perUserBody",
+        "Each person connects their own account and the agent acts as them.",
+      );
+    case "MAILBOX":
+      return t(
+        "connections.bindingChoice.mailboxBody",
+        "An administrator links dedicated mailboxes (Google Workspace) for email integrations. Usable only for reading and answering that mailbox's mail — never by tools.",
+      );
+  }
 }
 
 /* ─── What the caller has to send ───────────────────────────────── */

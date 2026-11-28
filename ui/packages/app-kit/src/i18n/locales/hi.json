@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "प्रति व्यक्ति",
       "service": "साझा",
-      "callerSupplied": "कॉलर द्वारा दिया गया"
+      "callerSupplied": "कॉलर द्वारा दिया गया",
+      "mailbox": "समर्पित मेलबॉक्स"
     },
     "status": {
       "active": "जुड़ा हुआ",
