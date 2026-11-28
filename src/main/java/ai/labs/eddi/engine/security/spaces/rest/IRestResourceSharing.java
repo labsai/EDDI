@@ -134,7 +134,8 @@ public interface IRestResourceSharing {
     }
 
     /**
-     * Sets visibility: {@code private}, {@code space} or {@code published}.
+     * Sets visibility: {@code private}, {@code space}, {@code internal} or
+     * {@code published}.
      */
     @PUT
     @Path("/visibility")
@@ -180,6 +181,13 @@ public interface IRestResourceSharing {
     /**
      * Reassigns ownership. Administrators only — this exists to recover resources
      * whose owner has left, which cannot depend on that owner acting.
+     *
+     * @param ownerId
+     *            the new owner, by principal, name or email (resolved through the
+     *            user directory)
+     * @param spaceId
+     *            the space to file the resource under; omitted, the new owner's
+     *            personal space
      */
     @PUT
     @Path("/owner")

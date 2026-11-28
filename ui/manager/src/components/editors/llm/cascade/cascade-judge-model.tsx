@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Scale } from "lucide-react";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
-import { ProviderSelect } from "@/components/shared/provider-select";
-import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
-import { type CascadeJudgeModel } from "../types";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
+import { offeredWithoutBaseUrl } from "@eddi/app-kit/lib/model-suggestions";
+import { type CascadeJudgeModel } from "@eddi/app-kit/components/editors/llm/types";
 import { modelParamSpec } from "../model-params";
 import { LEGACY_MODEL_KEY, modelField, withModel } from "./cascade-utils";
 

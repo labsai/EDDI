@@ -6,7 +6,7 @@ import { useStudioSaveAndTest } from "@/components/studio/use-studio-save-and-te
 
 const deployAgent = vi.fn();
 const getDeploymentStatus = vi.fn();
-vi.mock("@/lib/api/agents", () => ({
+vi.mock("@eddi/app-kit/lib/api/agents", () => ({
   deployAgent: (...args: unknown[]) => deployAgent(...args),
   getDeploymentStatus: (...args: unknown[]) => getDeploymentStatus(...args),
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/api/agents", () => ({
 const clearMessages = vi.fn();
 const setSelectedAgent = vi.fn();
 const startConversation = vi.fn();
-vi.mock("@/hooks/use-chat", () => ({
+vi.mock("@eddi/app-kit/hooks/use-chat", () => ({
   useChatStore: { getState: () => ({ clearMessages, setSelectedAgent }) },
   useStartConversation: () => ({ mutateAsync: startConversation }),
 }));

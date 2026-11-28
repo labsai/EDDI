@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { discoverMcpTools } from "../mcp-discover";
-import { discoverEndpoints, LiteralCredentialError } from "../openapi-discover";
-import { isAuthReference } from "@/lib/secret-reference";
+import { discoverEndpoints, LiteralCredentialError } from "@eddi/app-kit/lib/api/openapi-discover";
+import { isAuthReference } from "@eddi/app-kit/lib/secret-reference";
 
 const MCP_URL = `${window.location.origin}/mcpcallsstore/mcpcalls/discover-tools`;
 const OPENAPI_URL = `${window.location.origin}/apicallstore/apicalls/discover-endpoints`;

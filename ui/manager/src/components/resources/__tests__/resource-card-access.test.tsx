@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ResourceCard } from "@/components/resources/resource-card";
 import { WorkflowCard } from "@/components/workflows/workflow-card";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 
 const base = {
   resource: "eddi://ai.labs.output/outputstore/outputsets/r1?version=1",

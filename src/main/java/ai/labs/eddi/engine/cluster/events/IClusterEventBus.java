@@ -22,6 +22,20 @@ public interface IClusterEventBus {
     /** Publishes an event to every other node. Never blocks, never throws. */
     void publish(String type, Map<String, Object> payload);
 
+    /**
+     * Publishes a transient event to the nodes connected right now: at most once,
+     * never stored, never replayed, never queued. When this node is disconnected
+     * the event is dropped — it never takes a place in the outbox that cache
+     * invalidations depend on, so it can neither overflow it (and force a cluster
+     * wide resync) nor push invalidations out of the stream's retention. For hints
+     * whose loss a client recovers from by refetching, such as the per-user event
+     * stream. Delivered to the same {@link #subscribe} handlers. Never blocks,
+     * never throws; a no-op in single-node mode.
+     */
+    default void publishTransient(String type, Map<String, Object> payload) {
+        // single node: nobody to tell
+    }
+
     /** Registers a handler for events of {@code type} from other nodes. */
     void subscribe(String type, Consumer<ClusterEvent> handler);
 

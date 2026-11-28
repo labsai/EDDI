@@ -15,7 +15,7 @@
  * Both implementations consume `src/test/resources/llm/parameter-rule-vectors.json`.
  */
 
-import { getCompatibleProvider } from "@/lib/llm-provider-catalog";
+import { getCompatibleProvider } from "@eddi/app-kit/lib/llm-provider-catalog";
 import { LLM_PARAMETER_CATALOG_DATA } from "@/lib/llm-parameter-catalog.data";
 
 // ─── Raw catalog shape (the JSON, verbatim) ─────────────────────────────────

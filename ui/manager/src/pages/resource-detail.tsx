@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import {
@@ -13,11 +13,11 @@ import {
 } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { EditableTitle } from "@/components/shared/editable-title";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";
-import { getResourceType } from "@/lib/api/resources";
+import { getResourceType } from "@eddi/app-kit/lib/api/resources";
 import {
   useResource,
   useResourceVersions,
@@ -27,33 +27,33 @@ import {
   useCascadeSave,
 } from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
-import { getResourceTypeIcon } from "@/lib/resource-type-icons";
+import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
-import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
-import { useAgent } from "@/hooks/use-agents";
+import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
+import { useAgent } from "@eddi/app-kit/hooks/use-agents";
 import {
   findResourceUsage,
   type ResourceUsage,
 } from "@/lib/api/resource-usage";
 import { useJsonSchema } from "@/hooks/use-json-schema";
-import type { CascadeContext } from "@/lib/api/cascade-save";
+import type { CascadeContext } from "@eddi/app-kit/lib/api/cascade-save";
 import {
   CascadeReferenceError,
   cascadePartialResult,
   cascadeVersionUpdate,
   nextCascadeContext,
-} from "@/lib/api/cascade-save";
+} from "@eddi/app-kit/lib/api/cascade-save";
 import { describeSaveError } from "@/lib/save-error";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
-import { getResource } from "@/lib/api/resources";
+import { getResource } from "@eddi/app-kit/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
-import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { OwningAgentContext } from "@/hooks/use-owning-agent";
-import { allowNextNavigation } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 
 /**
  * One id for the "saved — not yet live" toast, so only the most recent save's

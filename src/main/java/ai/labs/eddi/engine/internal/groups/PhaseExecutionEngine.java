@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
@@ -22,6 +23,8 @@ import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancellation;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelledException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -32,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -44,6 +48,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * Runs the debate-style phase turn orders (sequential, parallel, and
@@ -68,6 +73,7 @@ public class PhaseExecutionEngine {
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
     private ServiceConvergenceJudge serviceJudge;
+    private GroupSigningGuard signingGuard;
 
     /**
      * The {@code memberConversationIds} key the convergence judge's own private
@@ -100,6 +106,57 @@ public class PhaseExecutionEngine {
      */
     public void setServiceJudge(ServiceConvergenceJudge serviceJudge) {
         this.serviceJudge = serviceJudge;
+    }
+
+    /**
+     * Wires the guard every prompt this engine composes for a role turn (judge,
+     * dissenter, tie-breaker) and the vote tally read the transcript through.
+     * Without it they read the transcript as stored.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
+    }
+
+    private Map<String, DiscussionControlToken> discussionControls;
+
+    /**
+     * Wires the discussions' control tokens (K2): a cancel is then read before
+     * every speaker, and {@code CANCEL_IMMEDIATE} releases the running turn.
+     * Without it the engine runs every phase to its end, as before.
+     */
+    public void setDiscussionControls(Map<String, DiscussionControlToken> discussionControls) {
+        this.discussionControls = discussionControls;
+    }
+
+    private DiscussionControlToken tokenOf(GroupConversation gc) {
+        return discussionControls == null || gc.getId() == null ? null : discussionControls.get(gc.getId());
+    }
+
+    /**
+     * One member turn, stopped by the discussion's cancel: refused when it is
+     * already cancelled, released on {@code CANCEL_IMMEDIATE} while it runs.
+     */
+    private TranscriptEntry cancellableTurn(GroupMember speaker, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                            DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException {
+        var token = tokenOf(gc);
+        DiscussionCancellation.checkpoint(token);
+        if (token == null) {
+            return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, targetAgentId, listener);
+        }
+        try (var link = DiscussionCancellation.link(token)) {
+            return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, targetAgentId, listener,
+                    link.cancellation());
+        }
+    }
+
+    /**
+     * The transcript of {@code gc} as the group's own records count it (see
+     * {@link GroupSigningGuard#recordView}): what the vote tally, the SERVICE judge
+     * and a tie-break resumed later read.
+     */
+    GroupSigningGuard.View recordsOf(GroupConversation gc, AgentGroupConfiguration config) {
+        return GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
     }
 
     /**
@@ -185,8 +242,9 @@ public class PhaseExecutionEngine {
      * Ordering is deliberate: the deterministic all-abstained check runs first and
      * short-circuits, so a unanimously silent round never pays for a judge call to
      * tell it what it already knows. The judge runs only when that fails,
-     * convergence is enabled, {@code minRepeats} has elapsed, and there is a
-     * previous round to compare against.
+     * convergence is enabled, {@code minRepeats} has elapsed, and — in SIMILARITY
+     * mode; VERDICT mode compares nothing — there is a previous round to compare
+     * against.
      * <p>
      * A judge failure is never fatal to the discussion: {@code executeAgentTurn}
      * already converts an agent failure into a SKIPPED/ERROR entry rather than
@@ -262,11 +320,15 @@ public class PhaseExecutionEngine {
             turnCounter.incrementAndGet();
         }
 
+        // The judge's input, built from the entries as the judge sees them: the
+        // moderator agent reads them through its own verification view, the SERVICE
+        // judge through the group's records view.
+        Function<UnaryOperator<List<TranscriptEntry>>, String> judgeInput = seen -> verdictMode
+                ? ConvergenceDetector.buildVerdictInput(currentQuestion(gc), seen.apply(repeatEntries))
+                : ConvergenceDetector.buildJudgeInput(seen.apply(previousRepeatEntries), seen.apply(repeatEntries));
         var verdict = verdictMode
-                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
-                        ConvergenceDetector.buildVerdictInput(currentQuestion(gc), repeatEntries), ConvergenceDetector::parseVerdict, listener)
-                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
-                        ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries),
+                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence, judgeInput, ConvergenceDetector::parseVerdict, listener)
+                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence, judgeInput,
                         output -> ConvergenceDetector.parseJudgeVerdict(output, convergence.threshold()), listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
         return verdict.converged() ? PhaseOutcome.endRepeats(verdict.summary()) : PhaseOutcome.cont();
@@ -294,7 +356,6 @@ public class PhaseExecutionEngine {
                                int phaseIdx, List<GroupMember> synthesizers, GroupDiscussionEventListener listener,
                                AtomicInteger turnCounter, int maxTurns) {
 
-        String synthesis = latestSynthesis(gc);
         Set<String> synthesizerIds = synthesizers == null
                 ? Set.of()
                 : synthesizers.stream().map(GroupMember::agentId).filter(Objects::nonNull).collect(Collectors.toSet());
@@ -318,16 +379,26 @@ public class PhaseExecutionEngine {
             return 0;
         }
 
-        // I3: after a judged debate the transcript entry holds the judge's JSON.
-        // Asking members to disagree with a serialization format produces DISSENT
-        // entries — public, SSE-streamed, and recorded on the DecisionRecord — that
-        // argue with braces. The rendered outcome is what a human would have been
-        // shown, so it is what the minority reacts to.
-        DecisionRecord decision = gc.getDecision();
-        String reactTo = DebateVerdictParser.isRenderedFrom(decision, synthesis) ? decision.outcome() : synthesis;
-        String input = AbstentionDetector.buildDissentInput(reactTo);
         List<Dissent> collected = new ArrayList<>();
         for (GroupMember member : dissenters) {
+            // Each dissenter reacts to the synthesis as it sees it. A verifying member
+            // for whom this round's synthesis does not verify has nothing it may react
+            // to, so it is not asked.
+            var view = GroupSigningGuard.viewOf(signingGuard, member.agentId(), gc);
+            String synthesis = latestSynthesis(gc, view);
+            if (synthesis == null && view.verifying()) {
+                LOGGER.infof("Group %s: no dissent turn for '%s' — this round's synthesis does not verify for it",
+                        LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()));
+                continue;
+            }
+            // I3: after a judged debate the transcript entry holds the judge's JSON.
+            // Asking members to disagree with a serialization format produces DISSENT
+            // entries — public, SSE-streamed, and recorded on the DecisionRecord — that
+            // argue with braces. The rendered outcome is what a human would have been
+            // shown, so it is what the minority reacts to.
+            DecisionRecord decision = gc.getDecision();
+            String reactTo = DebateVerdictParser.isRenderedFrom(decision, synthesis) ? decision.outcome() : synthesis;
+            String input = AbstentionDetector.buildDissentInput(reactTo);
             if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
                 break;
             }
@@ -383,11 +454,12 @@ public class PhaseExecutionEngine {
      * How many member turns a repeat of {@code phase} schedules — the denominator
      * "did everyone abstain?" must be measured against.
      * <p>
-     * A peer-targeted phase runs one turn per (speaker, other-member) pair, so its
-     * count is N×(N-1), not N. Sequential and parallel phases run one turn per
-     * speaker. Using the speaker count for all three made unanimity mean different
-     * things per turn order — the kind of mismatch that reads as correct until a
-     * three-member critique round quietly ends itself.
+     * A peer-targeted phase runs one turn per (speaker, target) pair minus the
+     * self-pairs — N×(N-1) when speakers and targets are the same N members, not N.
+     * Sequential and parallel phases run one turn per speaker. Using the speaker
+     * count for all three made unanimity mean different things per turn order — the
+     * kind of mismatch that reads as correct until a three-member critique round
+     * quietly ends itself.
      */
     private static int expectedTurnsFor(DiscussionPhase phase, List<GroupMember> speakers, List<GroupMember> targets) {
         int n = speakers != null ? speakers.size() : 0;
@@ -416,9 +488,18 @@ public class PhaseExecutionEngine {
         return (int) (((long) n * m) - selfPairs);
     }
 
-    /** The most recent synthesis text, which is what dissenters are reacting to. */
+    /** The most recent synthesis text of this round, as stored. */
     private static String latestSynthesis(GroupConversation gc) {
-        List<TranscriptEntry> transcript = gc.getTranscript();
+        return latestSynthesis(gc, new GroupSigningGuard.View(GroupSigningGuard.Requirement.NOT_REQUIRED, gc.getTranscript()));
+    }
+
+    /**
+     * The most recent synthesis text of this round as {@code view}'s reader sees
+     * it, which is what a dissenter reacts to; {@code null} when there is none, or
+     * when the reader verifies and the latest synthesis does not verify for it.
+     */
+    private static String latestSynthesis(GroupConversation gc, GroupSigningGuard.View view) {
+        List<TranscriptEntry> transcript = view.transcript();
         // THIS round's entries only. A continuation re-runs every phase from index 0
         // against a transcript that still holds the previous round's, and an entry
         // carries no round — so an unscoped scan let a round whose synthesis
@@ -432,13 +513,14 @@ public class PhaseExecutionEngine {
             for (int i = transcript.size() - 1; i >= from; i--) {
                 TranscriptEntry e = transcript.get(i);
                 if (e != null && e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null) {
-                    return e.content();
+                    return GroupSigningGuard.isWithheld(e) ? null : e.content();
                 }
             }
         }
         // Only a first round may fall back to the answer field: there is no earlier
-        // round for it to have come from.
-        return from == 0 ? gc.getSynthesizedAnswer() : null;
+        // round for it to have come from. It is free text no signature covers, so
+        // never for a verifying reader.
+        return from == 0 && !view.verifying() ? gc.getSynthesizedAnswer() : null;
     }
 
     /**
@@ -522,11 +604,15 @@ public class PhaseExecutionEngine {
                                                                   AtomicInteger turnCounter, int maxTurns) {
         HumanTieBreakEngine.PendingTieBreak pendingTieBreak = null;
         var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
+        // Options and ballots as the group's records may count them: once any reader
+        // requires peer verification, only what verifies for every reader, so the
+        // options a tie-breaker is shown and the ballots counted are verified text.
+        var records = recordsOf(gc, config);
+        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, records.transcript());
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
             transcriptSnapshot = List.copyOf(gc.getTranscript());
         }
-        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, transcriptSnapshot);
         if (options.size() < 2) {
             LOGGER.warnf("Group %s: VOTE phase '%s' resolved %d option(s) — a vote needs at least two; recording NONE",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()), options.size());
@@ -537,7 +623,9 @@ public class PhaseExecutionEngine {
             return null;
         }
 
-        List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
+        List<TranscriptEntry> ballots = repeatEntries.stream()
+                .filter(e -> e != null && e.type() == TranscriptEntryType.VOTE && records.trusts(e))
+                .toList();
         int participants = speakers != null ? speakers.size() : ballots.size();
         var outcome = VoteTallyEngine.tally(ballots, participants, options, voteConfig, phase.name());
 
@@ -610,7 +698,7 @@ public class PhaseExecutionEngine {
 
     /**
      * One moderator turn choosing among the unresolved options. The reply is
-     * resolved by the same exact-scan rule as a tier-2 ballot; an unreadable reply
+     * resolved by the same exact-scan rule as a tier-3 ballot; an unreadable reply
      * keeps the tally's honest NONE.
      */
     private DecisionRecord moderatorTiebreak(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
@@ -720,13 +808,18 @@ public class PhaseExecutionEngine {
 
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
                                                             ProtocolConfig protocol, int phaseIdx, int repeat, ConvergenceConfig convergence,
-                                                            String input, Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
+                                                            Function<UnaryOperator<List<TranscriptEntry>>, String> input,
+                                                            Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
                                                             GroupDiscussionEventListener listener) {
         // SERVICE judge first: it needs no moderator, so it must run before the
-        // no-moderator early return. Empty = run the moderator judge below.
-        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = serviceJudge != null
-                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input, parser, listener)
-                : Optional.empty();
+        // no-moderator early return. Empty = run the moderator judge below. It is no
+        // agent, but its verdict ends the phase for every member, so it reads the
+        // entries as the group's records count them, like the vote tally does.
+        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = Optional.empty();
+        if (serviceJudge != null) {
+            var records = recordsOf(gc, config);
+            serviceVerdict = serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input.apply(records::of), parser, listener);
+        }
         if (serviceVerdict.isPresent()) {
             return serviceVerdict.get();
         }
@@ -743,8 +836,9 @@ public class PhaseExecutionEngine {
             // moderator AGENT but must not share the moderator's CONVERSATION, or its
             // "reply with ONLY this JSON" prompts become the recent history a later
             // SYNTHESIS turn (same agent) reads — and the synthesis comes back as JSON.
-            TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input, protocol, phaseIdx, phase, null, listener,
-                    null, JUDGE_CONVERSATION_KEY);
+            var view = GroupSigningGuard.viewOf(signingGuard, moderatorAgentId, gc);
+            TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input.apply(view::of), protocol, phaseIdx, phase,
+                    null, listener, null, JUDGE_CONVERSATION_KEY);
             return parser.apply(judgeEntry != null ? judgeEntry.content() : null);
         } catch (Exception e) {
             LOGGER.warnf("Convergence judge failed for phase '%s' — continuing without an early exit: %s", phase.name(), e.getMessage());
@@ -794,7 +888,10 @@ public class PhaseExecutionEngine {
         int from = Math.min(Math.max(startSpeakerIdx, 0), speakers.size());
         for (int idx = from; idx < speakers.size(); idx++) {
             GroupMember speaker = speakers.get(idx);
+            // K2: a cancel stops the phase before the next speaker, not at its end.
+            DiscussionCancellation.checkpoint(tokenOf(gc));
             if (turnCounter.get() >= maxTurns) {
+                TurnBudget.noteCut(gc, phaseIdx, phase.name());
                 break;
             }
             // I1: checked before each turn — an already-dispatched turn may still
@@ -823,12 +920,11 @@ public class PhaseExecutionEngine {
                     config.getRetroConfig());
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
-            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
-            TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
+            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(), recordsOf(gc, config));
+            TranscriptEntry entry = cancellableTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
-                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                        entry.content(), phaseIdx, phase.name()));
+                listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(), null, null));
             }
         }
     }
@@ -891,11 +987,17 @@ public class PhaseExecutionEngine {
         // Cap batch size to remaining turn budget
         int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : agentSpeakers.size();
         if (remainingTurns == 0) {
+            if (!agentSpeakers.isEmpty()) {
+                TurnBudget.noteCut(gc, phaseIdx, phase.name());
+            }
             return;
         }
         List<GroupMember> batchSpeakers = maxTurns > 0
                 ? agentSpeakers.subList(0, Math.min(agentSpeakers.size(), remainingTurns))
                 : agentSpeakers;
+        if (batchSpeakers.size() < agentSpeakers.size()) {
+            TurnBudget.noteCut(gc, phaseIdx, phase.name());
+        }
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
@@ -922,6 +1024,38 @@ public class PhaseExecutionEngine {
         // Cooperative cancellation for this batch — cancel(true) does not stop a
         // supplyAsync body, so a "cancelled" speaker would otherwise keep running.
         var cancellation = new MemberTurnCancellation();
+        // K2: the discussion's CANCEL_IMMEDIATE releases the batch as well.
+        var token = tokenOf(gc);
+        DiscussionCancellation.checkpoint(token);
+        Runnable unlinkBatch = token == null ? () -> {
+        } : token.onCancel(signal -> {
+            if (signal == ControlSignal.CANCEL_IMMEDIATE) {
+                cancellation.cancelAndStopInFlight();
+            }
+        });
+        // S1: the batch's turns are counted before it is dispatched (parallel turns
+        // are atomic batches), so a nested GROUP member in it sees what really
+        // remains — shared with its GROUP siblings — and never the synthesis turn.
+        turnCounter.addAndGet(batchSpeakers.size());
+        gc.shareLegTurns((int) batchSpeakers.stream().filter(s -> s.memberType() == AgentGroupConfiguration.MemberType.GROUP).count());
+        try {
+            runParallelBatch(gc, config, phase, protocol, question, phaseIdx, listener, batchSpeakers, snapshotTranscript, cancellation, token);
+        } finally {
+            gc.shareLegTurns(1);
+            unlinkBatch.run();
+        }
+        DiscussionCancellation.checkpoint(token);
+
+        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
+        // "parallel" (independent) round stays independent — a human answering
+        // after the agents must not read their answers first.
+        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
+    }
+
+    private void runParallelBatch(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                                  String question, int phaseIdx, GroupDiscussionEventListener listener, List<GroupMember> batchSpeakers,
+                                  List<TranscriptEntry> snapshotTranscript, MemberTurnCancellation cancellation, DiscussionControlToken token)
+            throws GroupDiscussionException {
 
         // Notify all speakers starting (parallel)
         if (listener != null) {
@@ -943,7 +1077,8 @@ public class PhaseExecutionEngine {
                                 GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                                 config.getRetroConfig());
                         // I11: see the sequential loop — appended, not templated.
-                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
+                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(),
+                                recordsOf(gc, config));
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -1017,6 +1152,15 @@ public class PhaseExecutionEngine {
                     cause = ce.getCause();
                 }
                 if (cause instanceof MemberTurnCancelledException) {
+                    if (token != null && token.isCancelled()) {
+                        // Released by the discussion's own cancel: not a timeout. Every
+                        // started turn still gets its closing entry and speaker_complete;
+                        // the leg ends as CANCELLED right after the batch.
+                        recordParallelOutcome(gc, TranscriptEntry.notAnswered(speaker.agentId(), speaker.displayName(), phaseIdx,
+                                phase.name(), TranscriptEntryType.SKIPPED, TurnOutcome.SKIPPED, MemberTurnExecutor.REASON_CANCELLED, null),
+                                phaseIdx, phase, listener);
+                        continue;
+                    }
                     // Already released by the batch deadline above — same outcome as a
                     // speaker whose own get() timed out.
                     recordParallelOutcome(gc, timeoutEntry(speaker, phaseIdx, phase), phaseIdx, phase, listener);
@@ -1035,13 +1179,6 @@ public class PhaseExecutionEngine {
                         listener);
             }
         }
-        // Count all completed turns for this batch (parallel turns are atomic batches)
-        turnCounter.addAndGet(batchSpeakers.size());
-
-        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
-        // "parallel" (independent) round stays independent — a human answering
-        // after the agents must not read their answers first.
-        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
     }
 
     /**
@@ -1052,24 +1189,16 @@ public class PhaseExecutionEngine {
                                               GroupDiscussionEventListener listener) {
         gc.getTranscript().add(entry);
         if (listener != null) {
-            String outcome = switch (entry.type()) {
-                case SKIPPED -> entry.errorReason() != null && entry.errorReason().startsWith("Timeout")
-                        ? GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT
-                        : GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_SKIPPED;
-                case ERROR -> GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_ERROR;
-                default -> null;
-            };
             // A skipped or failed turn carries no content (its reason is in the
             // transcript's errorReason, never on the wire) and says so by flag.
-            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
-                    outcome == null ? entry.content() : null, phaseIdx, phase.name(), null, null, outcome));
+            listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(), null, null));
         }
     }
 
     /** A parallel speaker released by the batch deadline, attributed to it. */
     private static TranscriptEntry timeoutEntry(GroupMember speaker, int phaseIdx, DiscussionPhase phase) {
-        return new TranscriptEntry(speaker.agentId(), speaker.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                Instant.now(), "Timeout", null);
+        return TranscriptEntry.notAnswered(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                TurnOutcome.TIMED_OUT, "Timeout", null);
     }
 
     /**
@@ -1119,7 +1248,9 @@ public class PhaseExecutionEngine {
                 if (speaker.agentId().equals(target.agentId())) {
                     continue; // Don't critique yourself
                 }
+                DiscussionCancellation.checkpoint(tokenOf(gc));
                 if (turnCounter.get() >= maxTurns) {
+                    TurnBudget.noteCut(gc, phaseIdx, phase.name());
                     break outer;
                 }
                 if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
@@ -1133,12 +1264,11 @@ public class PhaseExecutionEngine {
                 String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
                         GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                         config.getRetroConfig());
-                TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
-                        listener);
+                TranscriptEntry entry = cancellableTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(), listener);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
-                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                            entry.content(), phaseIdx, phase.name(), target.agentId(), target.displayName()));
+                    listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(),
+                            target.agentId(), target.displayName()));
                 }
             }
         }

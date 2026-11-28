@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DiscussionOutcome;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
@@ -24,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * Implements {@link GroupDiscussionEventListener} to receive callbacks as
  * agents speak, and posts each contribution to Slack.
  * <p>
- * All discussion styles use <b>EXPANDED</b> mode: each agent's first
+ * All preset discussion styles use <b>EXPANDED</b> mode: each agent's first
  * contribution is a channel-level header with a short preview, and the full
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
@@ -40,8 +41,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     /**
      * Discussion styles that use EXPANDED mode (channel-level messages with peer
-     * threading). All styles use expanded mode in Slack for readability — compact
-     * mode (single thread) is too hard to follow with multiple agents.
+     * threading). All preset styles use expanded mode in Slack for readability —
+     * compact mode (single thread) is too hard to follow with multiple agents; only
+     * {@code CUSTOM} falls back to it.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
             "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");
@@ -237,6 +239,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // onSpeakerComplete
             if (!synthesisPosted && event.synthesizedAnswer() != null && !event.synthesizedAnswer().isBlank()) {
                 postSynthesis("Moderator", event.synthesizedAnswer());
+            }
+            // A discussion that ended without an answer says so, instead of ending
+            // in silence after the last contribution.
+            if (event.outcome() != null && event.outcome() != DiscussionOutcome.ANSWERED) {
+                String msg = "⚠️ The group discussion ended without an answer (" + event.outcomeReason() + ").";
+                postSafe(channelId, expandedMode ? null : userThreadTs, msg);
             }
             LOGGER.debugf("Group discussion complete: %s", event.state());
         } finally {

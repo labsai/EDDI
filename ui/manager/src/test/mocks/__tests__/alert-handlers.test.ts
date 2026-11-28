@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createAlertRule, listAlertRules, testAlertRule, updateAlertRule } from "@/lib/api/alerts";
-import type { AlertRule } from "@/lib/api/alerts";
+import { createAlertRule, listAlertRules, testAlertRule, updateAlertRule } from "@eddi/app-kit/lib/api/alerts";
+import type { AlertRule } from "@eddi/app-kit/lib/api/alerts";
 
 /** The mock mirrors the server's targetId rules, so page tests exercise the real contract. */
 describe("alert handlers — webhook URLs and targetId", () => {

@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
-import { getErrorMessage } from "@/lib/api-client";
-import { CascadeReferenceError } from "@/lib/api/cascade-save";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { CascadeReferenceError } from "@eddi/app-kit/lib/api/cascade-save";
 
 /**
  * The message to show for a failed config save, translated where the failure is

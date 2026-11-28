@@ -45,6 +45,9 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApproverCheck;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -100,11 +103,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * {@code say}/step machinery a normal turn uses — a second, resume-shaped copy
  * of turn execution is how post-approval behaviour drifts from ordinary
  * behaviour without anyone noticing. Hence the back-reference to
- * {@link ConversationService} for the seven facade members this cluster calls
- * ({@code say}, {@code getAgent}, {@code createPropertiesHandler},
+ * {@link ConversationService} for the facade members this cluster calls (among
+ * them {@code getAgent}, {@code createPropertiesHandler},
  * {@code storeConversationMemoryIfState}, {@code cacheConversationState},
- * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError}) plus
- * {@code rejectIfShuttingDown}. Same pattern and the same safety argument as
+ * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError} and
+ * {@code rejectIfShuttingDown}). Same pattern and the same safety argument as
  * {@code GroupHitlCoordinator} in R1: the constructor only stores it, never
  * calls through it before the facade's own construction completes.
  * <p>
@@ -399,6 +402,12 @@ class ConversationHitlService {
                 "The pending approval changed since this decision was made — the conversation was resumed and has "
                         + "paused again on a different request. Review the current request and decide again.");
     }
+
+    /**
+     * Resumes a conversation paused {@code AWAITING_HUMAN} with the human's (or the
+     * timeout policy's) decision. {@code handler} may be {@code null} for an
+     * internally driven resume that has no client to answer.
+     */
     public void resumeConversation(String conversationId,
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
@@ -537,8 +546,8 @@ class ConversationHitlService {
         conversationService.cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
         // From here on the pause's STATE has been consumed
-        // (AWAITING_HUMAN->IN_PROGRESS):
-        // EVERY failure path must restore it, or the approval is wedged IN_PROGRESS.
+        // (AWAITING_HUMAN->IN_PROGRESS): EVERY failure path must restore it, or the
+        // approval is wedged IN_PROGRESS.
         // The timeout schedule is deliberately NOT deleted yet (see below): a failure
         // before that point — a transient snapshot-load hiccup or an undeployed agent —
         // then leaves the original finite-policy timeout armed, so it still fires on
@@ -610,6 +619,24 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw new ProcessingRestrictedException("Processing is restricted for this user (GDPR Art. 18)");
             }
+            // Mandatory approvals (MandatoryApprovalRule): a decision that approves a call
+            // a rule gated must come from an approver that call's ApproverRule accepts —
+            // for consent, the conversation's verified user or an administrator with a
+            // reason. Checked on the snapshot this resume runs, before anything runs; a
+            // refusal puts the pause back untouched, so the call stays pending for
+            // someone who may decide it. Rejections are never refused.
+            try {
+                var byCall = MandatoryApproverCheck.enforceByCall(snapshot.getHitlPendingToolCalls(), decision,
+                        callerIdentityContext.captureOrCurrent(), snapshot.getUserId(), snapshot.getResolutionProvenance());
+                decision.setMandatoryApprovalsByCallId(byCall);
+                decision.setMandatoryApproval(MandatoryApproverCheck.strictest(snapshot.getHitlPendingToolCalls(), byCall));
+            } catch (MandatoryApprovalRefusedException refused) {
+                LOGGER.infof("Refused a decision on conversation %s: it approves a call that needs a mandatory approval its "
+                        + "approver cannot give (%s); the pause is untouched", sanitize(conversationId), refused.getMessage());
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw refused;
+            }
+            logAdminOnBehalf(conversationId, decision);
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             // Execution side of the binding: re-derive the hash from the plan this
@@ -635,7 +662,7 @@ class ConversationHitlService {
             prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
         } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
-                | HitlPlanBinding.PlanHashRequired e) {
+                | HitlPlanBinding.PlanHashRequired | MandatoryApprovalRefusedException e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -895,8 +922,7 @@ class ConversationHitlService {
                         // land between that check and this store, and an unconditional
                         // full-document replace would then overwrite ENDED/
                         // EXECUTION_INTERRUPTED with READY — resurrecting a terminated
-                        // conversation that then accepts new conversationService.say() input. The
-                        // atomic
+                        // conversation that then accepts new say() input. The atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
                         // A resumed turn that settled may ask to continue, like any turn:
@@ -1041,7 +1067,8 @@ class ConversationHitlService {
                                 runtime.submitCallable(withConversationPrincipal(memory,
                                         callerIdentityContext.withIdentity(resumeCallerIdentity,
                                                 callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),
-                                        resumeFinished, null));
+                                        resumeFinished, null),
+                                () -> committedResumeState.get() != null);
                     } finally {
                         // Backstop: the runtime callbacks flush a deferred re-pause, but a
                         // resume that reached neither (cancelled before it ran) must still
@@ -1343,10 +1370,8 @@ class ConversationHitlService {
             return false;
         }
         // Both the flag and the placeholder: the scrub always writes the placeholder
-        // with
-        // secret=true, while a non-secret entry that happens to carry the placeholder
-        // text
-        // was never a secret and must not be re-supplied.
+        // with secret=true, while a non-secret entry that happens to carry the
+        // placeholder text was never a secret and must not be re-supplied.
         if (stored instanceof Context context) {
             return Boolean.TRUE.equals(context.getSecret()) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(context.getValue());
         }
@@ -1376,6 +1401,8 @@ class ConversationHitlService {
         }
 
         PendingToolCallBatch batch = snapshot.getHitlPendingToolCalls();
+        // A mandatory call is approved or rejected as its rule saw it, never amended.
+        MandatoryApproverCheck.refuseAmendments(batch, decision);
         List<PendingToolCallBatch.PendingToolCall> pendingCalls = batch != null && batch.getCalls() != null
                 ? batch.getCalls()
                 : List.of();
@@ -1530,8 +1557,7 @@ class ConversationHitlService {
         }
 
         // The auto-approval CAP being reached is its own guard signal (distinct from
-        // the
-        // fixed >=2 no-progress threshold) — record it so operators can tell a
+        // the fixed >=2 no-progress threshold) — record it so operators can tell a
         // config-limited stop from the built-in loop breaker.
         if (capReached) {
             recordGuard("auto_approve_cap");
@@ -1966,8 +1992,8 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
             // An agent without hitlConfig can still pause on a task-level toolApprovals
-            // rule: the renderer then
-            // takes the blocks of the effective configuration stored on the pending batch.
+            // rule: the renderer then takes the blocks of the effective configuration
+            // stored on the pending batch.
             memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
                     hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
@@ -2042,7 +2068,7 @@ class ConversationHitlService {
     void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
         // Fix #1: the TOOL-LEVEL source is the config that ACTUALLY gated the paused
         // batch — the task-level override rides on the batch (persisted by
-        // AgentOrchestrator.buildPendingBatch). Prefer it; fall back to the
+        // ToolApprovalGateSupport.buildPendingBatch). Prefer it; fall back to the
         // agent-level hitlConfig.toolApprovals for a legacy batch (null field) or a
         // null batch. The inherit-from-outer fallback and the AUTO_APPROVE-demotion
         // below still read the OUTER hitlConfig — Task 10 semantics unchanged.
@@ -2101,8 +2127,42 @@ class ConversationHitlService {
         } else {
             effectivePolicy = inheritedPolicy;
         }
+        // A batch carrying a mandatory call (MandatoryApprovalRule) is never
+        // auto-approved on a silent timeout, whatever any level of the config says —
+        // the approval it needs cannot come from a timer.
+        if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE && hasMandatoryCall(pendingBatch)) {
+            effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        }
         memory.setHitlTimeoutPolicy(effectivePolicy);
         memory.setHitlApprovalTimeout(effectiveTimeout);
+    }
+
+    /** Whether the batch holds a call a mandatory-approval rule gated. */
+    static boolean hasMandatoryCall(PendingToolCallBatch batch) {
+        if (batch == null || batch.getCalls() == null) {
+            return false;
+        }
+        for (PendingToolCallBatch.PendingToolCall call : batch.getCalls()) {
+            if (call != null && call.isMandatory()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * An administrator approving a mandatory call for the conversation's user is
+     * never silent: besides the decision's audit entry ({@code actingAs},
+     * {@code approvedBy}, {@code onBehalfOf}), one INFO line carries the same
+     * fields — the trail that survives when the audit ledger is disabled.
+     */
+    static void logAdminOnBehalf(String conversationId, HitlDecision decision) {
+        MandatoryApprovalAttribution mandatory = decision.getMandatoryApproval();
+        if (mandatory == null || mandatory.actingAs() != MandatoryApprovalAttribution.ActingAs.ADMIN_ON_BEHALF) {
+            return;
+        }
+        LOGGER.infof("hitl.mandatory.admin_on_behalf conversation=%s approvedBy=%s onBehalfOf=%s actingAs=%s", sanitize(conversationId),
+                sanitize(mandatory.approvedBy()), sanitize(mandatory.onBehalfOf()), mandatory.actingAs().name());
     }
 
     /**

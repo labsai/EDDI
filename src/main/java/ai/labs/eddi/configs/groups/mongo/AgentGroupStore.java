@@ -209,6 +209,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public static List<String> memberAndLimitProblems(AgentGroupConfiguration config) {
         List<String> problems = new ArrayList<>();
         List<AgentGroupConfiguration.GroupMember> members = config.getMembers() != null ? config.getMembers() : List.of();
+        if (members.isEmpty()) {
+            // GR4: a group without members saved, and every discussion on it
+            // "completed" with nothing in it. Stored groups keep loading — only a
+            // save is refused.
+            problems.add("members must contain at least one member");
+        }
         for (int i = 0; i < members.size(); i++) {
             var member = members.get(i);
             if (member == null) {
@@ -889,7 +895,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         }
         // Checking getPhases() alone made this inert for exactly the configs that
         // need it: a preset-style group stores NO phases, the engine expands the
-        // preset at discussion time, and every one of the six presets ends in a
+        // preset at discussion time, and every one of the seven presets ends in a
         // participants="MODERATOR" phase. Mirror
         // GroupConversationService.resolvePhases.
         return resolvedPhases(groupConfiguration).stream()

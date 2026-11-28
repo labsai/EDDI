@@ -2,8 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { User, Users } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { searchDirectory, type DirectoryMatch } from "@/lib/api/workspaces";
 
 interface ShareSubjectInputProps {

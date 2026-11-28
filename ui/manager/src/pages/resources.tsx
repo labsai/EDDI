@@ -6,11 +6,11 @@ import {
   FileCode,
   ChevronRight,
 } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 import { useResourceDescriptors } from "@/hooks/use-resources";
-import { cn } from "@/lib/utils";
-import { getResourceTypeIcon } from "@/lib/resource-type-icons";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
 function ResourceTypeCard({

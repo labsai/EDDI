@@ -1,7 +1,7 @@
-import { api } from "../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 import { operatorEnvironment } from "@/lib/operator/operator-environment";
 import { globMatches } from "@/lib/glob";
-import { createApiAgent, type SetupResult } from "./agent-setup";
+import { createApiAgent, type SetupResult } from "@eddi/app-kit/lib/api/agent-setup";
 import {
   getVariable,
   upsertVariable,
@@ -15,12 +15,12 @@ import {
   getAgent,
   getAgentCurrentVersion,
   type Agent,
-} from "./agents";
-import { startConversation, sendMessageStreaming, endConversation } from "./chat";
+} from "@eddi/app-kit/lib/api/agents";
+import { startConversation, sendMessageStreaming, endConversation } from "@eddi/app-kit/lib/api/chat";
 import { markOperatorDescriptor } from "./operator-marker";
-import { getBrand } from "@/lib/brand";
-import { seg } from "./path-segment";
-import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { getBrand } from "@eddi/app-kit/lib/brand";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
+import { runDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
 import {
   buildEndpointFilter,
   buildToolApprovals,
@@ -1173,6 +1173,8 @@ export async function reactivateOperator(
     agentId: config.agentId,
     version: config.version,
     environment: config.environment,
+    // As in activation: the operator's key is granted to the operator, not widened.
+    offerAllowAll: false,
   });
   if (outcome.kind === "cancelled") {
     throw new Error(

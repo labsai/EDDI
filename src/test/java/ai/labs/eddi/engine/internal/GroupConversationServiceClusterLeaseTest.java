@@ -346,7 +346,10 @@ class GroupConversationServiceClusterLeaseTest {
         IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
         when(resourceId.getVersion()).thenReturn(1);
         when(groupStore.getCurrentResourceId("group-1")).thenReturn(resourceId);
-        when(groupStore.read("group-1", 1)).thenReturn(new AgentGroupConfiguration());
+        var config = new AgentGroupConfiguration();
+        // GR4 (main): a group without members is refused before anything is created.
+        config.setMembers(List.of(new AgentGroupConfiguration.GroupMember("agent-1", "Agent 1", 1, null)));
+        when(groupStore.read("group-1", 1)).thenReturn(config);
         when(conversationStore.create(any())).thenReturn(GC_ID);
 
         var prepared = cadenceService.prepareCadenceDiscussion("group-1", "What next?", "pm", List.of(), null, null);

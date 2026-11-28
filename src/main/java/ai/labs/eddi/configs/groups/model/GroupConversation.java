@@ -22,10 +22,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
- * model via {@code AbstractResourceStore} (DB-agnostic).
+ * model by {@code GroupConversationStore}, directly on {@code IResourceStorage}
+ * (DB-agnostic: MongoDB or PostgreSQL).
  *
  * @author ginccc
  */
@@ -64,6 +66,13 @@ public class GroupConversation {
      * from a fresh state. The bump makes such a pod refuse the document instead. No
      * migration entry: a v4 document has no state and Jackson leaves it null, which
      * is what an unbudgeted run carries (identity hop).
+     * <p>
+     * Version 6 — {@code inheritedMaxTurns}: the turn cap a nested discussion's
+     * resumed leg runs under. Resume-consumed and not soft: an older pod would
+     * resume the child under its own configured limit, ignoring the inherited cap,
+     * and re-saving the document would drop the field. The bump makes it refuse.
+     * Identity hop: a v5 document has none, which is a top-level discussion's
+     * value.
      */
     // v4: the 2026-08 release shape — adds I11's negotiationState, I12's
     // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
@@ -76,7 +85,7 @@ public class GroupConversation {
     // would re-run the vote's last repeat. Identity hop: a null detail is the
     // pre-v5 speaking turn.
     // Also v5 (same release): teamBudgetState (team budgets). Identity hop as well.
-    public static final int CURRENT_SCHEMA_VERSION = 5;
+    public static final int CURRENT_SCHEMA_VERSION = 6;
     /**
      * The version a stored document claims when its JSON carries no
      * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
@@ -121,7 +130,7 @@ public class GroupConversation {
      * Maps agentId → displayName for all group members. Populated at discussion
      * start.
      */
-    // ConcurrentHashMap for the same reason the three lists above are
+    // ConcurrentHashMap for the same reason the three lists below are
     // copy-on-write: Jackson walks this map unguarded on every persist, and
     // RecruitAgentTool now writes it from a member-turn thread. A plain
     // LinkedHashMap here re-opens the ConcurrentModificationException that
@@ -160,12 +169,50 @@ public class GroupConversation {
     /**
      * Typed outcome of the discussion (Wave 0, F3) — verdict, vote, agreement or
      * award. {@code null} until a decision-producing feature (I3 verdicts, I11
-     * agreements, I14 votes, I18 awards) sets it; none of those exist yet, so this
-     * is {@code null} for every discussion today. {@link #synthesizedAnswer} is
-     * always prose; {@code decision} is the structured form of a conclusion when
-     * one of those features ran.
+     * agreements, I14 votes, I18 awards) sets it, so it stays {@code null} for a
+     * discussion where none of those ran. {@link #synthesizedAnswer} is always
+     * prose; {@code decision} is the structured form of a conclusion when one of
+     * those features ran.
      */
     private DecisionRecord decision;
+    /**
+     * How the <em>latest</em> round ended (see {@link DiscussionOutcome}) — a
+     * continued discussion reports its last round, not the discussion as a whole: a
+     * round 3 that failed during an outage is {@code FAILED} here while the state
+     * stays {@code COMPLETED} because round 1 answered. {@code null} while a round
+     * runs, after a cancel, and on documents written before this field existed.
+     */
+    private DiscussionOutcome outcome;
+    /**
+     * A short stable code saying why {@link #outcome} is not {@code ANSWERED} — or,
+     * next to {@code ANSWERED}, that the round was cut short on its way to its
+     * answer ({@code TURN_LIMIT_REACHED}, {@code COST_CEILING_REACHED}). The codes
+     * are listed in {@code DiscussionOutcomes}.
+     */
+    private String outcomeReason;
+    /**
+     * How many rounds ended {@code ANSWERED}. {@code null} on documents written
+     * before it existed (see {@link #hasAnsweredRound()}); new discussions start at
+     * 0. Decides whether a failed round ends the discussion (only if none
+     * answered).
+     */
+    private Integer answeredRounds;
+    /**
+     * The turns a parent discussion had left when it ran this nested one as a GROUP
+     * member's turn; the child runs under {@code min(own maxTurns, this)}.
+     * {@code null} for a top-level discussion. Persisted like
+     * {@link #inheritedCostCeiling}: it belongs to the run.
+     */
+    private Integer inheritedMaxTurns;
+    /**
+     * The running leg's turn counter and its current cap — runtime only, never
+     * persisted. Lets a nested GROUP member's turn hand the parent's remaining
+     * budget to its child and charge the child's turns back.
+     */
+    @JsonIgnore
+    private transient AtomicInteger legTurnCounter;
+    @JsonIgnore
+    private transient volatile int legMaxTurns;
     /**
      * The negotiation's proposals + concession ledger (I11). {@code null} until the
      * first PROPOSAL/BARGAIN phase produces state; persisted with the document so a
@@ -721,10 +768,62 @@ public class GroupConversation {
      * @param signatureRound
      *            the discussion round ({@link GroupConversation#getRound()}) the
      *            signature binds the entry to (null if unsigned)
+     * @param outcome
+     *            how the turn that produced this entry ended — see
+     *            {@link TurnOutcome}. Never null once constructed: an entry stored
+     *            before this field existed (or built through one of the shorter
+     *            constructors) gets {@link TurnOutcome#derivedFrom its type's}
+     *            reading. Only an {@link TurnOutcome#ANSWERED} entry carries
+     *            content: any other outcome forces {@code content} to null, so no
+     *            reader of the transcript can quote a failed turn as something the
+     *            member said.
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
             TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
-            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
+            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound,
+            TurnOutcome outcome) {
+
+        public TranscriptEntry {
+            if (outcome == null) {
+                // A failed turn stored before outcomes existed carried this text as its
+                // "answer"; it reads as what it was.
+                outcome = LEGACY_FAILURE_PLACEHOLDER.equals(content) ? TurnOutcome.FAILED : TurnOutcome.derivedFrom(type);
+            }
+            if (outcome != TurnOutcome.ANSWERED) {
+                content = null;
+            }
+        }
+
+        /**
+         * Constructor without the outcome: it is derived from the type (see
+         * {@link TurnOutcome#derivedFrom}).
+         */
+        public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
+                TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
+                String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
+            this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName, type, timestamp, errorReason, targetAgentId,
+                    signature, signatureNonce, signatureTimestampMs, signatureKeyVersion, signatureRound, null);
+        }
+
+        /**
+         * An entry for a member turn that produced no answer: no content, the given
+         * outcome, and a short stable {@code reason} (never provider or driver text —
+         * that belongs in the server log).
+         */
+        public static TranscriptEntry notAnswered(String speakerAgentId, String speakerDisplayName, int phaseIndex, String phaseName,
+                                                  TranscriptEntryType type, TurnOutcome outcome, String reason, String targetAgentId) {
+            return new TranscriptEntry(speakerAgentId, speakerDisplayName, null, phaseIndex, phaseName, type, Instant.now(), reason,
+                    targetAgentId, null, null, null, null, null, outcome);
+        }
+
+        /**
+         * Whether this entry is a usable contribution: the turn
+         * {@link TurnOutcome#ANSWERED answered} and left content. An abstention is
+         * answered but has no content, so it is not one.
+         */
+        public boolean answered() {
+            return outcome == TurnOutcome.ANSWERED && content != null;
+        }
 
         /**
          * Backward-compatible constructor without any signature fields.
@@ -751,6 +850,70 @@ public class GroupConversation {
         public boolean hasEnvelopeData() {
             return signature != null && signatureNonce != null && signatureTimestampMs != null;
         }
+    }
+
+    /**
+     * How a member turn ended — the value every consumer of the transcript checks
+     * before treating an entry as a position (a peer's prompt, a vote, a stance,
+     * the convergence judge, the synthesized answer). Only {@link #ANSWERED}
+     * entries carry content.
+     */
+    public enum TurnOutcome {
+        /** The member answered (an abstention is an answer too: it has no content). */
+        ANSWERED,
+        /**
+         * The turn did not run by design: the agent is not deployed, a HUMAN member in
+         * an automated sub-round, a member pause the group cannot honour, the turn or
+         * depth limit.
+         */
+        SKIPPED,
+        /**
+         * The turn ran and failed: the provider or pipeline failed (the member's
+         * conversation ended in ERROR without output), an exception, a nested
+         * discussion without an answer. Counts against {@code protocol.onAgentFailure}.
+         */
+        FAILED,
+        /** The turn ran out of {@code protocol.agentTimeoutSeconds}. */
+        TIMED_OUT;
+
+        /**
+         * The reading of an entry that carries no outcome — stored before this field
+         * existed, or built without one: {@code SKIPPED} entries were skipped,
+         * {@code ERROR} entries failed, everything else answered.
+         */
+        public static TurnOutcome derivedFrom(TranscriptEntryType type) {
+            if (type == TranscriptEntryType.SKIPPED) {
+                return SKIPPED;
+            }
+            if (type == TranscriptEntryType.ERROR) {
+                return FAILED;
+            }
+            return ANSWERED;
+        }
+    }
+
+    /**
+     * How a discussion round ended, next to its {@link GroupConversationState}: a
+     * {@code COMPLETED} discussion is not necessarily an answered one. {@code null}
+     * on documents written before this field existed, and while a round runs, is
+     * paused or was cancelled.
+     */
+    public enum DiscussionOutcome {
+        /** The round produced its answer (a synthesis, or a decision record). */
+        ANSWERED,
+        /**
+         * The round ran to its end without an answer — the synthesis failed or never
+         * ran (turn limit, cost ceiling). State stays {@code COMPLETED}; the reason
+         * says why.
+         */
+        NO_ANSWER,
+        /**
+         * Member turns failed and nobody answered, or the run failed with an error, a
+         * gate timed out. State is {@code FAILED} when no round of the discussion ever
+         * answered; a later round that fails leaves it {@code COMPLETED}, so it can be
+         * continued.
+         */
+        FAILED
     }
 
     public enum TranscriptEntryType {
@@ -1012,7 +1175,8 @@ public class GroupConversation {
      * @param terms
      *            the proposal's terms — a String in v1, deliberately untyped
      * @param status
-     *            OPEN, SUPERSEDED (the proposer made a newer proposal) or REJECTED
+     *            OPEN or SUPERSEDED (the proposer made a newer proposal or accepted
+     *            another one); no code path sets any other status
      * @param acceptedBy
      *            agent ids that accepted these terms
      * @param acceptanceEntryIndices
@@ -1069,12 +1233,12 @@ public class GroupConversation {
 
     /**
      * Typed outcome of a discussion, or of one decision-producing phase within it
-     * (Wave 0, F3). Today the only conclusion a discussion produces is
+     * (Wave 0, F3). The conclusion every discussion produces is
      * {@link #synthesizedAnswer}, which is always prose — callers that want to
      * branch on a winner, a tally, or a vote count have to parse it. This is the
      * structured alternative, populated by whichever decision-producing feature ran
      * (I3 verdicts, I11 agreements, I14 votes, I18 awards); {@code null} until one
-     * of those exists.
+     * of those has run.
      * <p>
      * A parse failure in the producing feature's own judgment/tally step must never
      * fail the discussion — the convention each of those features follows is to
@@ -1123,8 +1287,8 @@ public class GroupConversation {
          * Deliberately NOT {@link #FAILED}. A rejection is a recorded human decision
          * and the product's whole selling point; rendering it as "Failed" told the
          * operator the system had broken when in fact it had done exactly what it was
-         * asked. Terminal, closeable, and treated as FAILED is everywhere that asks
-         * "may this still run?" — the difference is what it MEANS, not what it permits.
+         * asked. Terminal, closeable, and treated as FAILED everywhere that asks "may
+         * this still run?" — the difference is what it MEANS, not what it permits.
          * <p>
          * Documents written before this state existed carry {@link #FAILED} for a
          * rejection and are left alone: nothing in them distinguishes the two, so a
@@ -1274,8 +1438,21 @@ public class GroupConversation {
     }
 
     public void setSynthesizedAnswer(String synthesizedAnswer) {
-        this.synthesizedAnswer = synthesizedAnswer;
+        // A discussion stored before outcomes existed may hold the old failure
+        // placeholder as its answer; it never was one.
+        this.synthesizedAnswer = LEGACY_FAILURE_PLACEHOLDER.equals(synthesizedAnswer) ? null : synthesizedAnswer;
     }
+
+    /**
+     * The text earlier versions stored in place of a member turn whose conversation
+     * ended in ERROR without output ("K1" of the November 2026 review): signed and
+     * kept as an OPINION/SYNTHESIS, quoted to peers and taken as the synthesized
+     * answer. Recognised on read only — a stored entry carrying it without an
+     * {@code outcome} reads as FAILED without content, a stored
+     * {@code synthesizedAnswer} equal to it as no answer. Nothing writes it any
+     * more.
+     */
+    private static final String LEGACY_FAILURE_PLACEHOLDER = "[Agent failed to produce output — conversation entered ERROR state]";
 
     public DecisionRecord getDecision() {
         return decision;
@@ -1283,6 +1460,184 @@ public class GroupConversation {
 
     public void setDecision(DecisionRecord decision) {
         this.decision = decision;
+    }
+
+    public DiscussionOutcome getOutcome() {
+        return outcome;
+    }
+
+    public void setOutcome(DiscussionOutcome outcome) {
+        this.outcome = outcome;
+    }
+
+    public String getOutcomeReason() {
+        return outcomeReason;
+    }
+
+    public void setOutcomeReason(String outcomeReason) {
+        this.outcomeReason = outcomeReason;
+    }
+
+    public Integer getAnsweredRounds() {
+        return answeredRounds;
+    }
+
+    public void setAnsweredRounds(Integer answeredRounds) {
+        this.answeredRounds = answeredRounds;
+    }
+
+    /** Counts a round that ended {@code ANSWERED}. */
+    public void markRoundAnswered() {
+        answeredRounds = answeredRounds == null ? 1 : answeredRounds + 1;
+    }
+
+    /**
+     * Pins the answer history of a document from before the count existed, from
+     * what the record holds <em>now</em> — call it before a continuation clears the
+     * previous round's answer and decision. A round-1 document shows its own answer
+     * or none; one already continued cannot say, and stays unknown (see
+     * {@link #hasAnsweredRound()}).
+     */
+    public void establishAnswerHistory() {
+        if (answeredRounds != null) {
+            return;
+        }
+        // a blank synthesis is no answer, as settle judges it
+        boolean answerOnRecord = (synthesizedAnswer != null && !synthesizedAnswer.isBlank())
+                || (decision != null && decision.type() != DecisionType.NONE);
+        // (a dissent-only NONE record is no evidence either way: members may have
+        // answered)
+        if (answerOnRecord) {
+            answeredRounds = 1;
+        } else if (round <= 1 && !hasMemberContribution()) {
+            // A missing synthesis is no proof by itself: a style without a synthesis
+            // phase answers with its members' contributions, and the phases the round
+            // ran are not on the record. Only a round nobody contributed to is pinned
+            // at zero; one with contributions stays unknown.
+            answeredRounds = 0;
+        }
+    }
+
+    /**
+     * The entry types a member's own answer is recorded as; with {@code ABSTAINED},
+     * the same set {@code DiscussionOutcomes} counts.
+     */
+    private static final Set<TranscriptEntryType> CONTRIBUTION_TYPES = Set.of(TranscriptEntryType.OPINION,
+            TranscriptEntryType.CRITIQUE, TranscriptEntryType.REVISION, TranscriptEntryType.CHALLENGE, TranscriptEntryType.DEFENSE,
+            TranscriptEntryType.ARGUMENT, TranscriptEntryType.REBUTTAL, TranscriptEntryType.PLAN, TranscriptEntryType.TASK_RESULT,
+            TranscriptEntryType.PROPOSAL, TranscriptEntryType.BARGAIN, TranscriptEntryType.VOTE, TranscriptEntryType.HUMAN_INPUT,
+            TranscriptEntryType.RETRO, TranscriptEntryType.BID);
+
+    private boolean hasMemberContribution() {
+        synchronized (transcript) {
+            // An abstention is a deliberate pass and carries no content.
+            return transcript.stream().anyMatch(e -> e != null && e.speakerAgentId() != null
+                    && ((e.type() == TranscriptEntryType.ABSTAINED && e.outcome() == TurnOutcome.ANSWERED)
+                            || (CONTRIBUTION_TYPES.contains(e.type()) && e.answered() && !e.content().isBlank())));
+        }
+    }
+
+    /**
+     * Whether any round of this discussion ended with an answer. A document from
+     * before the count existed and not pinned by {@link #establishAnswerHistory()}
+     * has none recorded: a continued one ({@code round > 1}) is assumed to have
+     * answered, as it was continuable.
+     */
+    public boolean hasAnsweredRound() {
+        return answeredRounds != null ? answeredRounds > 0 : round > 1;
+    }
+
+    public Integer getInheritedMaxTurns() {
+        return inheritedMaxTurns;
+    }
+
+    public void setInheritedMaxTurns(Integer inheritedMaxTurns) {
+        this.inheritedMaxTurns = inheritedMaxTurns;
+    }
+
+    /** Binds the running leg's turn counter and its current cap (runtime only). */
+    public void bindLegTurnBudget(AtomicInteger counter, int cap) {
+        this.legTurnCounter = counter;
+        this.legMaxTurns = cap;
+    }
+
+    /**
+     * The turns the running leg has left under its current cap, or {@code null}
+     * when no leg is bound.
+     */
+    public Integer remainingLegTurns() {
+        var counter = legTurnCounter;
+        return counter == null ? null : Math.max(0, legMaxTurns - counter.get());
+    }
+
+    /** The turns the running (or last) leg has counted; 0 when none is bound. */
+    public int legTurnsUsed() {
+        var counter = legTurnCounter;
+        return counter == null ? 0 : counter.get();
+    }
+
+    /** Charges {@code turns} spent elsewhere (a nested discussion) to this leg. */
+    public void chargeLegTurns(int turns) {
+        var counter = legTurnCounter;
+        if (counter != null && turns > 0) {
+            counter.addAndGet(turns);
+        }
+    }
+
+    /**
+     * How many nested GROUP members of the running parallel batch share the leg's
+     * remaining turns (runtime only); 1 outside a batch.
+     */
+    @JsonIgnore
+    private transient int legNestedShares = 1;
+    @JsonIgnore
+    private final transient Object legClaimLock = new Object();
+
+    /**
+     * Sets how many nested members share the remaining turns (a parallel batch).
+     */
+    public void shareLegTurns(int shares) {
+        synchronized (legClaimLock) {
+            this.legNestedShares = Math.max(1, shares);
+        }
+    }
+
+    /**
+     * Reserves turns for a nested discussion: the leg's remaining turns, divided
+     * among the nested members of a parallel batch that have not claimed yet — each
+     * claim takes one share off, so the last unclaimed member receives what
+     * remains. Counted at once, so siblings see what really remains. {@code null}
+     * when no leg is bound.
+     */
+    public Integer claimLegTurns() {
+        var counter = legTurnCounter;
+        if (counter == null) {
+            return null;
+        }
+        synchronized (legClaimLock) {
+            while (true) {
+                int used = counter.get();
+                int remaining = legMaxTurns - used;
+                if (remaining <= 0) {
+                    return 0;
+                }
+                int claim = Math.max(1, remaining / legNestedShares);
+                if (counter.compareAndSet(used, used + claim)) {
+                    legNestedShares = Math.max(1, legNestedShares - 1);
+                    return claim;
+                }
+            }
+        }
+    }
+
+    /**
+     * Settles a claim: the nested discussion used {@code used} of {@code claimed}.
+     */
+    public void settleLegTurns(int claimed, int used) {
+        var counter = legTurnCounter;
+        if (counter != null && used != claimed) {
+            counter.addAndGet(used - claimed);
+        }
     }
 
     public NegotiationState getNegotiation() {
@@ -1453,8 +1808,8 @@ public class GroupConversation {
     }
 
     /**
-     * Records a teardown and drops the agent from every live tracking list, as one
-     * atomic operation.
+     * Records a teardown and drops the agent from {@link #createdAgentIds} and
+     * {@link #retainedAgentIds}, as one atomic operation.
      * <p>
      * The tombstone is written first AND under {@link #dynamicTrackingMutex}, so a
      * concurrent merge cannot interleave between the check it makes and the add it

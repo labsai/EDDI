@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { NumberInput } from "../number-input";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import { ScrollText, RotateCcw } from "lucide-react";
-import { EditorSection } from "../editor-section";
-import { ContentEditor } from "../content-editor";
-import { ProviderSelect } from "@/components/shared/provider-select";
-import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import { ContentEditor } from "@eddi/app-kit/components/editors/content-editor";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
+import { offeredWithoutBaseUrl } from "@eddi/app-kit/lib/model-suggestions";
 import type { TaskSectionProps } from "./task-section-props";
 
 /**

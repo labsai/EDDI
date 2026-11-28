@@ -29,15 +29,20 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * JAX-RS webhook endpoint for Slack Events API.
+ * JAX-RS webhook endpoint for the Slack Events API and for Slack interactivity
+ * ({@code POST /integrations/slack/events} and
+ * {@code POST /integrations/slack/interactive}).
  * <p>
- * Handles:
+ * {@code /events} handles:
  * <ul>
  * <li><b>URL Verification</b> — Slack sends a challenge on app setup; we echo
  * it back.</li>
  * <li><b>Event Callbacks</b> — {@code app_mention} and {@code message} events
  * are delegated to {@link SlackEventHandler} for async processing.</li>
  * </ul>
+ * <p>
+ * {@code /interactive} receives the HITL Approve/Reject button and modal
+ * payloads; see {@link #handleInteractive}.
  * <p>
  * Signing secrets are resolved from {@link ChannelTargetRouter}. Verification
  * is two-stage: the pooled set of all known secrets first rejects anything no
@@ -150,7 +155,7 @@ public class RestSlackWebhook {
 
                     // Pin the workspace to the SIGNING/owning integration's declared
                     // teamId. A validly-signed event whose claimed workspace disagrees
-                    // with that declaration is forged — reject it (review residual #1).
+                    // with that declaration is forged — reject it.
                     String payloadTeam = stringOrNull(payload.get("team_id"));
                     String eventTeam = stringOrNull(event.get("team"));
                     if (origin.pinnedTeamId() != null

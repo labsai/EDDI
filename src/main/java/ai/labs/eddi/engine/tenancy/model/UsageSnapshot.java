@@ -21,9 +21,11 @@ import java.time.ZoneOffset;
  * @param apiCallsThisMinute
  *            API calls in the current minute window
  * @param monthlyCostUsd
- *            accumulated tool cost this month (USD)
+ *            accumulated priced spend this month (USD): LLM tokens at the
+ *            configured prices plus tracked tool cost
  * @param minuteWindowStart
- *            start of the current per-minute sliding window
+ *            start of the current per-minute window (calendar-aligned, not
+ *            sliding)
  * @param dayStart
  *            start of the current daily window
  * @param costMonth
