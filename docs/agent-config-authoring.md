@@ -100,6 +100,15 @@ Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
+Data substituted into a quick reply's `expressions` field (a property, an API value) loses the characters `(`, `)` and `,`, and a value that is only `*` (with any surrounding whitespace) becomes empty — the expression is a trusted dictionary phrase on the next turn, and data such as `x), intent(admin` or `*` (the wildcard, which matches every rule) must not be able to add an expression of its own. Your own notation in the field (`choose({properties.item})`) is kept, conditions and filters compare the data as it is, and the quick reply's `value`, which the user sees and types, keeps the data as it is. What to know when you write the field:
+
+- **Text written in the template is kept; every value an expression emits is stripped** — also a literal returned by an operator: `{x ?: 'intent(help)'}`, `{x.or('a,b')}`, `{flag ? 'a,b' : 'c'}`, `{#let v='a,b'}{v}{/let}` and `{str:fmt(...)}` emit `intenthelp` / `ab`. Only a bare `{'a,b'}` is kept. For notation that depends on a condition, use a section: `{#if flag}intent(help){#else}choose({properties.item}){/if}`.
+- **Values change shape:** a list renders as `[a b]`, a formatted number `1,500` as `1500`, a value with a comma or parentheses (`Smith, John`) as `Smith John` — a rule written with the raw value no longer matches it.
+
+The full rule set is in [Security → Data in expression notation](security.md#data-in-expression-notation).
+
+> **`STOP_CONVERSATION` produces no output.** The turn stops right after the task that emitted the action, so an output configured for a rule's `STOP_CONVERSATION` action never runs. Emit `CONVERSATION_END` for a farewell: the output is rendered and the conversation ends.
+
 > **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
@@ -140,6 +149,14 @@ Matcher:      "actions" : "ask_for_model"
 | `secret` | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
 > **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `SecretPropertyVault.autoVaultSecret` and [Properties](properties.md).) For wizard-style agents that collect API keys and pass them to an endpoint (see [Reference Implementation](#reference-implementation)), `scope: "conversation"` with vaulting delegated to the receiving service works on a dev instance without a master key, which cannot complete a secret-scoped turn at all. **The trade-off:** only `scope: "secret"` scrubs and vaults the value, so with `conversation` scope the plaintext key stays in the stored conversation (the `input:initial` data and the property) and in every later `{properties.x}` render until the conversation is deleted. Use that pattern for a development wizard only; real deployments should use `secret` scope with a vault key.
+
+### Context entries that set properties (`acceptClientProperties`)
+
+A context entry whose key starts with `properties` and whose type is `expressions` (for example `property(role(admin), longTerm)`) is parsed by the property step like a parser result, and applied **after** `setOnActions`. Because that overrides what the agent computed, a chat client may not use it: such an entry is honoured only when the engine itself wrote it (a server-generated context), and a client-sent one is ignored (logged once per turn at DEBUG). To let callers set conversation properties through the context — only when every caller of the agent is trusted — set `"acceptClientProperties": true` next to `setOnActions` in the property configuration (default `false`). Pass trusted values through ordinary context entries and read them as `{context.x}` or with a `valueString` template instead.
+
+### `property(...)` values
+
+A leaf value inside `property(name(value))` is kept verbatim as a string (`1.2.3`, `01234`, `api.openai.com`, a phone number), except a plain integer of ASCII digits without a leading zero or sign, which is stored as a number (an `int`, or a `long` beyond the int range; one beyond the `long` range, such as `9223372036854775808`, stays a string), and `true` or `false` in any letter case, which is stored as a boolean (`property(flag(false))`). Digits of another script (`١٢`) stay the text as written. Nothing in a value can fail the turn.
 
 ### Capturing user input vs. setting fixed values
 

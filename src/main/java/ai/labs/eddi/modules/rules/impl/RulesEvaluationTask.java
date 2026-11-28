@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rules.impl;
 
+import ai.labs.eddi.modules.nlp.expressions.utilities.StoredExpressions;
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
@@ -91,7 +92,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
         } catch (RulesEvaluator.RuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
             log.error(msg, e);
-            throw new LifecycleException(msg, e);
+            throw new RuleEvaluationFailedException(msg, e);
         } catch (InterruptedException e) {
             // B2: the pipeline's graceful-stop signal IS the thread's interrupt flag —
             // LifecycleManager re-checks Thread.currentThread().isInterrupted() before
@@ -131,7 +132,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
         Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
-            inputExpressions = expressionProvider.parseExpressions(data.getResult());
+            inputExpressions = StoredExpressions.parseOrEmpty(expressionProvider, data.getResult());
         }
 
         return inputExpressions.stream().map(Expression::getExpressionName).toList();

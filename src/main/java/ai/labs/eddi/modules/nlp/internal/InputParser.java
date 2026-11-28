@@ -90,6 +90,17 @@ public class InputParser implements IInputParser {
         return semanticFallback;
     }
 
+    @Override
+    public boolean isPassThrough() {
+        return Boolean.TRUE.equals(config.getPassThrough()) && isNullOrEmpty(normalizers) && isNullOrEmpty(dictionaries)
+                && isNullOrEmpty(corrections) && semanticFallback == null;
+    }
+
+    @Override
+    public boolean preservesInput() {
+        return config.getPreserveInput() != null ? config.getPreserveInput() : isNullOrEmpty(normalizers);
+    }
+
     /** The configured dictionaries, in lookup order. */
     public List<IDictionary> getDictionaries() {
         return Collections.unmodifiableList(dictionaries);
@@ -224,7 +235,8 @@ public class InputParser implements IInputParser {
                 continue;
             }
 
-            List<IDictionary.IFoundWord> dictionaryEntries = dictionary.lookupTerm(currentInputPart);
+            // an over-limit token fails no turn: see lookupWithinLimits
+            List<IDictionary.IFoundWord> dictionaryEntries = IDictionary.lookupWithinLimits(dictionary, currentInputPart);
             if (!dictionaryEntries.isEmpty()) {
                 addDictionaryEntriesTo(holder, currentInputPart, dictionaryEntries);
             }

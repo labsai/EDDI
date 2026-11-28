@@ -23,7 +23,7 @@ public class ExpressionFactory implements IExpressionFactory {
 
     public ExpressionFactory() {
         // expressions.put("", new Parentheses());
-        expressions.put("*", new AnyValue());
+        expressions.put(AnyValue.NAME, new AnyValue());
         expressions.put("all", new AllValue());
         expressions.put("ignored", new Ignored());
         expressions.put("negation", new Negation());

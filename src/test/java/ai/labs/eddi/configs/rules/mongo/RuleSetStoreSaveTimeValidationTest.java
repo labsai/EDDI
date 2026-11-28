@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.rules.mongo;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -131,6 +134,37 @@ class RuleSetStoreSaveTimeValidationTest {
     }
 
     @Test
+    @DisplayName("a dependency cycle is refused at save time and never reaches storage")
+    void dependencyCycleIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "B"));
+        var b = new RuleConfiguration();
+        b.setName("B");
+        b.setActions(List.of("do_other"));
+        var back = new RuleConditionConfiguration();
+        back.setType("dependency");
+        back.setConfigs(Map.of("reference", "A"));
+        b.setConditions(List.of(back));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(b);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("cycle"), thrown.getMessage());
+        verify(resourceStorage, never()).newResource(any());
+    }
+
+    @Test
+    @DisplayName("a dangling dependency reference is refused at save time")
+    void danglingDependencyIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "nope"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("nope"), thrown.getMessage());
+    }
+
+    @Test
     @DisplayName("update is guarded too — an invalid ruleset never reaches storage")
     void invalidRuleSetIsRefusedOnUpdate() throws Exception {
         var ruleSet = ruleSetWith("Start over", "actionmatcher", Map.of("actions", "confirm_creation", "occurrence", "lastSteps"));
@@ -209,5 +243,52 @@ class RuleSetStoreSaveTimeValidationTest {
 
         verify(resourceStorage).newResource(ruleSet);
         verify(resourceStorage).store(createdResource);
+    }
+
+    @Test
+    @DisplayName("an import, sync or copy (lenient write) is not refused for a cycle, a dangling dependency or duplicate names")
+    void graphProblemsOnlyWarnInALenientWrite() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "nope"));
+        var duplicate = new RuleConfiguration();
+        duplicate.setName("A");
+        duplicate.setActions(List.of("x"));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(duplicate);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
+        verify(resourceStorage).newResource(any());
+    }
+
+    @Test
+    @DisplayName("a lenient write keeps a ruleset with an A -> B -> A cycle and stores it")
+    void cycleOnlyWarnsInALenientWrite() throws Exception {
+        var createdResource = mock(IResourceStorage.IResource.class);
+        when(resourceStorage.newResource(any(RuleSetConfiguration.class))).thenReturn(createdResource);
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "B"));
+        var b = new RuleConfiguration();
+        b.setName("B");
+        b.setActions(List.of("do_other"));
+        var back = new RuleConditionConfiguration();
+        back.setType("dependency");
+        back.setConfigs(Map.of("reference", "A"));
+        b.setConditions(List.of(back));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(b);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
+
+        verify(resourceStorage).store(createdResource);
+    }
+
+    @Test
+    @DisplayName("the lenient write does not excuse a broken condition")
+    void lenientWriteStillRefusesBrokenConditions() {
+        var ruleSet = ruleSetWith("Start over", "actionmatcher", Map.of("actions", "confirm_creation", "occurrence", "lastSteps"));
+
+        assertThrows(IllegalArgumentException.class, () -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
     }
 }

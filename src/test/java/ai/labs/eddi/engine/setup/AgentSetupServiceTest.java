@@ -323,6 +323,7 @@ class AgentSetupServiceTest {
             assertNotNull(config.getExtensions());
             assertTrue(config.getExtensions().containsKey("dictionaries"));
             assertTrue(config.getExtensions().containsKey("corrections"));
+            assertEquals(Boolean.TRUE, config.getConfig().get("passThrough"), "the wizard's catch-all rule needs no tokenising");
         }
 
         @Test

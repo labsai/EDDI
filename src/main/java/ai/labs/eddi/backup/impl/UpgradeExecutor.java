@@ -32,6 +32,7 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -984,8 +985,9 @@ public class UpgradeExecutor {
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
             // Copied from the sync source, where it exists already: a ruleset among
-            // them keeps a retired condition config, with a WARN, as on deploy.
-            IResourceId created = ExistingRuleSetWrite.call(() -> store.create(content));
+            // them keeps a retired condition config, with a WARN, as on deploy, and the
+            // graph and timesOccurred checks of a save only warn.
+            IResourceId created = ExistingRuleSetWrite.call(() -> LenientConfigWrite.call(() -> store.create(content)));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1046,8 +1048,10 @@ public class UpgradeExecutor {
                     RuleSetConfiguration.class,
                     IRuleSetStore.class,
                     // A synced ruleset exists on the source already: a retired condition
-                    // config is accepted with a WARN, as on deploy.
-                    (id, version, config) -> ExistingRuleSetWrite.call(() -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config)),
+                    // config is accepted with a WARN, as on deploy, and the graph checks
+                    // of a save only warn.
+                    (id, version, config) -> ExistingRuleSetWrite.call(() -> LenientConfigWrite
+                            .call(() -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config))),
                     IRestRuleSetStore.resourceURI,
                     IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(
@@ -1071,7 +1075,7 @@ public class UpgradeExecutor {
             case "output" -> new ExtensionStoreOps<>(
                     OutputConfigurationSet.class,
                     IOutputStore.class,
-                    (id, version, config) -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config),
+                    (id, version, config) -> LenientConfigWrite.call(() -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config)),
                     IRestOutputStore.resourceURI,
                     IRestOutputStore.versionQueryParam);
             case "mcpcalls" -> new ExtensionStoreOps<>(

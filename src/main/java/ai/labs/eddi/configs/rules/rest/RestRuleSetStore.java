@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rules.rest;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
@@ -78,8 +79,9 @@ public class RestRuleSetStore implements IRestRuleSetStore {
         restVersionInfo.validateParameters(id, version);
         var behaviorConfiguration = restVersionInfo.read(id, version);
         // A copy of a stored ruleset (an agent duplicate, too): a retired condition
-        // config it carries is accepted with a WARN, as on deploy, not refused.
-        return ExistingRuleSetWrite.call(() -> restVersionInfo.create(behaviorConfiguration));
+        // config it carries is accepted with a WARN, as on deploy, and the graph
+        // checks of a save only warn.
+        return ExistingRuleSetWrite.call(() -> LenientConfigWrite.call(() -> restVersionInfo.create(behaviorConfiguration)));
     }
 
     @Override

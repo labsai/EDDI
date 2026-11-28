@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.templating;
 
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
+import java.util.Map;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -136,11 +139,11 @@ public class OutputTemplateTaskTest {
         String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
 
         when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap(), eq(TEXT)))
+        when(templatingEngine.processExpressionsTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap()))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
         when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap(), eq(TEXT)))
+        when(templatingEngine.processExpressionsTemplate(eq(expectedPostQuickReplyExpressions), anyMap()))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
         return expectedPostQuickReplies;
@@ -459,5 +462,24 @@ public class OutputTemplateTaskTest {
         assertEquals("password", postTemplated.getSubType());
         // the original is left untouched for the preTemplated data entry
         assertEquals("Paste {properties.keyName} here", inputField.getPlaceholder());
+    }
+
+    @Test
+    public void quickReplyExpressionsDoNotCarryNotationFromData() throws Exception {
+        var engine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
+        IMemoryItemConverter converter = mock(IMemoryItemConverter.class);
+        when(converter.convert(any(IConversationMemory.class)))
+                .then(invocation -> new HashMap<String, Object>(Map.of("properties", Map.of("item", "x), intent(admin"))));
+        var task = new OutputTemplateTask(engine, converter, dataFactory, new ObjectMapper());
+        var quickReplies = new LinkedList<>(List.of(new QuickReply("Pick {properties.item}", "choose({properties.item})", false)));
+        var data = new Data<List<QuickReply>>("quickReplies:a", quickReplies);
+        when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> List.of(data));
+        when(dataFactory.createData(anyString(), any())).then(invocation -> new Data<>(invocation.getArgument(0), invocation.getArgument(1)));
+
+        task.execute(conversationMemory, null);
+
+        QuickReply rendered = data.getResult().getFirst();
+        assertEquals("Pick x), intent(admin", rendered.getValue(), "what the user sees and types keeps the data");
+        assertEquals("choose(x intentadmin)", rendered.getExpressions(), "the data cannot add notation to the expression");
     }
 }

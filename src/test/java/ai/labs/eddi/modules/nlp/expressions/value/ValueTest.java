@@ -83,6 +83,33 @@ class ValueTest {
         }
 
         @Test
+        @DisplayName("conversions never throw: over-range, decimal and non-numeric give null")
+        void conversionsNeverThrow() {
+            assertNull(new Value("9".repeat(30)).toInteger());
+            assertNull(new Value("2.5").toInteger());
+            assertNull(new Value("abc").toInteger());
+            assertNull(new Value("9".repeat(60)).toFloat());
+            assertNull(new Value("abc").toFloat());
+        }
+
+        @Test
+        @DisplayName("non-ASCII digits convert like ASCII digits")
+        void nonAsciiDigits() {
+            assertEquals(12, new Value("١٢").toInteger());
+            assertEquals(12, new Value("１２").toInteger());
+            assertEquals(2.5f, new Value("２.５").toFloat(), 0.01f);
+            assertEquals(7, new Value("𐒧").toInteger(), "a digit outside the BMP (Osmanya)");
+        }
+
+        @Test
+        @DisplayName("the text is kept as written; numbers compare by value")
+        void textIsKeptButNumbersCompare() {
+            assertEquals("١٢", new Value("١٢").getExpressionName());
+            assertEquals(new Value("12"), new Value("١٢"));
+            assertEquals(new Value("12").hashCode(), new Value("١٢").hashCode());
+        }
+
+        @Test
         @DisplayName("should convert to boolean")
         void convertsToBoolean() {
             assertTrue(new Value("true").toBoolean());
@@ -166,6 +193,55 @@ class ValueTest {
         void addSubExpressionsNoOp() {
             Value v = new Value("test");
             assertDoesNotThrow(() -> v.addSubExpressions());
+        }
+    }
+
+    @Nested
+    @DisplayName("exact numeric comparison and robustness")
+    class ExactComparison {
+
+        @Test
+        @DisplayName("numbers above 2^24 do not collide")
+        void bigNumbersDoNotCollide() {
+            assertNotEquals(new Value("123456789"), new Value("123456790"));
+        }
+
+        @Test
+        @DisplayName("1, 1.0 and 1,0 are equal and hash alike")
+        void sameNumberDifferentSpelling() {
+            assertEquals(new Value("1"), new Value("1.0"));
+            assertEquals(new Value("1"), new Value("1,0"));
+            assertEquals(new Value("1").hashCode(), new Value("1,0").hashCode());
+        }
+
+        @Test
+        @DisplayName("unicode digits are read as numbers, compare exactly and never throw")
+        void unicodeDigitsAreNumbersAndCompareExactly() {
+            for (String digits : new String[]{"\uFF11\uFF12", "\u0661\u0662", "\u0967\u0968", "\u0E51\u0E52"}) {
+                Value value = new Value(digits);
+                assertTrue(value.isNumeric(), digits);
+                assertEquals(12, value.toInteger(), digits);
+                assertEquals(new Value("12"), value, digits);
+                assertEquals(new Value("12").hashCode(), value.hashCode(), digits);
+                assertNotEquals(new Value("13"), value, digits);
+                assertDoesNotThrow(() -> value.equals(new Value("1")));
+            }
+        }
+
+        @Test
+        @DisplayName("a numeric value compared with a non-numeric one does not throw")
+        void numericVersusText() {
+            assertDoesNotThrow(() -> new Value("1").equals(new Value("abc")));
+            assertNotEquals(new Value("1"), new Value("abc"));
+        }
+
+        @Test
+        @DisplayName("an over-long number is compared as text and does not throw")
+        void overLongNumber() {
+            String digits = "9".repeat(5000);
+            assertEquals(new Value(digits), new Value(digits));
+            assertEquals(new Value(digits).hashCode(), new Value(digits).hashCode());
+            assertNotEquals(new Value(digits), new Value(digits + "8"));
         }
     }
 }

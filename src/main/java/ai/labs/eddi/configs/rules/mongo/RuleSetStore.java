@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.configs.rules.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.RuleSetSaveValidator;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
@@ -105,6 +107,18 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
             }
         } catch (DeserializationException e) {
             throw new IllegalArgumentException("Invalid ruleset: " + e.getMessage(), e);
+        }
+
+        // The graph checks (dependency cycle, dangling dependency, duplicate rule names
+        // in a group) refuse an interactive save only. A stored ruleset still loads and
+        // deploys, and one that is imported, synced, upgraded or duplicated only warns:
+        // an archive that imported and ran before must still import.
+        List<String> graphProblems = RuleSetSaveValidator.findProblems(behaviorConfiguration);
+        if (!graphProblems.isEmpty()) {
+            if (!LenientConfigWrite.isActive()) {
+                throw new IllegalArgumentException(graphProblems.getFirst());
+            }
+            graphProblems.forEach(problem -> LOGGER.warn("ruleset import, sync or copy: " + sanitize(problem)));
         }
     }
 

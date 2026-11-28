@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.nlp.expressions.ExpressionFactory;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.IDictionaryProvider;
@@ -190,6 +191,28 @@ class InputParserTaskQualityTest {
 
             task.execute(memory, configure(Map.of("maxInputTokens", "2")));
 
+            assertEquals(Boolean.TRUE, stored(memory, MemoryKeys.EXPRESSIONS_INPUT_TRUNCATED.key()));
+        }
+
+        @Test
+        @DisplayName("a result too long to store is reduced to an unknown of the tokens read, not of words past maxInputTokens")
+        void oversizedResultKeepsTheTokenLimit() throws Exception {
+            // Each expression parses on its own, the two joined pass the 40-character
+            // limit.
+            var bounded = new InputParserTask(new ExpressionProvider(new ExpressionFactory(), new ExpressionLimits(40, 32)), normalizers,
+                    dictionaries, new HashMap<>(), MAPPER, mock(IResourceClientLibrary.class), embeddingModelFactory, meterRegistry);
+            var first = dictionaryWith("first", "alpha", "greeting(aaaaaaaaaaaa)");
+            var second = dictionaryWith("second", "beta", "greeting(bbbbbbbbbbbb)");
+            var parser = (IInputParser) bounded.configure(new HashMap<>(Map.of("maxInputTokens", "2")),
+                    new HashMap<>(Map.of("dictionaries", List.of(first, second))));
+            var memory = turn("alpha beta ignored");
+
+            bounded.execute(memory, parser);
+
+            String expressions = stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key());
+            assertTrue(expressions.startsWith("unknown("), expressions);
+            assertTrue(expressions.contains("alpha"), expressions);
+            assertFalse(expressions.contains("ignored"), "a word past maxInputTokens must not become matchable: " + expressions);
             assertEquals(Boolean.TRUE, stored(memory, MemoryKeys.EXPRESSIONS_INPUT_TRUNCATED.key()));
         }
 
