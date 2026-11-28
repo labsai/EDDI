@@ -541,7 +541,8 @@ class McpConnectionCredentialTest {
             assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
 
             assertEquals(Map.of("Authorization", "Bearer live-token"), headerFor(config("${connection:crm}"), toolCallFor(GRANTED)));
-            // A request that carries no agent (the resource bridge) keeps the session's
+            // A request that carries no agent (discovery, a call made without a context)
+            // keeps the session's
             // access; the per-call check is what covers it.
             assertEquals(Map.of("Authorization", "Bearer live-token"), headerFor(config("${connection:crm}"), toolCall()));
         }

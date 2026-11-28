@@ -133,6 +133,46 @@ class ConnectionResolverGrantTest {
     }
 
     @Test
+    @DisplayName("a STATIC connection is checked on the field it sends, not on a retained passwordRef it never resolves")
+    void staticChecksOnlyItsOwnField() {
+        var connection = staticHeader();
+        connection.getStaticAuth().setPasswordRef("${vault:rotated-secret}"); // granted to B only, and unused by STATIC
+        register(connection);
+
+        assertEquals("Bearer plain-token", resolver.resolve("${connection:crm}", GRAPH, null, SecretAccess.agent(AGENT_A)).headerValue());
+
+        connection.setAuthType(AuthType.BASIC);
+        connection.getStaticAuth().setUsername("svc");
+        var e = assertThrows(ConnectionException.class,
+                () -> resolver.resolve("${connection:crm}", GRAPH, null, SecretAccess.agent(AGENT_A)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason(), "BASIC sends the password, so its grant applies");
+    }
+
+    @Test
+    @DisplayName("a credential variable repointed to another secret changes the binding fingerprint, so a cached card is not reused")
+    void fingerprintFollowsTheVariable() {
+        var connection = staticHeader();
+        connection.getStaticAuth().setValueTemplate("Bearer ${vars:crm-token}");
+        register(connection);
+        var pointsAt = new AtomicReference<>("${vault:token}");
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveValue(anyString())).thenAnswer(inv -> {
+            String value = inv.getArgument(0);
+            return value.replace("${vars:crm-token}", pointsAt.get());
+        });
+        var repointable = new ConnectionResolver(registry, new CredentialReferenceResolver(secrets, variables), mock(CallerIdentityContext.class),
+                new SimpleMeterRegistry(), tokens, true);
+
+        String before = repointable.bindingFingerprint("${connection:crm}");
+        pointsAt.set("${vault:rotated-secret}");
+        String after = repointable.bindingFingerprint("${connection:crm}");
+
+        assertTrue(before.contains("${vault:token}"), before);
+        assertTrue(after.contains("${vault:rotated-secret}"), after);
+        assertTrue(!before.equals(after), "the same template, another secret: another key");
+    }
+
+    @Test
     void bareTokenPathChecksToo() {
         register(oauthService());
         var e = assertThrows(ConnectionException.class,

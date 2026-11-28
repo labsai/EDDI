@@ -513,7 +513,9 @@ public class SecretResolver {
      * @return the value with vault references replaced by plaintext
      * @throws SecretNotGrantedException
      *             when a referenced secret's grant does not admit {@code access}
-     *             (under {@code eddi.vault.grant-enforcement=enforce})
+     *             (under {@code eddi.vault.grant-enforcement=enforce});
+     *             {@link SecretChangingException} when the secret kept changing
+     *             while its grant was to be bound to the value read (transient)
      */
     public String resolveValue(String value, SecretAccess access) {
         if (value == null || !SecretReference.isVaultReference(value)) {
@@ -568,7 +570,17 @@ public class SecretResolver {
             if (generation < 0) {
                 continue;
             }
-            String resolved = resolveOnce(ref, fullMatch, access);
+            String resolved;
+            try {
+                resolved = resolveOnce(ref, fullMatch, access);
+            } catch (SecretNotGrantedException refused) {
+                // As in requireGranted: a refusal read from a grant that changed
+                // meanwhile is no answer; only one bound to a settled state is final.
+                if (generationOf(key) == generation) {
+                    throw refused;
+                }
+                continue;
+            }
             if (generationOf(key) == generation) {
                 return resolved;
             }
@@ -576,6 +588,12 @@ public class SecretResolver {
         LOGGER.warnf("Vault reference %s not resolved: the vault changed during each of %d attempts, so its grant could not be "
                 + "bound to the value read", SecretReference.describe(fullMatch), GRANT_BINDING_ATTEMPTS);
         resolveErrorCounter.increment();
+        if (grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
+            // Transient, not a missing secret: a retry once the change settles succeeds,
+            // so a caller answers 503 rather than reporting a broken configuration.
+            throw new SecretChangingException(SecretReference.describe(fullMatch)
+                    + " is being changed, so its grant cannot be bound to the value read. Retry shortly.");
+        }
         return fullMatch;
     }
 

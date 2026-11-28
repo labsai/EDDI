@@ -453,7 +453,7 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
 
             assertTrue(outcome.isContinue(), "a refused judge is not converged");
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             verify(quota, never()).recordCost(anyString(), anyDouble());
             assertTrue(gc.getMemberCosts().isEmpty());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
@@ -468,7 +468,7 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
 
             assertTrue(outcome.isContinue());
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
         }
 

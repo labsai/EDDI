@@ -40,6 +40,7 @@ import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.invocation.InvocationParameters;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -61,6 +62,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -643,7 +645,10 @@ public class McpToolProviderManager {
      * <p>
      * The context carries no per-user state and is deliberately shared: it is a
      * discriminator ("this is a tool call"), not an identity. The identity comes
-     * from the thread-bound caller, exactly as it does for a normal tool call.
+     * from the thread-bound caller, exactly as it does for a normal tool call. It
+     * is the fallback for a call made without a context: one that
+     * {@link #grantChecked} wraps carries the calling agent in its own context, and
+     * the bridged tools pass that one on instead.
      */
     private static final InvocationContext RESOURCE_BRIDGE_INVOCATION = InvocationContext.builder()
             .interfaceName(McpToolProviderManager.class.getName()).methodName("mcpResourceBridge").build();
@@ -710,29 +715,52 @@ public class McpToolProviderManager {
                         .required("uri").build())
                 .build();
 
-        ToolExecutor listExecutor = (request, memoryId) -> {
+        ToolExecutor listExecutor = bridgeExecutor((request, invocation) -> {
             try {
-                return renderResourceList(getOrCreateClient(serverConfig), serverName);
+                return renderResourceList(getOrCreateClient(serverConfig), serverName, invocation);
             } catch (Exception e) {
                 LOGGER.warnf("MCP list_resources failed for '%s': %s", sanitize(serverName), e.getMessage());
                 return "Error listing resources from MCP server '" + serverName + "': " + e.getMessage();
             }
-        };
-        ToolExecutor readExecutor = (request, memoryId) -> {
+        });
+        ToolExecutor readExecutor = bridgeExecutor((request, invocation) -> {
             String uri = resourceUriArgument(request);
             if (isNullOrEmpty(uri)) {
                 return "Error: the 'uri' argument is required - call " + listName + " for the available uris.";
             }
             try {
-                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, RESOURCE_BRIDGE_INVOCATION), uri, serverName);
+                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, invocation), uri, serverName);
             } catch (Exception e) {
                 LOGGER.warnf("MCP read_resource failed for '%s' uri '%s': %s", sanitize(serverName), sanitize(uri), e.getMessage());
                 return "Error reading resource '" + uri + "' from MCP server '" + serverName + "': " + e.getMessage();
             }
-        };
+        });
 
         return new McpResourceBridge(List.of(listSpec, readSpec),
                 grantChecked(Map.of(listName, listExecutor, readName, readExecutor), serverConfig, access));
+    }
+
+    /**
+     * A bridged tool's executor that hands the request the invocation it is called
+     * with: {@link #grantChecked} attaches the calling agent there, and the
+     * credential lookup of a list or read checks that agent, as a tool call's does
+     * (#1179). Called without one (the context-free overload), the request is still
+     * a tool call, never the discovery handshake:
+     * {@link #RESOURCE_BRIDGE_INVOCATION}.
+     */
+    private static ToolExecutor bridgeExecutor(BiFunction<ToolExecutionRequest, InvocationContext, String> body) {
+        return new ToolExecutor() {
+            @Override
+            public String execute(ToolExecutionRequest request, Object memoryId) {
+                return body.apply(request, RESOURCE_BRIDGE_INVOCATION);
+            }
+
+            @Override
+            public ToolExecutionResult executeWithContext(ToolExecutionRequest request, InvocationContext context) {
+                return ToolExecutionResult.builder().resultText(body.apply(request, context != null ? context : RESOURCE_BRIDGE_INVOCATION))
+                        .build();
+            }
+        };
     }
 
     /** The {@code uri} argument of a read_resource call, or null. */
@@ -778,9 +806,9 @@ public class McpToolProviderManager {
      * the aggregate cap is an actual ceiling rather than a threshold noticed one
      * append too late.
      */
-    private static String renderResourceList(McpClient client, String serverName) {
+    private static String renderResourceList(McpClient client, String serverName, InvocationContext invocation) {
         var sb = new StringBuilder(remoteContentHeader(serverName));
-        List<McpResource> resources = client.listResources(RESOURCE_BRIDGE_INVOCATION);
+        List<McpResource> resources = client.listResources(invocation);
         if (resources == null || resources.isEmpty()) {
             sb.append("No resources.\n");
         } else {
@@ -793,7 +821,7 @@ public class McpToolProviderManager {
         }
         // Templates are parameterised uris (e.g. eddi://docs/{name}) - listed so
         // the model knows the shape, even though only concrete uris can be read.
-        List<McpResourceTemplate> templates = safeListTemplates(client);
+        List<McpResourceTemplate> templates = safeListTemplates(client, invocation);
         if (templates != null && !templates.isEmpty()) {
             sb.append("Resource templates (").append(templates.size()).append("):\n");
             for (McpResourceTemplate template : templates) {
@@ -844,9 +872,9 @@ public class McpToolProviderManager {
      * Templates are optional in the protocol and some servers reject the call
      * outright - that must not fail a listing whose resources half succeeded.
      */
-    private static List<McpResourceTemplate> safeListTemplates(McpClient client) {
+    private static List<McpResourceTemplate> safeListTemplates(McpClient client, InvocationContext invocation) {
         try {
-            return client.listResourceTemplates(RESOURCE_BRIDGE_INVOCATION);
+            return client.listResourceTemplates(invocation);
         } catch (Exception e) {
             return List.of();
         }
@@ -1193,8 +1221,9 @@ public class McpToolProviderManager {
 
     /**
      * The agent a tool call runs for, as {@link #grantChecked} attached it, or
-     * {@link #MCP_SESSION} for a request that carries none (discovery, the resource
-     * bridge, an executor not wrapped because no grant applies).
+     * {@link #MCP_SESSION} for a request that carries none (discovery, a
+     * resource-bridge call made without a context, an executor not wrapped because
+     * no grant applies).
      */
     static SecretAccess callerAccess(McpCallContext callContext) {
         if (callContext == null || callContext.invocationContext() == null

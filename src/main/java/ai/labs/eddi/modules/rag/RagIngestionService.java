@@ -36,6 +36,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -249,11 +250,16 @@ public class RagIngestionService {
             // document differently from a query, and gets to know which.
             EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT, KNOWLEDGE_BASE_INGESTION);
             if (replace) {
+                Map<String, String> modelBinding = embeddingModelFactory.bindingOf(model);
                 // The lease is held from before embedding until the cleanup is done, so
                 // a delete arriving meanwhile — on any instance — waits and then removes
                 // these chunks too, instead of answering "deleted" and being undone by
                 // them a moment later.
                 underDocumentLease(kbId, documentName, replaceLeaseWait, lease -> {
+                    // The model was taken before the wait for the lease: a grant narrowed
+                    // meanwhile must stop the run before the document reaches the provider
+                    // (and before an in-memory store is replaced below).
+                    embeddingModelFactory.requireGranted(ragConfig, modelBinding, KNOWLEDGE_BASE_INGESTION);
                     // Looked up only once the lease is held: for an in-memory store built
                     // under another embedding configuration this replaces it, which a
                     // replacement that is then refused the lease must not have done.

@@ -11,6 +11,8 @@ import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.invocation.InvocationContext;
+import dev.langchain4j.invocation.InvocationParameters;
+import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.McpReadResourceResult;
 import dev.langchain4j.mcp.client.McpResource;
@@ -212,6 +214,43 @@ class McpResourceBridgeTest {
         // identity comes from the thread, exactly as it does for a normal tool call.
         assertSame(listContext.getValue(), readContext.getValue(),
                 "both bridged tools must use the one shared context constant");
+    }
+
+    @Test
+    @DisplayName("called with the agent grantChecked attached, list and read hand that agent on to the credential lookup")
+    void bridgeCallsCarryTheCallingAgent() {
+        McpClient client = mock(McpClient.class);
+        when(client.listResources(any(InvocationContext.class))).thenReturn(List.of());
+        when(client.readResource(eq("eddi://x"), any(InvocationContext.class)))
+                .thenReturn(new McpReadResourceResult(List.of(new McpTextResourceContents("eddi://x", "hello", "text/plain"))));
+        var stubbed = new McpToolProviderManager(globalVariableResolver, secretResolver) {
+            @Override
+            McpClient getOrCreateClient(McpServerConfig config) {
+                return client;
+            }
+        };
+        var bridge = stubbed.resourceBridgeTools(config("srv", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
+        var agent = SecretAccess.agent("aaaaaaaaaaaaaaaaaaaaaaaa");
+        // What grantChecked builds for each call.
+        var context = InvocationContext.builder().chatMemoryId("memory-1")
+                .invocationParameters(InvocationParameters.from(McpToolProviderManager.SECRET_ACCESS_PARAMETER, agent)).build();
+
+        bridge.executors().get("srv_list_resources")
+                .executeWithContext(ToolExecutionRequest.builder().name("srv_list_resources").arguments("{}").build(), context);
+        String read = bridge.executors().get("srv_read_resource")
+                .executeWithContext(ToolExecutionRequest.builder().name("srv_read_resource").arguments("{\"uri\":\"eddi://x\"}").build(),
+                        context)
+                .resultText();
+        assertTrue(read.contains("hello"), read);
+
+        var listContext = ArgumentCaptor.forClass(InvocationContext.class);
+        verify(client).listResources(listContext.capture());
+        var readContext = ArgumentCaptor.forClass(InvocationContext.class);
+        verify(client).readResource(eq("eddi://x"), readContext.capture());
+        for (InvocationContext sent : List.of(listContext.getValue(), readContext.getValue())) {
+            assertEquals(agent, McpToolProviderManager.callerAccess(new McpCallContext(sent, null)),
+                    "the request must be checked as the calling agent, not as the shared session");
+        }
     }
 
     @Test

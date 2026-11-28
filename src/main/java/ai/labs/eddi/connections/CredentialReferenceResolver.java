@@ -225,6 +225,19 @@ public class CredentialReferenceResolver {
     }
 
     /**
+     * {@code template} with its {@code ${vars:…}} expanded, as the grant check and
+     * the resolution read it; references only, nothing is decrypted. {@code null}
+     * stays {@code null}.
+     */
+    public String expandVariables(String template) {
+        if (template == null || template.isBlank()) {
+            return template;
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        return expanded == null ? template : expanded;
+    }
+
+    /**
      * A secret that does not exist is a configuration error (400), not a grant
      * refusal (403): an administrator widening a grant cannot fix it.
      */

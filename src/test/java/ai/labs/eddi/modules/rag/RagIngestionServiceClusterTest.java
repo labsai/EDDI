@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.rag.RagIngestionService.DeleteOutcome;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -237,6 +238,19 @@ class RagIngestionServiceClusterTest {
         assertNotNull(instanceA.getWarning(RAG_ID, id));
         assertEquals(List.of("Refunds within 30 days.", "Refunds within 47 days."), storedTexts(),
                 "the cleanup ran without the lease");
+    }
+
+    @Test
+    @DisplayName("a grant narrowed while the replacement waited for its lease stops it before embedding or touching the store")
+    void grantNarrowedDuringTheLeaseWaitStopsTheReplacement() {
+        doThrow(new SecretResolver.SecretNotGrantedException("narrowed")).when(models).requireGranted(any(), any(), any());
+
+        String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
+
+        assertTrue(status.startsWith("failed") && status.contains("narrowed"), status);
+        assertEquals(1, embedding.getCount(), "nothing was sent to the provider");
+        verify(stores, never()).getOrCreateForIngestion(anyString(), any(), any());
+        assertEquals(1, cluster.released.get());
     }
 
     @Test

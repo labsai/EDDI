@@ -472,7 +472,8 @@ public class RestSecretStore implements IRestSecretStore {
                     + (dryRun
                             ? "If this change is applied, under eddi.vault.grant-enforcement=enforce they would be refused the secret — "
                                     + "the grant is checked whenever a secret is resolved — and their next deployment would be refused too. "
-                            : "Under eddi.vault.grant-enforcement=enforce they are refused the secret from now on — the grant is checked "
+                            : "Under eddi.vault.grant-enforcement=enforce they are refused the secret on this node now, and on the others "
+                                    + "as the change reaches them — the grant is checked "
                                     + "whenever a secret is resolved — and their next deployment is refused too. ")
                     + "Add them to allowedAgents, or remove the reference from their configuration first.");
         }

@@ -352,14 +352,33 @@ class SecretResolverGrantTest {
         }
 
         @Test
-        @DisplayName("a vault that changes during every attempt leaves the reference unresolved")
+        @DisplayName("a vault that changes during every attempt is refused as changing (retryable), not as a missing secret")
         void vaultChangingOnEveryAttemptIsRefused() throws Exception {
             when(provider.resolve(KEY)).thenAnswer(invocation -> {
                 resolver.invalidateGrant(KEY);
                 return "sk-plaintext";
             });
-            assertEquals(REF, resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
+            assertThrows(SecretResolver.SecretChangingException.class, () -> resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)));
             verify(provider, times(SecretResolver.GRANT_BINDING_ATTEMPTS)).resolve(KEY);
+        }
+
+        @Test
+        @DisplayName("a resolution whose grant read races an invalidation reads the grant again instead of refusing on the old one")
+        void resolutionRefusalRacingAnInvalidationReadsAgain() throws Exception {
+            var reads = new int[]{0};
+            when(provider.getMetadata(KEY)).thenAnswer(invocation -> {
+                if (reads[0]++ == 0) {
+                    // The settled sample was taken; the invalidation (A added) starts and
+                    // finishes while the old grant, without A, is being read.
+                    resolver.invalidateLocal(KEY);
+                    return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_B));
+                }
+                return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A, AGENT_B));
+            });
+
+            assertEquals("sk-plaintext", resolver.resolveValue(REF, SecretAccess.agent(AGENT_A)),
+                    "the refusal came from a grant that changed meanwhile; the settled grant admits A");
+            assertEquals(2, reads[0], "the grant was read again, bound to the settled state");
         }
 
         @Test
@@ -393,7 +412,10 @@ class SecretResolverGrantTest {
 
             assertThrows(SecretResolver.SecretNotGrantedException.class, () -> clustered.resolveValue(REF, SecretAccess.agent(AGENT_B)));
             assertTrue(notified.isEmpty(), "no client may be closed for a grant-only edit");
-            verify(provider, times(1)).resolve(KEY); // the plaintext cache was kept
+            // Read by an agent still granted, so the plaintext cache is actually consulted
+            // (B is refused before it): still one provider read, the cache was kept.
+            assertEquals("sk-plaintext", clustered.resolveValue(REF, SecretAccess.agent(AGENT_A)));
+            verify(provider, times(1)).resolve(KEY);
         }
 
         @Test

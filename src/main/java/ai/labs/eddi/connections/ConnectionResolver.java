@@ -123,11 +123,13 @@ public class ConnectionResolver {
     }
 
     /**
-     * The credential references the connection {@code reference} names now, as one
-     * string, or {@code ""} when it does not exist. Never a secret: references
-     * only. For a cache keyed on a {@code ${connection:…}} reference, so that a
-     * rebinding is a new key even on a node that never received the change's event
-     * and only reloaded the connection when its registry entry expired (#1179).
+     * The credential references the connection {@code reference} names now, with
+     * their {@code ${vars:…}} expanded, as one string, or {@code ""} when it does
+     * not exist. Nothing is decrypted, but a variable may hold a literal
+     * credential, so the result is key material: digest it, never log it. For a
+     * cache keyed on a {@code ${connection:…}} reference, so that a rebinding is a
+     * new key even on a node that never received the change's event and only
+     * reloaded the connection when its registry entry expired (#1179).
      */
     public String bindingFingerprint(String reference) {
         ConnectionConfiguration connection;
@@ -140,16 +142,29 @@ public class ConnectionResolver {
         if (connection == null) {
             return "";
         }
+        // Expanded, as the grant check reads them: a ${vars:…} repointed from one
+        // secret to another is then another fingerprint, so a card fetched with the
+        // old secret is not reused for an agent checked against the new one.
         StringBuilder fingerprint = new StringBuilder().append(connection.getAuthType()).append('|').append(connection.getBinding());
         StaticAuth staticAuth = connection.getStaticAuth();
         if (staticAuth != null) {
-            fingerprint.append('|').append(staticAuth.getValueTemplate()).append('|').append(staticAuth.getUsername()).append('|')
-                    .append(staticAuth.getPasswordRef());
+            fingerprint.append('|').append(expandVariables(staticAuth.getValueTemplate())).append('|')
+                    .append(expandVariables(staticAuth.getUsername())).append('|')
+                    .append(expandVariables(staticAuth.getPasswordRef()));
         }
         if (connection.getOauth() != null) {
-            fingerprint.append('|').append(connection.getOauth().clientCredentialReference(connection.getAuthType()));
+            fingerprint.append('|')
+                    .append(expandVariables(connection.getOauth().clientCredentialReference(connection.getAuthType())));
         }
         return fingerprint.toString();
+    }
+
+    /**
+     * {@code template} with its {@code ${vars:…}} expanded, when there is a
+     * resolver to expand them.
+     */
+    private String expandVariables(String template) {
+        return credentialReferenceResolver != null ? credentialReferenceResolver.expandVariables(template) : template;
     }
 
     /** Whether a value carries a connection reference. */
@@ -631,19 +646,26 @@ public class ConnectionResolver {
      * the grant store, minted with a client secret that was resolved once, possibly
      * for another agent. Checking only where a secret is decrypted would let a
      * cached token stand in for a secret the asking agent is not granted (#1179).
-     * Every credential field is checked whatever the auth type, since a field the
-     * type does not use carries no reference that matters, and a stale one is cheap
-     * to read.
+     * The fields checked are the ones the auth type sends, as dispatch selects
+     * them: a stale field the type does not use carries no reference that matters.
      */
     private void requireCredentialsGranted(ConnectionConfiguration connection, SecretAccess access) {
         if (connection == null) {
             return; // nothing to check: the lookup that follows fails on its own
         }
         StaticAuth staticAuth = connection.getStaticAuth();
+        AuthType type = connection.getAuthType();
         if (staticAuth != null) {
-            credentialReferenceResolver.requireGranted(staticAuth.getValueTemplate(), access, connection.getName(), "credential");
-            credentialReferenceResolver.requireGranted(staticAuth.getUsername(), access, connection.getName(), "username");
-            credentialReferenceResolver.requireGranted(staticAuth.getPasswordRef(), access, connection.getName(), "password");
+            // Only the fields the auth type sends: a passwordRef retained on a STATIC
+            // connection is never resolved, so it must not refuse an agent granted the
+            // valueTemplate's secret. An unset type checks every field.
+            if (type == null || type == AuthType.STATIC) {
+                credentialReferenceResolver.requireGranted(staticAuth.getValueTemplate(), access, connection.getName(), "credential");
+            }
+            if (type == null || type == AuthType.BASIC) {
+                credentialReferenceResolver.requireGranted(staticAuth.getUsername(), access, connection.getName(), "username");
+                credentialReferenceResolver.requireGranted(staticAuth.getPasswordRef(), access, connection.getName(), "password");
+            }
         }
         if (connection.getOauth() != null) {
             // The client secret, or for a JWT bearer connection the private key that

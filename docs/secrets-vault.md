@@ -443,7 +443,7 @@ Three properties are worth knowing:
   "agentsLosingAccess": [
     { "agentId": "89abcdef0123456789abcdef", "agentVersion": 3, "environment": "production" }
   ],
-  "warning": "1 deployed agent(s) reference this secret and are not on the new grant list. Under eddi.vault.grant-enforcement=enforce they are refused the secret from now on — the grant is checked whenever a secret is resolved — and their next deployment is refused too. …"
+  "warning": "1 deployed agent(s) reference this secret and are not on the new grant list. Under eddi.vault.grant-enforcement=enforce they are refused the secret on this node now, and on the others as the change reaches them — the grant is checked whenever a secret is resolved — and their next deployment is refused too. …"
 }
 ```
 
