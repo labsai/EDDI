@@ -27,6 +27,8 @@ Orphans and unreadable conversations are not in the memory store, so they never 
 
 `ConversationListingScanBenchmarkTest` produced these numbers. It is opt-in: `-Deddi.bench.listing=true`, and it writes `target/conversation-listing-benchmark.md`. It ran on a real MongoDB 7 and a real PostgreSQL (Testcontainers) with production serialization. Each figure is the median of 3 runs, limit 20. "Before" is the old unbounded per-row filter; "after" is this change.
 
+After a review comment (CodeRabbit), the benchmark now samples the two paths of one workload in turn. The path that runs first swaps on every sample, and the report has an `order` column that records each sample's order. The figures below were measured before that change, when all samples of one path ran before any of the other. The descriptor and query counts do not depend on the order. The millisecond columns do, so a small gap in them should be read with that in mind. They have not been re-measured.
+
 | backend | conversations | ENDED | page | before: ms / descriptors read / queries | after: ms / descriptors read / queries |
 |---|---|---|---|---|---|
 | Mongo | 10,000 | 10 (0.1%) | first | 4,837 / 10,000 / 1,001 | 5 / 10 / 3 |

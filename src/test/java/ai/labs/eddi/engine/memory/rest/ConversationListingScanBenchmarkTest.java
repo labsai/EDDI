@@ -17,6 +17,7 @@ import com.mongodb.client.model.Updates;
 import jakarta.ws.rs.WebApplicationException;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.types.ObjectId;
+import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -26,7 +27,9 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
@@ -57,6 +60,7 @@ import static org.mockito.Mockito.spy;
 @EnabledIfSystemProperty(named = "eddi.bench.listing", matches = "true")
 class ConversationListingScanBenchmarkTest extends MongoTestBase {
 
+    private static final Logger LOGGER = Logger.getLogger(ConversationListingScanBenchmarkTest.class);
     private static final int[] SIZES = {10_000, 100_000};
     private static final double[] SELECTIVITIES = {0.001, 0.01, 0.1};
     private static final int LIMIT = 20;
@@ -83,6 +87,8 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
 
         report.append("# Conversation listing by state - measurements (#931)\n\n")
                 .append("Each row: the median of ").append(RUNS).append(" runs after one warm-up, limit ").append(LIMIT)
+                .append(". The two paths of one workload are sampled in turn, the order swapping every sample; `order` lists ")
+                .append("each sample's (warm-up first), `b` = before ran first, `a` = after ran first")
                 .append(". `before` filters the state row by row with no bound (the code before #931); `after` pushes the ids ")
                 .append("in the state into the descriptor query. Descriptors read and queries are counted at the store interfaces; ")
                 .append("keys/docs examined are MongoDB's serverStatus queryExecutor counters (not available on PostgreSQL).\n\n");
@@ -95,14 +101,14 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
         Path out = Path.of("target", "conversation-listing-benchmark.md");
         Files.createDirectories(out.getParent());
         Files.writeString(out, report.toString());
-        System.out.println(report);
+        LOGGER.info(report);
     }
 
     private void listingCosts(ListingBackend backend, int size) throws Exception {
         report.append("## ").append(backend.name()).append(", ").append(size).append(" conversations\n\n")
                 .append("| ENDED | page | path | ms | descriptors read | descriptor queries | summary queries | id queries | keys examined "
-                        + "| docs examined | outcome |\n")
-                .append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+                        + "| docs examined | outcome | order |\n")
+                .append("|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         backend.clear();
         // Every conversation READY; the selectivity loop marks the first n ENDED.
         List<String> ids = backend.seed(size, i -> ConversationState.READY.name(), i -> false, 2_048);
@@ -117,14 +123,15 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
             ended = countEnded(backend, ids);
             int deepIndex = Math.min(ended - LIMIT, RestConversationStore.MAX_RESULT_OFFSET) / LIMIT;
             for (int index : new int[]{0, Math.max(1, deepIndex)}) {
-                // Alternate which path is measured first, so order is not read as a difference.
-                for (String path : index == 0 ? List.of("before", "after") : List.of("after", "before")) {
-                    Measure m = measureListing(backend, index, path);
-                    report.append(String.format("| %d (%.1f%%) | %s | %s | %.1f | %d | %d | %d | %d | %s | %s | %s |%n", ended,
-                            100.0 * ended / size, index == 0 ? "first" : "index " + index + " (offset " + index * LIMIT + ")", path,
-                            m.millis(), m.descriptorsRead(), m.descriptorQueries(), m.summaryQueries(), m.idQueries(),
+                StringBuilder order = new StringBuilder();
+                Map<String, Measure> medians = measureListing(backend, index, order);
+                for (Map.Entry<String, Measure> path : medians.entrySet()) {
+                    Measure m = path.getValue();
+                    report.append(String.format("| %d (%.1f%%) | %s | %s | %.1f | %d | %d | %d | %d | %s | %s | %s | %s |%n", ended,
+                            100.0 * ended / size, index == 0 ? "first" : "index " + index + " (offset " + index * LIMIT + ")",
+                            path.getKey(), m.millis(), m.descriptorsRead(), m.descriptorQueries(), m.summaryQueries(), m.idQueries(),
                             m.keysExamined() < 0 ? "-" : String.valueOf(m.keysExamined()),
-                            m.docsExamined() < 0 ? "-" : String.valueOf(m.docsExamined()), m.outcome()));
+                            m.docsExamined() < 0 ? "-" : String.valueOf(m.docsExamined()), m.outcome(), order));
                 }
             }
             // Reset the ENDED ones for the next selectivity, which marks its own set.
@@ -140,38 +147,64 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
         return backend.memoryStore.findConversationIdsByState(ConversationState.ENDED, ids.size()).size();
     }
 
-    private Measure measureListing(ListingBackend backend, int index, String path) {
-        List<Measure> runs = new ArrayList<>();
+    /**
+     * The median of {@link #RUNS} samples of each path for one workload, after one
+     * warm-up sample of each. The paths are sampled in turn, and which one runs
+     * first swaps every sample, so a drift over the measurement (cache, JIT, clock)
+     * falls on both paths alike instead of on whichever ran later.
+     *
+     * @param order
+     *            receives each sample's order, warm-up first: {@code b} when
+     *            {@code before} ran first, {@code a} when {@code after} did
+     */
+    private Map<String, Measure> measureListing(ListingBackend backend, int index, StringBuilder order) {
+        Map<String, List<Measure>> samples = new LinkedHashMap<>();
+        samples.put("before", new ArrayList<>());
+        samples.put("after", new ArrayList<>());
         for (int run = 0; run <= RUNS; run++) {
-            AtomicLong descriptorsRead = new AtomicLong();
-            AtomicLong descriptorQueries = new AtomicLong();
-            AtomicLong summaryQueries = new AtomicLong();
-            AtomicLong idQueries = new AtomicLong();
-            IConversationDescriptorStore descriptors = countingDescriptors(backend.descriptorStore, descriptorsRead, descriptorQueries);
-            IConversationMemoryStore memory = countingMemory(backend.memoryStore, summaryQueries, idQueries);
-            RestConversationStore listing = new ListingOver(descriptors, memory).listing(true);
-            if ("before".equals(path)) {
-                listing.maxStateIdSet = -1;
-                listing.maxRejectedScan = Integer.MAX_VALUE;
-            }
-            long[] before = backend.serverScanned();
-            long start = System.nanoTime();
-            String outcome;
-            try {
-                outcome = listing.readConversationDescriptors(index, LIMIT, null, null, null, null, ConversationState.ENDED, null).size()
-                        + " rows";
-            } catch (WebApplicationException e) {
-                outcome = "HTTP " + e.getResponse().getStatus();
-            }
-            double millis = (System.nanoTime() - start) / 1e6;
-            long[] after = backend.serverScanned();
-            if (run > 0) {
-                runs.add(new Measure(millis, descriptorsRead.get(), descriptorQueries.get(), summaryQueries.get(), idQueries.get(),
-                        before == null ? -1 : after[0] - before[0], before == null ? -1 : after[1] - before[1], outcome));
+            List<String> paths = run % 2 == 0 ? List.of("before", "after") : List.of("after", "before");
+            order.append(paths.getFirst().charAt(0));
+            for (String path : paths) {
+                Measure m = measureOnce(backend, index, path);
+                if (run > 0) {
+                    samples.get(path).add(m);
+                }
             }
         }
-        runs.sort((a, b) -> Double.compare(a.millis(), b.millis()));
-        return runs.get(runs.size() / 2);
+        Map<String, Measure> medians = new LinkedHashMap<>();
+        samples.forEach((path, runs) -> {
+            runs.sort((a, b) -> Double.compare(a.millis(), b.millis()));
+            medians.put(path, runs.get(runs.size() / 2));
+        });
+        return medians;
+    }
+
+    /** One timed listing request on {@code path}. */
+    private Measure measureOnce(ListingBackend backend, int index, String path) {
+        AtomicLong descriptorsRead = new AtomicLong();
+        AtomicLong descriptorQueries = new AtomicLong();
+        AtomicLong summaryQueries = new AtomicLong();
+        AtomicLong idQueries = new AtomicLong();
+        IConversationDescriptorStore descriptors = countingDescriptors(backend.descriptorStore, descriptorsRead, descriptorQueries);
+        IConversationMemoryStore memory = countingMemory(backend.memoryStore, summaryQueries, idQueries);
+        RestConversationStore listing = new ListingOver(descriptors, memory).listing(true);
+        if ("before".equals(path)) {
+            listing.maxStateIdSet = -1;
+            listing.maxRejectedScan = Integer.MAX_VALUE;
+        }
+        long[] before = backend.serverScanned();
+        long start = System.nanoTime();
+        String outcome;
+        try {
+            outcome = listing.readConversationDescriptors(index, LIMIT, null, null, null, null, ConversationState.ENDED, null).size()
+                    + " rows";
+        } catch (WebApplicationException e) {
+            outcome = "HTTP " + e.getResponse().getStatus();
+        }
+        double millis = (System.nanoTime() - start) / 1e6;
+        long[] after = backend.serverScanned();
+        return new Measure(millis, descriptorsRead.get(), descriptorQueries.get(), summaryQueries.get(), idQueries.get(),
+                before == null ? -1 : after[0] - before[0], before == null ? -1 : after[1] - before[1], outcome);
     }
 
     /** The backend with its stores swapped for counting ones. */
