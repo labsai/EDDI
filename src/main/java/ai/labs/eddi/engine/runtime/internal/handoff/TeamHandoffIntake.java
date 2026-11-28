@@ -38,8 +38,9 @@ import java.util.UUID;
  * handoff sits in {@code handoffs.inbox}, in no task list, so no cadence can
  * pull it; accepting it here copies it onto the backlog as a PENDING task and
  * stamps its origin. Authorization (EDIT on the receiving group) is the
- * caller's: the REST resource, and later the MCP tools, check it before calling
- * these methods, which is why they are public and free of any web types.
+ * caller's: the REST resource ({@code RestTeamHandoffs}, which the MCP tools
+ * also go through) checks it before calling these methods, which is why they
+ * are public and free of any web types.
  * <p>
  * Every decision writes an audit entry with the shared HITL vocabulary
  * ({@code approvalCategory = team_handoff_intake}, outcome

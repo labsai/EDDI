@@ -99,7 +99,7 @@ public class ServiceJudgeVaultGrants {
                 SecretMetadata metadata = secretProvider.getMetadata(reference);
                 if (metadata == null || !SecretMetadata.grantsAllAgents(metadata.allowedAgents())) {
                     return "references vault secret " + name + ", which is not granted to all agents — a group is not an agent, so "
-                            + "a group-level model (SERVICE judge, lesson consolidation) may only use a secret whose grant is open to "
+                            + "a group-level model or action (SERVICE judge, lesson consolidation, approved-result action) may only use a secret whose grant is open to "
                             + "every agent: grant it to all agents "
                             + "(allowedAgents [\"*\"]) first";
                 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { brandingErrorInfo, getBranding, updateBranding, uploadBrandAsset } from "@/lib/api/branding";
-import { EMPTY_COLORS } from "@/lib/brand-css";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { brandingErrorInfo, getBranding, updateBranding, uploadBrandAsset } from "@eddi/app-kit/lib/api/branding";
+import { EMPTY_COLORS } from "@eddi/app-kit/lib/brand-css";
 
 describe("branding API", () => {
   it("uploads the file's bytes as the raw body, not as JSON", async () => {

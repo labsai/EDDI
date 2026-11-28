@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ratingKeys } from "@/lib/query-keys";
-import { isApiError } from "@/lib/api-client";
+import { ratingKeys } from "@eddi/app-kit/lib/query-keys";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   getAttentionCount,
   listRatings,
@@ -11,7 +11,7 @@ import {
   type RatingQuery,
   type RatingSort,
   type ReviewStatus,
-} from "@/lib/api/ratings";
+} from "@eddi/app-kit/lib/api/ratings";
 
 /** How often the attention count refreshes — the same cadence as the approvals badge. */
 export const ATTENTION_POLL_MS = 30_000;

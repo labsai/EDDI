@@ -24,9 +24,9 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * {@code pii-redaction} — input and output. Finds personal identifiers with the
- * built-in detector ({@link BuiltinRecognizers}) and reports a rewrite with
- * each one replaced by {@code [REDACTED:<kind>]}.
+ * {@code pii-redaction} — input, output and tool-call arguments. Finds personal
+ * identifiers with the built-in detector ({@link BuiltinRecognizers}) and
+ * reports a rewrite with each one replaced by {@code [REDACTED:<kind>]}.
  * <p>
  * A kind is an entity type in lower case ({@code iban}, {@code fr_nir},
  * {@code de_tax_id}, …); the four original kinds keep their names

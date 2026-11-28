@@ -1,4 +1,4 @@
-import { ALERT_LIMITS, MASKED_URL_SUFFIX, type AlertCondition, type AlertRule, type MatchOp } from "@/lib/api/alerts";
+import { ALERT_LIMITS, MASKED_URL_SUFFIX, type AlertCondition, type AlertRule, type MatchOp } from "@eddi/app-kit/lib/api/alerts";
 
 /** Mirrors the backend's OutputMatchCondition grammar. */
 export const OUTPUT_MATCH_LIMITS = { maxDepth: 8, maxInValues: 50, maxValueLength: 1000 } as const;

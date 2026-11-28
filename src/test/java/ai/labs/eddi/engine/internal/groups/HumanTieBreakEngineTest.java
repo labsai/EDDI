@@ -115,7 +115,7 @@ class HumanTieBreakEngineTest {
         var original = VoteTallyEngine.tally(gc.getTranscript().subList(1, 3), 2, OPTIONS, phase.voteConfig(), "Board vote");
         gc.setDecision(original.decision());
 
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, 1, 1);
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, 1, 1, GroupSigningGuard.recordView(null, gc, List.of()));
         var decision = HumanTieBreakEngine.decisionFor("Launch the paid pilot", "Founder", rebuilt.quorumReached(), rebuilt,
                 gc.getDecision(), "Board vote", "We need revenue this quarter");
 
@@ -135,7 +135,7 @@ class HumanTieBreakEngineTest {
         var gc = tiedConversation();
         gc.getTranscript().add(1, ballot("old", "{\"vote\":\"Double down on SEO\"}"));
 
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase(vote(null)), 1, 2);
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase(vote(null)), 1, 2, GroupSigningGuard.recordView(null, gc, List.of()));
 
         assertEquals(2, rebuilt.ballots().size());
     }

@@ -63,6 +63,7 @@ public final class ConnectionReadRedactor {
         OAuthConfig oauth = copy.getOauth();
         if (oauth != null) {
             oauth.setClientSecret(keepIf(oauth.getClientSecret(), ConnectionConfiguration::isReferenceOnly));
+            oauth.setPrivateKey(keepIf(oauth.getPrivateKey(), ConnectionConfiguration::isReferenceOnly));
             if (oauth.getExtraAuthParams() != null) {
                 Map<String, String> params = new LinkedHashMap<>();
                 oauth.getExtraAuthParams().forEach((key, value) -> params.put(key,

@@ -139,20 +139,20 @@ public class HitlCrashRecoveryObserver {
     /** Upper bound of paused conversations scanned per retention sweep. */
     private static final int RETENTION_SCAN_LIMIT = 10_000;
 
-    // 'event' is the required CDI observer trigger — the method fires on
-    // StartupEvent regardless of whether the payload is read.
     /**
-     * Cluster mode: no recovery at startup. Every rolling update starts a node, and
-     * recovering on boot parked the LIVE turns other nodes were running (their
-     * conversations are IN_PROGRESS too). The leader-elected periodic sweep in
-     * {@code ClusterHitlRecovery} recovers instead, and only conversations that
-     * hold no lease and stayed unchanged for
-     * {@code eddi.cluster.hitl-recovery.min-age}. Field-injected; null in tests
-     * built with {@code new}.
+     * Cluster mode switch: when NATS is the messaging type no recovery runs at
+     * startup. Every rolling update starts a node, and recovering on boot parked
+     * the LIVE turns other nodes were running (their conversations are IN_PROGRESS
+     * too). The leader-elected periodic sweep in {@code ClusterHitlRecovery}
+     * recovers instead, and only conversations that hold no lease and stayed
+     * unchanged for {@code eddi.cluster.hitl-recovery.min-age}. Field-injected;
+     * null in tests built with {@code new}.
      */
     @Inject
     ClusterConfig clusterConfig;
 
+    // 'event' is the required CDI observer trigger — the method fires on
+    // StartupEvent regardless of whether the payload is read.
     @SuppressWarnings("unused")
     void onStartup(@Observes StartupEvent event) {
         if (!enabled) {
@@ -214,8 +214,8 @@ public class HitlCrashRecoveryObserver {
      * the same cutoff; group discussions paused under WAIT_INDEFINITELY would
      * otherwise accumulate forever just like regular pauses.
      * <p>
-     * The property is read once at startup. See {@code docs/hitl.md} (owned by a
-     * later phase) for the operator-facing description.
+     * The property is read once at startup. See {@code docs/hitl.md} for the
+     * operator-facing description.
      */
     @Scheduled(every = "${eddi.hitl.pending.sweep-interval:6h}", delayed = "5m", identity = "hitl-pending-retention")
     void sweepExpiredPendingApprovals() {

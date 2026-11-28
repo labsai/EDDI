@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -21,6 +20,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -86,8 +86,6 @@ class GroupConversationServiceHitlCoverage2Test {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -106,7 +104,7 @@ class GroupConversationServiceHitlCoverage2Test {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -321,8 +319,11 @@ class GroupConversationServiceHitlCoverage2Test {
 
         assertNotNull(result);
         var entry = (TranscriptEntry) result;
-        assertNotNull(entry.content(), "ERROR + empty output yields a placeholder content string");
-        assertTrue(entry.content().contains("ERROR"), entry.content());
+        // K1: ERROR + empty output is a FAILED turn — no placeholder text a peer or the
+        // synthesis could take for an answer
+        assertNull(entry.content());
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
+        assertEquals(MemberTurnExecutor.REASON_ERROR_STATE, entry.errorReason());
     }
 
     // =================================================================

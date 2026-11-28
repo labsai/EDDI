@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -28,6 +29,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+import ai.labs.eddi.modules.templating.impl.ConfigReferenceNamespaceResolvers;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,16 +40,20 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -57,6 +63,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -80,6 +87,7 @@ class ApiCallExecutorForEachTest {
     private static final String SERVER = "http://api.example.com";
 
     private IHttpClient httpClient;
+    private SecretResolver secretResolver;
     private ApiCallExecutor executor;
     private IConversationMemory memory;
 
@@ -99,7 +107,7 @@ class ApiCallExecutorForEachTest {
     @BeforeEach
     void setUp() {
         httpClient = mock(IHttpClient.class);
-        SecretResolver secretResolver = mock(SecretResolver.class);
+        secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -108,7 +116,8 @@ class ApiCallExecutorForEachTest {
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         var jsonSerialization = new JsonSerialization(new ObjectMapper());
-        var engine = Engine.builder().addDefaults().strictRendering(false).build();
+        var engine = Engine.builder().addDefaults().strictRendering(false).addNamespaceResolver(new ConfigReferenceNamespaceResolvers.Vault())
+                .build();
         var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(engine),
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
 
@@ -354,6 +363,21 @@ class ApiCallExecutorForEachTest {
         }
 
         @Test
+        @DisplayName("onItemFailure=fail keeps the configuration refusal behind an unbuildable item, so a start answers 422")
+        void failPolicyKeepsTheRefusal() {
+            when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.NOT_FOUND);
+            ApiCall call = call("/items/{item}", forEach(1));
+            call.getRequest().setHeaders(Map.of("X-Api-Key", "${vault:api-key}"));
+            call.getForEach().setOnItemFailure("fail");
+
+            LifecycleException e = assertThrows(LifecycleException.class,
+                    () -> executor.execute(call, memory, dataWithItems(List.of("a", "b")), SERVER));
+
+            assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, AgentConfigurationRefusal.find(e));
+            assertEquals(0, built.stream().filter(r -> r.sends.get() > 0).count(), "nothing was sent");
+        }
+
+        @Test
         @DisplayName("an item whose request cannot be built is not sent; the others are")
         void unbuildableItemIsNotSent() throws Exception {
             responder = request -> json(200, "{}");
@@ -369,6 +393,57 @@ class ApiCallExecutorForEachTest {
             assertEquals(false, stored.get(1).get("sent"));
             assertTrue(String.valueOf(stored.get(1).get("error")).startsWith("request not built"), String.valueOf(stored.get(1).get("error")));
             assertEquals(2, built.stream().filter(r -> r.sends.get() > 0).count());
+        }
+    }
+
+    // ─── Encoded echoes in an item's error body ────────────────────────────────
+
+    @Nested
+    @DisplayName("an item's error body echoing the substituted secret encoded")
+    class EncodedErrorEchoes {
+
+        /**
+         * Characters every encoding changes, so each form differs from the plaintext.
+         */
+        private static final String SUBSTITUTED = "opaque/sample value+1234";
+        private final String base64 = Base64.getEncoder().encodeToString(SUBSTITUTED.getBytes(StandardCharsets.UTF_8));
+        private final String formEncoded = URLEncoder.encode(SUBSTITUTED, StandardCharsets.UTF_8);
+        private final String errorBody = "{\"echo\":\"" + base64 + "\",\"seen\":\"" + formEncoded + "\"}";
+
+        @BeforeEach
+        void echoingServer() {
+            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> ((String) inv.getArgument(0)).replace("${vault:api-key}", SUBSTITUTED));
+            responder = request -> json(401, errorBody);
+        }
+
+        private ApiCall withVaultHeader(ApiCall call) {
+            call.getRequest().setHeaders(Map.of("X-Api-Key", "${vault:api-key}"));
+            return call;
+        }
+
+        @Test
+        @DisplayName("the base64 and URL-encoded forms are redacted from the stored item body, as in a single call")
+        void encodedFormsRedacted() throws Exception {
+            Map<String, Object> templateData = dataWithItems(List.of("a"));
+
+            executor.execute(withVaultHeader(call("/items/{item}", forEach(1))), memory, templateData, SERVER);
+
+            String body = String.valueOf(stored(templateData).getFirst().get("body"));
+            assertFalse(body.contains(base64), "base64 echo stored: " + body);
+            assertFalse(body.contains(formEncoded), "URL-encoded echo stored: " + body);
+            assertTrue(body.contains(RequestRedactor.REDACTED), body);
+        }
+
+        @Test
+        @DisplayName("a single call and a forEach item redact the same error body identically")
+        void sameRedactionAsSingleCall() throws Exception {
+            Map<String, Object> single = dataWithItems(List.of("a"));
+            Map<String, Object> singleResult = executor.execute(withVaultHeader(call("/items/a", null)), memory, single, SERVER);
+            Map<String, Object> perItem = dataWithItems(List.of("a"));
+            executor.execute(withVaultHeader(call("/items/{item}", forEach(1))), memory, perItem, SERVER);
+
+            assertEquals(ApiCallExecutor.redactErrorBody(errorBody, Set.of(SUBSTITUTED)), single.get("resultsError"));
+            assertEquals(singleResult.get("body"), stored(perItem).getFirst().get("body"));
         }
     }
 

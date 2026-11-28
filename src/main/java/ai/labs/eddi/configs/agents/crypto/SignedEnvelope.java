@@ -26,7 +26,8 @@ import java.util.UUID;
  * @param senderId
  *            the agent ID of the sender
  * @param recipientId
- *            the agent ID of the intended recipient
+ *            the intended recipient: an agent ID, or the group ID for a
+ *            group-transcript entry
  * @param payload
  *            the message payload (arbitrary key-value pairs)
  * @param nonce
@@ -89,7 +90,9 @@ public record SignedEnvelope(
      * Get the canonical form of this envelope for signing/verification.
      * <p>
      * The canonical form includes all fields except {@code signature} and
-     * {@code keyVersion} to prevent circular dependency.
+     * {@code keyVersion}, so a signature does not by itself bind the key version it
+     * was made with. A caller that needs that binding puts the version in the
+     * payload, as the group transcript does.
      *
      * @return canonical JSON string
      * @throws JsonProcessingException

@@ -558,6 +558,32 @@ class RestGroupConversationTest {
         }
 
         @Test
+        @DisplayName("mine=true restricts an admin's listing to their own sessions, in the query")
+        void listGroupConversations_mineForAdmin() throws Exception {
+            when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+            when(identity.isAnonymous()).thenReturn(false);
+            lenient().when(identity.hasRole("eddi-admin")).thenReturn(true);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn("admin-1");
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var own = new GroupConversation();
+            own.setId("gc-1");
+            own.setUserId("admin-1");
+            var foreign = new GroupConversation();
+            foreign.setId("gc-2");
+            foreign.setUserId("user-1");
+            when(groupService.listGroupConversations("group-1", "admin-1", 0, 10))
+                    .thenReturn(new ArrayList<>(List.of(own, foreign)));
+
+            List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10, true);
+
+            assertEquals(1, result.size());
+            assertEquals("gc-1", result.get(0).getId());
+            verify(groupService, never()).listGroupConversations("group-1", 0, 10);
+        }
+
+        @Test
         @DisplayName("should return an empty list, not NPE, for an authenticated caller with no principal name")
         void listGroupConversations_namelessCallerOwnsNothing() throws Exception {
             when(ownershipValidator.isAuthEnabled()).thenReturn(true);

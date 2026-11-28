@@ -1426,7 +1426,7 @@ Tokens already streamed to a client cannot be taken back. A task with an output 
 Every guardrail that fires produces:
 
 - an audit record under the step key `audit:guardrail:<phase>:<type>` (`{phase, type, action, reason, retryCount, taskId}`), collected into the [audit ledger](audit-ledger.md) entry as `output.guardrails`. The `reason` is EDDI's (e.g. `pii:email`, `prompt_injection_pattern`) — never the screened text;
-- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
+- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer. The Manager's chat and the Chat UI show it under the reply it explains ("Guardrail (output): pii redacted"), and while the reply is still being written their activity line reads "Checking the reply…";
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
 Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
@@ -1517,22 +1517,63 @@ Some tools require API keys or external configuration to function. These are con
 
 #### Web Search Tool
 
-By default, the tool uses **DuckDuckGo** (HTML scraping), which requires no configuration.
+`eddi.tools.websearch.provider` picks where `searchWeb` and `searchNews` go
+(`searchWikipedia` always asks Wikipedia):
 
-To use **Google Custom Search** (more reliable/structured), configure these properties:
+| Provider | Key | Default price per call | What it returns |
+| --- | --- | --- | --- |
+| `duckduckgo` (default) | none | $0.001 | DuckDuckGo's Instant Answer API — an abstract and related topics, **not** a ranked results page. Fine for definitions, thin for research |
+| `brave` | `eddi.tools.websearch.brave.api-key` | $0.005 | The [Brave Search API](https://brave.com/search/api/) web endpoint, from Brave's own index: up to 10 ranked results with title, snippet and URL |
+| `google` | `eddi.tools.websearch.google.api-key` + `.cx` | $0.005 | Google's Custom Search JSON API. **Deprecated** — see below |
+
+**Brave Search API (recommended paid provider).** Create a key in the
+[Brave Search API dashboard](https://api-dashboard.search.brave.com/) on the
+*Search* plan — $5 per 1,000 requests, with $5 of free usage each month
+(about 1,000 searches) — then:
 
 ```properties
-# In application.properties
+eddi.tools.websearch.provider=brave
+eddi.tools.websearch.brave.api-key=YOUR_BRAVE_KEY
+# or keep it in the secrets vault:
+# eddi.tools.websearch.brave.api-key=${vault:brave-search}
+```
+
+Docker: `EDDI_TOOLS_WEBSEARCH_PROVIDER=brave`, `EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...`.
+The key is sent in the `X-Subscription-Token` header, never in the URL, and is
+stripped on a cross-origin redirect. A `${vault:...}` reference that the vault
+cannot resolve fails the search rather than being sent as the key.
+
+Brave's terms allow results to be used inside your application but forbid
+storing them beyond "transient storage required for operation" and using them to
+train or fine-tune models. EDDI's 30-minute tool-result cache is transient;
+results also stay in the conversation memory like every tool result, so check
+that against your plan (Brave sells plans with storage rights) if you keep
+conversations for long.
+
+**Google Custom Search (deprecated).** Google closed the Custom Search JSON API
+to new customers and [shuts it down on 2027-01-01](https://developers.google.com/custom-search/v1/overview).
+Existing keys keep working until then, and EDDI logs a startup WARN while
+`provider=google` is set. Move to `brave` before that date.
+
+```properties
 eddi.tools.websearch.provider=google
 eddi.tools.websearch.google.api-key=YOUR_GOOGLE_API_KEY
 eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 ```
 
-**Docker Environment Variables:**
+A paid provider configured without its key falls back to DuckDuckGo, and the
+startup log names the missing property — but the call is still priced as the
+configured provider, so a budget never undercounts. An unknown provider value
+also falls back to DuckDuckGo with a startup WARN.
 
-- `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
-- `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
-- `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+**Pricing.** The default price per search is a property of the provider, not a
+constant of the build: `$0.005` for `brave` and `google`, `$0.001` for
+`duckduckgo`. If your contract differs, set `eddi.tools.websearch.price-per-call`
+(dollars per call; `0` makes searches free) and it replaces the provider default
+for whichever provider is configured. A value that is not a finite, non-negative
+number is ignored with a startup WARN. A per-agent
+[`toolPricing`](#agent-mode-parameters) entry (`{"websearch": 0.002}`) still wins
+over both.
 
 #### Web Scraper Tool
 
@@ -1752,6 +1793,51 @@ The LLM task supports advanced pre-request and post-response processing for fine
 
 - **responseObjectName**: Name for storing the full response object in memory
 - **responseMetadataObjectName**: Name for storing response metadata (token usage, finish reason) in memory
+
+## Documents (`documents`)
+
+An LLM task can carry a `documents` block that says how the agent treats PDF documents: their structure, splitting them into chapters ("units"), handing files to other agents, a personal or team library, and documents too large to forward whole. It ships one capability at a time.
+
+**Nothing in the block is available yet.** The block exists in the configuration model so that the shape is stable, but every key is refused when the configuration is saved:
+
+```
+langchain.task[0].documents.sharing.delegation is not available in this version
+```
+
+An absent block, `{}` and empty nested blocks (`"split": {}`) are accepted and change nothing. An agent that configures nothing behaves exactly as before, including for large PDFs.
+
+How values resolve, once keys become available:
+
+- **Every key is optional.** Unset means the deployment default, `eddi.documents.defaults.<path>` (for example `eddi.documents.defaults.split.maxUnitTokens=8000`), and without one the built-in default.
+- **Operator bounds.** Some numbers (counts, bytes, depth, dollars) have an operator bound. A value above it is refused when the configuration is saved, with the bound named. A stored value above it (a bound tightened after the save) is clamped with a warning when the agent is deployed: a bound never un-deploys an agent.
+- **Stored keys that are not available do not stop a deploy.** Every save path — the REST API, JSON patch, ZIP import, agent setup and upgrade — refuses them, so they reach a stored configuration only by being written directly to the database or saved by a newer EDDI. At deploy such a key is ignored, and the deploy log names it at WARN.
+
+The full shape, with every key at its default:
+
+```json
+"documents": {
+  "structure": "OFF",
+  "split":   { "strategy": "AUTO", "pagesPerUnit": 10, "maxUnitTokens": 12000, "minUnitTokens": 500, "maxUnits": 60 },
+  "unitForm": "AUTO",
+  "images":  { "mode": "EMBEDDED", "pageRender": "NEVER", "maxPerUnit": 20, "maxEdgePx": 1568, "minEdgePx": 48, "renderDpi": 110 },
+  "tables":  { "image": "NEVER", "format": "MARKDOWN", "maxInlineRows": 60 },
+  "audio":   { "extract": false, "maxFiles": 10, "maxPerUnit": 2, "maxDurationSeconds": 600 },
+  "embeddedFiles": { "extract": "NONE", "mimeTypes": [] },
+  "derived": { "maxPerSource": 200, "maxBytesPerSource": 52428800 },
+  "sharing": { "delegation": false, "handoff": false, "maxFilesPerShare": 5, "maxSharesPerTurn": 10, "maxDepth": 3 },
+  "library": { "enabled": false, "promote": "TOOL", "scopes": ["self"], "teams": [], "memoryCard": true,
+               "maxCardsRecalled": 5, "retentionDays": null },
+  "index":   { "rag": null },
+  "large":   { "thresholdPages": 80, "thresholdBytes": 10485760, "processOnUpload": false, "onReady": "NOTE",
+               "summary": { "llm": null, "leafOutputTokens": 300, "reduceFanIn": 12, "maxLevels": 4,
+                            "maxParallelUnits": 4, "maxCostPerDocument": 5.00, "images": "CAPTIONS" } },
+  "bridge":  null
+}
+```
+
+| Key | Available since |
+|---|---|
+| *(none yet)* | — |
 
 ## Conversation Window Management
 
@@ -2582,8 +2668,9 @@ The check runs *before* each call and uses `<=`, so the call that crosses the
 ceiling still completes and the next one is refused with
 `Error: Budget exceeded for conversation <id>`.
 
-Default per-call prices: `webscraper` $0.002, `websearch` $0.001, `pdfreader`
-$0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
+Default per-call prices: `webscraper` $0.002, `websearch` $0.001 with
+`duckduckgo` and $0.005 with `brave` or `google` (the
+`eddi.tools.websearch.provider` in force, or `eddi.tools.websearch.price-per-call` when set), `pdfreader` $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
 `textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
 and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
 Negative `toolPricing` values are clamped to 0.0.

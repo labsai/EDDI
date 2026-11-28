@@ -30,11 +30,13 @@ import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringV
  * Moonshot, ...) by applying the provider's preset to the generic
  * {@link OpenAILanguageModelBuilder}.
  * <p>
- * Not a CDI bean: {@code LlmModule} creates one instance per catalog entry.
+ * Not a CDI bean: {@code LlmModule} registers a supplier of one instance per
+ * catalog entry.
  * <p>
- * Precedence: an explicit {@code baseUrl} wins over {@code region}, which wins
- * over the preset's default endpoint; an explicit {@code modelName} wins over
- * the preset's default; explicit parameters win over the preset's
+ * Precedence: an explicit {@code baseUrl} (a {@code baseUrl} in the preset's
+ * {@code parameterDefaults} counts as one) wins over {@code region}, which wins
+ * over the preset's {@code defaultBaseUrl}; an explicit {@code modelName} wins
+ * over the preset's default; explicit parameters win over the preset's
  * {@code parameterDefaults}.
  * <p>
  * <b>Vendor fields.</b> Settings the OpenAI protocol has no field for

@@ -1,4 +1,4 @@
-import { MAX_NOTIFY_RECIPIENTS } from "./api/hitl";
+import { MAX_NOTIFY_RECIPIENTS } from "@eddi/app-kit/lib/api/hitl";
 
 /** Why a recipients draft cannot be saved; the UI turns it into a sentence. */
 export type NotifyRecipientsError = "empty" | "tooMany" | "invalid" | "duplicate";

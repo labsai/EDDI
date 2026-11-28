@@ -280,6 +280,25 @@ replacing that would delete all of them. On a vector store that cannot delete by
 ingestion still completes and the status response carries a `warning` saying the previous version is
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
 
+A replacement holds the document's **lease** from before it embeds until the previous version is
+removed, so two replacements of one name do not interleave — and neither does a replacement and a
+delete of that name — as far as a lease can guarantee it (best-effort; see the end of this paragraph). In a cluster the lease is cluster-wide (a `rag.<hash>` key in the `LEASES`
+bucket, see [clustering](clustering.md)), so this holds when several instances share one vector
+store: a replacement that arrives while another instance is replacing or deleting the same name waits
+for it (up to 30 minutes, then fails with `failed: Document '…' is being replaced or deleted on
+another instance`). The lease is renewed for as long as embedding takes. A vector store cannot check a
+fencing token, so a replacement checks that it still holds the lease before it stores and before it
+removes the previous version: an instance cut off from NATS stops there with `failed: This instance
+lost the lease …` instead of overwriting what another instance did meanwhile — if it had already
+stored the new version, the status also carries the both-versions-may-remain `warning`. The checks narrow
+the window but cannot close it — this is exclusion with checks, not a fence: a write already issued when
+the lease expires still lands, and so does one from a holder that paused (a long GC pause, a stalled
+thread) after its check and resumed after another instance took the document over, as with any vector
+store that cannot check a token. While NATS is
+unreachable, leases follow `eddi.cluster.degraded.turns`: `local` (the default) replaces and deletes under
+the instance-local lock only — a node cut off from NATS does not wait for an operation on a connected one —
+and `reject` fails the replacement and answers a delete `409`. Appending (`replace=false`) takes no lease.
+
 #### Deleting a document
 
 ```bash
@@ -296,14 +315,14 @@ EDIT on the knowledge base, like ingesting, and it is synchronous.
 | `200` `{"status": "deleted", ...}` | The document's chunks are gone. A name nothing was ingested under is also `200`: there is nothing left to remove |
 | `200` with `warning` | The vector store cannot delete by metadata, so nothing was removed and the text is still retrievable (`status: "not_deleted"`) |
 | `400` | `documentName` is missing, blank or `unnamed` — every document ingested without a name shares `unnamed`, and deleting that would delete all of them |
-| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement of the same name is still embedding after 30 seconds |
+| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement or delete of the same name — on this or another instance — still holds the document after 30 seconds (about 1.25 seconds more at most: the cluster lease is always given one second plus scheduling slack, so a free one can still be granted), or its cluster lease cannot be taken (see above); nothing was removed, retry |
 | `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
 
-**A delete and a replacement of one name never interleave.** Both take the same per-document lock, so
+**A delete and a replacement of one name do not interleave, as far as the lease can guarantee it.** Both take the same per-document lease, so
 a delete waits for a replacement in flight and then removes its chunks too, rather than landing
-between the replacement's store and its cleanup. As with replacements, the lock is per instance. An
-ingestion *without* `replace` takes no lock, so one still in flight when the delete answers can store
-its chunks afterwards.
+between the replacement's store and its cleanup. As with replacements, the lock is the document's cluster lease (see above), so this holds between
+instances sharing one vector store. An ingestion *without* `replace` takes no lease, so one still in
+flight when the delete answers can store its chunks afterwards.
 
 **What a source ingested is removed through the source.** Its chunks carry `sourceName` and a
 `sourceKey`, never the `source` key this endpoint matches on, so a delete could not touch them — and
@@ -472,7 +491,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
-| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
+| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.technology)` | Sent on every request, and matched against robots.txt groups |
 | `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
 
 `settings` — what to do with what was crawled:

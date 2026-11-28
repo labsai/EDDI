@@ -353,9 +353,13 @@ public class ConverseWithAgentTool {
             }
 
             String response = extractResponse(snapshot);
-            if (response == null && snapshot != null
+            if ((response == null || response.isEmpty()) && snapshot != null
                     && snapshot.getConversationState() == ConversationState.ERROR) {
-                response = "[Agent failed to produce output — conversation entered ERROR state]";
+                // A failure, reported as one — never as text the delegating model
+                // could take for the other agent's answer.
+                LOGGER.warnf("[CONVERSE] Agent '%s' ended in ERROR without an answer in conversation '%s'", agentId, convId);
+                return "❌ Agent '%s' failed to produce an answer: its conversation (%s) ended in ERROR. This is not the agent's "
+                        .formatted(agentId, convId) + "answer; retry later or proceed without it.";
             }
 
             LOGGER.debugf("[CONVERSE] Agent '%s' responded in conversation '%s'", agentId, convId);
@@ -429,6 +433,8 @@ public class ConverseWithAgentTool {
                 .toList();
     }
 
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     /**
      * Refuses when a model-supplied {@code conversationId} belongs to a user other
      * than the one this tool is bound to.
@@ -445,8 +451,6 @@ public class ConverseWithAgentTool {
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
      */
-    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
-
     private String refuseIfNotOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
             // Fail closed: with no bound identity there is nothing to compare the

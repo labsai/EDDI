@@ -28,14 +28,17 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * {@link IClusterRpc} on core NATS request-reply. Handlers run on virtual
@@ -247,6 +250,21 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
 
     @Override
     public Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request, Duration wait, int expected) {
+        return scatter(op, request, wait, expected > 0, replies -> replies.size() >= expected);
+    }
+
+    @Override
+    public Map<String, Map<String, Object>> callAllAwaiting(String op, Map<String, Object> request, Duration wait, Set<String> expectedNodes) {
+        Set<String> expected = Set.copyOf(expectedNodes);
+        return scatter(op, request, wait, !expected.isEmpty(), replies -> replies.keySet().containsAll(expected));
+    }
+
+    /**
+     * Publishes {@code op} to every node and collects the replies until
+     * {@code wait} passed or, when {@code awaiting}, {@code complete} holds.
+     */
+    private Map<String, Map<String, Object>> scatter(String op, Map<String, Object> request, Duration wait, boolean awaiting,
+                                                     Predicate<Map<String, Map<String, Object>>> complete) {
         long start = System.nanoTime();
         Map<String, Map<String, Object>> replies = new LinkedHashMap<>();
         String outcome = "ok";
@@ -268,7 +286,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
             String self = connections.node().nodeId();
             while (true) {
                 long remaining = deadline - System.nanoTime();
-                if (remaining <= 0 || (expected > 0 && replies.size() >= expected)) {
+                if (remaining <= 0 || (awaiting && complete.test(replies))) {
                     break;
                 }
                 Message msg = sub.nextMessage(Duration.ofNanos(remaining));
@@ -291,7 +309,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
                     replies.put(from, reply);
                 }
             }
-            if (expected > 0 && replies.size() < expected) {
+            if (awaiting && !complete.test(replies)) {
                 outcome = "partial";
             }
         } catch (InterruptedException e) {
@@ -320,11 +338,21 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
      */
     @Override
     public int expectedPeers() {
+        return expectedPeerIds().size();
+    }
+
+    /**
+     * {@link #expectedPeers()} by id: read now, uncached, and failing the same way
+     * when the presence bucket is unavailable.
+     */
+    @Override
+    public Set<String> expectedPeerIds() {
         String self = connections.node().nodeId();
-        int remote = 0;
+        Set<String> remote = new LinkedHashSet<>();
         for (Map<String, Object> member : presence.currentMembers()) {
-            if (!self.equals(String.valueOf(member.get("node")))) {
-                remote++;
+            String node = String.valueOf(member.get("node"));
+            if (!self.equals(node)) {
+                remote.add(node);
             }
         }
         return remote;

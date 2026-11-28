@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { OperatorActivation } from "../operator-activation";
 import { extractVaultKeyName } from "@/lib/operator/vault-ref";
 import { defaultOperatorConfig } from "@/lib/api/operator";
-import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
+import { LLM_PROVIDERS } from "@eddi/app-kit/lib/api/agent-setup";
 
 const authState = { method: "none" as "none" | "keycloak" };
-vi.mock("@/hooks/use-auth", () => ({
+vi.mock("@eddi/app-kit/hooks/use-auth", () => ({
   useAuth: () => ({
     authenticated: true,
     loading: false,

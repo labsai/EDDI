@@ -85,6 +85,7 @@ class SkillToolReferencesTest {
             "executeUntilFirstSuccess", "lastStep", "valueString", // behavior-rule and template terms
             "failedSteps", "omittedCategories", // GDPR tool result fields
             "ratingConfig", // agent configuration field (SKILL.md, Feedback from users)
+            "conversationControls", "rawHtml", "titleGeneration", // agent configuration fields (SKILL.md, Change an agent)
             "canOpenTranscript" // list_conversation_ratings result field
     );
 

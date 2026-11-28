@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentCascadeService.CascadeException;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -31,6 +32,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -81,7 +83,7 @@ class RestAgentStoreCascadeTest {
         accessGuard = mock(ResourceAccessGuard.class);
         store = new RestAgentStore(mock(IAgentStore.class), mock(IRestWorkflowStore.class), mock(IDocumentDescriptorStore.class),
                 mock(IJsonSchemaCreator.class), mock(IScheduleStore.class), mock(CapabilityRegistryService.class), mock(IDeploymentStore.class),
-                accessGuard, mock(AgentSigningService.class), mock(IAgentFactory.class), "default", cascadeService);
+                accessGuard, mock(AgentSigningService.class), mock(IAgentFactory.class), "default", cascadeService, mock(VaultGrantService.class));
     }
 
     private static AgentCascadeRequest request(String environment, Boolean redeploy, Boolean compatible) {
@@ -152,6 +154,20 @@ class RestAgentStoreCascadeTest {
 
         assertEquals(500, ex.getResponse().getStatus());
         assertTrue(ex.getMessage().contains("Workflow versions already written"));
+    }
+
+    @Test
+    @DisplayName("a store that could not answer is a 503 whose JSON body carries the message")
+    void unavailable() {
+        when(cascadeService.cascade(any(), anyInt(), any(), anyBoolean(), any(), anyBoolean()))
+                .thenThrow(
+                        new CascadeException(CascadeException.Kind.UNAVAILABLE, "Could not check this agent's signing key. Agent was NOT changed."));
+
+        var ex = assertThrows(WebApplicationException.class, () -> store.cascadeAgentChanges(AGENT_ID, 1, request(null, null, null)));
+
+        assertEquals(503, ex.getResponse().getStatus());
+        assertEquals(Map.of("error", "service_unavailable", "message", "Could not check this agent's signing key. Agent was NOT changed."),
+                ex.getResponse().getEntity());
     }
 
     @Test

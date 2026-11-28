@@ -3,8 +3,8 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { type SSEEvent } from "@/lib/api/chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { type SSEEvent } from "@eddi/app-kit/lib/api/chat";
 import { readFileSync } from "node:fs";
 
 /**
@@ -28,8 +28,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: { error: h.toastError, success: vi.fn() } }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* (
@@ -63,8 +63,8 @@ import {
   UNCONSUMED_STREAM_ERROR_CODES,
   useChatStore,
   useSendMessage,
-} from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+} from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({

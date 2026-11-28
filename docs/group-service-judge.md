@@ -83,6 +83,14 @@ exactly as for an LLM task. See [Secrets Vault](secrets-vault.md).
 - The cost is booked on the discussion's ledger under `system:judge:<round>:<phaseIndex>:<repeat>` and announced with a
   `cost_updated` event (display name `Convergence Judge`), so it shows in `memberCosts` and `totalCost` next to
   the members' own spend. A reply that cannot be read was still paid for and is still booked.
+- The same cost is **charged to the tenant's monthly budget** (`maxMonthlyCostUsd`), exactly as the group's window
+  and stance summaries are, and reaches the spend sinks as a `GROUP_SYSTEM` event whose detail is that ledger key.
+  A re-run of the same check charges only the increase. Before the call the judge passes the same gate as those
+  summaries: a spent or unreadable tenant budget, or an unpriced judge model under
+  [strict pricing](model-pricing.md#strict-mode), skips the call — the check is `outcome=error`, "not converged",
+  and the discussion continues. If the quota store cannot take the charge after the call, the verdict still stands,
+  the ledger keeps the cost, and the amount is carried to the next group system charge (see
+  [Tenant Quotas](tenant-quotas.md)).
 - The judge **never ends a phase on doubt**. A provider error, a timeout or a reply that is not the expected
   JSON is "not converged", and the phase runs its next repeat. The provider's error text is not copied into the
   transcript; the log names only the exception class.

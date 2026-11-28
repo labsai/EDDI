@@ -17,8 +17,8 @@ import java.util.function.Consumer;
  * durationMs} so an operator can follow one conversation or count one action.
  * <p>
  * The values are engine-generated identifiers and labels, never model output or
- * user input; they are stripped of whitespace and control characters anyway so
- * a crafted id cannot split the line.
+ * user input; whitespace and control characters are replaced with {@code _}
+ * anyway so a crafted id cannot split the line.
  */
 final class LlmRecoveryLog {
 

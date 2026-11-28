@@ -1,6 +1,6 @@
 import { gateLooksInstalled } from "@/lib/api/operator";
 import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Settings inside a gated request body that grant capability beyond the request

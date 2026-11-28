@@ -93,7 +93,7 @@ class HumanTieBreakDiscussionTest {
         var templatingEngine = mock(ITemplatingEngine.class);
         var jsonSerialization = mock(IJsonSerialization.class);
         service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine,
-                jsonSerialization, new SimpleMeterRegistry(), null, mock(IAgentStore.class), null, null, null,
+                jsonSerialization, new SimpleMeterRegistry(), null, mock(IAgentStore.class), null, null,
                 new CallerIdentityContext(null, null), "default", 3);
         when(conversationStore.create(any())).thenReturn("gc-1");
         lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
@@ -199,7 +199,7 @@ class HumanTieBreakDiscussionTest {
         assertEquals(gc.getPendingHumanInput().detail(), back.getPendingHumanInput().detail());
         assertEquals(GroupConversation.RESUME_KIND_TIE_BREAK, back.getResumePoint().pauseKind());
         assertEquals(new HumanTieBreakConfig(DECIDER, "PT24H", null), configBack.getPhases().getFirst().voteConfig().humanTieBreak());
-        assertEquals(5, GroupConversation.CURRENT_SCHEMA_VERSION);
+        assertTrue(back.getSchemaVersion() >= 5, "the tie-break pause is a v5 shape; a v4 pod must refuse the document");
 
         var legacy = json.deserialize(json.serialize(new GroupConversation.PendingHumanInput("h", "H", 0, 0, 0, "OPINION", "p",
                 "SKIP_TURN", Instant.now())), GroupConversation.PendingHumanInput.class);

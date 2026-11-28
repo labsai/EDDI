@@ -1,12 +1,12 @@
 import { memo, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
-import type { Agent, AgentRatingConfig } from "@/lib/api/agents";
+import type { Agent, AgentRatingConfig } from "@eddi/app-kit/lib/api/agents";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { ChipInput } from "@/components/shared/chip-input";
-import { RATING_LIMITS } from "@/lib/api/ratings";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
+import { RATING_LIMITS } from "@eddi/app-kit/lib/api/ratings";
 import { ratingConfigErrors, type RatingConfigError } from "@/lib/rating-config";
-import { EditorSection } from "./editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 
 const fieldClass =
   "w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid=true]:border-destructive";

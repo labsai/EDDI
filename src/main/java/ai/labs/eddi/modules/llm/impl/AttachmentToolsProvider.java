@@ -24,7 +24,8 @@ import java.util.Map;
  * dynamic block for any agent that has both a dynamic-agent whitelist and
  * attachments in the conversation — a small, silent presentation change, and
  * exactly the kind a "pure move" is not allowed to make. Its own provider,
- * assembled last, reproduces the old order exactly.
+ * assembled after the dynamic-agent and group sources, reproduces the old order
+ * exactly.
  * <p>
  * That it also reads better this way is a bonus: unlike user memory and
  * conversation recall, this tool is deliberately outside {@code

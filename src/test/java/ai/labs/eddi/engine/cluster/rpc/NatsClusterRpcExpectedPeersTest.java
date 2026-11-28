@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,6 +49,7 @@ class NatsClusterRpcExpectedPeersTest {
     void countsRemoteNodes() {
         when(presence.currentMembers()).thenReturn(List.of(Map.of("node", "a"), Map.of("node", "self"), Map.of("node", "b")));
         assertEquals(2, rpc.expectedPeers());
+        assertEquals(Set.of("a", "b"), rpc.expectedPeerIds(), "by id, the same nodes");
     }
 
     @Test
@@ -62,5 +64,6 @@ class NatsClusterRpcExpectedPeersTest {
     void unavailablePresenceFails() {
         when(presence.currentMembers()).thenThrow(new ClusterUnavailableException("presence down"));
         assertThrows(ClusterUnavailableException.class, () -> rpc.expectedPeers());
+        assertThrows(ClusterUnavailableException.class, () -> rpc.expectedPeerIds());
     }
 }

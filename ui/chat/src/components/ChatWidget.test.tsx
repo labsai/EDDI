@@ -329,6 +329,27 @@ describe("ChatWidget — stop generating", () => {
 
     await waitFor(() => expect(cancelled).toBe(true));
   });
+
+  it("Esc stops the running turn as the Stop button does (T1.10)", async () => {
+    let cancelled = false;
+    mockHangingStream(() => {
+      cancelled = true;
+    });
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    // Nothing runs yet: Esc is the composer's, and nothing is cancelled.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(cancelled).toBe(false);
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByTestId("chat-stop");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(cancelled).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("chat-stop")).not.toBeInTheDocument());
+  });
 });
 
 describe("ChatWidget — a turn that pauses vs a turn that is dropped", () => {
@@ -965,7 +986,7 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     const indicator = await screen.findByTestId("tool-indicator");
-    expect(indicator).toHaveTextContent("Using calculator…");
+    expect(indicator).toHaveTextContent("Using Calculator…");
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
   });
@@ -978,9 +999,59 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     await waitFor(() =>
-      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
+      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using Calculator…"),
     );
-    expect(document.body.textContent).not.toMatch(/websearch/);
+    expect(document.body.textContent).not.toMatch(/websearch/i);
+  });
+
+  it("shows the designer's toolDisplay phrase as written (EDDI 6.7 tool_call)", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"createAction","callId":"call_1","displayName":"Creating an action","display":{"title":"Renew the contract"}}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Creating an action: Renew the contract…");
+    expect(indicator).not.toHaveTextContent("Using");
+    expect(document.body.textContent).not.toMatch(/createAction/);
+  });
+
+  it("shows a one-word toolDisplay label as written, not as an identifier", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"webSearch","callId":"call_1","displayName":"Searching"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Searching…");
+    expect(indicator).not.toHaveTextContent("Using");
+  });
+
+  it("puts a prefixed MCP tool name into words", async () => {
+    mockOpenStream(['event: tool_call\ndata: {"tool":"github.search-code","callId":"call_1"}\n\n']);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Github search code…");
+  });
+
+  it("puts a generated tool's identifier into words", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Get agent descriptors…");
+  });
+
+  it("clears the tool status when its tool_result arrives (EDDI 6.7)", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator","callId":"call_1"}\n\n',
+      'event: tool_result\ndata: {"tool":"calculator","callId":"call_1","status":"ok","durationMs":4}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() => expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument());
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
   });
 
   it("clears the tool status as soon as text resumes", async () => {
@@ -993,7 +1064,7 @@ describe("ChatWidget — live tool calls", () => {
 
     await screen.findByText("The answer is 4");
     expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/Using calculator/);
+    expect(document.body.textContent).not.toMatch(/Using Calculator/);
   });
 
   it("clears the tool status when the turn completes", async () => {
@@ -1018,7 +1089,7 @@ describe("ChatWidget — live tool calls", () => {
     ]);
     await sendOnOpenStream();
 
-    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using weather…");
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Weather…");
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
     expect(screen.getByText("Let me check that.")).toBeInTheDocument();
   });
@@ -1043,12 +1114,29 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     const status = await screen.findByTestId("chat-activity-status");
-    await waitFor(() => expect(status).toHaveTextContent("Using calculator…"));
+    await waitFor(() => expect(status).toHaveTextContent("Using Calculator…"));
     expect(status).toHaveAttribute("role", "status");
     expect(status.closest("[aria-busy='true']")).toBeNull();
     expect(screen.getByTestId("chat-transcript")).toHaveAttribute("aria-busy", "true");
     // The visual copy stays put but is not a second announcement.
     expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("keeps tool_result's payload off the page: the tool line clears, nothing of it is rendered", async () => {
+    // tool_result (B6) only ends the call on screen: the controller clears the
+    // tool line and goes back to "Thinking…" (see "clears the tool status when
+    // its tool_result arrives"). The widget shows no tool cards, so whatever
+    // the payload carries — even a summary of the tool's output, which a
+    // non-conforming server might send — must never appear as page text.
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: tool_result\ndata: {"tool":"calculator","ok":true,"summary":"SUMMARY-MARKER 4"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() => expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument());
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/SUMMARY-MARKER/);
   });
 
   it("gives way to the escalation hint when the cascade escalates", async () => {

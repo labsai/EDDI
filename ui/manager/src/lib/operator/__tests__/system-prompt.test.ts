@@ -7,7 +7,7 @@ import {
   safetyPreambleForScope,
   promptSafeName,
 } from "../system-prompt";
-import { setBrand, DEFAULT_BRAND } from "@/lib/brand";
+import { setBrand, DEFAULT_BRAND } from "@eddi/app-kit/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,
@@ -1210,6 +1210,20 @@ describe("batched changes: the plan shape the operator is taught", () => {
     // The body is rendered as a template on every turn. `{oldUri, newUri}` would
     // be read as a variable reference and render empty or fail.
     expect(section(full)).not.toMatch(/\{/);
+  });
+});
+
+describe("the whole prompt renders as a Qute template", () => {
+  it("names no Qute namespace but the ones EDDI registers (vault, connection, caller)", () => {
+    // The backend renders the prompt on every turn, and `{name:` is a namespace
+    // expression to Qute: with no resolver for it the whole render fails, and the
+    // model is handed the raw template (`eddi_parser_semantic_fallback_total{outcome:
+    // match, …}` did exactly that). Section tests only see their own section.
+    const lists = [READ_ENDPOINTS, WITH_A_WRITE];
+    for (const endpoints of lists) {
+      const body = buildOperatorPromptBody(endpoints);
+      expect(body.match(/\{(?!(?:vault|connection|caller):)[A-Za-z_][\w-]*\s*:/g) ?? []).toEqual([]);
+    }
   });
 });
 

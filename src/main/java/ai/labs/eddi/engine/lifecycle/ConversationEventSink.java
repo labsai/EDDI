@@ -167,8 +167,9 @@ public interface ConversationEventSink {
      * One tool call has finished — sent exactly once for every call, and always
      * after that call's {@link #onToolCall} on the same stream (a gated call that a
      * resume settles without running is announced immediately before its result).
-     * Status only, never the result: results may hold user data and are delivered,
-     * redacted, in the task summary's toolTrace.
+     * Never the raw result: results may hold user data and are delivered, redacted,
+     * in the task summary's toolTrace; the five-argument form below adds the start
+     * of that same redacted text.
      *
      * @param status
      *            {@code ok}, {@code error}, {@code not_executed} (refused or
@@ -176,6 +177,23 @@ public interface ConversationEventSink {
      *            it)
      */
     default void onToolResult(String toolName, String callId, String status, long durationMs) {
+    }
+
+    /**
+     * As {@link #onToolResult(String, String, String, long)}, with a short summary
+     * of the result (B6) — the form the tool loop calls. The summary is the start
+     * of the result, or of the refusal (budget, quota, deadline), redacted exactly
+     * like the turn-end {@code toolTrace} ({@code ToolTraceRedaction.summary}), so
+     * it shows nothing the task summary does not, and at most
+     * {@code ToolTraceRedaction.MAX_SUMMARY_LENGTH} characters. Defaults to the
+     * status-only form, so a sink that only knows that one keeps working.
+     *
+     * @param summary
+     *            never null; empty when there is nothing to show (a call a resume
+     *            settled without running)
+     */
+    default void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+        onToolResult(toolName, callId, status, durationMs);
     }
 
     /**

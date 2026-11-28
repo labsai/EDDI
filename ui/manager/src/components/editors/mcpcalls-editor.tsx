@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useId, useRef } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
-import { NumberInput } from "./number-input";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import {
   ChevronDown,
   ChevronRight,
@@ -26,15 +26,15 @@ import {
   Code2,
   ServerCog,
 } from "lucide-react";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
-import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
+import { ConnectionReferenceWarning } from "@eddi/app-kit/components/shared/connection-reference-warning";
 import {
   discoverMcpTools,
   type McpToolInfo,
 } from "@/lib/api/mcp-discover";
-import { EditorSection } from "./editor-section";
-import { RenamableKeyInput } from "./renamable-key-input";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import { RenamableKeyInput } from "@eddi/app-kit/components/editors/renamable-key-input";
 import {
   formatJsonArgument,
   hasOwnKey,
@@ -43,8 +43,8 @@ import {
   renameKey,
   toolArgumentKind,
   type ToolArgumentKind,
-} from "./editor-value-utils";
-import { cn } from "@/lib/utils";
+} from "@eddi/app-kit/components/editors/editor-value-utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import {
   PropertyInstructionsEditor,
   OutputBuildInstructionsEditor,
@@ -52,7 +52,7 @@ import {
   type PropertyInstruction,
   type OutputBuildingInstruction,
   type QuickRepliesBuildingInstruction,
-} from "./apicalls-editor";
+} from "@eddi/app-kit/components/editors/apicalls-editor";
 
 // ─── Types matching McpCallsConfiguration backend model ──────────────────────
 

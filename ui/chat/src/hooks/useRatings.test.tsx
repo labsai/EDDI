@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useRatings, RATING_TOAST_MS, type UseRatingsArgs } from "./useRatings";
-import { parseRatingProfile, type RatingClient, type RatingProfile, type StoredRating } from "@/api/rating-api";
-import { ApiError } from "@/api/http";
+import { parseRatingProfile, type RatingClient, type RatingProfile, type StoredRating } from "@eddi/core";
+import { ApiError } from "@eddi/core";
 import type { ChatMessage, ConversationState } from "@/types";
 
 const profile = (extra: Record<string, unknown> = {}): RatingProfile =>

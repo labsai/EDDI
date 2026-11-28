@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -55,6 +56,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -226,6 +228,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
         } catch (RuntimeException e) {
@@ -233,9 +239,54 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             throw e;
         }
     }
+
+    /**
+     * The {@code error} code of a conversation start the agent's configuration
+     * refused.
+     */
+    static final String AGENT_MISCONFIGURED = "agent_misconfigured";
+
+    /** Longest refusal message a 422 carries; the full one is in the server log. */
+    static final int MAX_REFUSAL_MESSAGE_CHARS = 1000;
+
+    /**
+     * {@code 422} for a conversation start that failed because the agent's own
+     * configuration cannot run — its {@code CONVERSATION_START} turn hit an
+     * {@link AgentConfigurationRefusal} (an httpcall whose vault reference names no
+     * secret, a secret sent to a host it may not reach). Not a 500: nothing on the
+     * server broke, and repeating the request fails the same way until the
+     * configuration changes. Not a 409 either: no state of the request's target
+     * conflicts — the request is well-formed, and what cannot be processed is the
+     * agent it addresses.
+     * <p>
+     * The body is the flat {@code {"error", "message"}} envelope this endpoint
+     * already answers its 503 with, so a client reads the code and shows the
+     * sentence. The message is the refusal's own — written to name the call and the
+     * reference, never a value — redacted again and bounded, with no stack trace. A
+     * say turn already reports the same sentence in its {@code taskErrors}.
+     */
+    static Response configurationRefused(String agentId, Throwable refusal) {
+        String message = SecretRedactionFilter.redact(String.valueOf(refusal.getMessage()));
+        if (message.length() > MAX_REFUSAL_MESSAGE_CHARS) {
+            message = message.substring(0, MAX_REFUSAL_MESSAGE_CHARS) + "...";
+        }
+        LOGGER.warnf("Conversation start of agent %s refused by its configuration: %s", sanitize(agentId), sanitize(message));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", AGENT_MISCONFIGURED);
+        body.put("message", message);
+        body.put("retryable", false);
+        return Response.status(UNPROCESSABLE_CONTENT).type(MediaType.APPLICATION_JSON).entity(body).build();
+    }
+
+    /** RFC 9110's 422; {@link Response.Status} has no constant for it. */
+    private static final int UNPROCESSABLE_CONTENT = 422;
 
     @Override
     public Response endConversation(String conversationId) {
@@ -880,6 +931,11 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (MandatoryApprovalRefusedException e) {
+            // The decision approves a call that needs a mandatory approval (e.g. the
+            // conversation user's consent) this approver cannot give. Nothing ran; the
+            // pause is untouched and the call stays pending. Fixed text.
+            return Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (IConversationService.PlanMismatchException e) {
             // The decision named a plan (planHash) other than the pending one, or the
             // stored plan no longer verifies. Nothing ran; the pause is untouched.
@@ -1042,6 +1098,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             callView.put("arguments", SecretRedactionFilter.redact(call.getArgumentsRedacted()));
             callView.put("argsTruncated", call.isArgsTruncated());
             callView.put("gateReason", call.getGateReason());
+            // A call a mandatory, argument-aware rule gated: why it is asked and whose
+            // decision it needs. Server-built text only; absent for every other call.
+            if (call.isMandatory()) {
+                callView.put("mandatoryReasonCode", call.getMandatoryReasonCode());
+                callView.put("mandatoryApprover", call.getMandatoryApprover());
+                callView.put("mandatorySummary", call.getMandatorySummary());
+            }
             // The approver's honest replacement for guessing a method/path from a
             // tool name: what this call actually resolves to, already redacted at
             // gate time. requestPinned tells the caller whether that preview is
