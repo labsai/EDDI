@@ -12,17 +12,27 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.chat.response.PartialResponse;
+import dev.langchain4j.model.chat.response.PartialResponseContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.chat.response.StreamingHandle;
+import dev.langchain4j.model.output.FinishReason;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -48,7 +58,14 @@ import static org.mockito.Mockito.verify;
 @DisplayName("ToolLoopStreamingChatModel")
 class ToolLoopStreamingChatModelTest {
 
-    private static final ChatResponse COMPLETE = ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build();
+    private static final ChatResponse COMPLETE = ChatResponse.builder().aiMessage(AiMessage.from("Hello world"))
+            .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build();
+
+    /**
+     * A completion without a finish reason: how a client library reports a stream
+     * that just closed.
+     */
+    private static final ChatResponse NO_FINISH = ChatResponse.builder().aiMessage(AiMessage.from("Hello")).build();
 
     private ConversationEventSink eventSink;
 
@@ -299,5 +316,139 @@ class ToolLoopStreamingChatModelTest {
 
         assertSame(boom, thrown);
         assertTrue(RetryConfiguration.isRetryableError(thrown));
+    }
+
+    /**
+     * Emits the given partials, then completes with {@code response} —
+     * synchronously.
+     */
+    private static StreamingChatModel streamingThen(ChatResponse response, String... partials) {
+        return new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                for (String partial : partials) {
+                    handler.onPartialResponse(partial);
+                }
+                handler.onCompleteResponse(response);
+            }
+        };
+    }
+
+    private static StreamPolicy policy(boolean requireFinishReason, List<String> partialSink) {
+        return new StreamPolicy(30, 0, requireFinishReason, null, partialSink != null ? partialSink::add : null, false);
+    }
+
+    @Test
+    @DisplayName("S-1: a stream that ended without a finish reason after text is a failure, not an answer — and not retried")
+    void streamWithoutFinishReasonAfterTextFails() {
+        var partials = new ArrayList<String>();
+        var bridge = new ToolLoopStreamingChatModel(streamingThen(NO_FINISH, "Hel", "lo"), eventSink, policy(true, partials), "openai",
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        var thrown = assertThrows(ToolLoopStreamingChatModel.PartiallyStreamedRoundException.class, () -> bridge.chat(request()));
+
+        assertInstanceOf(ToolLoopStreamingChatModel.IncompleteStreamException.class, thrown.getSuppressed()[0]);
+        assertFalse(RetryConfiguration.isRetryableError(thrown), "the client already has the fragment");
+        assertEquals("Hello", thrown.partialText());
+        assertEquals(List.of("Hello"), partials, "the fragment is kept as error detail");
+        assertEquals("", bridge.lastForwardedText(), "a failed call never counts as streamed live");
+    }
+
+    @Test
+    @DisplayName("a stream that ended without a finish reason before any text is a retryable transport failure")
+    void streamWithoutFinishReasonBeforeTextIsRetryable() {
+        var bridge = new ToolLoopStreamingChatModel(streamingThen(NO_FINISH), eventSink, policy(true, null), "openai",
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        var thrown = assertThrows(ToolLoopStreamingChatModel.IncompleteStreamException.class, () -> bridge.chat(request()));
+
+        assertTrue(RetryConfiguration.isRetryableError(thrown));
+    }
+
+    @Test
+    @DisplayName("requireFinishReason=false accepts a server that never sends one")
+    void finishReasonOptOut() {
+        var bridge = new ToolLoopStreamingChatModel(streamingThen(NO_FINISH, "Hello"), eventSink, policy(false, null), "openai",
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        assertSame(NO_FINISH, bridge.chat(request()));
+        assertEquals("Hello", bridge.lastForwardedText());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = FinishReason.class, names = {"LENGTH", "CONTENT_FILTER"})
+    @DisplayName("an abnormal finish reason is an answer, and the bridge reports it for the turn's outcome")
+    void abnormalFinishIsRecorded(FinishReason reason) {
+        var response = ChatResponse.builder().aiMessage(AiMessage.from("cut"))
+                .metadata(ChatResponseMetadata.builder().finishReason(reason).build()).build();
+        var bridge = new ToolLoopStreamingChatModel(streamingThen(response, "cut"), eventSink, policy(true, null), "openai",
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        bridge.chat(request());
+        Map<String, Object> metadata = new HashMap<>();
+        bridge.recordLastFinish(metadata);
+
+        assertEquals(reason, bridge.lastFinishReason());
+        assertEquals(reason.toString(), metadata.get("finishReason"));
+        assertEquals(reason == FinishReason.LENGTH ? "truncated" : "content_filter", metadata.get("warning"));
+        assertEquals(reason == FinishReason.LENGTH ? "length" : "content_filter", LlmTask.abnormalFinishReason(metadata));
+    }
+
+    @Test
+    @DisplayName("B9: a cancelled turn stops the call, cancels the provider stream and forwards nothing more")
+    void cancelledTurnStopsTheStream() {
+        var cancelled = new AtomicBoolean();
+        var handleCancelled = new AtomicBoolean();
+        var handlerRef = new AtomicReference<StreamingChatResponseHandler>();
+        StreamingHandle handle = new StreamingHandle() {
+            @Override
+            public void cancel() {
+                handleCancelled.set(true);
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return handleCancelled.get();
+            }
+        };
+        StreamingChatModel streamsThenStalls = new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handlerRef.set(handler);
+                handler.onPartialResponse(new PartialResponse("first "), new PartialResponseContext(handle));
+                // The user presses stop while the model is still writing.
+                cancelled.set(true);
+            }
+        };
+        var partials = new ArrayList<String>();
+        var bridge = new ToolLoopStreamingChatModel(streamsThenStalls, eventSink,
+                new StreamPolicy(30, 0, true, cancelled::get, partials::add, false), "openai", ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        var thrown = assertThrows(ToolLoopStreamingChatModel.StreamCancelledException.class, () -> bridge.chat(request()));
+
+        assertFalse(RetryConfiguration.isRetryableError(thrown), "a cancel is never retried");
+        assertTrue(handleCancelled.get(), "the provider is told to stop, so the spend stops too");
+        handlerRef.get().onPartialResponse("second");
+        verify(eventSink).onToken("first ");
+        verify(eventSink, never()).onToken("second");
+        assertEquals(List.of("first "), partials);
+    }
+
+    @Test
+    @DisplayName("an idle gap after the first token ends the call as a timeout — partial text makes it non-retryable")
+    void idleGapIsATimeout() {
+        StreamingChatModel stalls = new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handler.onPartialResponse("partial answer before the hang ");
+            }
+        };
+        var bridge = new ToolLoopStreamingChatModel(stalls, eventSink, new StreamPolicy(30, 1, true, null, null, false), "openai",
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
+
+        var thrown = assertThrows(ToolLoopStreamingChatModel.PartiallyStreamedRoundException.class, () -> bridge.chat(request()));
+
+        assertTrue(thrown.timedOut());
+        assertInstanceOf(TimeoutException.class, thrown.getSuppressed()[0].getCause());
     }
 }

@@ -197,6 +197,37 @@ public interface ConversationEventSink {
     }
 
     /**
+     * The turn's agent is resolved: its {@code streamingClientDisconnect} policy
+     * ({@code cancel}, {@code finish} or {@code null} for the deployment default),
+     * so a streaming endpoint knows at once what a vanished client does — without a
+     * store read when the client actually leaves.
+     *
+     * @since 6.7.0
+     */
+    default void onTurnStarted(String streamingClientDisconnect) {
+    }
+
+    /**
+     * The turn was asked to cancel ({@code /cancel}, a cancelling disconnect, an
+     * end). Lets a stream tell a real cancel from a turn that was abandoned for
+     * other reasons.
+     *
+     * @since 6.7.0
+     */
+    default void onCancelRequested() {
+    }
+
+    /**
+     * Every workflow of the turn has run; what follows is the turn's own
+     * bookkeeping and its write. A stream uses it to stop treating a vanished
+     * client as a reason to cancel: the answer exists and is being stored.
+     *
+     * @since 6.7.0
+     */
+    default void onGenerationFinished() {
+    }
+
+    /**
      * Called when the entire conversation step has completed successfully. The SSE
      * endpoint should send the final snapshot and close the stream.
      */

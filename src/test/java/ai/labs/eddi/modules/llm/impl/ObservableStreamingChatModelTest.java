@@ -13,7 +13,12 @@ import dev.langchain4j.model.chat.listener.ChatModelRequestContext;
 import dev.langchain4j.model.chat.listener.ChatModelResponseContext;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.PartialResponse;
+import dev.langchain4j.model.chat.response.PartialResponseContext;
+import dev.langchain4j.model.chat.response.PartialToolCall;
+import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.chat.response.StreamingHandle;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for {@link ObservableStreamingChatModel} — the decorator that makes
@@ -312,5 +318,53 @@ class ObservableStreamingChatModelTest {
 
         assertNotNull(seen.get());
         assertEquals("boom", seen.get().getMessage());
+    }
+
+    /**
+     * B8/B9: the provider's StreamingHandle travels in the context variant of
+     * onPartialResponse, and tool-call and thinking deltas are what keep a long
+     * round from looking idle. With response logging on, the interface defaults
+     * dropped the handle (and the non-text partials) — a cancelled turn could not
+     * stop its stream.
+     */
+    @Test
+    @DisplayName("with response logging on, the stream handle and the non-text partials still reach the handler")
+    void wrapped_logResponses_forwardsHandleAndNonTextPartials() {
+        StreamingHandle handle = mock(StreamingHandle.class);
+        StreamingChatModel provider = new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handler.onPartialToolCall(PartialToolCall.builder().index(0).id("c1").name("f").partialArguments("{").build(),
+                        new PartialToolCallContext(handle));
+                handler.onPartialResponse(new PartialResponse("tok"), new PartialResponseContext(handle));
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("tok")).build());
+            }
+        };
+        var wrapped = ObservableStreamingChatModel.wrap(provider, "openai", "false", "true", null);
+
+        var handles = new ArrayList<StreamingHandle>();
+        var toolCallDeltas = new AtomicReference<PartialToolCall>();
+        wrapped.chat(request(), new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(PartialResponse partialResponse, PartialResponseContext context) {
+                handles.add(context.streamingHandle());
+            }
+
+            @Override
+            public void onPartialToolCall(PartialToolCall partialToolCall, PartialToolCallContext context) {
+                toolCallDeltas.set(partialToolCall);
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse completeResponse) {
+            }
+
+            @Override
+            public void onError(Throwable error) {
+            }
+        });
+
+        assertEquals(List.of(handle), handles);
+        assertNotNull(toolCallDeltas.get());
     }
 }

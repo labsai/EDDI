@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.MethodRef;
+import ai.labs.eddi.engine.internal.SseStreams;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -39,6 +40,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
@@ -135,6 +137,13 @@ public class RestA2AEndpoint {
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
     }
+
+    /**
+     * The node's stream registry — a streamed send takes one of its slots.
+     * Field-injected so the direct-construction tests keep their constructor.
+     */
+    @Inject
+    SseStreams sseStreams = SseStreams.unmetered();
 
     /**
      * Default Agent Card — returns the first A2A-enabled agent's card.
@@ -389,12 +398,23 @@ public class RestA2AEndpoint {
             LOGGER.debugf("A2A request refused, every in-flight slot is taken: method=%s, agentId=%s",
                     sanitize(request.method()), sanitize(agentId));
             count(operation, dialect, "busy");
-            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-                    .header("Retry-After", String.valueOf(BUSY_RETRY_AFTER_SECONDS))
-                    .type(MediaType.APPLICATION_JSON)
-                    .entity(new JsonRpcResponse("2.0", request.id(), null,
-                            new JsonRpcError(A2AModels.ERROR_INTERNAL, BUSY_MESSAGE, null)))
-                    .build();
+            return busy(request.id(), String.valueOf(BUSY_RETRY_AFTER_SECONDS));
+        } catch (WebApplicationException e) {
+            // The node's shared stream cap (eddi.streaming.max-concurrent-streams)
+            // refuses a streamed send with a 503 and its own Retry-After: the peer gets
+            // the A2A busy answer with that wait, not a 200 with an opaque error.
+            Response refused = e.getResponse();
+            if (refused != null && refused.getStatus() == Response.Status.SERVICE_UNAVAILABLE.getStatusCode()) {
+                LOGGER.debugf("A2A request refused, the node's stream slots are taken: method=%s, agentId=%s",
+                        sanitize(request.method()), sanitize(agentId));
+                count(operation, dialect, "busy");
+                String retryAfter = refused.getHeaderString("Retry-After");
+                return busy(request.id(), retryAfter != null ? retryAfter : String.valueOf(BUSY_RETRY_AFTER_SECONDS));
+            }
+            LOGGER.errorf(e, "A2A JSON-RPC error for method=%s, agentId=%s",
+                    sanitize(request.method()), sanitize(agentId));
+            count(operation, dialect, "error");
+            return jsonRpcError(request.id(), A2AModels.ERROR_INTERNAL, INTERNAL_ERROR_MESSAGE);
         } catch (Exception e) {
             // The peer is an arbitrary remote party: the exception detail stays in the
             // server log, the wire gets a curated, non-revealing message.
@@ -403,6 +423,18 @@ public class RestA2AEndpoint {
             count(operation, dialect, "error");
             return jsonRpcError(request.id(), A2AModels.ERROR_INTERNAL, INTERNAL_ERROR_MESSAGE);
         }
+    }
+
+    /**
+     * The A2A busy answer: 503, the wait in {@code Retry-After}, the request's id.
+     */
+    private static Response busy(Object requestId, String retryAfterSeconds) {
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .header("Retry-After", retryAfterSeconds)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(new JsonRpcResponse("2.0", requestId, null,
+                        new JsonRpcError(A2AModels.ERROR_INTERNAL, BUSY_MESSAGE, null)))
+                .build();
     }
 
     /**
@@ -477,11 +509,33 @@ public class RestA2AEndpoint {
     private Response stream(String agentId, JsonRpcRequest request, Dialect dialect) throws Exception {
         var send = A2AWireFormat.parseSend(request.params(), dialect);
         BlockingQueue<StreamEvent> events = new LinkedBlockingQueue<>();
-        taskHandler.stream(agentId, send, events::add);
+        // One of the node's stream slots (eddi.streaming.max-concurrent-streams),
+        // taken before the task is accepted: a node at capacity answers 503.
+        SseStreams.Slot slot = sseStreams.acquireSlot(SseStreams.Kind.A2A, SseStreams.SLOT_BODY_START_GRACE_MILLIS);
+        try {
+            taskHandler.stream(agentId, send, events::add);
+        } catch (Throwable refused) {
+            slot.releaseFailed();
+            throw refused;
+        }
         long waitMillis = TimeUnit.SECONDS.toMillis((long) taskHandler.taskTimeoutSeconds() + A2ATaskHandler.SLOT_LEASE_GRACE_SECONDS);
         Object rpcId = request.id();
 
-        StreamingOutput body = out -> drain(out, events, rpcId, dialect, waitMillis);
+        StreamingOutput body = out -> {
+            slot.bodyStarted();
+            boolean completed = false;
+            try {
+                // Completed only when the turn's final event was relayed: a stream that
+                // outlived its wait or was interrupted is a failed one in the slot metrics.
+                completed = drain(out, events, rpcId, dialect, waitMillis);
+            } finally {
+                if (completed) {
+                    slot.releaseCompleted();
+                } else {
+                    slot.releaseFailed();
+                }
+            }
+        };
         return Response.ok(body)
                 .type(MediaType.SERVER_SENT_EVENTS)
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache")
@@ -493,8 +547,8 @@ public class RestA2AEndpoint {
      * Writes stream events until the final one, or until {@code waitMillis} has
      * passed.
      */
-    void drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis) throws IOException {
-        drain(out, events, rpcId, dialect, waitMillis, KEEPALIVE_INTERVAL_MILLIS);
+    boolean drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis) throws IOException {
+        return drain(out, events, rpcId, dialect, waitMillis, KEEPALIVE_INTERVAL_MILLIS);
     }
 
     /**
@@ -505,7 +559,11 @@ public class RestA2AEndpoint {
      */
     static final long KEEPALIVE_INTERVAL_MILLIS = 15_000;
 
-    void drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis, long keepaliveMillis)
+    /**
+     * @return {@code true} when the turn's final event was relayed; {@code false}
+     *         when the wait ran out first or the thread was interrupted
+     */
+    boolean drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis, long keepaliveMillis)
             throws IOException {
         long deadline = System.currentTimeMillis() + waitMillis;
         A2ATask lastSeen = null;
@@ -524,7 +582,7 @@ public class RestA2AEndpoint {
                     if (lastSeen != null) {
                         writeEvent(out, rpcId, A2AWireFormat.statusUpdate(lastSeen, true, dialect));
                     }
-                    return;
+                    return false;
                 }
                 switch (event) {
                     case TaskEvent taskEvent -> {
@@ -545,12 +603,13 @@ public class RestA2AEndpoint {
                             }
                         }
                         writeEvent(out, rpcId, A2AWireFormat.statusUpdate(task, true, dialect));
-                        return;
+                        return true;
                     }
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return false;
         }
     }
 

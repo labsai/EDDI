@@ -13,8 +13,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.exception.InternalServerException;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.output.FinishReason;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -25,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,7 +37,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -225,7 +231,7 @@ class StreamingLegacyChatExecutorTimeoutTest {
 
         @Test
         @DisplayName("a short timeout must not cut off a stream that is still healthy")
-        void shortTimeoutParameter_doesNotTruncateHealthyStream() {
+        void shortTimeoutParameter_doesNotTruncateHealthyStream() throws Exception {
             // End to end through execute(): with only `timeout` set to 1s, the overall
             // backstop stays at the 120s default, so a stream that takes ~1.5s completes.
             StreamingChatModel model = new StreamingChatModel() {
@@ -239,7 +245,7 @@ class StreamingLegacyChatExecutorTimeoutTest {
                             return;
                         }
                         handler.onPartialResponse("slow but fine");
-                        handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("slow but fine")).build());
+                        handler.onCompleteResponse(stop("slow but fine"));
                     });
                     emitter.setDaemon(true);
                     emitter.start();
@@ -340,7 +346,7 @@ class StreamingLegacyChatExecutorTimeoutTest {
                         Thread.currentThread().interrupt();
                     }
                     handler.onPartialResponse("good");
-                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("good")).build());
+                    handler.onCompleteResponse(stop("good"));
                 }
             };
 
@@ -366,7 +372,7 @@ class StreamingLegacyChatExecutorTimeoutTest {
          */
         @Test
         @DisplayName("a retried error's late token must not interleave with the retry's output")
-        void lateTokenFromRetriedErrorAttempt_isNotEmitted() {
+        void lateTokenFromRetriedErrorAttempt_isNotEmitted() throws Exception {
             var failedAttempt = new AtomicReference<StreamingChatResponseHandler>();
 
             StreamingChatModel model = new StreamingChatModel() {
@@ -374,13 +380,13 @@ class StreamingLegacyChatExecutorTimeoutTest {
                 public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                     if (failedAttempt.get() == null) {
                         failedAttempt.set(handler);
-                        handler.onError(new IllegalStateException("provider 500"));
+                        handler.onError(new InternalServerException("provider 500"));
                         return;
                     }
                     // The failed attempt's callback delivers a straggler while the retry runs.
                     failedAttempt.get().onPartialResponse("LATE");
                     handler.onPartialResponse("good");
-                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("good")).build());
+                    handler.onCompleteResponse(stop("good"));
                 }
             };
 
@@ -455,16 +461,25 @@ class StreamingLegacyChatExecutorTimeoutTest {
                         "The executor must not set `abandoned` and read the buffer while a token emission is in flight");
 
                 releaseEmit.countDown();
-                var result = running.get(10, TimeUnit.SECONDS);
+                var failure = assertThrows(ExecutionException.class, () -> running.get(10, TimeUnit.SECONDS));
 
                 assertEquals(List.of("A"), emitted, "exactly one token reached the sink");
-                assertEquals(String.join("", emitted), result.response(),
-                        "the text stored in memory must be exactly the text streamed to the client");
-                assertEquals(Boolean.TRUE, result.metadata().get("streamingTimeout"), "the attempt did time out");
+                // A timeout after text fails the turn; the text is kept as error detail,
+                // exactly what the client was sent — never half of an in-flight emission.
+                var partial = assertInstanceOf(ToolLoopStreamingChatModel.PartiallyStreamedRoundException.class,
+                        failure.getCause().getCause());
+                assertEquals(String.join("", emitted), partial.partialText(),
+                        "the recorded text must be exactly the text streamed to the client");
+                assertTrue(partial.timedOut(), "the attempt did time out");
             } finally {
                 pool.shutdownNow();
             }
         }
+    }
+
+    private static ChatResponse stop(String text) {
+        return ChatResponse.builder().aiMessage(AiMessage.from(text))
+                .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build();
     }
 
     private static LlmConfiguration.Task task(String timeoutMs) {

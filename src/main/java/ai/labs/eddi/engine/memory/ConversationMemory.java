@@ -39,6 +39,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -76,7 +78,18 @@ public class ConversationMemory implements IConversationMemory {
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
-    private volatile boolean cancelled;
+    /** Raised by compare-and-set, so the listeners run exactly once. */
+    private final transient AtomicBoolean cancelled = new AtomicBoolean();
+    /**
+     * Somebody asked for the stop (a cancel, not an abandon) — set before
+     * {@link #cancelled}, so whoever sees the turn stopped can tell the two apart.
+     */
+    private final transient AtomicBoolean cancelRequested = new AtomicBoolean();
+    /**
+     * Called once when {@link #cancelled} is raised; see {@link #onCancel}.
+     * Transient.
+     */
+    private final transient List<Runnable> cancelListeners = new CopyOnWriteArrayList<>();
     /**
      * Cluster mode: whether this turn's lease is lost; see
      * {@link #setLeaseLostCheck}.
@@ -680,12 +693,84 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public void setCancelled(boolean cancelled) {
-        this.cancelled = cancelled;
+        raiseCancel(cancelled, true);
+    }
+
+    @Override
+    public void abandon() {
+        raiseCancel(true, false);
+    }
+
+    /**
+     * Sets the flag and, when it goes up, wakes the waiting calls; only a cancel
+     * someone asked for ({@code announce}) tells the event sink — a turn the
+     * watchdog or a lost lease abandons is not "cancelled" to its client.
+     */
+    private void raiseCancel(boolean cancel, boolean announce) {
+        if (!cancel) {
+            cancelled.set(false);
+            cancelRequested.set(false);
+            return;
+        }
+        // First, so a completion that sees the flag also sees why; announced once.
+        boolean firstRequest = announce && cancelRequested.compareAndSet(false, true);
+        if (!cancelled.compareAndSet(false, true)) {
+            // Already stopped (an abandon, say): this request still reaches the stream.
+            if (firstRequest) {
+                announce();
+            }
+            return;
+        }
+        // Event-driven, so a streamed model call waiting on the provider stops at
+        // once rather than at its next poll.
+        for (Runnable listener : cancelListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                // A listener must not keep the cancel from reaching the others.
+            }
+        }
+        if (firstRequest) {
+            announce();
+        }
+    }
+
+    private void announce() {
+        ConversationEventSink sink = eventSink;
+        if (sink != null) {
+            try {
+                sink.onCancelRequested();
+            } catch (RuntimeException e) {
+                // The flags above are what the pipeline and the completion act on.
+            }
+        }
+    }
+
+    @Override
+    public boolean isCancelRequested() {
+        return cancelRequested.get();
+    }
+
+    @Override
+    public AutoCloseable onCancel(Runnable listener) {
+        // One-shot per registration: a raise between the add and the check below would
+        // otherwise run the listener from the list AND here.
+        AtomicBoolean fired = new AtomicBoolean();
+        Runnable once = () -> {
+            if (fired.compareAndSet(false, true)) {
+                listener.run();
+            }
+        };
+        cancelListeners.add(once);
+        if (cancelled.get()) {
+            once.run();
+        }
+        return () -> cancelListeners.remove(once);
     }
 
     @Override
     public boolean isCancelled() {
-        return cancelled || isLeaseLost();
+        return cancelled.get() || isLeaseLost();
     }
 
     @Override

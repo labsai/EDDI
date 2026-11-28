@@ -64,14 +64,15 @@ class StreamingLegacyChatExecutorCoverageTest {
     }
 
     @Test
-    @DisplayName("execute (delegating) — no metadata still returns the accumulated text")
-    void executeDelegates_noMetadata() {
+    @DisplayName("execute (delegating) — returns the accumulated text")
+    void executeDelegates() throws Exception {
         var sink = mock(ConversationEventSink.class);
         StreamingChatModel model = mock(StreamingChatModel.class);
         doAnswer(inv -> {
             StreamingChatResponseHandler h = inv.getArgument(1);
             h.onPartialResponse("plain");
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("plain")).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("plain"))
+                    .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(model).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
@@ -80,7 +81,7 @@ class StreamingLegacyChatExecutorCoverageTest {
     }
 
     @Test
-    @DisplayName("executeCapturing — metadata present but finishReason/tokenUsage null")
+    @DisplayName("executeCapturing — a completion without a finish reason is an incomplete stream, not an answer (B1)")
     void metadataWithNullFields() {
         var sink = mock(ConversationEventSink.class);
         ChatResponseMetadata md = mock(ChatResponseMetadata.class);
@@ -97,9 +98,9 @@ class StreamingLegacyChatExecutorCoverageTest {
             return null;
         }).when(model).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
-        var result = new StreamingLegacyChatExecutor().executeCapturing(model, List.of(UserMessage.from("hi")), sink);
-        assertEquals("x", result.response());
-        assertTrue(result.responseMetadata().isEmpty());
+        var thrown = assertThrows(ToolLoopStreamingChatModel.PartiallyStreamedRoundException.class,
+                () -> new StreamingLegacyChatExecutor().executeCapturing(model, List.of(UserMessage.from("hi")), sink));
+        assertEquals("x", thrown.partialText());
     }
 
     @Test
@@ -115,6 +116,6 @@ class StreamingLegacyChatExecutorCoverageTest {
 
         var ex = assertThrows(RuntimeException.class,
                 () -> new StreamingLegacyChatExecutor().executeCapturing(model, List.of(UserMessage.from("hi")), sink));
-        assertTrue(ex.getMessage().contains("Streaming chat failed"));
+        assertEquals("boom", ex.getMessage(), "nothing was streamed, so the provider's own failure goes up for the cascade to classify");
     }
 }

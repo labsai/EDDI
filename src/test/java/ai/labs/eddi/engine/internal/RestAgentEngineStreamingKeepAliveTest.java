@@ -78,10 +78,10 @@ class RestAgentEngineStreamingKeepAliveTest {
     private RestAgentEngineStreaming streaming(boolean cancelOnDisconnect, int intervalSeconds) {
         var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class),
                 cancelOnDisconnect, intervalSeconds);
-        streaming.shutdownKeepAlive();
-        streaming.keepAliveScheduler = scheduler;
-        streaming.clockMillis = now::get;
-        streaming.clientGoneExecutor = clientGone::add;
+        streaming.sseStreams = SseStreams.unmetered();
+        streaming.sseStreams.scheduler = scheduler;
+        streaming.sseStreams.clock = now::get;
+        streaming.sseStreams.clientGoneExecutor = clientGone::add;
         return streaming;
     }
 
@@ -187,8 +187,11 @@ class RestAgentEngineStreamingKeepAliveTest {
         verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
         verify(future, atLeastOnce()).cancel(false);
 
-        // When this turn starts, its first event finds the sink closed and cancels it.
+        // When this turn starts, its first event finds the sink closed and cancels it —
+        // off the sending thread (B11), so the handed-off task is run here.
         handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
+        assertEquals(1, clientGone.size());
+        clientGone.forEach(Runnable::run);
         verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
                 RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
     }
@@ -260,6 +263,9 @@ class RestAgentEngineStreamingKeepAliveTest {
         var data = ArgumentCaptor.forClass(String.class);
         verify(eventBuilder, times(2)).data(eq(String.class), data.capture());
         assertTrue(data.getValue().contains("\"code\":\"" + RestAgentEngineStreaming.TURN_TIMEOUT_CODE + "\""), data.getValue());
+        // This layer cannot know whether the turn was stored: not retryable, read
+        // first.
+        assertTrue(data.getValue().contains("\"retryable\":false"), data.getValue());
         verify(eventSink).close();
         verify(future, atLeastOnce()).cancel(false);
         // The watchdog already abandoned the turn: the backstop only ends the stream.

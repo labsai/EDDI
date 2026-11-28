@@ -541,6 +541,14 @@ public class ConversationMemoryUtilities {
                     }
                     newConversationOutput.put(key, redactDetailedValue(source.get(key), isCredentialValueKey(key)));
                 }
+                // The same normalisation as the default projection: "empty" is dropped once
+                // another task added an answer, so both modes report one completion.
+                String detailedReason = TurnFinishReason.of(conversationOutput);
+                if (detailedReason != null) {
+                    newConversationOutput.put(TURN_FINISH_REASON, detailedReason);
+                } else {
+                    newConversationOutput.remove(TURN_FINISH_REASON);
+                }
                 newConversationOutputs.add(newConversationOutput);
                 continue;
             }
@@ -560,6 +568,12 @@ public class ConversationMemoryUtilities {
                     newConversationOutput.put(key,
                             secretTurn ? maskedSecretTurnOutputValue(key, conversationOutput.get(key), needles) : conversationOutput.get(key));
                 }
+            }
+            // Why the answer is not a plain complete one (length, content_filter, or
+            // empty when the turn shows nothing) — the streamed done event reads it here.
+            String finishReason = TurnFinishReason.of(conversationOutput);
+            if (finishReason != null) {
+                newConversationOutput.put(TURN_FINISH_REASON, finishReason);
             }
         }
 

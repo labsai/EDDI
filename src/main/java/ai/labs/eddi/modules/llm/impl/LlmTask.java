@@ -1076,7 +1076,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     // holds for an output guardrail that can change the answer (WS4).
                     var streamingModel = bufferOutput ? null : chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                     if (streamingModel != null) {
-                        var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
+                        var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy, memory);
                         responseContent = streamingResult.response();
                         responseMetadata.putAll(streamingResult.metadata());
                     } else {
@@ -1316,6 +1316,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // identifies which conversation — which the WARN never did.
                 LOGGER.debugf("LLM response was null or blank for task '%s' (type=%s) in conversation '%s' — skipping output",
                         task.getId(), task.getType(), sanitize(memory.getConversationId()));
+                // Not silent to the client either: the turn says its answer was empty.
+                var turnOutput = currentStep.getConversationOutput();
+                if (turnOutput == null || turnOutput.get(MemoryKeys.TURN_FINISH_REASON) == null) {
+                    currentStep.addConversationOutputString(MemoryKeys.TURN_FINISH_REASON, MemoryKeys.TURN_FINISH_REASON_EMPTY);
+                }
             }
         }
 
@@ -1825,6 +1830,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         String reason = abnormalFinishReason(responseMetadata);
         if (reason != null) {
             currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_FINISH_REASON, reason));
+            // And where a client reads the turn: the native done event and the snapshot.
+            currentStep.addConversationOutputString(MemoryKeys.TURN_FINISH_REASON, reason);
         }
     }
 
@@ -2390,7 +2397,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var resumeBridge = bufferOutput
                 ? null
                 : createToolLoopStreamingBridge(memory.getEventSink(),
-                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task, memory);
 
         // Spend gate: the same preflight as the live path, asked before the approved
         // tools run and before the first resumed model request. A conversation (or a
@@ -2451,6 +2458,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+        // The streamed continuation's finish reason, as the live path records it, so
+        // onTruncation and the turn's finish marker see a resumed LENGTH answer. (A
+        // buffered resume has no bridge; its finish reason is not carried yet.)
+        if (resumeBridge != null) {
+            resumeBridge.recordLastFinish(responseMetadata);
+        }
+        recordAbnormalFinish(currentStep, responseMetadata);
         // A resumed cascade step ran on that step's model, so its tokens are priced at
         // the step's rates (as the live cascade does), not the task's: set
         // cascadeCostUsd — which pricedCost prefers — from the resumed token usage,
@@ -3462,7 +3476,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // R5: a task that may re-ask its final answer buffers it (no streaming bridge).
         var toolLoopBridge = retryPolicy != null
                 ? null
-                : createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+                : createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task, memory);
         var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
                 new ArrayList<>(chatMessagesWithoutSystem), task,
                 memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
@@ -3842,7 +3856,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      */
     private ToolLoopStreamingChatModel createToolLoopStreamingBridge(ConversationEventSink eventSink, boolean addToOutputExplicitlyFalse,
                                                                      String resolvedType, Map<String, String> processedParams,
-                                                                     LlmConfiguration.Task task)
+                                                                     LlmConfiguration.Task task, IConversationMemory memory)
             throws ChatModelRegistry.UnsupportedLlmTaskException {
         if (!toolLoopStreamingEnabled || eventSink == null || addToOutputExplicitlyFalse) {
             return null;
@@ -3851,8 +3865,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         if (streamingModel == null) {
             return null;
         }
-        return new ToolLoopStreamingChatModel(streamingModel, eventSink,
-                streamingLegacyChatExecutor.backstopSeconds(task), resolvedType);
+        return new ToolLoopStreamingChatModel(streamingModel, eventSink, streamingLegacyChatExecutor.streamPolicy(task, memory), resolvedType,
+                ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
     }
 
     /**
@@ -3871,6 +3885,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     private void emitAgentResponseUnlessStreamedLive(ConversationEventSink eventSink, String responseContent,
                                                      Map<String, Object> responseMetadata, LlmConfiguration.Task task,
                                                      ToolLoopStreamingChatModel toolLoopBridge) {
+        if (toolLoopBridge != null) {
+            toolLoopBridge.recordLastFinish(responseMetadata);
+        }
         if (toolLoopBridge != null && responseContent.equals(toolLoopBridge.lastForwardedText())) {
             responseMetadata.put("streamedLive", true);
             return;

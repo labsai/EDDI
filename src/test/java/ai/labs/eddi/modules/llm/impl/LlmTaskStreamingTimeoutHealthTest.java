@@ -50,9 +50,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Agent Health: a stream whose last attempt timed out with no text returns
- * normally — no catch sees a failure — so the task records the timeout itself,
- * once, with the recovery that validation decided.
+ * Agent Health: a stream whose last attempt timed out with no text is recorded
+ * once, with the recovery the task decided. Since the streaming contract (6.7)
+ * such a timeout fails the model call instead of returning an empty answer, so
+ * it reaches the task's failure path like any other model failure.
  */
 @DisplayName("LlmTask — a streaming timeout with no text is recorded for Agent Health")
 class LlmTaskStreamingTimeoutHealthTest {
@@ -120,9 +121,9 @@ class LlmTaskStreamingTimeoutHealthTest {
     }
 
     @Test
-    @DisplayName("without validation the turn goes on, and the timeout is recorded once, unrecovered, with its model")
-    void recordedOnce() throws Exception {
-        llmTask.execute(memory, config(null));
+    @DisplayName("without validation the task fails, and the timeout is recorded once, unrecovered, with its model")
+    void recordedOnce() {
+        assertThrows(LifecycleException.class, () -> llmTask.execute(memory, config(null)));
 
         List<Map<String, Object>> records = records();
         assertEquals(1, records.size(), records.toString());
@@ -149,7 +150,7 @@ class LlmTaskStreamingTimeoutHealthTest {
         cascade.setSteps(List.of(first, last));
         config.tasks().get(0).setModelCascade(cascade);
 
-        llmTask.execute(memory, config);
+        assertThrows(LifecycleException.class, () -> llmTask.execute(memory, config));
 
         List<Map<String, Object>> records = records();
         assertEquals(2, records.size(), records.toString());

@@ -54,14 +54,15 @@ class StreamingLegacyChatExecutorNoPartialsTest {
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 // No onPartialResponse at all — the shape of a provider whose binding
                 // does not support incremental streaming.
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text)).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text))
+                        .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
     }
 
     @Test
     @DisplayName("the complete response is used when no partials arrived")
-    void fallsBackToCompleteResponse() {
+    void fallsBackToCompleteResponse() throws Exception {
         var result = executor.execute(completeOnly("The full answer."), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -71,7 +72,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("the fallback text still reaches the SSE client")
-    void emitsFallbackToken() {
+    void emitsFallbackToken() throws Exception {
         executor.execute(completeOnly("The full answer."), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -80,7 +81,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("the degradation is observable: metadata warning plus a metric")
-    void recordsWarningAndMetric() {
+    void recordsWarningAndMetric() throws Exception {
         var result = executor.execute(completeOnly("The full answer."), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -92,7 +93,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("a genuinely empty completion stays empty and raises no false alarm")
-    void trulyEmptyResponseIsNotFlagged() {
+    void trulyEmptyResponseIsNotFlagged() throws Exception {
         var result = executor.execute(completeOnly(""), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -102,13 +103,14 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("a normal streaming provider is unaffected — no fallback, no warning")
-    void normalStreamingIsUnaffected() {
+    void normalStreamingIsUnaffected() throws Exception {
         StreamingChatModel model = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("Hel");
                 handler.onPartialResponse("lo");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello")).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello"))
+                        .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
 
@@ -134,7 +136,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("a no-partials provider that also truncated keeps warning=truncated")
-    void truncationWarningSurvivesTheNoPartialsFallback() {
+    void truncationWarningSurvivesTheNoPartialsFallback() throws Exception {
         var result = executor.execute(completeOnly("Half an ans", FinishReason.LENGTH), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -151,7 +153,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("a no-partials provider that was content-filtered keeps warning=content_filter")
-    void contentFilterWarningSurvivesTheNoPartialsFallback() {
+    void contentFilterWarningSurvivesTheNoPartialsFallback() throws Exception {
         var result = executor.execute(completeOnly("Blocked-ish", FinishReason.CONTENT_FILTER), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 
@@ -162,7 +164,7 @@ class StreamingLegacyChatExecutorNoPartialsTest {
 
     @Test
     @DisplayName("with a normal STOP finish the no-partials warning is still reported")
-    void noPartialsWarningStillSetWhenNoFinishReasonWarning() {
+    void noPartialsWarningStillSetWhenNoFinishReasonWarning() throws Exception {
         var result = executor.execute(completeOnly("All good", FinishReason.STOP), List.of(UserMessage.from("Hi")),
                 eventSink, null, JsonResponseFormatPolicy.DISABLED);
 

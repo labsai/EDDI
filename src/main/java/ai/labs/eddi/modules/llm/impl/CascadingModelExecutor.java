@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.CallCancelledException;
 import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
@@ -53,6 +54,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
+import java.util.function.BooleanSupplier;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -479,6 +481,13 @@ class CascadingModelExecutor {
         for (int i = 0; i < steps.size(); i++) {
             CascadeStep step = steps.get(i);
             boolean isLastStep = (i == steps.size() - 1);
+
+            // A cancelled turn starts no further step: escalating would pay another model
+            // for an answer nobody will read.
+            if (memory != null && memory.isCancelled()) {
+                throw UnrecordedSpend.attach(new LifecycleException.LifecycleInterruptedException("Model cascade cancelled before step " + i),
+                        totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
+            }
 
             // Ceiling checks before starting a step (step 0 always runs).
             if (i > 0) {
@@ -954,6 +963,19 @@ class CascadingModelExecutor {
                 totals.llmCostUsd += failedStep.llmCostUsd();
                 mergeTokenUsage(totals.tokenUsage, failedStep.tokenUsage());
                 long durationMs = System.currentTimeMillis() - stepStart;
+                // A step stopped because the turn was cancelled is not a model failure:
+                // no escalation, no "best so far", no circuit-breaker strike. The text it
+                // had streamed is already kept as error detail by its stream policy.
+                if (e instanceof LifecycleException.LifecycleInterruptedException || CallCancelledException.isCancellation(e)
+                        || (memory != null && memory.isCancelled())) {
+                    ticket.release();
+                    stepTrace.put("status", "cancelled");
+                    stepTrace.put("durationMs", durationMs);
+                    trace.add(stepTrace);
+                    LOGGER.infof("Cascade step %d stopped: the turn was cancelled; no further step runs", i);
+                    throw UnrecordedSpend.attach(new LifecycleException.LifecycleInterruptedException("Model cascade cancelled at step " + i, e),
+                            totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
+                }
                 LlmFailure failure = LlmFailureClassifier.classify(e);
                 var circuitFailure = LlmCircuitBreakers.Failure.of(failure.cls());
                 if (circuitFailure != null) {
@@ -1343,7 +1365,7 @@ class CascadingModelExecutor {
                             recovery);
                 } else {
                     return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                            heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+                            heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null, memory);
                 }
             } finally {
                 unwound.countDown();
@@ -1394,7 +1416,8 @@ class CascadingModelExecutor {
     private StepResult executeLegacyModeStep(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                              List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                              LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig,
-                                             JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery, TurnDeadline turnDeadline)
+                                             JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery, TurnDeadline turnDeadline,
+                                             IConversationMemory memory)
             throws LifecycleException {
 
         // The structured_output wrapper only applies in legacy mode; it never co-occurs
@@ -1410,6 +1433,9 @@ class CascadingModelExecutor {
         Map<String, Object> tokenUsage;
         Map<String, Object> responseMetadata;
         boolean streamedLive = false;
+        // The turn's cancel reaches the buffered calls too: no further attempt, and no
+        // JSON-format fallback request, once the turn is cancelled.
+        BooleanSupplier cancelled = memory != null ? memory::isCancelled : null;
         FormatRetryRunner.Trigger unresolved = null;
         int reasks = 0;
         if (recovery.policy() != null && streamingModel == null) {
@@ -1421,7 +1447,7 @@ class CascadingModelExecutor {
                         : smaller;
             };
             var outcome = formatRetryRunner.run(recovery.policy(), messages, (msgs, maxTokens) -> {
-                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, turnDeadline);
+                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, turnDeadline, cancelled);
                 return new FormatRetryRunner.Attempt(r.response() != null ? r.response() : "", r.responseMetadata());
             }, shrinker, recovery.budget(), recovery.gate(), recovery.listener());
             responseText = outcome.attempt().text();
@@ -1431,13 +1457,13 @@ class CascadingModelExecutor {
             reasks = outcome.reasks();
         } else if (streamingModel != null && eventSink != null) {
             // Stream the always-accepted final step live — tokens emitted via the sink.
-            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy);
+            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy, memory);
             responseText = streamResult.response() != null ? streamResult.response() : "";
             responseMetadata = streamResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);
             streamedLive = true;
         } else {
-            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, turnDeadline);
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, null, turnDeadline, cancelled);
             responseText = chatResult.response() != null ? chatResult.response() : "";
             responseMetadata = chatResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);
@@ -1521,7 +1547,7 @@ class CascadingModelExecutor {
         // Agent mode returned null (no tools enabled) — fall back to legacy (no live
         // stream).
         return executeLegacyModeStep(chatModel, null, null, originalMessages, systemMessage, evaluationStrategy, task, judgeModel, heuristicConfig,
-                jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+                jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null, memory);
     }
 
     /**

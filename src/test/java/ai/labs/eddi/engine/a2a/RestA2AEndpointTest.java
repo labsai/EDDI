@@ -27,10 +27,12 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.SendRequest;
+import ai.labs.eddi.engine.internal.SseStreams;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
@@ -590,6 +592,24 @@ class RestA2AEndpointTest {
         assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
         assertEquals(RestA2AEndpoint.BUSY_MESSAGE, body.error().message());
         assertEquals(1.0, meterRegistry.counter("eddi.a2a.requests", "method", "send", "dialect", "1.0", "outcome", "busy").count());
+    }
+
+    @Test
+    void stream_whenTheNodeStreamCapRefuses_is503WithItsRetryAfter_notA200() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var streams = mock(SseStreams.class);
+        when(streams.acquireSlot(any(), anyLong())).thenThrow(new WebApplicationException(
+                Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Retry-After", "7").build()));
+        endpoint.sseStreams = streams;
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("text", "Hello"))));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, "1.0", new JsonRpcRequest("2.0", "SendStreamingMessage", params, "s-9"));
+
+        assertEquals(503, response.getStatus());
+        assertEquals("7", response.getHeaderString("Retry-After"));
+        var body = (JsonRpcResponse) response.getEntity();
+        assertEquals("s-9", body.id());
+        assertEquals(RestA2AEndpoint.BUSY_MESSAGE, body.error().message());
     }
 
     @Test

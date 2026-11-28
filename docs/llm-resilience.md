@@ -359,8 +359,11 @@ rejection then applies as under `SKIP`. See [Revise with the reviewer's note](hi
 
 ## Known limits
 
-- Streaming (SSE) calls keep their own timeout and are not bounded by the turn deadline, and their retry loop
-  uses the plain backoff, not the provider's delay. A task that may re-ask is buffered rather than streamed.
+- Streaming (SSE) calls retry like every other call (same classifier, `Retry-After`, turn deadline and default
+  of three attempts), but only until the first token reached the client: a failure after that fails the turn,
+  because streamed text cannot be taken back — see
+  [The streaming contract](langchain.md#the-streaming-contract). A task that may re-ask is buffered rather than
+  streamed. A cascade's live final step gets one attempt, like every cascade step.
 - An HTTP `Retry-After` header is not available to the engine: only the provider's error body is read.
 - Circuit breaker state is per node.
 - A duplicate request that lands on another node (NATS coordinator) while a turn runs still meets `409` until

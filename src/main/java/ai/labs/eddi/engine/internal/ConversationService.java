@@ -994,6 +994,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      *
      * @return true when a running turn was signalled
      */
+    @Override
     public boolean signalLocalInFlight(String conversationId) {
         var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
         if (inFlightMemory == null) {
@@ -1500,6 +1501,21 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onTurnStarted(String streamingClientDisconnect) {
+                streamingHandler.onTurnStarted(streamingClientDisconnect);
+            }
+
+            @Override
+            public void onCancelRequested() {
+                streamingHandler.onCancelRequested();
+            }
+
+            @Override
+            public void onGenerationFinished() {
+                streamingHandler.onGenerationFinished();
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }
@@ -1666,6 +1682,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 // LifecycleManager and the tasks read.
                 if (listener.eventSink() != null) {
                     memory.setEventSink(listener.eventSink());
+                    // The stream learns the agent's disconnect policy now, so a vanished
+                    // client costs no store read.
+                    listener.eventSink().onTurnStarted(agent.getStreamingClientDisconnect());
                 }
                 // Always assigned: a memory reused across turns must not keep the
                 // previous turn's observer.
@@ -1705,6 +1724,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                             }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            // Read from the memory, not only from the sink's announce: a cancel
+                            // that arrived before the sink was set, or whose announce has not
+                            // run yet, still makes the stream say "cancelled", never "timeout".
+                            if (listener.eventSink() != null && returnConversationMemory.isCancelRequested()) {
+                                listener.eventSink().onCancelRequested();
+                            }
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
                         });
 
@@ -2498,6 +2523,21 @@ public class ConversationService implements IConversationService, UserErasurePar
         @Override
         public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
             delegate.onGuardrailTriggered(type, phase, action, taskId);
+        }
+
+        @Override
+        public void onTurnStarted(String streamingClientDisconnect) {
+            delegate.onTurnStarted(streamingClientDisconnect);
+        }
+
+        @Override
+        public void onCancelRequested() {
+            delegate.onCancelRequested();
+        }
+
+        @Override
+        public void onGenerationFinished() {
+            delegate.onGenerationFinished();
         }
 
         @Override

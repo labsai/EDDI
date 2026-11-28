@@ -786,6 +786,12 @@ public class Conversation implements IConversation {
         TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
+            // The answer exists: a streaming client that leaves from now on must not
+            // cancel (and so discard) a turn that is only being stored.
+            var eventSink = conversationMemory.getEventSink();
+            if (eventSink != null) {
+                eventSink.onGenerationFinished();
+            }
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
@@ -2131,6 +2137,13 @@ public class Conversation implements IConversation {
                 LOGGER.warnf("Resume: pausedWorkflowId '%s' not found in executable workflows", pausedWorkflowId);
                 setConversationState(ConversationState.ERROR);
                 throw new LifecycleException("Paused workflow '" + pausedWorkflowId + "' no longer exists (config drift)");
+            }
+            // The answer exists, as in executeConversationStep: a streaming client that
+            // leaves from now on must not cancel (and so discard) a turn that is only
+            // being stored — its approved tool calls have already run.
+            var eventSink = conversationMemory.getEventSink();
+            if (eventSink != null) {
+                eventSink.onGenerationFinished();
             }
         } catch (ConversationStopException unused) {
             endConversation();

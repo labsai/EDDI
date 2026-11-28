@@ -87,10 +87,10 @@ class RestAgentEngineResumeStreamTest {
     private RestAgentEngineStreaming streaming(boolean resumeCancelOnDisconnect) {
         var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class), true, 15);
         streaming.resumeCancelOnClientDisconnect = resumeCancelOnDisconnect;
-        streaming.shutdownKeepAlive();
-        streaming.keepAliveScheduler = scheduler;
+        streaming.sseStreams = SseStreams.unmetered();
+        streaming.sseStreams.scheduler = scheduler;
         streaming.restAgentEngine = restAgentEngine;
-        streaming.clientGoneExecutor = Runnable::run;
+        streaming.sseStreams.clientGoneExecutor = Runnable::run;
         return streaming;
     }
 
@@ -372,10 +372,10 @@ class RestAgentEngineResumeStreamTest {
     void resumeStreamDoesNotCancelByDefault() throws Exception {
         // the field is left at its default; the say switch (constructor) is true
         var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class), true, 15);
-        streaming.shutdownKeepAlive();
-        streaming.keepAliveScheduler = scheduler;
+        streaming.sseStreams = SseStreams.unmetered();
+        streaming.sseStreams.scheduler = scheduler;
         streaming.restAgentEngine = restAgentEngine;
-        streaming.clientGoneExecutor = Runnable::run;
+        streaming.sseStreams.clientGoneExecutor = Runnable::run;
         assertFalse(streaming.resumeCancelOnClientDisconnect);
         var handler = accepted(streaming);
         when(eventSink.isClosed()).thenReturn(true);

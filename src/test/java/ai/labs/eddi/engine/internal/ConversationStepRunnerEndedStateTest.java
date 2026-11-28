@@ -65,7 +65,7 @@ class ConversationStepRunnerEndedStateTest {
 
         assertTrue(runner.waitForExecutionFinishOrTimeout(Map.of(), ID, memory, new CompletableFuture<>()));
 
-        verify(memory).setCancelled(true);
+        verify(memory).abandon();
         verify(store, never()).setConversationState(anyString(), any());
         verify(store, never()).compareAndSetState(anyString(), any(), any());
         verify(stateCache).put(ID, ConversationState.ENDED);
