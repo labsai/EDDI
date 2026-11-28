@@ -7,10 +7,15 @@ reviews:
   profile: chill
   auto_review:
     enabled: true
-    # Re-review every push, not just the first one.
-    auto_incremental_review: true
-    # Draft PRs are reviewed too.
-    drafts: true
+    # Only the first review is automatic. Later pushes (fixups, merges of main
+    # into the branch) are re-reviewed only on request: comment
+    # "@coderabbitai review" (new commits) or "@coderabbitai full review".
+    # The review allowance is small, and re-reviewing every push used it up,
+    # so the reviews that mattered came back "Review rate limited".
+    # Request a round for large or security-sensitive follow-ups.
+    auto_incremental_review: false
+    # Drafts are reviewed once they are marked ready for review.
+    drafts: false
     # Review PRs into any branch, not only main. Stacked PRs (a PR based on
     # another feature branch) were skipped with "Auto reviews are disabled on
     # base/target branches other than the default branch".
