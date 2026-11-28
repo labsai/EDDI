@@ -149,7 +149,9 @@ public class ContinuationRecoverySweep {
                     outcomes.merge(continuations.recover(candidate), 1, Integer::sum);
                 } catch (Exception e) {
                     if (backedOff.size() < MAX_BACKED_OFF) {
-                        backedOff.put(key, now + FAILURE_BACKOFF.toMillis());
+                        // From the failure, not the pass start: a slow pass would
+                        // otherwise record a retry time already in the past.
+                        backedOff.put(key, clock.millis() + FAILURE_BACKOFF.toMillis());
                     }
                     LOGGER.warnf("Could not recover the pending continuation of conversation %s (tried again in %d min): %s",
                             sanitize(candidate.conversationId()), FAILURE_BACKOFF.toMinutes(), e.toString());

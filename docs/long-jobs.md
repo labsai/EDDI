@@ -141,8 +141,11 @@ reads the records older than `eddi.continuation.recovery.grace-period` (1 minute
 turn's own arm, which runs milliseconds after the commit, has long happened or never will), oldest
 first and at most `eddi.continuation.recovery.batch-size` (100) per pass, from an index that holds
 only those records — never the rest of the conversations. A record whose recovery fails is left out
-of the passes for ten minutes and the read reaches past it, so a record that fails on its own
-cannot hold up the ones behind it. For each one:
+of the passes for ten minutes and the read reaches past it, so a record that fails on its own does
+not hold up the ones behind it — up to 1000 held-back candidates per node. Past that cap, failing
+candidates are retried on every pass and can delay the records behind them; the sweep logs a WARN
+when it is reached. A record that has only just started failing takes its slot for the pass in which
+it fails, so the records behind it can wait one interval. For each one:
 
 | The conversation… | What the sweep does |
 |---|---|

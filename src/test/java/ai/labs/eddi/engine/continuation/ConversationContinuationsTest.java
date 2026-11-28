@@ -364,8 +364,8 @@ class ConversationContinuationsTest {
         @DisplayName("with the recovery sweep on, a failed write is not the end of the job: no job.finished, the sweep arms it")
         void storeFailureLeftToTheSweep() throws Exception {
             var publisher = mock(UserEventPublisher.class);
-            var withStore = new ConversationContinuations(scheduleStore, mock(IConversationMemoryStore.class), meters,
-                    Clock.fixed(NOW, ZoneOffset.UTC));
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
             withStore.userEventPublisher = publisher;
             withStore.recoveryEnabled = true;
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
@@ -376,6 +376,10 @@ class ConversationContinuationsTest {
 
             assertEquals(1.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED), "the failed write is still counted");
             assertNotNull(memory.getPendingContinuation(), "the decision the sweep arms from is still there");
+            // ...and in the store: neither cleared nor marked handled, or the sweep would
+            // find nothing to arm.
+            verify(memoryStore, never()).clearPendingContinuation(anyString(), any(), any());
+            verify(memoryStore, never()).markPendingContinuationHandled(anyString(), anyInt(), any());
             verify(publisher, never()).publish(any(), any());
         }
 
@@ -759,6 +763,19 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("a record that cannot be removed still reports the withdrawal failed when the row delete fails too")
+        void disarmReportsFailureWhenBothFail() throws Exception {
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
+            String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null, null);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).deleteSchedulesByName(name);
+
+            assertEquals(ConversationContinuations.WITHDRAWAL_FAILED, withStore.disarm(CONVERSATION_ID),
+                    "the stored decision is still armable: not NOTHING_TO_CANCEL");
+        }
+
+        @Test
         @DisplayName("a record removal that fails once is retried, so a cancel between two turns still takes the lost arm's record")
         void disarmRetriesTheRecordRemoval() throws Exception {
             var memoryStore = mock(IConversationMemoryStore.class);
@@ -859,6 +876,18 @@ class ConversationContinuationsTest {
 
             verify(scheduleStore).deleteSchedule(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, DECISION));
             assertEquals(0.0, recovered());
+        }
+
+        @Test
+        @DisplayName("withdrawing the sweep's own row is retried: once the record is gone nothing selects the candidate again")
+        void supersededDeleteIsRetried() throws Exception {
+            doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
+            doReturn(false).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
+            String id = ConversationContinuations.scheduleId(CONVERSATION_ID, 2, DECISION);
+            doThrow(new IResourceStore.ResourceStoreException("blip")).doNothing().when(scheduleStore).deleteSchedule(id);
+
+            assertEquals(ConversationContinuations.Recovery.SUPERSEDED, recovering.recover(candidate(ConversationState.READY)));
+            verify(scheduleStore, times(2)).deleteSchedule(id);
         }
 
         @Test

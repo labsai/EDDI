@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -128,6 +129,40 @@ class ContinuationRecoverySweepTest {
         now.set(NOW.plus(ContinuationRecoverySweep.FAILURE_BACKOFF).plusSeconds(1));
         oneAtATime.sweep();
         verify(continuations, times(2)).recover(poisoned);
+    }
+
+    @Test
+    @DisplayName("the backoff runs from the failure, not from the start of a slow pass")
+    void backoffStartsAtTheFailure() throws Exception {
+        var now = new AtomicReference<>(NOW);
+        Clock clock = new Clock() {
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        var slow = new ContinuationRecoverySweep(memoryStore, continuations, leases, true, Duration.ofSeconds(90), 1, clock);
+        var poisoned = candidate("poisoned");
+        doReturn(List.of(poisoned)).when(memoryStore).findPendingContinuations(anyLong(), anyInt());
+        doAnswer(invocation -> {
+            // The pass has been running for longer than the backoff when it fails.
+            now.set(NOW.plus(ContinuationRecoverySweep.FAILURE_BACKOFF).plusSeconds(60));
+            throw new IResourceStore.ResourceStoreException("refused for this row");
+        }).when(continuations).recover(poisoned);
+
+        slow.sweep();
+        slow.sweep(); // right after: still inside the backoff that began at the failure
+        verify(continuations, times(1)).recover(poisoned);
     }
 
     @Test

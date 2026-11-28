@@ -626,6 +626,32 @@ public class ConversationContinuations {
      * sweep was faster, or an attempt that reported a failure did land — counts as
      * written: its id names this very decision.
      */
+    /**
+     * Deletes the row a recovery wrote for a continuation withdrawn meanwhile, with
+     * the arm's retries: once the record is gone nothing selects the candidate
+     * again, so a delete given up on leaves a row that can still fire.
+     */
+    private void deleteWithRetry(String scheduleId) throws Exception {
+        for (int attempt = 1;; attempt++) {
+            try {
+                scheduleStore.deleteSchedule(scheduleId);
+                return;
+            } catch (Exception e) {
+                if (attempt >= ARM_ATTEMPTS) {
+                    throw e;
+                }
+                LOGGER.warnf("Withdrawing a recovered continuation schedule failed (attempt %d of %d), retrying: %s", attempt, ARM_ATTEMPTS,
+                        e.toString());
+                try {
+                    Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
     private void createWithRetry(ScheduleConfiguration schedule) throws Exception {
         for (int attempt = 1;; attempt++) {
             try {
@@ -715,7 +741,9 @@ public class ConversationContinuations {
             return withdrawn;
         } catch (Exception e) {
             LOGGER.warnf("Could not withdraw the pending continuation of conversation %s: %s", sanitize(conversationId), e.getMessage());
-            return 0;
+            // The record is still there too: the sweep could arm it, so not "nothing to
+            // cancel".
+            return recordCleared == null ? WITHDRAWAL_FAILED : 0;
         }
     }
 
@@ -803,10 +831,12 @@ public class ConversationContinuations {
      * match the decision id, not only the number, so a later decision of the same
      * number is never marked or removed in this one's name. So when the record no
      * longer names this decision, the continuation was withdrawn or superseded
-     * while this ran, and a row this call wrote is withdrawn again. A cancel
-     * removes the record before it deletes the rows, so between them every
-     * interleaving ends without a live row; two sweeps write one row and both keep
-     * it.</li>
+     * while this ran, and a row this call wrote is withdrawn again (the delete is
+     * retried like the other writes). A cancel removes the record before it deletes
+     * the rows, so a sweep that writes after that delete finds the record gone and
+     * deletes its own row, as long as it keeps running: a node that stops between
+     * the insert and that delete leaves the row behind. Two sweeps write one row
+     * and both keep it.</li>
      * </ol>
      * The decision itself — {@code maxContinuations}, the cost ceiling, a group
      * member's turn — was taken by the turn and is not taken again; everything the
@@ -835,7 +865,7 @@ public class ConversationContinuations {
         // the record too, and must not look like a cancel to this one.
         boolean stillPending = memoryStore.markPendingContinuationHandled(conversationId, number, decisionId);
         if (written && !stillPending) {
-            scheduleStore.deleteSchedule(schedule.getId());
+            deleteWithRetry(schedule.getId());
             LOGGER.infof("Recovered continuation %d of conversation %s withdrawn: the conversation moved on meanwhile", number,
                     sanitize(conversationId));
             return Recovery.SUPERSEDED;

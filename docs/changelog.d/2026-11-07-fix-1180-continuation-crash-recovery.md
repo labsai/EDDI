@@ -46,15 +46,22 @@ sweep** on the existing schedule machinery:
   withdraws its own row if the record was removed or replaced meanwhile. A
   candidate whose recovery fails is held back for ten minutes (in memory, no
   write) and the read reaches past it, so a record that fails on its own — a
-  user id longer than PostgreSQL's 255-character schedule column, say — cannot
-  starve the ones behind it.
-- **Handled, not removed.** A sweep only *marks* a record handled (drops
-  `decidedAt`, which takes it out of the index); only a cancel, an end or a newer
-  turn removes or replaces it. That is what lets a sweep tell "the job was
+  user id longer than PostgreSQL's 255-character schedule column, say — does not
+  hold up the ones behind it. That holds for up to 1,000 held-back candidates per
+  node, a cap that bounds memory and the read: past it, further failing ones are
+  retried every pass and can delay the records behind them, which the sweep
+  reports at WARN.
+- **Handled, not removed.** For a READY conversation a sweep only *marks* a
+  record handled (drops `decidedAt`, which takes it out of the index); it removes
+  the record only of a candidate it reads as not READY. Otherwise only a cancel,
+  an end or a newer turn removes or replaces it. That is what lets a sweep tell "the job was
   stopped" from "another sweep was faster" — the first design cleared the record
   on both and a concurrent sweep would have withdrawn the winner's row.
 - **Cancel and end** (`disarm`) remove the record before deleting the
-  schedules, so every interleaving with a sweep ends without a live row. A
+  schedules. A sweep that arms after the cancel deleted the rows finds the
+  record gone when it confirms and deletes its own row (retried like the other
+  writes); that compensation needs the sweep to keep running, so a node that
+  stops between the insert and that delete leaves the row behind. A
   cancel of a job whose arm was lost answers `200 CANCELLED`, as for any job
   between two turns. `decide` now also refuses a turn already cancelled
   (`interrupted`) so its decision never reaches the store. The sweep's mark and
