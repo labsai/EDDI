@@ -14,7 +14,7 @@
 
 EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, every image is checked against Red Hat's container certification requirements, and EDDI was selected as a UNIDO Trusted Partner for Industrial AI.
 
-[Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Quick start](#quick-start) · [Docker Hub](https://hub.docker.com/r/labsai/eddi) · [Discussions](https://github.com/labsai/EDDI/discussions)
+[Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Quick start](#quick-start) · [Docker Hub](https://hub.docker.com/r/labsai/eddi) · [Discussions](https://github.com/labsai/EDDI/discussions) · [Commercial support](https://eddi.solutions/)
 
 ## Why EDDI
 
@@ -208,6 +208,7 @@ The full command list, code style and the pull-request process are in [CONTRIBUT
 
 - **Questions and ideas:** [GitHub Discussions](https://github.com/labsai/EDDI/discussions)
 - **Bugs and feature requests:** [GitHub Issues](https://github.com/labsai/EDDI/issues)
+- **Commercial support:** [EDDI Solutions](https://eddi.solutions/) is the managed offering from LABS.AI, the team that develops EDDI: dedicated instances in the US, EU, Switzerland or Singapore, or deployment in your own cloud or on-premise, SLA-backed operations with support up to 24/7, and workshops, connectors and agent builds by the core team. See the [plans](https://eddi.solutions/pricing/) or [request a demo](https://eddi.solutions/contact/). EDDI itself stays free and open source under Apache 2.0.
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md) and [Governance](GOVERNANCE.md)
 - **Security:** report vulnerabilities privately as the [Security Policy](SECURITY.md) describes. The container image refuses to start without authentication unless you opt out; the bundled Compose files opt out for local use and publish on `127.0.0.1` only. The details are in the [security guide](docs/security.md).
 
