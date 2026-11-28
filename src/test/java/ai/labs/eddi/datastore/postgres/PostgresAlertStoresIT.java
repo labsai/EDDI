@@ -18,6 +18,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +53,30 @@ class PostgresAlertStoresIT extends PostgresTestBase implements AlertStoreContra
     @Override
     public IAlertEventStore eventStore() {
         return events;
+    }
+
+    /**
+     * A conversation delete selects by the full conversation-content predicate
+     * (value, excerpt or subject), which the value-only partial index cannot serve;
+     * the conversation index can.
+     */
+    @Test
+    void theConversationContentLookupHasAnIndex() throws Exception {
+        events.countConversationContent("conv-x"); // the schema
+        StringBuilder plan = new StringBuilder();
+        try (Connection conn = DATA_SOURCE.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("SET enable_seqscan = off");
+            // The store's own predicate, so the check cannot drift from the real query.
+            try (ResultSet rs = stmt.executeQuery("EXPLAIN SELECT COUNT(*) FROM alert_events WHERE conversation_id = 'conv-x' AND "
+                    + PostgresAlertEventStore.CONVERSATION_CONTENT)) {
+                while (rs.next()) {
+                    plan.append(rs.getString(1)).append('\n');
+                }
+            }
+        }
+        assertTrue(Pattern.compile("idx_alert_events_conversation\\b(?!_)").matcher(plan).find(), plan.toString());
+        // Used as an index on the conversation, not scanned whole with a filter.
+        assertTrue(plan.toString().contains("Index Cond: ((conversation_id)"), plan.toString());
     }
 
     @Test

@@ -471,6 +471,34 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 - **Model-backed screening, and its availability trade-off.** The `classifier` type asks a safety-classifier model the agent designer configures (EDDI ships and endorses none). It reaches the model through the LLM provider client, not `OutboundHttp`: classifier endpoints are typically in-cluster, and a configured classifier `baseUrl` is the same trust class as a task's own model `baseUrl` — only configuration authors can set either. A classifier that is unreachable, times out (`timeoutMs`, default 3 s, bounded by the turn deadline) or answers something that is not a label has not checked the text, and `failMode` decides: **`closed`** (the default for `block`/`reprompt`) refuses the turn, so a classifier outage becomes an outage of every guarded agent — the safe choice where letting unscreened text through is the worse failure; **`open`** records a `warn` (reason `classifier_unavailable` / `classifier_unparseable`) and lets the text through, keeping the agent available while the screen is down. Pick per guardrail, watch `eddi.guardrail.classifier.duration{outcome}` and the `classifier_unavailable` audit reasons, and size the classifier for the input path: it runs before the main model on every turn.
 - **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
+### Egress needs an approval the designer cannot switch off
+
+> **Status: the mechanism ships, the rules do not yet.** No tool source registers a mandatory rule in this revision, so
+> the hook currently gates no tool: an `exempt` tool, or one with no approvals configured, runs without a human check.
+> The rules for file egress and team-library additions arrive with the tool sources that carry those arguments. Until
+> then, control outbound file tools with the ordinary tool approvals and by choosing which tools an agent gets.
+> What follows describes the behaviour once a rule is registered.
+A tool call that carries a file out of the deployment, or adds a document to a team library, must pause for a human even when the agent designer marked the tool `exempt` or configured no approvals at all. The tool approval gate cannot express that — it matches a call by name, never by its arguments — so the engine has a separate, server-side hook: **mandatory, argument-aware approvals** ([HITL — Mandatory approvals](hitl.md#mandatory-approvals)). Design points for a security review:
+
+- **Server code decides, not configuration.** A rule is attached by the tool source that built the tool and sees the call's arguments; no agent config can remove it. A rule that throws gates the call for the conversation user's confirmation, and a source whose rules cannot be built loses its tools for the turn.
+- **Consent means the user.** A `CONVERSATION_USER` approval is accepted only from the conversation's own verified user, or from an administrator with a reason, recorded as on behalf of the user (audit ledger, log line, trace entry and the created record). An `eddi-approver`, a timeout policy or an unauthenticated channel (Slack) cannot give it.
+- **Never degrades to allowed.** Where nobody could decide (a group member's turn, a run without a user, an oversight approval without an active gate) the call is refused and not run.
+- **Bound to the call.** The arguments of a mandatory call cannot be amended at approval, and a reissue of an executed one needs a new approval.
+- **Residual risk.** The hook covers file *arguments*. An agent that can read a document and also holds outbound tools (HTTP calls, A2A, MCP) can still send the document's *text*; the control for that is which tools the designer gives such an agent, plus the ordinary tool approvals.
+
+---
+
+### Files between conversations
+
+A stored attachment's `storageRef` is a capability: whoever holds it, and a conversation that may read it, can have its bytes forwarded to a model. So a model never handles one. Every path that hands a file from one conversation to another (today the nested-group pass-through; delegation, group tasks, handoff, A2A and MCP as they gain file arguments) goes through `AttachmentShareService`, which enforces one rule. The service has two entry points: `share()` does the whole job, while the nested-group pass-through today asks only its read check (`whyNotReadable()`) and grants access itself, so the bounds and the audit and metrics entries below apply to callers of `share()` and not (yet) to that pass-through:
+
+- **Names in, capabilities never.** A model names entries of its *own* conversation's listing — the files `IAttachmentStore.listAccessible` returns for it (owned or granted), minus the ones it withholds because an input guardrail refused the turn they came with. It never supplies a `storageRef`, a source conversation or a target conversation: the source is the conversation the tool is bound to, the target one that server code created.
+- **The listing is checked, not trusted.** A listing records the conversation it was built for and the files that conversation withholds. A share is refused when the listing was built for another conversation, when the file is withheld (even in a listing assembled by hand), and when the source can no longer read the file (`mayRead`: owner or grantee) — so a stale or foreign listing widens nothing. Each is refused as `not found`, the same answer as a file that does not exist, and the file's name is not echoed.
+- **Bounded.** Files per share, shares per turn (counted on the conversation's step, so a model cascade cannot multiply it) and a hop limit; a refusal uses no slot. Parts of a file cannot be shared yet.
+- **Recorded.** Each share is one audit entry (`taskId` `attachment.share`) in the *source* conversation's ledger — target conversation and agent, reason, MIME type, size; no bytes, no file name and no `storageRef`, because the entry is returned to its owner and a reference is a capability — and `eddi_attachment_shared_total{path}` / `eddi_attachment_share_refused_total{reason}`.
+
+A grant is on the file's root and lets the receiving conversation read the whole file through `readAttachment`. See [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).
+
 ---
 
 ### Cluster control plane (NATS)
@@ -490,7 +518,7 @@ rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
 
 ## JVM Advisory: Java4Shell (CVE-2026-114938)
 
-**Interim mitigation in place; remove once a fixed base image ships.**
+**The pinned base images now carry a fixed JDK. The interim flag stays for now as a second line of defence; see [removing the flag](#removing-the-flag) below.**
 
 [CVE-2026-114938](https://access.redhat.com/security/vulnerabilities/RHSB-2026-018) is memory corruption in OpenJDK's accelerated Base64 decoder (`java.util.Base64.Decoder`). Malformed input can crash the JVM or run code in it, with no login, on hosts where all of these hold:
 
@@ -504,11 +532,13 @@ EDDI decodes attacker-controlled Base64 before authentication:
 
 Keycloak decodes Base64 before any login too. Code running in the EDDI process can read everything EDDI can: the database, the vault master key and, through it, every stored secret.
 
-| Image | JDK | Mitigation shipped |
+| Image | JDK in the pinned base | Mitigation shipped |
 | --- | --- | --- |
-| `labsai/eddi` | OpenJDK 25.0.5 (UBI 10) | `-XX:-UseBASE64Intrinsics` on `JDK_JAVA_OPTIONS` |
-| Demo image | Temurin 25.0.5 | The same flag on the `java` ENTRYPOINT |
-| Keycloak 26.8.0 (compose `auth` overlay, Helm, kustomize `auth` overlay) | OpenJDK 21.0.12.1 | `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` |
+| `labsai/eddi` | OpenJDK 25.0.5.1 (UBI 10 `openjdk-25-runtime:1.24-21`, confirmed with `java -version`), fixed | `-XX:-UseBASE64Intrinsics` on `JDK_JAVA_OPTIONS` |
+| Demo image | Temurin 25.0.5.1+2, fixed | The same flag on the `java` ENTRYPOINT |
+| Keycloak 26.8.2, pinned by digest (compose `auth` overlay, Helm, kustomize `auth` overlay) | OpenJDK 21.0.13.1 (confirmed with `java -version`), fixed | `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` |
+
+Images built before these pins (every EDDI image up to and including 6.7.0, Keycloak 26.8.0, and any `26.8.2` pulled before 2026-11-19, when that tag was rebuilt) carry a vulnerable JDK.
 
 The flag switches off only the vulnerable path: Base64 decoding falls back to plain Java. `-XX:UseAVX=2` is Red Hat's alternative, but a JVM on ARM64 refuses to start with it.
 
@@ -531,7 +561,9 @@ grep -o avx512vbmi /proc/cpuinfo | head -1                                      
 docker exec <container> sh -c 'tr "\0" "\n" < /proc/1/cmdline | grep -x -e -XX:-UseBASE64Intrinsics'   # expect: the flag, printed back
 ```
 
-Remove the flag from all five places, and delete `Java4ShellMitigationTest`, only when **all three** pinned bases carry a fixed JDK: the UBI `openjdk-25-runtime` digest (25.0.5.1 or later), the `eclipse-temurin:25-jre` digest of the demo image (25.0.5.1 or later) and the Keycloak image (JDK 21.0.13.1 or later). Moving one pin does not fix the others. The test fails the build whenever the flag is missing, so it goes in the same change.
+### Removing the flag
+
+The pins above meet the condition below, and `java -version` inside each pinned image confirmed it on 2026-11-21 (25.0.5.1, 25.0.5.1+2 and 21.0.13.1). The flag still protects a deployment that overrides the Keycloak image or still runs an earlier pull of the same tag, so it is removed in a change of its own. Remove the flag from all five places, and delete `Java4ShellMitigationTest`, only when **all three** pinned bases carry a fixed JDK: the UBI `openjdk-25-runtime` digest (25.0.5.1 or later), the `eclipse-temurin:25-jre` digest of the demo image (25.0.5.1 or later) and the Keycloak image (JDK 21.0.13.1 or later). Moving one pin does not fix the others. The test fails the build whenever the flag is missing, so it goes in the same change.
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
@@ -564,6 +596,20 @@ identity is captured while the request context is live and bound to the
 executing thread by `CallerIdentityContext`, always cleared in a `finally` —
 those threads are reused across conversations, so a leaked binding would be
 readable by the next caller's turn.
+
+**Team subjects travel as a snapshot.** The captured identity also carries the
+caller's team subjects (`team:<group path>`, the personal space excluded), read
+from the request's token with the same derivation the REST access checks use
+(`CallerSpaces.teamSubjectsOf`). That snapshot is what code running inside a turn
+— a tool on a virtual thread, where no token can be read — asks for the current
+caller's teams. It is taken once at the request boundary, never refreshed during
+the turn, never persisted, and never filled from the user directory's last-seen
+memberships. It fails closed: a turn without a request token behind it
+(a schedule, a team cadence, a HITL resume approved by somebody other than the
+conversation's owner) has no teams. An approver who is not the owner is bound
+without their teams, so the calls they approved run with their token but never
+admit the owner's turn through a team only the approver belongs to.
+`CallerIdentity.toString()` names neither the token nor any team.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
