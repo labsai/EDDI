@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.groups.IRestGroupTemplates.InstantiateRequest;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +24,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -103,5 +106,28 @@ class RestGroupTemplatesTest {
     void instantiate_unknownTemplate_400() throws Exception {
         assertEquals(400, rest.instantiate("no-such", new InstantiateRequest(null, Map.of())).getStatus());
         verify(groupStore, never()).createGroup(any());
+    }
+
+    /**
+     * The store refuses a member agent the caller may not use with a 403. The
+     * generic catch used to swallow it into a logged 500: the caller saw "server
+     * error" for their own missing access, and every refusal paged an error log.
+     */
+    @Test
+    @DisplayName("an access refusal from the store stays a 403, not a 500")
+    void instantiate_storeAccessRefusal_isRethrown() throws Exception {
+        when(groupStore.createGroup(any())).thenThrow(new ForbiddenException("denied"));
+
+        assertThrows(ForbiddenException.class,
+                () -> rest.instantiate("research-pod", new InstantiateRequest("My Pod", assignments("research-pod"))));
+    }
+
+    @Test
+    @DisplayName("a JAX-RS status the store chose is kept, not turned into a 500")
+    void instantiate_storeWebApplicationException_isRethrown() throws Exception {
+        when(groupStore.createGroup(any())).thenThrow(new BadRequestException("invalid config"));
+
+        assertThrows(BadRequestException.class,
+                () -> rest.instantiate("research-pod", new InstantiateRequest("My Pod", assignments("research-pod"))));
     }
 }

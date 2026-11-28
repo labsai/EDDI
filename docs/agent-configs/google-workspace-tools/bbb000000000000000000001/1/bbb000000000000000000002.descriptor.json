@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.rules/rulestore/rulesets/bbb000000000000000000002?version=1",
+  "name" : "Google Workspace Assistant (recipe)",
+  "description" : "Every input goes to the LLM task",
+  "deleted" : false
+}

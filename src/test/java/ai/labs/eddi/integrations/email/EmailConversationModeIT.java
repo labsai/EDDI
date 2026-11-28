@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
@@ -164,12 +165,6 @@ class EmailConversationModeIT {
         SenderAuthenticator authenticator = mock(SenderAuthenticator.class);
         when(authenticator.authenticate(any(), any(), any(), any()))
                 .thenReturn(new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com"));
-        EmailInboundProcessor processor = new EmailInboundProcessor(ledger, state, new MimeMessageParser(new HtmlToMarkdownConverter()),
-                authenticator, conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
-                new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), mock(Instance.class),
-                mock(EmailOwnerNotifier.class),
-                new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
-
         ConnectionResolver resolver = mock(ConnectionResolver.class);
         when(resolver.authTypeOf("${connection:mailbox}")).thenReturn(Optional.of(AuthType.BASIC));
         when(resolver.resolveBasicLogin(eq("${connection:mailbox}"), any())).thenReturn(new ConnectionResolver.BasicLogin(MAILBOX, PASSWORD));
@@ -195,8 +190,13 @@ class EmailConversationModeIT {
         EmailReplySender replies = new EmailReplySender(ledger, suppressions, directory, conversations, transport,
                 new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())),
                 mock(EmailOwnerNotifier.class),
-                null, new SimpleMeterRegistry(), Runnable::run, Duration.ofDays(30), 3, Duration.ofMinutes(1));
-        processor.replies = replies;
+                mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Runnable::run, Duration.ofDays(30), 3,
+                Duration.ofMinutes(1));
+        EmailInboundProcessor processor = new EmailInboundProcessor(ledger, state, new MimeMessageParser(new HtmlToMarkdownConverter()),
+                authenticator, conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
+                new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), mock(Instance.class),
+                mock(EmailOwnerNotifier.class), replies, mock(Instance.class), mock(GdprPseudonymizer.class),
+                new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
         poller = new EmailMailboxPoller(directory, processor, state, transport, mock(EmailPollScheduler.class), mock(EmailOwnerNotifier.class),
                 new SimpleMeterRegistry(), 50, Duration.ofMinutes(2));
         sweeper = new EmailInboundSweeper(ledger, conversations, directory, mock(EmailPollScheduler.class), mock(EmailOwnerNotifier.class),

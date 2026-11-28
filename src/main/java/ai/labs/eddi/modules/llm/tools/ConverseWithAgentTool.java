@@ -29,15 +29,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
- * per-invocation by {@code AgentOrchestrator} with the conversation service and
- * user identity.
+ * per-invocation by {@code DynamicAgentToolsProvider} with the conversation
+ * service and user identity.
  *
  * <p>
  * Supports both single-turn (fire-and-forget) and multi-turn conversations.
@@ -51,7 +50,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class ConverseWithAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(ConverseWithAgentTool.class);
@@ -88,11 +88,13 @@ public class ConverseWithAgentTool {
     private final Integer inheritedMaxDepth;
 
     /**
-     * Delegations performed by this tool instance. The instance is built per
-     * {@code buildToolList} call (i.e. per LLM task execution), so this bounds
-     * {@code maxDelegationsPerTask} — finding I4.
+     * Delegations this LLM task has made this turn, bounded by
+     * {@code maxDelegationsPerTask} — finding I4. Not a count of this instance: a
+     * turn builds a new instance per tool assembly (each cascade step, a HITL
+     * resume), so {@code DynamicAgentToolsProvider} passes a count kept on the
+     * conversation step.
      */
-    private final AtomicInteger delegationCount = new AtomicInteger();
+    private final TurnCounter delegationCount;
 
     /**
      * {@code (agentId, principal) -> may that principal use that agent}, asked
@@ -163,6 +165,19 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, TurnCounter.local());
+    }
+
+    /**
+     * @param delegationCount
+     *            the count {@code maxDelegationsPerTask} bounds. Pass
+     *            {@link TurnCounter#onStep} so every instance built for the task
+     *            during one turn spends the same budget; {@code null} counts per
+     *            instance.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount) {
+        this.delegationCount = delegationCount != null ? delegationCount : TurnCounter.local();
         this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
         this.conversationService = conversationService;
@@ -224,7 +239,7 @@ public class ConverseWithAgentTool {
             }
 
             // --- Guardrail: delegations per task (finding I4) ---
-            if (delegationCount.incrementAndGet() > config.getMaxDelegationsPerTask()) {
+            if (delegationCount.increment() > config.getMaxDelegationsPerTask()) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: maxDelegationsPerTask=%d exhausted",
                         agentId, config.getMaxDelegationsPerTask());
                 return "⚠️ Maximum delegations for this task (%d) reached.".formatted(config.getMaxDelegationsPerTask());
@@ -338,9 +353,13 @@ public class ConverseWithAgentTool {
             }
 
             String response = extractResponse(snapshot);
-            if (response == null && snapshot != null
+            if ((response == null || response.isEmpty()) && snapshot != null
                     && snapshot.getConversationState() == ConversationState.ERROR) {
-                response = "[Agent failed to produce output — conversation entered ERROR state]";
+                // A failure, reported as one — never as text the delegating model
+                // could take for the other agent's answer.
+                LOGGER.warnf("[CONVERSE] Agent '%s' ended in ERROR without an answer in conversation '%s'", agentId, convId);
+                return "❌ Agent '%s' failed to produce an answer: its conversation (%s) ended in ERROR. This is not the agent's "
+                        .formatted(agentId, convId) + "answer; retry later or proceed without it.";
             }
 
             LOGGER.debugf("[CONVERSE] Agent '%s' responded in conversation '%s'", agentId, convId);
@@ -414,6 +433,8 @@ public class ConverseWithAgentTool {
                 .toList();
     }
 
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     /**
      * Refuses when a model-supplied {@code conversationId} belongs to a user other
      * than the one this tool is bound to.
@@ -430,8 +451,6 @@ public class ConverseWithAgentTool {
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
      */
-    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
-
     private String refuseIfNotOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
             // Fail closed: with no bound identity there is nothing to compare the

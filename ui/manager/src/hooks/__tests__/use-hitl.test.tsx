@@ -7,8 +7,8 @@ import {
   useAllGroupPendingApprovals,
   useApprovalStatus,
   useResumeConversation,
-} from "@/hooks/use-hitl";
-import { useChatStore } from "@/hooks/use-chat";
+} from "@eddi/app-kit/hooks/use-hitl";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 afterEach(() => act(() => useChatStore.getState().reset()));
 

@@ -38,6 +38,9 @@ final class McpToolUtils {
     /**
      * Check that the current caller has the required role. When authorization is
      * disabled ({@code authEnabled=false}), no check is performed.
+     * <p>
+     * No MCP tool gate uses this any more: each tool calls {@link #requireAnyRole}
+     * with its tier from {@link McpToolTiers}.
      *
      * @param identity
      *            the current security identity
@@ -152,7 +155,8 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse a string to a boolean, defaulting to false.
+     * Parse a string to a boolean: {@code defaultValue} when null or blank, else
+     * whether it is {@code "true"} (case-insensitive).
      */
     static boolean parseBooleanOrDefault(String value, boolean defaultValue) {
         if (value == null || value.isBlank()) {
@@ -376,8 +380,8 @@ final class McpToolUtils {
      * caller, describing what the caller got wrong. A 5xx entity is not written to
      * that contract and can carry endpoint, datastore or configuration detail, so
      * it falls through to the message below and is never lifted verbatim. Every MCP
-     * tool that reaches this point is already behind {@code requireRole}, but "the
-     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * tool that reaches this point is already behind its role gate, but "the caller
+     * is an admin" is a reason to answer usefully, not a reason to stop
      * distinguishing the two.
      */
     static String describe(Throwable cause) {
@@ -400,11 +404,14 @@ final class McpToolUtils {
      * when there is none), otherwise {@link #errorJson(String, String, Map)} with
      * the resource's own text. A body {@code {"error": "<CODE>", "message": "…"}}
      * keeps its code; a body {@code {"error": "<sentence>"}} — the shape of the
-     * team-handoff and team-budget resources — keeps the sentence, and the code
-     * follows the status (400 {@code BAD_REQUEST}, 403 {@code FORBIDDEN}, 404
-     * {@code NOT_FOUND}, 409 {@code CONFLICT}, 503 {@code UNAVAILABLE}, anything
-     * else {@code INTERNAL}). A 5xx without a body says only that the request
-     * failed: the resource has logged it.
+     * team-handoff and team-budget resources — or a plain-text body — the shape of
+     * the schedule resource's refusals — keeps the sentence, and the code follows
+     * the status (400 {@code BAD_REQUEST}, 403 {@code FORBIDDEN}, 404
+     * {@code NOT_FOUND}, 409 {@code CONFLICT}, 503 {@code UNAVAILABLE}, 504
+     * {@code TIMEOUT}, anything else {@code INTERNAL}). Either body is one the
+     * resource built and returned, not an exception's text, so it is kept on a 5xx
+     * too. A 5xx without a body says only that the request failed: the resource has
+     * logged it.
      */
     static String responseJson(IJsonSerialization jsonSerialization, Response response) throws IOException {
         if (response == null) {
@@ -421,6 +428,7 @@ final class McpToolUtils {
             case 404 -> "NOT_FOUND";
             case 409 -> "CONFLICT";
             case 503 -> "UNAVAILABLE";
+            case 504 -> "TIMEOUT";
             default -> "INTERNAL";
         };
         String message = "The request failed (HTTP " + status + ")";
@@ -431,6 +439,8 @@ final class McpToolUtils {
             } else {
                 message = error;
             }
+        } else if (entity instanceof String text && !text.isBlank()) {
+            message = text;
         }
         return errorJson(message, code, null);
     }

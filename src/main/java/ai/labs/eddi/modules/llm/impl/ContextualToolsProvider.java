@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
+import ai.labs.eddi.engine.memory.ContestedMemoryMarker;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
+import ai.labs.eddi.modules.llm.tools.TurnCounter;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import ai.labs.eddi.modules.llm.tools.impl.ReadAttachmentTool;
@@ -45,6 +47,9 @@ import java.util.Collections;
  * {@code addUserMemoryToolIfEnabled} /
  * {@code addConversationRecallToolIfEnabled} /
  * {@code addReadAttachmentToolIfEnabled} as a pure move — no behavior change.
+ * {@link #contribute} emits only the first two; {@code readAttachment} is
+ * assembled by {@link AttachmentToolsProvider}, which delegates the
+ * construction back here.
  * <p>
  * Grouped into one provider rather than three because they share a single
  * defining property: each is enabled by what the <em>conversation</em>
@@ -65,6 +70,12 @@ import java.util.Collections;
 class ContextualToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(ContextualToolsProvider.class);
+
+    /**
+     * Step-data key of this turn's user-memory write count
+     * ({@code maxWritesPerTurn}).
+     */
+    static final String KEY_MEMORY_WRITES = "tools:memory_writes";
 
     private final IUserMemoryStore userMemoryStore;
     private final IAttachmentStore attachmentStore;
@@ -175,20 +186,6 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     /**
-     * Says out loud that an agent asked for persistent memory and this task will
-     * not give it any.
-     * <p>
-     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
-     * configuration files — the agent's {@code enableMemoryTools}, its
-     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
-     * failing any part produced no output at all. An agent designer who enabled
-     * memory and got none had nothing to read: no error, no log line, and a model
-     * that cheerfully claimed to have saved things it had not. The conflict is
-     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
-     * a task-level statement that this task gets no built-in capability, and user
-     * memory is a cross-conversation write), but it must be visible.
-     */
-    /**
      * Whether the memory-misconfiguration warning should be emitted for this agent.
      * <p>
      * A missing agent id maps to a stable fallback key rather than bypassing
@@ -203,6 +200,20 @@ class ContextualToolsProvider implements ToolSourceProvider {
         return MEMORY_MISCONFIGURATION_WARNED.add(agentId != null ? agentId : "<no-agent-id>");
     }
 
+    /**
+     * Says out loud that an agent asked for persistent memory and this task will
+     * not give it any.
+     * <p>
+     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
+     * configuration files — the agent's {@code enableMemoryTools}, its
+     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
+     * failing any part produced no output at all. An agent designer who enabled
+     * memory and got none had nothing to read: no error, no log line, and a model
+     * that cheerfully claimed to have saved things it had not. The conflict is
+     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
+     * a task-level statement that this task gets no built-in capability, and user
+     * memory is a cross-conversation write), but it must be visible.
+     */
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
         if (!ctx.memory().isMemoryToolsEnabled() || ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
@@ -243,8 +254,14 @@ class ContextualToolsProvider implements ToolSourceProvider {
 
         List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);
 
+        // The write budget is counted on the step, not on the tool: this method runs
+        // once per tool assembly, and a turn assembles once per cascade step and again
+        // on a HITL resume.
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
-                memory::isCancelled);
+                memory::isCancelled, TurnCounter.onStep(memory, KEY_MEMORY_WRITES),
+                // A fact the tool wrote is stored ACCEPTED: it is no longer contested
+                // in this conversation, though its conversation property is unchanged.
+                key -> ContestedMemoryMarker.lift(memory.getConversationProperties(), Set.of(key)), memory.isPeerVerificationRequired());
         tools.add(tool);
         // Conversation id, not user id: sanitize() strips control characters, it does
         // not make an identifier non-personal, and this line fires on every turn that

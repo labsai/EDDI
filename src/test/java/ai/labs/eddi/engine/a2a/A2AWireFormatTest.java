@@ -143,6 +143,19 @@ class A2AWireFormatTest {
         }
 
         @Test
+        void identifiersWithControlCharactersAreInvalidParams() {
+            var parts = List.of(Map.of("kind", "text", "text", "hi"));
+            String withControl = "ab" + (char) 1 + "cd";
+
+            for (String key : List.of("contextId", "taskId", "messageId")) {
+                Map<String, Object> params = Map.of("message", Map.of("parts", parts, key, withControl));
+                var e = assertThrows(InvalidA2ARequestException.class, () -> A2AWireFormat.parseSend(params, Dialect.V1_0), key);
+                assertEquals(A2AModels.ERROR_INVALID_PARAMS, e.getCode());
+            }
+            assertThrows(InvalidA2ARequestException.class, () -> A2AWireFormat.requireTaskId(Map.of("id", withControl)));
+        }
+
+        @Test
         void requestIdShapes() {
             assertTrue(A2AWireFormat.isAcceptableRequestId(null));
             assertTrue(A2AWireFormat.isAcceptableRequestId(7));

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -89,7 +90,7 @@ class RestGroupConversationApproverScopeTest {
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, mock(IConversationDescriptorStore.class),
                 mock(IConversationService.class), groupService);
         rest = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
 
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
@@ -320,9 +321,24 @@ class RestGroupConversationApproverScopeTest {
 
             Response response = rest.cancelDiscussion(GROUP_ID, GC_ID);
 
-            assertEquals(200, response.getStatus());
+            // K2: still running — the cancel was accepted, it has not landed yet
+            assertEquals(202, response.getStatus());
             assertEquals(gc, response.getEntity());
             verify(groupService, never()).cancelPausedDiscussion(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("S5: a cancel that lands after the discussion finished answers 200 with the state it ended in")
+        void cancelAfterTheDiscussionFinished_saysHowItEnded() throws Exception {
+            var gc = gc(GroupConversationState.COMPLETED);
+            as(OWNER_ID);
+            when(groupService.cancelDiscussion(eq(GC_ID), any())).thenReturn(true);
+
+            Response response = rest.cancelDiscussion(GROUP_ID, GC_ID);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(GroupConversationState.COMPLETED, ((GroupConversation) response.getEntity()).getState());
+            assertEquals(gc, response.getEntity());
         }
 
         @Test

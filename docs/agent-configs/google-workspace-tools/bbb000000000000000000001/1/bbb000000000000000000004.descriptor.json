@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.apicalls/apicallstore/apicalls/bbb000000000000000000004?version=1",
+  "name" : "Google Drive tools",
+  "description" : "searchDrive, readDriveFile against www.googleapis.com/drive/v3 with the user's own grant. Read-only.",
+  "deleted" : false
+}

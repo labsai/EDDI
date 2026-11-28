@@ -8,12 +8,16 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -27,15 +31,19 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.Convers
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -66,6 +74,7 @@ class GroupLifecycleOpsTest {
     private IAgentFactory agentFactory;
     private IAgentStore agentStore;
     private IGroupConversationStore conversationStore;
+    private IDeploymentStore deploymentStore;
 
     private ISharedArtifactStore sharedArtifactStore;
     private IAttachmentStore attachmentStore;
@@ -74,10 +83,11 @@ class GroupLifecycleOpsTest {
         agentFactory = mock(IAgentFactory.class);
         agentStore = mock(IAgentStore.class);
         conversationStore = mock(IGroupConversationStore.class);
+        deploymentStore = mock(IDeploymentStore.class);
         sharedArtifactStore = mock(ISharedArtifactStore.class);
         attachmentStore = mock(IAttachmentStore.class);
         return new GroupLifecycleOps(conversationStore, mock(IAgentGroupStore.class),
-                mock(IConversationService.class), agentFactory, agentStore, mock(IDeploymentStore.class),
+                mock(IConversationService.class), agentFactory, agentStore, deploymentStore,
                 sharedArtifactStore, attachmentStore,
                 ConcurrentHashMap.newKeySet(), new ConcurrentHashMap<String, DiscussionControlToken>(),
                 Mockito.mock(GroupConversationService.class),
@@ -154,6 +164,59 @@ class GroupLifecycleOpsTest {
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
         verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_undeployOnlyPolicy_marksTheDeploymentRecordsUndeployed() throws Exception {
+        // A record left saying deployed is redeployed by the next deployment sweep,
+        // which deploys what is recorded and no longer served.
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production),
+                record(AGENT_A, 2, Environment.production), record(AGENT_A, 1, Environment.test), record("other", 1, Environment.production)));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.undeployed);
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 2, DeploymentStatus.undeployed);
+        verify(deploymentStore, never()).setDeploymentInfo(eq("test"), any(), any(), any());
+        verify(deploymentStore, never()).setDeploymentInfo(any(), eq("other"), any(), any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_flipsTheRecordsBeforeLeavingTheRegistry() throws Exception {
+        // The sweep deploys what is recorded deployed and not served: a sweep between a
+        // registry drop and the record write would deploy the agent again.
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production)));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+
+        var order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(Environment.production, AGENT_A, null);
+    }
+
+    @Test
+    void cleanupEphemeralAgents_failedRegistryRemovalPutsTheRecordsBack() throws Exception {
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production)));
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(Environment.production, AGENT_A, null);
+        // Deletion-eligible, so the never() below fails if cleanup carries on after the
+        // throw.
+        stubOrigin(AGENT_A, "gc-1");
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.deployed);
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    private static DeploymentInfo record(String agentId, int version, Environment environment) {
+        var info = new DeploymentInfo();
+        info.setAgentId(agentId);
+        info.setAgentVersion(version);
+        info.setEnvironment(environment);
+        return info;
     }
 
     @Test
@@ -400,6 +463,81 @@ class GroupLifecycleOpsTest {
     }
 
     @Test
+    void failConversation_aRoundFailsAfterAnEarlierAnswer_staysCompletedAndContinuable() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+
+        ops.failConversation(gc);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState(), "round 1 answered: the discussion stays continuable");
+        assertEquals(GroupConversation.DiscussionOutcome.FAILED, gc.getOutcome(), "the outcome still describes the failed round");
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+    }
+
+    @Test
+    void failConversation_alreadyTerminal_restoresTheOutcomeWithTheState() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        var persisted = gc();
+        persisted.setState(GroupConversationState.CANCELLED);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+
+        ops.failConversation(gc);
+
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+        assertNull(gc.getOutcome(), "no FAILED outcome next to a CANCELLED state the persisted record never got");
+        assertNull(gc.getOutcomeReason());
+    }
+
+    private static double unanswered(SimpleMeterRegistry registry) {
+        return registry.find(DiscussionOutcomes.METER_UNANSWERED).counters().stream().mapToDouble(c -> c.count()).sum();
+    }
+
+    /** What failConversation adds to the unanswered meter. */
+    private double unansweredAfterFailing(GroupConversationState persistedState, Exception writeFailure) throws Exception {
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            var ops = ops();
+            var gc = gc();
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = gc();
+            persisted.setState(persistedState);
+            doReturn(persisted).when(conversationStore).read("gc-1");
+            if (writeFailure != null) {
+                doThrow(writeFailure).when(conversationStore).updateIfState(any(), any());
+            }
+            ops.failConversation(gc);
+            return unanswered(registry);
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    @Test
+    void failConversation_countsTheFailedRoundAsUnanswered_onceTheWriteCommits() throws Exception {
+        assertEquals(1.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, null));
+    }
+
+    @Test
+    void failConversation_aCancelAlreadyStored_isNotAnUnansweredRound() throws Exception {
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.CANCELLED, null));
+    }
+
+    @Test
+    void failConversation_aLostConditionalWrite_isNotAnUnansweredRound() throws Exception {
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, new IResourceStore.ResourceModifiedException("lost")));
+        assertEquals(0.0, unansweredAfterFailing(GroupConversationState.IN_PROGRESS, new IResourceStore.ResourceStoreException("down")));
+    }
+
+    @Test
     void failConversation_storeReadThrows_fallsBackToInMemoryState() throws Exception {
         var ops = ops();
         var gc = gc();
@@ -408,6 +546,120 @@ class GroupLifecycleOpsTest {
 
         assertDoesNotThrow(() -> ops.failConversation(gc));
         verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+    }
+
+    // =================================================================
+    // A failed round that stays COMPLETED: its pause bookkeeping must not
+    // reach the next round
+    // =================================================================
+
+    /**
+     * The state a round 2 leaves behind when it paused at an approval gate after N
+     * turns, was approved, and its resumed leg then failed: round 1 answered, the
+     * run is IN_PROGRESS, and the pause's turn count and fingerprint are still set
+     * (the resume preserves pausedTurnCount to seed the resumed leg's counter).
+     */
+    private GroupConversation resumedRoundThatFails() {
+        var gc = completedGc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setRound(2);
+        gc.setAnsweredRounds(1);
+        gc.setPausedTurnCount(17);
+        gc.setHitlLastPauseFingerprint("phase-1|task-a,");
+        return gc;
+    }
+
+    private IAgentGroupStore continueGroupStore;
+
+    /**
+     * Ops whose continueDiscussion reaches a mocked executeDiscussion, which
+     * records the pausedTurnCount it was handed — the value its turn counter is
+     * seeded from.
+     */
+    private GroupLifecycleOps continueOps(GroupConversation stored, AtomicInteger seededTurnCount,
+                                          AtomicReference<String> seededFingerprint)
+            throws Exception {
+        conversationStore = mock(IGroupConversationStore.class);
+        continueGroupStore = mock(IAgentGroupStore.class);
+        var facade = Mockito.mock(GroupConversationService.class);
+        when(conversationStore.read("gc-1")).thenReturn(stored);
+        when(conversationStore.compareAndSetState(eq("gc-1"), any(), any())).thenReturn(true);
+        IResourceStore.IResourceId groupResource = mock(IResourceStore.IResourceId.class);
+        when(groupResource.getVersion()).thenReturn(1);
+        when(continueGroupStore.getCurrentResourceId("group-1")).thenReturn(groupResource);
+        var config = new AgentGroupConfiguration();
+        when(continueGroupStore.read("group-1", 1)).thenReturn(config);
+        when(facade.resolvePhases(config)).thenReturn(List.of(new DiscussionPhase("Opinion", PhaseType.OPINION)));
+        when(facade.executeDiscussion(any(), any(), any(), any(), any(), anyInt())).thenAnswer(inv -> {
+            GroupConversation g = inv.getArgument(0);
+            seededTurnCount.set(g.getPausedTurnCount());
+            seededFingerprint.set(g.getHitlLastPauseFingerprint());
+            return g;
+        });
+        return new GroupLifecycleOps(conversationStore, continueGroupStore, mock(IConversationService.class),
+                mock(IAgentFactory.class), mock(IAgentStore.class), mock(IDeploymentStore.class),
+                mock(ISharedArtifactStore.class), mock(IAttachmentStore.class), ConcurrentHashMap.newKeySet(),
+                new ConcurrentHashMap<String, DiscussionControlToken>(), facade,
+                new SimpleMeterRegistry().counter("test.followup"), new SimpleMeterRegistry().counter("test.continue"),
+                new SimpleMeterRegistry().counter("test.close"), new SimpleMeterRegistry().counter("test.failure"));
+    }
+
+    @Test
+    void failConversation_thatStaysCompleted_clearsThePauseBookkeepingOfTheFailedRound() throws Exception {
+        var ops = ops();
+        var gc = resumedRoundThatFails();
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+        // What the conditional write receives, captured when it is made.
+        var written = new AtomicReference<List<Object>>();
+        doAnswer(inv -> {
+            GroupConversation doc = inv.getArgument(0);
+            written.set(Arrays.asList(doc.getState(), doc.getPausedTurnCount(), doc.getHitlLastPauseFingerprint()));
+            return null;
+        }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.IN_PROGRESS));
+
+        ops.failConversation(gc);
+
+        assertEquals(Arrays.asList(GroupConversationState.COMPLETED, 0, null), written.get(),
+                "a continuable COMPLETED discussion must not be stored with the failed round's turn count or fingerprint");
+    }
+
+    @Test
+    void continueDiscussion_afterAPausedRoundFailedOnResume_startsTheNewRoundsTurnCounterAtZero() throws Exception {
+        // Round 2 paused after 17 turns, was approved, and its resumed leg failed.
+        var failedRound = resumedRoundThatFails();
+        var ops = ops();
+        var persisted = gc();
+        persisted.setState(GroupConversationState.IN_PROGRESS);
+        doReturn(persisted).when(conversationStore).read("gc-1");
+        ops.failConversation(failedRound);
+        assertEquals(GroupConversationState.COMPLETED, failedRound.getState(), "round 1 answered: continuable");
+
+        // Round 3 continues the document exactly as failConversation left it.
+        var seeded = new AtomicInteger(-1);
+        var fingerprint = new AtomicReference<String>("unset");
+        continueOps(failedRound, seeded, fingerprint).continueDiscussion("gc-1", "round three?", null);
+
+        assertEquals(0, seeded.get(), "the new round's turn counter must start at zero, not at the failed round's count");
+        assertNull(fingerprint.get(), "the new round's no-progress guard must start clean");
+    }
+
+    @Test
+    void continueDiscussion_ofADocumentStoredWithStalePauseState_resetsItBeforeTheRoundRuns() throws Exception {
+        // A COMPLETED document written before failConversation cleared these.
+        var stored = completedGc();
+        stored.setRound(2);
+        stored.setAnsweredRounds(1);
+        stored.setPausedTurnCount(17);
+        stored.setHitlLastPauseFingerprint("phase-1|task-a,");
+        var seeded = new AtomicInteger(-1);
+        var fingerprint = new AtomicReference<String>("unset");
+
+        continueOps(stored, seeded, fingerprint).continueDiscussion("gc-1", "round three?", null);
+
+        assertEquals(0, seeded.get(), "a COMPLETED discussion is never paused: its stored turn count belongs to an earlier round");
+        assertNull(fingerprint.get());
     }
 
     @Test
@@ -460,6 +712,43 @@ class GroupLifecycleOpsTest {
                 () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
 
         verify(followUpConversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void followUp_thatFails_keepsTheSpendAndCreatedAgents_butNotTheQuestion() throws Exception {
+        var gc = completedGc();
+        var ops = followUpOps(gc);
+        int transcriptBefore = gc.getTranscript().size();
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId("member-conv");
+        snapshot.setConversationState(ConversationState.ERROR);
+        snapshot.setConversationCost(0.25);
+        var step = new SimpleConversationStep();
+        step.getConversationStep().add(new ConversationStepData(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS,
+                new CopyOnWriteArrayList<>(List.of("sub-1")), null, null));
+        snapshot.getConversationSteps().add(step);
+        when(followUpFacade.extractResponse(any())).thenReturn(null);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(followUpConversationService).say(any(), eq(AGENT_A), eq("member-conv"), any(), any(), any(), any(),
+                anyBoolean(), any());
+        // What the conditional write receives, captured when it is made: the document
+        // is mutable, so reading it after the call returns proves nothing about it.
+        var written = new AtomicReference<List<Object>>();
+        doAnswer(inv -> {
+            GroupConversation doc = inv.getArgument(0);
+            written.set(List.of(doc.getTotalCost(), List.copyOf(doc.getCreatedAgentIds()), doc.getTranscript().size(), doc.getState()));
+            return null;
+        }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.IN_PROGRESS));
+
+        assertThrows(IGroupConversationService.GroupExecutionException.class, () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
+
+        // The failed turn cost money and created an agent: both are written
+        // (conditionally, on the run state) so later ceilings and cleanup see them —
+        // but no answer and no question are recorded.
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        assertEquals(List.of(0.25, List.of("sub-1"), transcriptBefore, GroupConversationState.COMPLETED), written.get());
     }
 
     @Test

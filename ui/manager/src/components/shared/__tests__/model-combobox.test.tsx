@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ModelCombobox } from "@/components/shared/model-combobox";
 
 const MODELS = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5", "claude-sonnet-4-6"];

@@ -28,7 +28,9 @@ import java.util.List;
  * unauthenticated and this filter enforces the shared API key. Necessary
  * because Open WebUI sends an opaque {@code sk-…} secret, which the OIDC
  * mechanism would reject as a malformed JWT long before any application code
- * ran.</li>
+ * ran. The {@code permit} permission alone does not prevent that, because
+ * authentication is proactive; {@link OpenAiPermitModeAuthMechanism} is what
+ * keeps OIDC from verifying the key.</li>
  * <li><b>{@code authenticated}</b> — Quarkus OIDC has already validated a real
  * bearer token; this filter requires it to hold one of
  * {@link #CONVERSING_ROLES} (with {@code authorization.enabled=true}) and reads

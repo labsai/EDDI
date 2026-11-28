@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -97,7 +98,8 @@ class RestAgentStoreExtendedTest {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
                 documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
-                permissiveGuard(), mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
+                permissiveGuard(), mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class),
+                mock(VaultGrantService.class));
         // The Agent is live at v1. A cascade only runs against the CURRENT version —
         // it tears workflows and schedules down before the delete's own version check.
         when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(createResourceId(AGENT_ID, 1));
@@ -551,21 +553,22 @@ class RestAgentStoreExtendedTest {
             identity.setKeys(List.of()); // empty
             config.setIdentity(identity);
 
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+            var e = assertThrows(BadRequestException.class,
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
+            assertTrue(e.getMessage().contains("declares none"), e.getMessage());
         }
 
         @Test
-        @DisplayName("null identity with crypto enabled throws BadRequestException")
+        @DisplayName("null identity with signing enabled throws BadRequestException")
         void nullIdentity() {
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
-            security.setRequirePeerVerification(true);
+            security.setSignInterAgentMessages(true);
             config.setSecurity(security);
             config.setIdentity(null);
 
             assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
         }
     }
 

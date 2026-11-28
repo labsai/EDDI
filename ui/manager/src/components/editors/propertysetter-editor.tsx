@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { ActionTags } from "./action-tags";
+import { ActionTags } from "@eddi/app-kit/components/editors/action-tags";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
-import "@/lib/monaco-setup";
+import "@eddi/app-kit/lib/monaco-setup";
 import Editor from "@monaco-editor/react";
-import { PropertyValueField } from "./property-value-field";
+import { PropertyValueField } from "@eddi/app-kit/components/editors/property-value-field";
 
 // ─── Types matching PropertySetterConfiguration backend model ────────────────
 

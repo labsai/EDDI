@@ -55,7 +55,7 @@ import java.util.regex.Pattern;
  * replace to run fully offline.
  * <p>
  * Never throws: every failure is a {@link Status}. Thread-safe; a
- * {@link Budget} is per message and not.
+ * {@link Budget} is per message and is not.
  */
 @ApplicationScoped
 public class MailDnsResolver {

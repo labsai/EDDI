@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
@@ -113,7 +114,7 @@ class VaultSecretProviderTest {
      */
     private EncryptedSecret createEncryptedSecret(String plaintext, byte[] dek) {
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encrypt(plaintext, dek);
-        String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+        String checksum = VaultChecksum.legacy(plaintext);
         return new EncryptedSecret(
                 "secret-id-1", TENANT_ID, KEY_NAME,
                 encResult.ciphertext(), encResult.iv(),
@@ -463,6 +464,38 @@ class VaultSecretProviderTest {
         assertEquals("key-b", result.get(1).keyName());
         assertEquals("desc-a", result.get(0).description());
         assertEquals(List.of("agent-x"), result.get(1).allowedAgents());
+    }
+
+    // ─── 18b. listTenants ───
+
+    /**
+     * The sweep that removes a deleted agent from every grant relies on this list:
+     * a tenant missing here keeps the deleted agent on its grants.
+     */
+    @Test
+    void listTenants_isTheDefaultTenantPlusEveryTenantHoldingADek() throws Exception {
+        VaultSecretProvider provider = createAvailableProvider();
+        Instant now = Instant.now();
+        when(persistence.listAllDeks()).thenReturn(List.of(new EncryptedDek("d1", "space-aaaa", "k", "iv", now),
+                new EncryptedDek("d2", "space-aaaa", 2, "k", "iv", now), new EncryptedDek("d3", "default", "k", "iv", now),
+                new EncryptedDek("d4", "space-bbbb", "k", "iv", now)));
+
+        assertEquals(List.of("default", "space-aaaa", "space-bbbb"), provider.listTenants());
+    }
+
+    @Test
+    void listTenants_withNoDeks_isStillTheDefaultTenant() throws Exception {
+        VaultSecretProvider provider = createAvailableProvider();
+        when(persistence.listAllDeks()).thenReturn(List.of());
+
+        assertEquals(List.of("default"), provider.listTenants());
+    }
+
+    @Test
+    void listTenants_whenNotAvailable_throwsSecretProviderException() {
+        VaultSecretProvider provider = createUnavailableProvider();
+
+        assertThrows(SecretProviderException.class, provider::listTenants);
     }
 
     // ─── 19. rotateDek — no DEK found ───

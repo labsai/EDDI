@@ -135,7 +135,7 @@ The EDDI Manager was completely rewritten in 6.0.1 (React 19 + Vite + Tailwind C
 | Component | 6.0.1 | 6.0.2 |
 |-----------|-------|-------|
 | Java | 25 | 25 |
-| Quarkus | 3.34.1 | 3.34.5 |
+| Quarkus | 3.34.3 | 3.34.5 |
 | langchain4j | 1.13.0 | 1.13.0 |
 | MongoDB (Docker) | 6.0 | 7.0.14 |
 | WireMock | — | 3.13.2 |

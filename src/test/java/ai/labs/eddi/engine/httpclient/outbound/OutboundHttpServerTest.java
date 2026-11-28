@@ -42,6 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * those tests used a Mockito spy to let a redirect reach loopback, these pass a
  * no-op {@link OutboundRequest#hopValidator()} — the same switch, now part of
  * the API.
+ * <p>
+ * Engine-neutral: {@link VertxOutboundHttpServerTest} runs every test here
+ * again on the Vert.x engine.
  */
 class OutboundHttpServerTest {
 
@@ -52,7 +55,12 @@ class OutboundHttpServerTest {
     private HttpServer server;
     private ExecutorService serverThreads;
     private int port;
-    private final OutboundHttp http = OutboundHttp.standalone(Duration.ofSeconds(10));
+    private OutboundHttp http;
+
+    /** The facade under test, over the engine this class covers. */
+    OutboundHttp createFacade() {
+        return OutboundHttp.standalone(Duration.ofSeconds(10));
+    }
 
     @BeforeEach
     void setUp() throws IOException {
@@ -61,10 +69,12 @@ class OutboundHttpServerTest {
         serverThreads = Executors.newCachedThreadPool();
         server.setExecutor(serverThreads);
         port = server.getAddress().getPort();
+        http = createFacade();
     }
 
     @AfterEach
     void tearDown() {
+        http.shutdown();
         server.stop(0);
         serverThreads.shutdownNow();
     }

@@ -35,6 +35,9 @@ import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.concurrent.ConcurrentHashMap;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -650,6 +653,29 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    /**
+     * The default tenant plus every tenant holding a DEK. A secret is sealed under
+     * its tenant's DEK, so a tenant with any secret has one — the DEK listing is
+     * the tenant registry this store already keeps.
+     */
+    @Override
+    public List<String> listTenants() throws SecretProviderException {
+        ensureAvailable();
+        try {
+            Set<String> tenants = new LinkedHashSet<>();
+            tenants.add(SecretReference.DEFAULT_TENANT);
+            for (EncryptedDek dek : persistence.listAllDeks()) {
+                if (dek.getTenantId() != null && !dek.getTenantId().isBlank()) {
+                    tenants.add(dek.getTenantId());
+                }
+            }
+            return List.copyOf(tenants);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while listing the vault's tenants", e);
+        }
+    }
+
     @Override
     public boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
         // Holds the keyed-checksum key, so it can verify both the current keyed form
@@ -664,6 +690,43 @@ public class VaultSecretProvider implements ISecretProvider {
     @Override
     public boolean isAvailable() {
         return available;
+    }
+
+    /**
+     * A 32-byte key for another feature, derived with HKDF-Expand (RFC 5869,
+     * HMAC-SHA256, one block) from the deployment's keyed-checksum key under the
+     * fixed {@code label}. Never stored: it is recomputed from the KEK-wrapped
+     * checksum key, which survives KEK rotation, so the subkey does too — and a
+     * database dump without the master key does not reveal it.
+     * <p>
+     * It does <b>not</b> survive a replaced checksum key. When the checksum key
+     * cannot be opened and is discarded — {@link #adoptCurrentMasterKey} after a
+     * lost master key ({@code checksumKeyReset}), or an empty vault at startup — a
+     * new random one is created and every subkey changes with it. For the erasure
+     * tombstone key ({@code ErasureGuard}) that means its stored check value no
+     * longer matches: guarded writes and erasures fail closed until the operator
+     * resolves it as {@code docs/gdpr-compliance.md} describes.
+     *
+     * @throws IllegalStateException
+     *             when the vault is not available
+     * @throws PersistenceException
+     *             when the checksum key cannot be read or stored
+     * @throws EnvelopeCrypto.CryptoException
+     *             when the stored checksum key cannot be unwrapped
+     */
+    public byte[] deploymentSubkey(String label) {
+        if (!available) {
+            throw new IllegalStateException("The secrets vault is not available");
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(checksumKey(), "HmacSHA256"));
+            mac.update(label.getBytes(StandardCharsets.UTF_8));
+            mac.update((byte) 1);
+            return mac.doFinal();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 unavailable", e);
+        }
     }
 
     // ─── Key Rotation ───
@@ -1372,15 +1435,15 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    /** Tenants already announced as holding unbound sealed data. */
+    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
+
     /**
      * Opens a value sealed through the generic {@code seal} API: bound form first,
      * then — for a value sealed before context binding existed — the unbound form.
      * A {@code null} context means the caller has none to give, so only the unbound
      * form is tried.
      */
-    /** Tenants already announced as holding unbound sealed data. */
-    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
-
     private String openSealedData(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
         byte[] dek = dekFor(tenantId, sealed.dekId());
         if (context == null) {
@@ -1590,7 +1653,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // fail on it for good.
             boolean checksumReset = discardUnopenableChecksumKey();
             LOGGER.warnf("[VAULT] The configured master key was adopted as the vault's master key.%s%s %d tenant(s) hold DEKs it cannot open "
-                    + "and need POST /secretstore/secrets/{tenantId}/reset: %s", systemReset ? " System values were reset." : "",
+                    + "and need POST /secretstore/secrets/{tenantId}/reset?confirm=true: %s", systemReset ? " System values were reset." : "",
                     checksumReset ? " The checksum key was reset." : "", unreadable.size(), sanitize(String.valueOf(unreadable)));
             return new MasterKeyAdoption(List.copyOf(unreadable), systemReset, checksumReset);
         } catch (PersistenceException e) {
@@ -1736,7 +1799,7 @@ public class VaultSecretProvider implements ISecretProvider {
                     + "is lost. " + (pendingMigration
                             ? ""
                             : "Only if the previous master key is lost for good: " + secretInfo + " POST /secretstore/secrets/" + safeTenantId
-                                    + "/reset clears this tenant."),
+                                    + "/reset?confirm=true clears this tenant."),
                     cause);
         }
         throw new SecretProviderException(
@@ -1748,7 +1811,7 @@ public class VaultSecretProvider implements ISecretProvider {
                         + "(2) If you have both old and new keys, use POST /secretstore/secrets/admin/rotate-kek "
                         + "to migrate all encrypted data to the new key. "
                         + "(3) To start fresh (deletes all secrets for this tenant), use "
-                        + "POST /secretstore/secrets/" + safeTenantId + "/reset to clear the vault for this tenant. "
+                        + "POST /secretstore/secrets/" + safeTenantId + "/reset?confirm=true to clear the vault for this tenant. "
                         + "(4) If the previous master key is lost for good, POST /secretstore/secrets/admin/adopt-master-key?confirm=true "
                         + "makes the current key the vault's key, so new DEKs can be created again.",
                 cause);

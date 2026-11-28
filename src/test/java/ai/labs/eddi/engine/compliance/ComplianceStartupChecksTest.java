@@ -102,6 +102,8 @@ class ComplianceStartupChecksTest {
                 "the failure must name the setting that caused it: " + thrown.getMessage());
         assertTrue(thrown.getMessage().contains("HMAC"),
                 "the failure must say what is actually missing: " + thrown.getMessage());
+        // Either key signs the ledger, so "no vault master key" alone is not the cause.
+        assertTrue(thrown.getMessage().contains("neither a vault master key nor eddi.audit.hmac-key"), thrown.getMessage());
     }
 
     @Test

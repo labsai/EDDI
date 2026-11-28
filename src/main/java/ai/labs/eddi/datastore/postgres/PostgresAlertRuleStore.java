@@ -35,7 +35,7 @@ import java.util.Optional;
  * columns that queries filter on ({@code enabled}, {@code all_agents},
  * {@code agent_ids}) and the audit columns are kept beside it.
  *
- * @since 6.6.0
+ * @since 6.7.0
  */
 @ApplicationScoped
 @DefaultBean
@@ -161,6 +161,18 @@ public class PostgresAlertRuleStore implements IAlertRuleStore {
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong(1) : 0;
             }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count alert rules", e);
+        }
+    }
+
+    @Override
+    public long countAllAgents() {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM alert_rules WHERE all_agents");
+                ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getLong(1) : 0;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to count alert rules", e);
         }

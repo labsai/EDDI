@@ -193,6 +193,35 @@ class ContextSuppliedOutputTemplatingTest {
         assertNoSecretInConversationOutput();
     }
 
+    /**
+     * The output task puts the same quick replies into the {@code quickReplies:*}
+     * data entry and into the conversation output. Templating used to replace only
+     * the data entry, so the client was shown the raw template while the next
+     * turn's dictionary — built from the data entry — held the rendered value: a
+     * click on the button the user saw matched nothing.
+     */
+    @Test
+    @DisplayName("authored quick replies are shown rendered, the same value the next turn's dictionary holds")
+    void displayedQuickRepliesAreTemplated() throws Exception {
+        memory.getCurrentStep().storeData(new Data<List<String>>("actions", List.of("named")));
+        var outputGeneration = new OutputGeneration(null);
+        outputGeneration.addOutputEntry(new OutputEntry("named", 0, List.of(new OutputValue(List.of(new TextOutputItem("Hello")))),
+                List.of(new QuickReply("Call {properties.agentName}", "call", false))));
+        // A context quick reply in the same turn stays literal.
+        storeContext("context:quickReplies", List.of(Map.of("value", PROBE)));
+
+        runOutputAndTemplating(outputGeneration);
+
+        IData<List<QuickReply>> data = memory.getCurrentStep().getLatestData("quickReplies:named");
+        var shown = displayedQuickReplies();
+        var shownValues = shown.stream().map(QuickReply::getValue).toList();
+        assertEquals(2, shown.size(), "precondition: one authored and one context quick reply are shown: " + shownValues);
+        assertEquals("Call " + PROBE, data.getResult().getFirst().getValue());
+        assertTrue(shown.contains(data.getResult().getFirst()), "the shown quick reply must be the one the parser will match: " + shownValues);
+        assertTrue(shownValues.contains(PROBE), "the context quick reply is shown literally: " + shownValues);
+        assertFalse(shownValues.contains("Call {properties.agentName}"), "the raw template was shown: " + shownValues);
+    }
+
     @Test
     @DisplayName("a second templating pass does not render what the first one substituted in")
     void secondTemplatingPassDoesNotReRender() throws Exception {
@@ -211,6 +240,7 @@ class ContextSuppliedOutputTemplatingTest {
         assertEquals("Your agent is called " + PROBE, ((TextOutputItem) output.getResult()).getText());
         IData<List<QuickReply>> quickReplies = memory.getCurrentStep().getLatestData("quickReplies:named");
         assertEquals("Call " + PROBE, quickReplies.getResult().getFirst().getValue());
+        assertEquals("Call " + PROBE, displayedQuickReplies().getFirst().getValue());
         assertNoSecretInConversationOutput();
         for (IData<Object> twin : memory.getCurrentStep().<Object>getAllData("output")) {
             assertFalse(String.valueOf(twin.getResult()).contains(SECRET), "leaked via " + twin.getKey());

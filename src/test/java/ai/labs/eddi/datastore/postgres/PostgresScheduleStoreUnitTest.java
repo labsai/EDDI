@@ -20,6 +20,7 @@ import org.mockito.InOrder;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -1063,7 +1064,7 @@ class PostgresScheduleStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
         // when
-        boolean claimed = sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300));
+        boolean claimed = sut.tryClaim("sched-1", "node-1", Instant.now(), Duration.ofMinutes(5));
 
         // then
         assertTrue(claimed);
@@ -1077,12 +1078,83 @@ class PostgresScheduleStoreUnitTest {
     void tryClaim_requiresTheScheduleToStillBeEnabled() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300));
+        sut.tryClaim("sched-1", "node-1", Instant.now(), Duration.ofMinutes(5));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection, atLeastOnce()).prepareStatement(sql.capture());
         assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("fire_status = 'CLAIMED'") && s.contains("enabled = TRUE")),
                 "the claim UPDATE must re-check enabled: " + sql.getAllValues());
+    }
+
+    /**
+     * A poll batch is read once and claimed row by row; a row another instance
+     * claimed, fired and re-armed in between is PENDING again with a future
+     * next_fire, and a claim on state alone fired it a second time.
+     */
+    @Test
+    void tryClaim_requiresTheScheduleToStillBeDue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        Instant now = Instant.parse("2030-01-01T00:00:00Z");
+
+        sut.tryClaim("sched-1", "node-1", now, Duration.ofMinutes(5));
+
+        String claim = claimSql();
+        assertTrue(claim.contains("next_fire <= ?"), "the poller's claim must re-check next_fire: " + claim);
+        verify(preparedStatement).setLong(7, now.toEpochMilli());
+    }
+
+    @Test
+    void tryClaimAnyTime_hasNoDueCheck() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(sut.tryClaimAnyTime("sched-1", "node-1", Instant.now(), Duration.ofMinutes(5)));
+
+        String claim = claimSql();
+        assertFalse(claim.contains("next_fire"), "a manual fire's claim must not depend on next_fire: " + claim);
+        assertTrue(claim.contains("enabled = TRUE"), "every other claim condition still applies: " + claim);
+    }
+
+    /**
+     * claimed_at is written by one instance and compared by another; on the
+     * claimers' own clocks, an instance running fast stole a live claim. Both the
+     * write and the expiry test use the database's clock, and the lease is bound as
+     * a length, not as an instant computed here.
+     */
+    @Test
+    void tryClaim_judgesTheLeaseOnTheDatabaseClock() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.tryClaim("sched-1", "node-1", Instant.now(), Duration.ofMinutes(10));
+
+        String claim = claimSql();
+        assertTrue(claim.contains("claimed_at = (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::bigint"),
+                "claimed_at must come from the database's clock: " + claim);
+        assertTrue(claim.contains("claimed_at <= (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::bigint - ?"),
+                "the lease must be measured against the database's clock: " + claim);
+        verify(preparedStatement).setLong(6, Duration.ofMinutes(10).toMillis());
+    }
+
+    @Test
+    void findDueSchedules_judgesTheLeaseOnTheDatabaseClock() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        sut.findDueSchedules(Instant.now(), Duration.ofMinutes(10), 3);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String normalized = sql.getValue().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("claimed_at <= (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::bigint - ?"),
+                "the lease must be measured against the database's clock: " + normalized);
+        verify(preparedStatement).setLong(2, Duration.ofMinutes(10).toMillis());
+    }
+
+    /** The claim UPDATE, whitespace-normalized. */
+    private String claimSql() throws Exception {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        return sql.getAllValues().stream().filter(q -> q.contains("SET fire_status = 'CLAIMED'")).findFirst()
+                .orElseThrow(() -> new AssertionError("no claim UPDATE: " + sql.getAllValues())).replaceAll("\\s+", " ");
     }
 
     @Test
@@ -1091,7 +1163,7 @@ class PostgresScheduleStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 
         // when
-        boolean claimed = sut.tryClaim("sched-1", "node-2", Instant.now(), Instant.now().minusSeconds(300));
+        boolean claimed = sut.tryClaim("sched-1", "node-2", Instant.now(), Duration.ofMinutes(5));
 
         // then
         assertFalse(claimed);
@@ -1104,7 +1176,7 @@ class PostgresScheduleStoreUnitTest {
 
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+                () -> sut.tryClaim("sched-1", "node-1", Instant.now(), Duration.ofMinutes(5)));
     }
 
     // ─── markCompleted ──────────────────────────────────────────
@@ -1259,8 +1331,7 @@ class PostgresScheduleStoreUnitTest {
 
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> sut.findDueSchedules(Instant.now(),
-                        Instant.now().minus(30, ChronoUnit.MINUTES), 3));
+                () -> sut.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3));
     }
 
     @Test
@@ -1268,7 +1339,7 @@ class PostgresScheduleStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);
 
-        sut.findDueSchedules(Instant.now(), Instant.now().minus(30, ChronoUnit.MINUTES), 3);
+        sut.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3);
 
         // An unordered LIMIT returns an arbitrary subset once more rows are due than
         // one poll batch holds; the oldest due fire must be served first.

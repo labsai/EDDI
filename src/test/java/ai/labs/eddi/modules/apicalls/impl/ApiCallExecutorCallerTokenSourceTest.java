@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -80,7 +79,7 @@ class ApiCallExecutorCallerTokenSourceTest {
                 .addNamespaceResolver(new ConfigReferenceNamespaceResolvers.Vault())
                 .addNamespaceResolver(new ConfigReferenceNamespaceResolvers.GlobalVariable())
                 .build();
-        var prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), new TemplatingEngine(engine),
+        var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(engine),
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
         memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));

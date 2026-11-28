@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents;
 
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -12,8 +13,11 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.logging.Handler;
@@ -28,6 +32,9 @@ import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 
 class AgentSigningServiceTest {
 
@@ -41,13 +48,6 @@ class AgentSigningServiceTest {
         signingService.initMetrics();
     }
 
-    @Test
-    void generateKeyPair_returnsPublicKey() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
-        assertNotNull(publicKey);
-        assertFalse(publicKey.isBlank());
-    }
-
     // ─── negative cache: a keyless agent does not ask the vault per audit entry
     // ───
 
@@ -57,13 +57,13 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> now[0];
 
         for (int i = 0; i < 3; i++) {
-            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", 0, "entry"));
             assertTrue(e.getMessage().contains("No signing key found"), e.getMessage());
         }
         assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
 
-        now[0] += AgentSigningService.MISSING_KEY_TTL_NANOS;
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", 0, "entry"));
         assertEquals(2, secretProvider.resolveCalls, "after the TTL the vault is asked again");
     }
 
@@ -72,19 +72,35 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> 0L;
 
         for (int i = 0; i < 3; i++) {
-            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", "entry"));
+            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", 0, "entry"));
         }
         assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
     }
 
     @Test
     void signIfKeyPresent_signsWhenTheKeyExists() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        String publicKey = provisionKey("tenant-1", "agent-1");
 
-        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", "entry");
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", 0, "entry");
 
         assertNotNull(signature);
         assertTrue(signingService.verify(publicKey, "entry", signature));
+    }
+
+    /**
+     * The audit ledger signs with the agent's current versioned key. It used to
+     * sign with the unversioned key only, which provisioning never writes, so a
+     * provisioned agent's entries were never signed.
+     */
+    @Test
+    void signIfKeyPresent_signsWithTheNamedVersion() throws Exception {
+        provisionKey("tenant-1", "agent-1");
+        String publicKeyV2 = provisionKey("tenant-1", "agent-1", 2);
+
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", 2, "entry");
+
+        assertTrue(signingService.verify(publicKeyV2, "entry", signature));
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", 3, "entry"), "no v3 in the vault");
     }
 
     @Test
@@ -98,46 +114,92 @@ class AgentSigningServiceTest {
         var service = new AgentSigningService(failing, new SimpleMeterRegistry());
         service.initMetrics();
 
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", 0, "entry"));
     }
 
+    /**
+     * A key provisioned for an agent that was just found keyless — the unversioned
+     * key the audit ledger uses, and a rotated one for an envelope — signs once the
+     * remembered "no key" has expired.
+     */
     @Test
-    void keylessAgent_keyGeneratedHereIsUsedAtOnce() throws Exception {
-        signingService.nanoClock = () -> 0L;
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
-
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-x");
-
-        assertTrue(signingService.verify(publicKey, "entry", signingService.sign("tenant-1", "agent-x", "entry")));
-    }
-
-    @Test
-    void keylessAgent_rotatedKeyIsUsedAtOnce() throws Exception {
-        signingService.nanoClock = () -> 0L;
+    void keylessAgent_aKeyAddedToTheVaultSignsOnceTheTtlHasPassed() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
         var envelope = SignedEnvelope.forSigning("agent-x", "agent-y", Map.of("text", "hello"));
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-x", 0, "entry"));
         assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-x", envelope, 2));
 
-        signingService.rotateKey("tenant-1", "agent-x", 2);
+        String publicKey = provisionKey("tenant-1", "agent-x");
+        String publicKeyV2 = provisionKey("tenant-1", "agent-x", 2);
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
 
-        assertNotNull(signingService.signEnvelope("tenant-1", "agent-x", envelope, 2).signature());
+        assertTrue(signingService.verify(publicKey, "entry", signingService.signIfKeyPresent("tenant-1", "agent-x", 0, "entry")));
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-x", envelope, 2), publicKeyV2));
     }
 
-    @Test
-    void keylessAgent_aMissSeenBeforeTheKeyWasGeneratedIsNotRemembered() throws Exception {
-        signingService.nanoClock = () -> 0L;
-        // The vault answers "not found", but by the time that answer comes back the key
-        // has been generated (and the cache evicted) on this node.
-        secretProvider.beforeNotFound = () -> {
-            try {
-                signingService.generateKeyPair("tenant-1", "agent-x");
-            } catch (AgentSigningService.AgentSigningException e) {
-                throw new IllegalStateException(e);
-            }
-        };
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
-        secretProvider.beforeNotFound = null;
+    // ─── positive cache: a loaded key is re-read from the vault after the TTL ───
 
-        assertNotNull(signingService.sign("tenant-1", "agent-x", "entry"), "the new key signs at once, not after the TTL");
+    /**
+     * The loaded private key used to be cached with no expiry, so a key replaced in
+     * the vault — on this node by anything other than this service, or on another
+     * node by anything at all — was never picked up: this process kept signing with
+     * the old key until it restarted, and every signature failed verification
+     * against the new public key.
+     */
+    @Test
+    void replacedKey_isUsedOnceTheTtlHasPassed() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        String publicKeyA = provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
+
+        String publicKeyB = provisionKey("tenant-1", "agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "second");
+
+        assertTrue(signingService.verify(publicKeyB, "second", signature), "the replaced key must be picked up after the TTL");
+        assertFalse(signingService.verify(publicKeyA, "second", signature), "the old key is still cached");
+    }
+
+    /**
+     * The other half of the TTL: inside it the cached key is used, so the vault is
+     * read once per agent and TTL, not once per signature (the audit ledger signs
+     * three entries a turn).
+     */
+    @Test
+    void loadedKey_isServedFromTheCacheInsideTheTtl() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        String publicKeyA = provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
+        int readsAfterFirstSignature = secretProvider.resolveCalls;
+
+        provisionKey("tenant-1", "agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS - 1;
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "second");
+
+        assertTrue(signingService.verify(publicKeyA, "second", signature), "inside the TTL the cached key signs");
+        assertEquals(readsAfterFirstSignature, secretProvider.resolveCalls, "inside the TTL the vault is not read again");
+    }
+
+    /**
+     * A key removed from the vault without going through this node's
+     * {@code deleteKeyPair} — another node's delete, for one — stops being used
+     * after the TTL rather than for the rest of the process's life.
+     */
+    @Test
+    void keyRemovedFromTheVaultElsewhere_stopsSigningOnceTheTtlHasPassed() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
+
+        secretProvider.forget("tenant-1:agent-signing-key:agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
+
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", 0, "second"),
+                "the removed key must not keep signing from memory past the TTL");
     }
 
     @Test
@@ -145,18 +207,18 @@ class AgentSigningServiceTest {
         signingService.nanoClock = () -> 0L;
         secretProvider.resolveUnreachable = true;
 
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
-        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", 0, "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", 0, "entry"));
 
         assertEquals(2, secretProvider.resolveCalls);
     }
 
     @Test
     void sign_and_verify_roundTrip() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        String publicKey = provisionKey("tenant-1", "agent-1");
         String payload = "Hello from Agent-1";
 
-        String signature = signingService.sign("tenant-1", "agent-1", payload);
+        String signature = signingService.sign("tenant-1", "agent-1", 0, payload);
         assertNotNull(signature);
 
         assertTrue(signingService.verify(publicKey, payload, signature));
@@ -164,18 +226,18 @@ class AgentSigningServiceTest {
 
     @Test
     void verify_failsOnTamperedPayload() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
-        String signature = signingService.sign("tenant-1", "agent-1", "original message");
+        String publicKey = provisionKey("tenant-1", "agent-1");
+        String signature = signingService.sign("tenant-1", "agent-1", 0, "original message");
 
         assertFalse(signingService.verify(publicKey, "tampered message", signature));
     }
 
     @Test
     void verify_failsOnWrongKey() throws Exception {
-        String publicKey1 = signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPair("tenant-1", "agent-2");
+        String publicKey1 = provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-2");
 
-        String signature = signingService.sign("tenant-1", "agent-2", "message");
+        String signature = signingService.sign("tenant-1", "agent-2", 0, "message");
 
         // Verify with agent-1's public key should fail
         assertFalse(signingService.verify(publicKey1, "message", signature));
@@ -183,11 +245,11 @@ class AgentSigningServiceTest {
 
     @Test
     void deleteKeyPair_removesKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
         signingService.deleteKeyPair("tenant-1", "agent-1");
 
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "payload"));
+                () -> signingService.sign("tenant-1", "agent-1", 0, "payload"));
     }
 
     @Test
@@ -202,121 +264,17 @@ class AgentSigningServiceTest {
     }
 
     @Test
-    void generateKeyPair_throwsWhenVaultStoreFailsOnGenerate() {
-        // Use a provider whose store() always throws
-        var failingProvider = new InMemorySecretProvider() {
-            @Override
-            public void store(SecretReference reference, String plaintext,
-                              String description, List<String> allowedAgents)
-                    throws SecretProviderException {
-                throw new SecretProviderException("Vault unavailable");
-            }
-        };
-        var failService = new AgentSigningService(failingProvider,
-                new SimpleMeterRegistry());
-        failService.initMetrics();
-
-        assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> failService.generateKeyPair("t1", "a1"));
-    }
-
-    @Test
     void sign_throwsAgentSigningExceptionWhenKeyNotFound() {
         // Agent was never generated, so vault has no key
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "nonexistent-agent", "payload"));
-    }
-
-    @Test
-    void generateKeyPair_evictsCacheOnRegeneration() throws Exception {
-        // Generate initial keypair and sign to populate the cache
-        String publicKey1 = signingService.generateKeyPair("tenant-1", "agent-1");
-        String sig1 = signingService.sign("tenant-1", "agent-1", "message");
-        assertTrue(signingService.verify(publicKey1, "message", sig1));
-
-        // Re-generate keypair (key rotation)
-        String publicKey2 = signingService.generateKeyPair("tenant-1", "agent-1");
-
-        // The new public key should be different
-        assertNotEquals(publicKey1, publicKey2);
-
-        // Signing should now use the NEW key (cache was evicted)
-        String sig2 = signingService.sign("tenant-1", "agent-1", "message");
-
-        // Verify with new public key should succeed
-        assertTrue(signingService.verify(publicKey2, "message", sig2));
-
-        // Verify with OLD public key should fail (proving new key is in use)
-        assertFalse(signingService.verify(publicKey1, "message", sig2));
-    }
-
-    // ==================== Versioned Key Tests ====================
-
-    @Test
-    void generateKeyPairVersioned_returnsPublicKey() throws Exception {
-        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        assertNotNull(publicKey);
-        assertFalse(publicKey.isBlank());
-    }
-
-    @Test
-    void generateKeyPairVersioned_throwsForNonPositiveVersion() {
-        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.generateKeyPairVersioned("t1", "a1", 0));
-        assertTrue(ex.getMessage().contains("positive"));
-    }
-
-    @Test
-    void generateKeyPairVersioned_throwsForNegativeVersion() {
-        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.generateKeyPairVersioned("t1", "a1", -1));
-        assertTrue(ex.getMessage().contains("positive"));
-    }
-
-    @Test
-    void generateKeyPairVersioned_throwsWhenVaultFails() {
-        var failingProvider = new InMemorySecretProvider() {
-            @Override
-            public void store(SecretReference reference, String plaintext,
-                              String description, List<String> allowedAgents)
-                    throws SecretProviderException {
-                throw new SecretProviderException("Vault unavailable");
-            }
-        };
-        var failService = new AgentSigningService(failingProvider, new SimpleMeterRegistry());
-        failService.initMetrics();
-
-        assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> failService.generateKeyPairVersioned("t1", "a1", 1));
-    }
-
-    // ==================== rotateKey Tests ====================
-
-    @Test
-    void rotateKey_generatesNewVersionedKey() throws Exception {
-        String publicKey = signingService.rotateKey("tenant-1", "agent-1", 2);
-        assertNotNull(publicKey);
-        assertFalse(publicKey.isBlank());
-    }
-
-    @Test
-    void rotateKey_throwsForNonPositiveVersion() {
-        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.rotateKey("t1", "a1", 0));
-        assertTrue(ex.getMessage().contains("positive"));
-    }
-
-    @Test
-    void rotateKey_throwsForNegativeVersion() {
-        assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.rotateKey("t1", "a1", -5));
+                () -> signingService.sign("t1", "nonexistent-agent", 0, "payload"));
     }
 
     // ==================== Envelope signing/verification ====================
 
     @Test
     void signEnvelope_andVerify_roundTrip() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        String publicKey = provisionKey("tenant-1", "agent-1");
         var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("message", "hello"));
 
         var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
@@ -327,7 +285,7 @@ class AgentSigningServiceTest {
 
     @Test
     void signEnvelope_withVersionedKey() throws Exception {
-        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+        String publicKey = provisionKey("tenant-1", "agent-1", 3);
         var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("data", "test"));
 
         var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 3);
@@ -347,7 +305,7 @@ class AgentSigningServiceTest {
 
     @Test
     void verifyEnvelope_returnsFalseOnTamperedPayload() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        String publicKey = provisionKey("tenant-1", "agent-1");
         var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("message", "original"));
         var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
 
@@ -361,7 +319,7 @@ class AgentSigningServiceTest {
 
     @Test
     void verifyEnvelope_returnsFalseOnInvalidPublicKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
         var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("msg", "test"));
         var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
 
@@ -372,14 +330,14 @@ class AgentSigningServiceTest {
 
     @Test
     void deleteKeyPair_alsoDeletesVersionedKeys() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 1);
 
         signingService.deleteKeyPair("tenant-1", "agent-1");
 
         // Both legacy and versioned key should be gone
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "payload"));
+                () -> signingService.sign("tenant-1", "agent-1", 0, "payload"));
     }
 
     /**
@@ -391,8 +349,8 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_deletesVersionedKeysWhenNoLegacyKeyExists() throws Exception {
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        provisionKey("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 2);
 
         signingService.deleteKeyPair("tenant-1", "agent-1");
 
@@ -403,15 +361,15 @@ class AgentSigningServiceTest {
     }
 
     /**
-     * {@code rotateKey} takes an arbitrary version number from its caller, so
-     * versions can be sparse. Stopping the scan at the first missing version left
-     * every key past the gap behind.
+     * Rotated keys are provisioned under whatever version number their provisioner
+     * chose, so versions can be sparse. Stopping the scan at the first missing
+     * version left every key past the gap behind.
      */
     @Test
     void deleteKeyPair_deletesVersionsPastAGap() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 3);
 
         signingService.deleteKeyPair("tenant-1", "agent-1");
 
@@ -460,9 +418,9 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_withKnownVersions_staysWithinTheHighestDeclaredVersion() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 3);
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of(3, 1));
 
@@ -478,22 +436,21 @@ class AgentSigningServiceTest {
     }
 
     /**
-     * A vault key can exist at a version {@code identity.keys} does not list.
-     * {@code rotateKey} writes the vault entry and returns; adding the version to
-     * {@code keys[]} is a SEPARATE config write by the caller, which can fail after
-     * the vault write succeeded — and {@code keys[]} is operator-editable JSON that
-     * nothing prunes. Sweeping only the listed versions left that private key in
-     * the vault forever after a permanent delete, while the tally reported "Deleted
-     * N signing key(s)": the leak wearing a success message, on a narrower path
-     * than the blanket-catch one the tally was written to close.
+     * A vault key can exist at a version {@code identity.keys} does not list. The
+     * vault entry and the {@code keys[]} entry are SEPARATE writes, either of which
+     * can land without the other — and {@code keys[]} is operator-editable JSON
+     * that nothing prunes. Sweeping only the listed versions left that private key
+     * in the vault forever after a permanent delete, while the tally reported
+     * "Deleted N signing key(s)": the leak wearing a success message, on a narrower
+     * path than the blanket-catch one the tally was written to close.
      */
     @Test
     void deleteKeyPair_withKnownVersions_stillRemovesAnUndeclaredKeyBelowTheHighest() throws Exception {
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 1);
         // v2 exists in the vault but the follow-up config write never landed, so
         // identity.keys names only v1 and v3.
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+        provisionKey("tenant-1", "agent-1", 2);
+        provisionKey("tenant-1", "agent-1", 3);
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of(1, 3));
 
@@ -512,7 +469,7 @@ class AgentSigningServiceTest {
     @Test
     void deleteKeyPair_withAVersionAboveTheCap_attemptsItWithoutUnboundingTheSweep() throws Exception {
         int aboveCap = AgentSigningService.MAX_KEY_VERSION_SCAN + 5;
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", aboveCap);
+        provisionKey("tenant-1", "agent-1", aboveCap);
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of(aboveCap));
 
@@ -526,7 +483,7 @@ class AgentSigningServiceTest {
 
     @Test
     void deleteKeyPair_withNoDeclaredVersions_stillRemovesTheLegacyKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
 
@@ -538,21 +495,21 @@ class AgentSigningServiceTest {
      * so it bounds nothing and has to fall back to the blind sweep.
      *
      * <p>
-     * {@code rotateKey} writes the vault entry and returns; adding the version to
-     * {@code identity.keys} is a SEPARATE config write by the caller. A first
-     * rotation whose config write failed therefore leaves v1 in the vault with
-     * {@code keys[]} still empty — and an operator can prune {@code keys[]} by hand
-     * to the same shape. Treating that as "no rotated versions, nothing to sweep"
-     * left an Ed25519 private key in the vault after a PERMANENT delete, while the
-     * tally reported a clean "Deleted 1 signing key(s)".
+     * The vault entry and the {@code identity.keys} entry are SEPARATE writes. A
+     * first rotation whose config update never landed therefore leaves v1 in the
+     * vault with {@code keys[]} still empty — and an operator can prune
+     * {@code keys[]} by hand to the same shape. Treating that as "no rotated
+     * versions, nothing to sweep" left an Ed25519 private key in the vault after a
+     * PERMANENT delete, while the tally reported a clean "Deleted 1 signing
+     * key(s)".
      * </p>
      */
     @Test
     void deleteKeyPair_withNoDeclaredVersions_stillRemovesAnUndeclaredRotatedKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
         // The rotation reached the vault; the config write that would have added it to
         // identity.keys did not.
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 1);
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
 
@@ -572,14 +529,15 @@ class AgentSigningServiceTest {
 
     /**
      * {@code identity.keys} is operator-editable JSON, so it can carry a null entry
-     * or a zero/negative version. {@code rotateKey} rejects those, meaning they
-     * name no vault entry at all — and letting one set the upper bound of the sweep
-     * would either widen it needlessly or, for a null, throw out of a delete.
+     * or a zero/negative version. Signing treats those as the unversioned key,
+     * meaning they name no versioned vault entry at all — and letting one set the
+     * upper bound of the sweep would either widen it needlessly or, for a null,
+     * throw out of a delete.
      */
     @Test
     void deleteKeyPair_ignoresNullAndNonPositiveDeclaredVersions() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 2);
 
         signingService.deleteKeyPair("tenant-1", "agent-1", Arrays.asList(null, 0, -3, 2));
 
@@ -597,9 +555,9 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_keepsSweepingAfterAVaultFailure() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 2);
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1:v1");
 
@@ -620,11 +578,11 @@ class AgentSigningServiceTest {
      */
     @Test
     void sign_usesTheCachedPrivateKeyOnTheSecondCall() throws Exception {
-        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.sign("tenant-1", "agent-1", "first");
+        String publicKey = provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", 0, "first");
 
         secretProvider.forget("tenant-1:agent-signing-key:agent-1");
-        String second = signingService.sign("tenant-1", "agent-1", "second");
+        String second = signingService.sign("tenant-1", "agent-1", 0, "second");
 
         assertTrue(signingService.verify(publicKey, "second", second),
                 "the second signature must come from the cached key, not from a vault round trip");
@@ -639,9 +597,9 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_evictsTheCacheEvenWhenTheVaultDeleteFails() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
         // Populate the private-key cache.
-        signingService.sign("tenant-1", "agent-1", "message");
+        signingService.sign("tenant-1", "agent-1", 0, "message");
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
@@ -651,7 +609,7 @@ class AgentSigningServiceTest {
         // this proves it did: the vault answer is removed out from under it.
         secretProvider.forget("tenant-1:agent-signing-key:agent-1");
         assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("tenant-1", "agent-1", "message"),
+                () -> signingService.sign("tenant-1", "agent-1", 0, "message"),
                 "the private key survived in the cache, so this process can still sign as a deleted agent");
     }
 
@@ -664,7 +622,7 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_doesNotReportSuccessWhenTheVaultRefusedEveryKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1");
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
 
         List<String> captured = new ArrayList<>();
@@ -710,9 +668,9 @@ class AgentSigningServiceTest {
      */
     @Test
     void deleteKeyPair_continuesPastAVaultFailureOnOneKey() throws Exception {
-        signingService.generateKeyPair("tenant-1", "agent-1");
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
-        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        provisionKey("tenant-1", "agent-1");
+        provisionKey("tenant-1", "agent-1", 1);
+        provisionKey("tenant-1", "agent-1", 2);
         // The vault answers for everything except the legacy key, which is the first
         // thing the scan touches.
         secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
@@ -741,7 +699,7 @@ class AgentSigningServiceTest {
         var envelopeFailure = assertThrows(AgentSigningService.AgentSigningException.class,
                 () -> signingService.signEnvelope("t1", "nonexistent", envelope, 0));
         var plainFailure = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "nonexistent", "payload"));
+                () -> signingService.sign("t1", "nonexistent", 0, "payload"));
 
         assertEquals("No signing key found for agent nonexistent", envelopeFailure.getMessage());
         assertEquals(plainFailure.getMessage(), envelopeFailure.getMessage(), "the two signing paths must not drift apart again");
@@ -753,7 +711,7 @@ class AgentSigningServiceTest {
     void sign_throwsWithSecretNotFoundCauseMessage() {
         // Agent was never generated — SecretNotFoundException is the cause
         var ex = assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> signingService.sign("t1", "missing-agent", "payload"));
+                () -> signingService.sign("t1", "missing-agent", 0, "payload"));
         assertTrue(ex.getMessage().contains("No signing key found") || ex.getMessage().contains("Failed to load"));
     }
 
@@ -770,7 +728,7 @@ class AgentSigningServiceTest {
     void deleteKeyPair_vaultFailure_cannotForgeALogRecordThroughTheAgentId() throws Exception {
         String poisonedAgent = "agent-1" + FORGED_RECORD;
         String poisonedTenant = "tenant-1" + FORGED_RECORD;
-        signingService.generateKeyPair(poisonedTenant, poisonedAgent);
+        provisionKey(poisonedTenant, poisonedAgent);
         secretProvider.failDeleteFor(poisonedTenant + ":agent-signing-key:" + poisonedAgent);
 
         List<String> captured = captureLogsOf(AgentSigningService.class,
@@ -792,7 +750,7 @@ class AgentSigningServiceTest {
     void deleteKeyPair_success_cannotForgeALogRecordThroughTheAgentId() throws Exception {
         String poisonedAgent = "agent-1" + FORGED_RECORD;
         String poisonedTenant = "tenant-1" + FORGED_RECORD;
-        signingService.generateKeyPair(poisonedTenant, poisonedAgent);
+        provisionKey(poisonedTenant, poisonedAgent);
 
         List<String> captured = captureLogsOf(AgentSigningService.class,
                 () -> signingService.deleteKeyPair(poisonedTenant, poisonedAgent, List.of(1)));
@@ -825,6 +783,211 @@ class AgentSigningServiceTest {
         assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's nothing-to-clean DEBUG");
     }
 
+    // ─── generateKey / checkSigningKey: provisioning, and the save-time check ───
+
+    @Test
+    void generateKey_storesAPrivateKeyThatSignsForTheReturnedPublicKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(1, generated.version());
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "the private key is in the vault under v1");
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), generated.publicKeyB64()));
+    }
+
+    /**
+     * The vault entry and the agent's {@code identity.keys} are two writes. A
+     * version the vault already holds — a concurrent provisioning, or one whose
+     * config write never landed — may have a published public key, so it is never
+     * replaced.
+     */
+    @Test
+    void generateKey_neverReplacesAKeyAlreadyInTheVault() throws Exception {
+        String existingPublicKey = provisionKey("tenant-1", "agent-1", 1);
+
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(2, generated.version(), "v1 is taken, so the new key is v2");
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), existingPublicKey),
+                "the key that was already at v1 still signs as v1");
+    }
+
+    /** A "no key" remembered for the version just generated must not outlive it. */
+    @Test
+    void generateKey_isUsedAtOnceAfterTheVaultWasFoundEmpty() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-1", envelope, 1));
+
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), generated.publicKeyB64()),
+                "the clock has not moved: only the eviction lets the new key sign");
+    }
+
+    @Test
+    void generateKey_reportsAVaultFailure() throws Exception {
+        ISecretProvider failing = SigningTestSupport.inMemoryVault();
+        doThrow(new ISecretProvider.SecretProviderException("Secrets Vault is not available")).when(failing).storeIfAbsent(any(), anyString(),
+                any(), any());
+        var service = new AgentSigningService(failing, new SimpleMeterRegistry());
+
+        var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> service.generateKey("t1", "a1", 1));
+        assertTrue(e.getMessage().contains("Secrets Vault is not available"), e.getMessage());
+    }
+
+    /**
+     * "fromVersion + attempts" overflowed for a version near Integer.MAX_VALUE: the
+     * loop never ran and a declared bogus version turned Generate into a 503 that
+     * blamed the vault. Versions now stop at MAX_VERSION.
+     */
+    @Test
+    void generateKey_neverGoesPastTheHighestVersion() throws Exception {
+        provisionKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION);
+
+        var e = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION));
+        assertTrue(e.getMessage().contains("versions 1000000 to 1000000"), e.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION + 1));
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", Integer.MAX_VALUE));
+    }
+
+    @Test
+    void discardKey_removesTheVersionFromTheVault() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        signingService.discardKey("tenant-1", "agent-1", generated.version());
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"));
+    }
+
+    @Test
+    void discardKey_ofVersionZeroRemovesTheLegacyKey() throws Exception {
+        provisionKey("tenant-1", "agent-1");
+        signingService.generateKey("tenant-1", "agent-1", 1);
+
+        signingService.discardKey("tenant-1", "agent-1", 0);
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "only the legacy key goes");
+    }
+
+    @Test
+    void isEd25519PublicKey_acceptsOnlyAnEd25519PublicKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+        String rsaPublicKey = Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("RSA").generateKeyPair().getPublic().getEncoded());
+
+        assertTrue(AgentSigningService.isEd25519PublicKey(generated.publicKeyB64()));
+        assertFalse(AgentSigningService.isEd25519PublicKey(rsaPublicKey));
+        assertFalse(AgentSigningService.isEd25519PublicKey("not base64 !"));
+        assertFalse(AgentSigningService.isEd25519PublicKey(null));
+    }
+
+    @Test
+    void checkSigningKey_isUsableForAGeneratedKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(AgentSigningService.SigningKeyStatus.USABLE, signingService.checkSigningKey("tenant-1", "agent-1", 1, generated.publicKeyB64()));
+    }
+
+    @Test
+    void checkSigningKey_coversTheLegacyUnversionedKey() throws Exception {
+        String publicKey = provisionKey("tenant-1", "agent-1");
+
+        assertEquals(AgentSigningService.SigningKeyStatus.USABLE, signingService.checkSigningKey("tenant-1", "agent-1", 0, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_rejectsAPublicKeyThatIsNotEd25519() throws Exception {
+        signingService.generateKey("tenant-1", "agent-1", 1);
+        String rsaPublicKey = Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("RSA").generateKeyPair().getPublic().getEncoded());
+
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, "MCowBQYDK2VwAyEA-not-a-real-key"));
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY, signingService.checkSigningKey("tenant-1", "agent-1", 1, rsaPublicKey));
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY, signingService.checkSigningKey("tenant-1", "agent-1", 1, null));
+    }
+
+    @Test
+    void checkSigningKey_reportsAKeyMissingFromTheVault() throws Exception {
+        String publicKeyOfAnotherAgent = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.NOT_IN_VAULT,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKeyOfAnotherAgent));
+    }
+
+    /**
+     * The declared public key is someone else's: the vault key signs, but not as
+     * it.
+     */
+    @Test
+    void checkSigningKey_reportsAPublicKeyThatDoesNotMatchTheVault() throws Exception {
+        signingService.generateKey("tenant-1", "agent-1", 1);
+        String publicKeyOfAnotherAgent = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.MISMATCH,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKeyOfAnotherAgent));
+    }
+
+    @Test
+    void checkSigningKey_reportsAVaultEntryThatIsNotAPrivateKey() throws Exception {
+        secretProvider.store(new SecretReference("tenant-1", "agent-signing-key:agent-1:v1"), "bm90LWEta2V5", null, List.of("agent-1"));
+        String publicKey = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.UNREADABLE, signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_throwsWhenTheVaultCannotAnswer() throws Exception {
+        String publicKey = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+        secretProvider.resolveUnreachable = true;
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_leavesTheVerifyMetricsAlone() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var service = new AgentSigningService(secretProvider, registry);
+        service.initMetrics();
+        var generated = service.generateKey("tenant-1", "agent-1", 1);
+
+        service.checkSigningKey("tenant-1", "agent-1", 1, generated.publicKeyB64());
+
+        assertEquals(0.0, registry.counter("eddi.agent.identity.verify.success").count());
+        assertEquals(0.0, registry.counter("eddi.agent.identity.verify.fail").count());
+    }
+
+    /**
+     * Writes a signing key into the vault in the one shape this service reads: an
+     * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
+     * {@code agent-signing-key:{agentId}}. {@link AgentSigningService#generateKey}
+     * writes only versioned keys, so the test stands in for a legacy unversioned
+     * one — and, through the overload below, for a version already taken in the
+     * vault. Writing it again replaces the key.
+     *
+     * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
+     */
+    private String provisionKey(String tenantId, String agentId) throws Exception {
+        return storeNewKey(tenantId, "agent-signing-key:" + agentId, agentId);
+    }
+
+    /**
+     * As {@link #provisionKey(String, String)}, for a rotated key under
+     * {@code agent-signing-key:{agentId}:v{version}}.
+     */
+    private String provisionKey(String tenantId, String agentId, int version) throws Exception {
+        return storeNewKey(tenantId, "agent-signing-key:" + agentId + ":v" + version, agentId);
+    }
+
+    private String storeNewKey(String tenantId, String keyName, String agentId) throws Exception {
+        KeyPair keyPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        secretProvider.store(new SecretReference(tenantId, keyName), Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded()),
+                "Ed25519 signing key for agent " + agentId, List.of(agentId));
+        return Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
+    }
+
     /**
      * Simple in-memory secret provider for testing.
      */
@@ -846,12 +1009,6 @@ class AgentSigningServiceTest {
 
         /** Makes {@code resolve} fail as an unreachable vault would. */
         boolean resolveUnreachable;
-
-        /**
-         * Runs just before {@code resolve} answers "not found" — for racing a key
-         * generation.
-         */
-        Runnable beforeNotFound;
 
         /** Whether a key is still in the vault — for asserting what a delete left. */
         boolean contains(String tenantId, String keyName) {
@@ -903,9 +1060,6 @@ class AgentSigningServiceTest {
             String key = reference.tenantId() + ":" + reference.keyName();
             String value = store.get(key);
             if (value == null) {
-                if (beforeNotFound != null) {
-                    beforeNotFound.run();
-                }
                 throw new SecretNotFoundException("Secret not found: " + key);
             }
             return value;

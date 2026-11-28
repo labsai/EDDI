@@ -107,6 +107,7 @@ public interface AlertStoreContract {
 
         assertEquals(3, ruleStore().count(AGENT, false)); // mine, both, off
         assertEquals(2, ruleStore().count(AGENT, true)); // mine, off
+        assertEquals(1, ruleStore().countAllAgents()); // all
         List<String> listed = ruleStore().list(AGENT, true, 0, 10).stream().map(AlertRule::name).toList();
         assertEquals(Set.of("mine", "off"), new HashSet<>(listed));
         assertEquals(5, ruleStore().count(null, false));
@@ -181,6 +182,115 @@ public interface AlertStoreContract {
         return new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.OUTPUT_MATCH, t.kind(), t.agentId(), t.agentVersion(),
                 t.conversationId(), t.firedAt(), "Escalations", AlertMatch.output("properties.note exists", value), t.deliveries(), t.state(),
                 t.nextAttemptAt(), dedupeKey, 0, null, null, null, null, 0, subject, null);
+    }
+
+    private static AlertEvent withOutputIn(AlertEvent t, String dedupeKey, String value, String subject, String conversationId) {
+        return new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.OUTPUT_MATCH, t.kind(), t.agentId(), t.agentVersion(), conversationId,
+                t.firedAt(), "Escalations", AlertMatch.output("properties.note exists", value), t.deliveries(), t.state(), t.nextAttemptAt(),
+                dedupeKey, 0, null, null, null, null, 0, subject, null);
+    }
+
+    /**
+     * A conversation delete reaches a rating alert's comment excerpt too: it is
+     * conversation content, carries the conversation id, and the write side already
+     * refuses it for a tombstoned conversation. Its rater subject goes with it.
+     */
+    @Test
+    default void aConversationDeleteAlsoBlanksRatingExcerptsAndTheirRater() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore()
+                .insert(new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.RATING, t.kind(), t.agentId(), t.agentVersion(), "conv-r",
+                        t.firedAt(), "Unhappy users", t.match(), t.deliveries(), t.state(), t.nextAttemptAt(), "r1", 0, null, null, null, null, 0,
+                        "k1:rater", null))
+                .orElseThrow();
+        AlertEvent elsewhere = eventStore().insert(event(AGENT, "r2", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
+        assertEquals(1, eventStore().countConversationContent("conv-r"), "an excerpt counts as the conversation's content");
+
+        assertEquals(1, eventStore().redactConversationContent("conv-r", Instant.now()));
+
+        assertEquals(0, eventStore().countConversationContent("conv-r"));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertFalse(eventStore().holdsPersonalContent(rated.id()), "the rater subject goes with the excerpt");
+        assertEquals(List.of("Too slow"), eventStore().read(rated.id()).orElseThrow().match().tags(), "the alert itself stays");
+        assertEquals("It took forever", eventStore().read(elsewhere.id()).orElseThrow().match().commentExcerpt(), "another conversation's stays");
+        assertEquals(0, eventStore().countConversationContent("conv-without-alerts"));
+        assertEquals(0, eventStore().redactConversationContent("conv-without-alerts", Instant.now()));
+    }
+
+    /**
+     * A rating deleted first blanks its excerpt and leaves the rater subject; the
+     * later conversation delete must still find, clear and count that subject — or
+     * it reports a clean delete over a stored user identifier.
+     */
+    @Test
+    default void aConversationDeleteClearsASubjectLeftAfterTheExcerptWasBlanked() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore()
+                .insert(new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.RATING, t.kind(), t.agentId(), t.agentVersion(), "conv-s",
+                        t.firedAt(), "Unhappy users", t.match(), t.deliveries(), t.state(), t.nextAttemptAt(), "s1", 0, null, null, null, null, 0,
+                        "k1:rater", null))
+                .orElseThrow();
+        assertEquals(1, eventStore().redactRatingComment(rated.id(), Instant.now()));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertTrue(eventStore().holdsPersonalContent(rated.id()), "the subject is still stored");
+        assertEquals(1, eventStore().countConversationContent("conv-s"), "the subject counts as the conversation's content");
+
+        assertEquals(1, eventStore().redactConversationContent("conv-s", Instant.now()));
+
+        assertEquals(0, eventStore().countConversationContent("conv-s"));
+        assertFalse(eventStore().holdsPersonalContent(rated.id()), "no subject is left");
+        assertEquals(0, eventStore().countOutputValues("k1:rater"));
+    }
+
+    /**
+     * The erasure guarantee's removals: a conversation's values, and one event's
+     * personal content.
+     */
+    @Test
+    default void erasureGuaranteeRedactsAConversationsValuesAndOneEvent() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        eventStore().insert(withOutputIn(t, "g1", "v1", "owner-1", "conv-a")).orElseThrow();
+        AlertEvent claimed = eventStore().insert(withOutputIn(t, "g2", "v2", "owner-1", "conv-a")).orElseThrow();
+        AlertEvent other = eventStore().insert(withOutputIn(t, "g3", "v3", "owner-2", "conv-b")).orElseThrow();
+        AlertEvent rated = eventStore().insert(event(AGENT, "g4", AlertEvent.State.PENDING, NOW, null)).orElseThrow();
+        assertEquals(2, eventStore().countConversationContent("conv-a"));
+
+        Instant now = Instant.now();
+        assertTrue(eventStore().claimSend(claimed.id(), "A", now, now.plusSeconds(30)));
+        assertEquals(1, eventStore().redactConversationContent("conv-a", now), "a live send claim is skipped");
+        assertEquals(1, eventStore().countConversationContent("conv-a"));
+        assertEquals(1, eventStore().redactConversationContent("conv-a", now.plusSeconds(30)));
+        assertEquals(0, eventStore().countConversationContent("conv-a"));
+        assertEquals(0, eventStore().countOutputValues("owner-1"), "the subject goes with the value");
+        assertEquals(1, eventStore().countConversationContent("conv-b"), "another conversation is untouched");
+
+        assertTrue(eventStore().claimSend(rated.id(), "B", now, now.plusSeconds(30)));
+        eventStore().redactEventContent(rated.id(), now);
+        assertEquals("It took forever", eventStore().read(rated.id()).orElseThrow().match().commentExcerpt(), "claimed: kept");
+        assertTrue(eventStore().releaseSend(rated.id(), "B"));
+        assertEquals(1, eventStore().redactEventContent(rated.id(), now));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertTrue(eventStore().holdsPersonalContent(other.id()));
+        assertEquals(1, eventStore().redactEventContent(other.id(), now));
+        assertNull(eventStore().read(other.id()).orElseThrow().match().value());
+        assertEquals(0, eventStore().countOutputValues("owner-2"));
+        assertFalse(eventStore().holdsPersonalContent(other.id()), "the read-back sees the removal");
+        assertFalse(eventStore().holdsPersonalContent("6aba70011a25f8be7920eeee"), "no such event holds nothing");
+    }
+
+    /**
+     * A rating alert's excerpt carries the rater's keyed subject; the user's
+     * erasure blanks it through that subject and counts it.
+     */
+    @Test
+    default void ratingExcerptIsFoundAndBlankedByItsKeyedSubject() {
+        AlertEvent t = event(AGENT, "ks", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore().insert(t.withMatch(t.match(), "k1:rater-key")).orElseThrow();
+        assertEquals(1, eventStore().countOutputValues("k1:rater-key"));
+        assertEquals(1, eventStore().redactOutputValues("k1:rater-key", Instant.now()));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertEquals(0, eventStore().countOutputValues("k1:rater-key"));
+        assertFalse(eventStore().holdsPersonalContent(rated.id()));
     }
 
     @Test

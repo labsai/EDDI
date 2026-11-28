@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { StreamingToggle } from "@/components/chat/streaming-toggle";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { StreamingToggle } from "@eddi/app-kit/components/chat/streaming-toggle";
 
 describe("StreamingToggle", () => {
   it("renders the toggle button", () => {

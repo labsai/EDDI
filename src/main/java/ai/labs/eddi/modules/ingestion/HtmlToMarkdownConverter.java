@@ -45,8 +45,8 @@ import java.net.URISyntaxException;
  * Noise is removed by selector, then the walk is scoped to
  * {@code main}/{@code article} when the page offers one. Note that
  * {@code header} is only stripped at page level: most documentation themes put
- * the page title inside {@code &lt;article&gt;&lt;header&gt;&lt;h1&gt;}, and
- * stripping every {@code header} deleted it.
+ * the page title inside <code>&lt;article&gt;&lt;header&gt;&lt;h1&gt;</code>,
+ * and stripping every {@code header} deleted it.
  */
 @ApplicationScoped
 public class HtmlToMarkdownConverter {
@@ -66,6 +66,24 @@ public class HtmlToMarkdownConverter {
      * deep.
      */
     private static final int MAX_DEPTH = 200;
+
+    /**
+     * How many prefixing containers — blockquotes, and list items whose content is
+     * re-indented — stack before deeper ones are written in place, without their
+     * {@code > } or indent.
+     *
+     * <p>
+     * Each renders its content into a buffer of its own and copies every line out
+     * of it behind a prefix, so a line nested {@code d} deep is copied {@code d}
+     * times and grows at each copy. The {@link Walk} budgets count source text and
+     * elements, not prefixes, and {@link #MAX_DEPTH} still allows about a hundred
+     * quote levels: a reply chain quoted that deep, or lists nested through
+     * {@code li > div > ul}, cost work and output that grew with the square of the
+     * depth — 340 MB for a 240 KB mail. An embedding gains nothing from a ninth
+     * level of markers, and with the cap every line is copied at most this many
+     * times.
+     */
+    private static final int MAX_PREFIXED_NESTING = 8;
 
     /**
      * How many elements one conversion visits before it stops. A walk that visits
@@ -104,12 +122,12 @@ public class HtmlToMarkdownConverter {
      *
      * <p>
      * Deliberately not {@code body > div > header}. A content wrapper is often a
-     * direct child of body, and its own {@code <header>} holds the page's {@code
-     *
-    <h1>}; removing it here dropped that heading before the wrapper was even chosen
-     * as the root. Site banners nested in a div are covered by
-     * {@code [role=banner]} and {@code .site-header} in {@link #NOISE_SELECTOR},
-     * which name what they are instead of guessing from depth.
+     * direct child of body, and its own <code>&lt;header&gt;</code> holds the
+     * page's <code>&lt;h1&gt;</code>; removing it here dropped that heading before
+     * the wrapper was even chosen as the root. Site banners nested in a div are
+     * covered by {@code [role=banner]} and {@code .site-header} in
+     * {@link #NOISE_SELECTOR}, which name what they are instead of guessing from
+     * depth.
      */
     private static final String PAGE_HEADER_SELECTOR = "body > header";
 
@@ -374,13 +392,9 @@ public class HtmlToMarkdownConverter {
      *
      * <p>
      * Trimming one character per {@code substring} copied the remaining text for
-     * every break, which is quadratic: a {@code
-     *
-     *
-
-    <pre>
-     * } ending in a few million newlines — a 5 MB page can hold that — spent
-     * minutes copying before the output cap was ever consulted.
+     * every break, which is quadratic: a <code>&lt;pre&gt;</code> ending in a few
+     * million newlines — a 5 MB page can hold that — spent minutes copying before
+     * the output cap was ever consulted.
      */
     static String stripTrailingNewline(String text) {
         int end = text.length();
@@ -407,8 +421,16 @@ public class HtmlToMarkdownConverter {
     }
 
     private void appendBlockquote(StringBuilder output, Element element, Walk walk, int depth) {
+        if (walk.prefixNesting >= MAX_PREFIXED_NESTING) {
+            // Past the cap the quote keeps its content and loses its marker, written
+            // in place rather than through a buffer of its own.
+            appendInPlace(output, element, walk, depth);
+            return;
+        }
         StringBuilder inner = new StringBuilder();
+        walk.prefixNesting++;
         appendChildren(inner, element, walk, depth + 1);
+        walk.prefixNesting--;
 
         output.append("\n");
         for (String line : inner.toString().split("\\r?\\n")) {
@@ -467,25 +489,23 @@ public class HtmlToMarkdownConverter {
                 break;
             }
 
-            // The item's own content, without its nested lists: small, and the only
-            // thing that needs re-indenting.
-            StringBuilder itemContent = new StringBuilder();
+            output.append(indent).append(ordered ? number + "." : "-").append(" ");
             List<Element> nestedLists = new ArrayList<>();
-            for (Node child : item.childNodes()) {
-                if (child instanceof TextNode textNode) {
-                    appendText(itemContent, textNode, walk);
-                } else if (child instanceof Element childElement) {
-                    String childTag = childElement.tagName().toLowerCase();
-                    if (childTag.equals("ul") || childTag.equals("ol")) {
-                        nestedLists.add(childElement);
-                    } else {
-                        convertElement(childElement, itemContent, walk, depth + 1);
-                    }
+            if (walk.prefixNesting < MAX_PREFIXED_NESTING) {
+                // The item's own content, without its directly nested lists: the only
+                // thing that needs re-indenting. A list nested through another element
+                // (li > div > ul) is part of it, hence the cap.
+                StringBuilder itemContent = new StringBuilder();
+                walk.prefixNesting++;
+                appendItemContent(itemContent, item, nestedLists, walk, depth);
+                walk.prefixNesting--;
+                output.append(itemContent.toString().trim().replace("\n", "\n" + indent + "    ")).append("\n");
+            } else {
+                appendItemContent(output, item, nestedLists, walk, depth);
+                if (!endsWithNewline(output)) {
+                    output.append("\n");
                 }
             }
-
-            output.append(indent).append(ordered ? number + "." : "-").append(" ");
-            output.append(itemContent.toString().trim().replace("\n", "\n" + indent + "    ")).append("\n");
 
             for (Element nested : nestedLists) {
                 appendList(output, nested, walk, nested.tagName().equalsIgnoreCase("ol"), depth + 1,
@@ -499,7 +519,42 @@ public class HtmlToMarkdownConverter {
     }
 
     /**
-     * {@code &lt;dl&gt;} as a term/definition list. Without this the terms and
+     * Writes a list item's content to {@code output}, collecting its directly
+     * nested lists into {@code nestedLists} instead.
+     */
+    private void appendItemContent(StringBuilder output, Element item, List<Element> nestedLists, Walk walk,
+                                   int depth) {
+        for (Node child : item.childNodes()) {
+            if (child instanceof TextNode textNode) {
+                appendText(output, textNode, walk);
+            } else if (child instanceof Element childElement) {
+                String childTag = childElement.tagName().toLowerCase();
+                if (childTag.equals("ul") || childTag.equals("ol")) {
+                    nestedLists.add(childElement);
+                } else {
+                    convertElement(childElement, output, walk, depth + 1);
+                }
+            }
+        }
+    }
+
+    /**
+     * A block's children written straight into {@code output}, on lines of their
+     * own: {@link #appendBlock} without its buffer, for a container past
+     * {@link #MAX_PREFIXED_NESTING}.
+     */
+    private void appendInPlace(StringBuilder output, Element element, Walk walk, int depth) {
+        if (!endsWithNewline(output)) {
+            output.append("\n");
+        }
+        appendChildren(output, element, walk, depth + 1);
+        if (!endsWithNewline(output)) {
+            output.append("\n");
+        }
+    }
+
+    /**
+     * <code>&lt;dl&gt;</code> as a term/definition list. Without this the terms and
      * their definitions ran together into one unreadable line.
      */
     private void appendDefinitionList(StringBuilder output, Element element, Walk walk, int depth) {
@@ -521,7 +576,7 @@ public class HtmlToMarkdownConverter {
         output.append("\n");
     }
 
-    /** {@code &lt;details&gt;}: the summary is the label, the rest the content. */
+    /** {@code <details>}: the summary is the label, the rest the content. */
     private void appendDetails(StringBuilder output, Element element, Walk walk, int depth) {
         // A direct child only. A descendant search found a nested <details>' summary
         // too, rendered it here and again where it sits — and a summary holding
@@ -546,7 +601,7 @@ public class HtmlToMarkdownConverter {
         output.append("\n");
     }
 
-    /** {@code &lt;figure&gt;}: content followed by its caption in italics. */
+    /** {@code <figure>}: content followed by its caption in italics. */
     private void appendFigure(StringBuilder output, Element element, Walk walk, int depth) {
         // A direct child only, for the same reason as appendDetails' summary: a
         // nested caption was rendered both as this caption and in place.
@@ -654,9 +709,8 @@ public class HtmlToMarkdownConverter {
      * <p>
      * {@code cell.text()} kept the words and dropped everything that carries
      * meaning: a link's destination, an image's alt text, inline code, emphasis,
-     * and the line breaks a {@code <br>
-     * } stands for. A table is where a page puts its most structured facts, so it
-     * was the worst place to flatten.
+     * and the line breaks a <code>&lt;br&gt;</code> stands for. A table is where a
+     * page puts its most structured facts, so it was the worst place to flatten.
      *
      * <p>
      * The cells continue the depth of the table they sit in. Starting them at zero
@@ -870,7 +924,8 @@ public class HtmlToMarkdownConverter {
     }
 
     /**
-     * The state of one conversion: the base URL and the work budget.
+     * The state of one conversion: the base URL, the work budget, and how many
+     * prefixing containers are open.
      *
      * <p>
      * The structural fixes make the walk linear, and this is the backstop that
@@ -893,6 +948,10 @@ public class HtmlToMarkdownConverter {
         private int elements;
         private long textChars;
         private boolean exhausted;
+        /**
+         * Prefixing containers currently open; see {@link #MAX_PREFIXED_NESTING}.
+         */
+        private int prefixNesting;
 
         Walk(String baseUrl, int cap) {
             this.baseUrl = baseUrl;

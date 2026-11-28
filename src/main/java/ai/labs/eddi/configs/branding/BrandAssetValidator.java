@@ -162,7 +162,8 @@ public final class BrandAssetValidator {
      * check also on a copy with all whitespace removed, since a URL parser drops
      * tabs and newlines inside a scheme. Character references are refused outright
      * ({@code &#106;avascript:} decodes to a scheme the text checks cannot see), as
-     * are entity declarations, which an XML parser would expand into markup.
+     * are entity declarations, which an XML parser would expand into markup, and
+     * backslashes, which CSS decodes the same way ({@code u\72l(} is {@code url(}).
      */
     static String svgProblem(String svg) {
         String lower = svg.toLowerCase(Locale.ROOT);
@@ -183,8 +184,21 @@ public final class BrandAssetValidator {
         if (compact.contains("javascript:") || compact.contains("vbscript:")) {
             return "it contains a javascript: URL";
         }
+        // Before the CSS checks: CSS decodes escapes in function names and at-keywords,
+        // so u\72l( is url( and @\69mport is @import to a browser while matching
+        // neither check. Refused anywhere, not only in <style> and style="…": every
+        // presentation attribute (fill, filter, mask, …) is parsed as CSS too, and
+        // deciding where an element really ends would be a parser the browser's may
+        // disagree with.
+        if (svg.indexOf('\\') >= 0) {
+            return "it contains a backslash, which CSS reads as an escape (u\\72l( is url( to a browser);"
+                    + " export it as a plain or optimized SVG without editor metadata";
+        }
         if (lower.contains("@import")) {
             return "its style imports another stylesheet";
+        }
+        if (lower.contains("image-set(")) {
+            return "its style uses image-set(), which loads an image without url()";
         }
         Matcher href = HREF.matcher(svg);
         while (href.find()) {

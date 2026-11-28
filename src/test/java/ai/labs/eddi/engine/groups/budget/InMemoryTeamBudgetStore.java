@@ -119,6 +119,28 @@ public class InMemoryTeamBudgetStore implements ITeamBudgetStore {
     }
 
     @Override
+    public synchronized AdjustOutcome setAdjustment(String groupId, String month, double expectedAdjustmentUsd, double newAdjustmentUsd,
+                                                    double baseUsd, TeamBudgetMonth.Adjustment entry, Instant expiresAt) {
+        check();
+        Row row = rows.computeIfAbsent(key(groupId, month), k -> new Row());
+        if (row.expiresAt == null) {
+            row.expiresAt = expiresAt;
+        }
+        if (row.adjustment != expectedAdjustmentUsd) {
+            return AdjustOutcome.CONFLICT;
+        }
+        if (!(baseUsd + newAdjustmentUsd >= row.spent)) {
+            return AdjustOutcome.REFUSED;
+        }
+        row.adjustment = newAdjustmentUsd;
+        row.history.add(entry);
+        if (row.history.size() > MAX_ADJUSTMENTS) {
+            row.history.remove(0);
+        }
+        return AdjustOutcome.APPLIED;
+    }
+
+    @Override
     public synchronized int deleteExpired(Instant now) {
         check();
         int before = rows.size();

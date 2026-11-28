@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.apicalls.impl;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -211,7 +213,7 @@ class RequestRedactorTest {
             // matches Bearer\s+. That produced a value redacted in queryParams and
             // plaintext one field away in uri.
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?auth=" + URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?auth=" + URLEncoder.encode(BEARER, StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             String redacted = map.get(IRequest.KEY_URI).toString();
             assertFalse(redacted.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), redacted);
@@ -220,7 +222,7 @@ class RequestRedactorTest {
         @Test
         void anEncodedVaultReferenceIsStillRedacted() {
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?k=" + URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?k=" + URLEncoder.encode("${vault:billing}", StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             assertFalse(map.get(IRequest.KEY_URI).toString().contains("billing"), map.get(IRequest.KEY_URI).toString());
         }
@@ -343,6 +345,25 @@ class RequestRedactorTest {
             assertFalse(logged.contains("session=abc"), logged);
             assertTrue(logged.contains("httpCode=401"), logged);
             assertTrue(logged.contains("invalid key"), logged);
+        }
+
+        @Test
+        @DisplayName("a base64 echo of a substituted secret is redacted from message, body and headers")
+        void encodedEchoIsRedacted() {
+            String secret = "deadbeefcafe1234";
+            String encoded = Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8));
+            IResponse response = mock(IResponse.class);
+            when(response.getHttpCode()).thenReturn(401);
+            when(response.getHttpCodeMessage()).thenReturn("rejected " + encoded);
+            when(response.getContentAsString()).thenReturn("echo " + encoded);
+            var headers = new HashMap<String, String>();
+            headers.put("X-Echo", encoded);
+            when(response.getHttpHeader()).thenReturn(headers);
+
+            String logged = RequestRedactor.safeResponseLog(response, Set.of(secret));
+
+            assertFalse(logged.contains(encoded), logged);
+            assertFalse(logged.contains(secret), logged);
         }
 
         @Test

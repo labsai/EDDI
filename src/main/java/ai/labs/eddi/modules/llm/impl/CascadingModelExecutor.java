@@ -10,9 +10,11 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -283,7 +285,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     /**
@@ -297,7 +299,7 @@ class CascadingModelExecutor {
      *            the time left for the whole turn, combined with each step's own
      *            timeout when deciding whether a re-ask still fits. This is the
      *            hook the turn deadline (R1) feeds; pass
-     *            {@link FormatRetryRunner.RemainingBudget#UNBOUNDED} until then
+     *            {@link FormatRetryRunner.RemainingBudget#UNBOUNDED} for no bound
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                           LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
@@ -330,7 +332,7 @@ class CascadingModelExecutor {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
                 turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
-                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, null);
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     /**
@@ -364,25 +366,34 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
-                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, stepMessages);
+                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(),
+                stepMessages);
     }
 
     /**
      * As above, with both the spend check and a per-step prompt: the spend check is
      * asked before every escalation and re-ask, and each step's attachments are
-     * decided for that step's own endpoint.
+     * decided for that step's own endpoint. This is the overload {@code LlmTask}
+     * calls, and the only one told whether the task has tools.
+     *
+     * @param taskHasTools
+     *            whether the task has a tool this turn other than the reply tool,
+     *            as {@link IAgentOrchestrator#offersTools} answers it — including
+     *            the tools of the workflow's httpcalls and mcpcalls, which
+     *            {@link LlmConfiguration.Task#isAgentMode()} cannot see. The other
+     *            overloads pass {@code isAgentMode()}
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                           LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                           ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                           FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
-                          FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
+                          FormatRetryRunner.ReaskSpend spend, boolean taskHasTools, StepMessages stepMessages)
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
                 turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
-                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, stepMessages);
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, taskHasTools, stepMessages);
     }
 
     /**
@@ -396,7 +407,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
@@ -404,7 +415,7 @@ class CascadingModelExecutor {
                                     Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                                     ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                                     FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
-                                    FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
+                                    FormatRetryRunner.ReaskSpend spend, boolean taskHasTools, StepMessages stepMessages)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -421,11 +432,10 @@ class CascadingModelExecutor {
         }
 
         // answerMode "tool" answers through the reply tool, so every step needs the
-        // tool
-        // loop even when the task has no other tool (isAgentMode() is false then).
+        // tool loop even when the task has no other tool (taskHasTools is false then).
         // enableInAgentMode does not gate it: a task with other tools and
         // enableInAgentMode=false never reaches the cascade (LlmTask skips it).
-        boolean useAgentMode = (cascade.isEnableInAgentMode() && task.isAgentMode()) || AnswerTool.enabled(task);
+        boolean useAgentMode = (cascade.isEnableInAgentMode() && taskHasTools) || AnswerTool.enabled(task);
         String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
         HeuristicConfig heuristicConfig = cascade.getHeuristic();
 
@@ -795,7 +805,7 @@ class CascadingModelExecutor {
 
                 if (stepTimedOut && bestSoFar != null) {
                     stepTrace.put("status", "timeout");
-                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName);
+                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName, memory, false);
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
@@ -876,7 +886,8 @@ class CascadingModelExecutor {
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName);
+                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName, memory,
+                        isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
                 increment("eddi.llm.cascade.escalations", "reason", "timeout");
@@ -955,7 +966,7 @@ class CascadingModelExecutor {
                 stepTrace.put("status", errorType);
                 stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, failure, modelName);
+                recordFailure(stepTrace, failure, modelName, memory, isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
@@ -1323,7 +1334,7 @@ class CascadingModelExecutor {
         // child of the eddi.pipeline.task span (ToolExecutionService does the same).
         var started = new AtomicBoolean();
         var unwound = new CountDownLatch(1);
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(RetryObserver.propagate(() -> {
             started.set(true);
             try {
                 if (useAgentMode) {
@@ -1337,7 +1348,7 @@ class CascadingModelExecutor {
             } finally {
                 unwound.countDown();
             }
-        })));
+        }))));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
@@ -1439,11 +1450,6 @@ class CascadingModelExecutor {
     }
 
     /**
-     * Execute a step in agent mode (with tool-calling loop). The structured_output
-     * wrapper is never used here — {@code evaluationStrategy} has already been
-     * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
-     */
-    /**
      * What a {@code judge_model} grades a step's answer against: the user's latest
      * request as the step's model saw it, and the cascade's acceptance criterion.
      */
@@ -1452,6 +1458,11 @@ class CascadingModelExecutor {
         return ConfidenceEvaluator.JudgeRequest.of(messages, cascade != null ? cascade.getAcceptanceCriterion() : null);
     }
 
+    /**
+     * Execute a step in agent mode (with tool-calling loop). The structured_output
+     * wrapper is never used here — {@code evaluationStrategy} has already been
+     * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
+     */
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
@@ -1796,7 +1807,12 @@ class CascadingModelExecutor {
      * class is counted as {@code eddi.llm.failure{class,model}}. The trace's
      * existing {@code status}/{@code error} fields are unchanged.
      */
-    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName) {
+    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName, IConversationMemory memory,
+                               boolean endsCascade) {
+        // Agent Health: escalated (or an earlier answer served) is recovered by the
+        // cascade; a failure that ends it is settled by the task (fallback or none).
+        LlmFailureRecords.record(memory != null ? memory.getCurrentStep() : null, failure.cls(), modelName,
+                endsCascade ? LlmFailureRecords.PENDING : HealthFailure.CASCADE);
         stepTrace.put("failureClass", failure.cls().name());
         if (failure.retryAfterMs() != null) {
             stepTrace.put("retryAfterMs", failure.retryAfterMs());

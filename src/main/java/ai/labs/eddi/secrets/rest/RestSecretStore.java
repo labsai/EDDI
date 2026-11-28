@@ -16,6 +16,7 @@ import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -53,6 +54,14 @@ public class RestSecretStore implements IRestSecretStore {
 
     /** See {@link VaultGrantRequests#MAX_ALLOWED_AGENTS}. */
     private static final int MAX_ALLOWED_AGENTS = VaultGrantRequests.MAX_ALLOWED_AGENTS;
+
+    /**
+     * Appended to the adopt-master-key answer when the checksum key was replaced:
+     * the GDPR erasure tombstone key is derived from it.
+     */
+    static final String ERASURE_KEY_RESET_NOTE = "The keyed-checksum key was replaced, and the GDPR erasure tombstone key is derived "
+            + "from it: guarded writes, erasures and permanent conversation deletes now fail closed until the stored "
+            + "'tombstone-key-check' row is resolved (see the GDPR guide, 'The tombstone key').";
 
     private final ISecretProvider secretProvider;
     private final SecretResolver secretResolver;
@@ -585,7 +594,10 @@ public class RestSecretStore implements IRestSecretStore {
     @Override
     public Response healthCheck() {
         boolean available = secretProvider.isAvailable();
-        var status = Map.of("status", available ? "UP" : "DOWN", "provider", secretProvider.getClass().getSimpleName(), "available", available);
+        // The injected @ApplicationScoped provider is an ArC client proxy, whose class
+        // is VaultSecretProvider_ClientProxy: name the bean behind it.
+        var status = Map.of("status", available ? "UP" : "DOWN", "provider", ClientProxy.unwrap(secretProvider).getClass().getSimpleName(),
+                "available", available);
 
         if (available) {
             return Response.ok(status).build();
@@ -673,7 +685,8 @@ public class RestSecretStore implements IRestSecretStore {
                             + (adoption.tenantsNeedingReset().isEmpty()
                                     ? "No tenant holds unreadable DEKs."
                                     : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset?confirm=true — "
-                                            + "their secrets were sealed under the lost key.")))
+                                            + "their secrets were sealed under the lost key.")
+                            + (adoption.checksumKeyReset() ? " " + ERASURE_KEY_RESET_NOTE : "")))
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to adopt the master key", e);

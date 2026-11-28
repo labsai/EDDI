@@ -120,9 +120,7 @@ public class EmailAgentToolsInspector {
                     continue;
                 }
                 for (LlmConfiguration.Task task : llm.tasks()) {
-                    boolean toolsOn = task.isAgentMode() || (hasApiCalls && !Boolean.FALSE.equals(task.getEnableHttpCallTools()))
-                            || (hasMcpCalls && !Boolean.FALSE.equals(task.getEnableMcpCallTools()));
-                    if (!toolsOn) {
+                    if (!task.usesTools(hasApiCalls, hasMcpCalls)) {
                         continue;
                     }
                     ToolApprovalsConfig effective = TaskToolApprovalsResolver.resolve(agentLevel, task.getToolApprovals());

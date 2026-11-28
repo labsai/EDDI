@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.TenantCostHolds;
+import ai.labs.eddi.engine.pricing.SpendSinks;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -184,7 +185,7 @@ class TenantCostReservationTest {
     @Test
     @DisplayName("settling a turn charges the actual cost first and then gives every hold back")
     void turnSettleChargesThenReleases() {
-        TurnCostMeter meter = new TurnCostMeter(service, meters);
+        TurnCostMeter meter = new TurnCostMeter(service, meters, SpendSinks.NONE);
         IConversationMemory memory = new ConversationMemory(CONVERSATION_ID, "agent", 1, "user");
         assertTrue(service.holdForCall(TENANT, memory.getTenantCostHolds(), 6.0).allowed());
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.5));
@@ -200,7 +201,7 @@ class TenantCostReservationTest {
     @Test
     @DisplayName("a turn that spent nothing still gives its holds back")
     void emptyTurnStillReleases() {
-        TurnCostMeter meter = new TurnCostMeter(service, meters);
+        TurnCostMeter meter = new TurnCostMeter(service, meters, SpendSinks.NONE);
         IConversationMemory memory = new ConversationMemory(CONVERSATION_ID, "agent", 1, "user");
         service.holdForCall(TENANT, memory.getTenantCostHolds(), 9.0);
 

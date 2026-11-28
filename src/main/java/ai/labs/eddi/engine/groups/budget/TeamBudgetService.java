@@ -53,6 +53,9 @@ public class TeamBudgetService {
     /** The limit on a free-text reason. */
     public static final int MAX_REASON_LENGTH = 1000;
 
+    /** Reads and compare-and-sets one {@link #setCurrentMonthCap} may try. */
+    private static final int MAX_SET_ATTEMPTS = 3;
+
     /** Hex characters of the request fingerprint in a transfer step id. */
     private static final int FINGERPRINT_LENGTH = 16;
 
@@ -291,13 +294,16 @@ public class TeamBudgetService {
     // ---- admin operations ----
 
     /**
-     * Sets this month's cap to {@code capUsd} by adjusting the delta over the base.
+     * Sets this month's cap to {@code capUsd} by setting the adjustment over the
+     * base. Of two concurrent sets, the later one's cap stands, and its audit entry
+     * names the cap it actually replaced.
      *
      * @throws IllegalArgumentException
      *             for a group without a budget, a missing reason, or a cap below
      *             what is already spent
      * @throws TeamBudgetAccountingUnavailableException
-     *             when the store cannot answer
+     *             when the store cannot answer, or the adjustment changed under
+     *             every one of {@value #MAX_SET_ATTEMPTS} attempts
      */
     public TeamBudgetSnapshot setCurrentMonthCap(String groupId, double capUsd, String reason, String actor) {
         requireReason(reason);
@@ -306,23 +312,34 @@ public class TeamBudgetService {
         }
         AgentGroupConfiguration config = requireBudgeted(groupId);
         String month = currentMonth();
-        TeamBudgetSnapshot before = snapshot(groupId, config, month, store.read(groupId, month).orElse(null));
-        double delta = capUsd - before.capUsd();
-        if (delta == 0.0) {
-            return before;
+        // A compare-and-set on the adjustment the snapshot was read with: a SET that
+        // lost a race re-reads and replaces the winner's cap, it never adds its
+        // delta on top of it.
+        for (int attempt = 0; attempt < MAX_SET_ATTEMPTS; attempt++) {
+            TeamBudgetSnapshot before = snapshot(groupId, config, month, store.read(groupId, month).orElse(null));
+            double delta = capUsd - before.capUsd();
+            if (delta == 0.0) {
+                return before;
+            }
+            if (capUsd < before.spentUsd()) {
+                throw new IllegalArgumentException(String.format(Locale.ROOT,
+                        "The cap cannot be set below what has already been spent this month ($%.2f).", before.spentUsd()));
+            }
+            TeamBudgetMonth.Adjustment entry = new TeamBudgetMonth.Adjustment(clock.instant(), actor, "SET", delta, capUsd, reason, null, null);
+            ITeamBudgetStore.AdjustOutcome outcome = store.setAdjustment(groupId, month, before.adjustmentUsd(), capUsd - before.baseUsd(),
+                    before.baseUsd(), entry, expiresAt(month));
+            if (outcome == ITeamBudgetStore.AdjustOutcome.CONFLICT) {
+                continue;
+            }
+            if (outcome == ITeamBudgetStore.AdjustOutcome.REFUSED) {
+                throw new IllegalArgumentException("The cap cannot be set below what has already been spent this month.");
+            }
+            meterRegistry.counter("eddi.team.budget.adjustments", "kind", "set").increment();
+            audit.adjusted(actor, groupId, month, delta, before.capUsd(), capUsd, reason);
+            return snapshot(groupId, config);
         }
-        if (capUsd < before.spentUsd()) {
-            throw new IllegalArgumentException(String.format(Locale.ROOT,
-                    "The cap cannot be set below what has already been spent this month ($%.2f).", before.spentUsd()));
-        }
-        TeamBudgetMonth.Adjustment entry = new TeamBudgetMonth.Adjustment(clock.instant(), actor, "SET", delta, capUsd, reason, null, null);
-        ITeamBudgetStore.AdjustOutcome outcome = store.applyAdjustment(groupId, month, delta, before.baseUsd(), entry, null, expiresAt(month));
-        if (outcome == ITeamBudgetStore.AdjustOutcome.REFUSED) {
-            throw new IllegalArgumentException("The cap cannot be set below what has already been spent this month.");
-        }
-        meterRegistry.counter("eddi.team.budget.adjustments", "kind", "set").increment();
-        audit.adjusted(actor, groupId, month, delta, before.capUsd(), capUsd, reason);
-        return snapshot(groupId, config);
+        throw new TeamBudgetAccountingUnavailableException(
+                "The team's budget kept changing while this cap was being set (" + MAX_SET_ATTEMPTS + " attempts); try again.");
     }
 
     /**

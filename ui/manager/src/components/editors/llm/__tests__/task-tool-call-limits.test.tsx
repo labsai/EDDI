@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { TaskToolCallLimits } from "../task-tool-call-limits";
 import { isUncappedToolCalls } from "../tool-call-limits";
-import type { LlmTask } from "../types";
+import type { LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 function Harness({ initial, onChangeSpy }: { initial: LlmTask; onChangeSpy?: (t: LlmTask) => void }) {
   const [task, setTask] = useState<LlmTask>(initial);

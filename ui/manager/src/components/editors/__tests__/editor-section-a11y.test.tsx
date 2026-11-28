@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { EditorSection } from "@/components/editors/editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { SessionManagementSection } from "@/components/editors/agent-config-sections";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 describe("EditorSection — accessibility", () => {
   it("card variant: the heading wraps the button, which reports its state", async () => {

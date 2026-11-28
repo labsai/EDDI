@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -87,7 +88,7 @@ class GroupHitlCoordinatorTest {
         executorService = Mockito.mock(ExecutorService.class);
         groupConversationService = Mockito.mock(GroupConversationService.class);
         return new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 new ConcurrentHashMap<>(), executorService, new CallerIdentityContext(null, null),
                 groupConversationService,
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
@@ -314,7 +315,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
                 new SimpleMeterRegistry().counter("test.group.failure"));
@@ -346,7 +347,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
                 new SimpleMeterRegistry().counter("test.group.failure"));
@@ -543,6 +544,29 @@ class GroupHitlCoordinatorTest {
     }
 
     @Test
+    void approve_stampsLastModifiedInTheResumeWrite() throws Exception {
+        // Startup crash recovery cancels a running discussion last written before the
+        // process started; the approve that starts a new leg must therefore move
+        // lastModified, as the human-turn and tie-break resumes already do.
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(5_000L);
+        gc.setLastModified(Instant.ofEpochMilli(5_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var written = new AtomicReference<Instant>();
+        doAnswer(invocation -> {
+            written.set(invocation.<GroupConversation>getArgument(0).getLastModified());
+            throw new IResourceStore.ResourceModifiedException("stop after the resume write");
+        }).when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
+        Instant before = Instant.now();
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, new GroupApprovalRequest(), null));
+
+        assertNotNull(written.get(), "the resume write must carry a lastModified");
+        assertFalse(written.get().isBefore(before), "the resume write must stamp lastModified, not keep the pause's");
+    }
+
+    @Test
     void reject_isBoundToThePauseItRead_andSurfacesAStaleRefusal() throws Exception {
         var coordinator = coordinator();
         var gc = approvalPausedGc(6_000L);
@@ -575,6 +599,25 @@ class GroupHitlCoordinatorTest {
 
         assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(7_000L)), pauseId.getValue());
         verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void cancelPausedDiscussion_announcesTheEndOnTheUserEventStream_onlyWhenItWon() throws Exception {
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(7_500L);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+
+        assertTrue(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
+
+        // No running leg ends here, so nothing else would tell the owner it ended.
+        verify(groupConversationService).announceUserEvents(argThat(c -> c.getState() == GroupConversationState.CANCELLED));
+
+        var lost = coordinator();
+        var paused = approvalPausedGc(7_600L);
+        when(conversationStore.read(GC_ID)).thenReturn(paused);
+        refuseAndCapturePauseId(ArgumentCaptor.forClass(String.class), GroupConversationState.AWAITING_APPROVAL);
+        assertFalse(lost.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
+        verify(groupConversationService, never()).announceUserEvents(any());
     }
 
     @Test
@@ -668,7 +711,7 @@ class GroupHitlCoordinatorTest {
         executorService = mock(ExecutorService.class);
         groupConversationService = mock(GroupConversationService.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 new ConcurrentHashMap<>(), executorService, identityContext, groupConversationService,
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
                 new SimpleMeterRegistry().counter("test.hitl.resume"),
@@ -945,7 +988,7 @@ class GroupHitlCoordinatorTest {
         conversationStore = mock(IGroupConversationStore.class);
         var coordinator = new GroupHitlCoordinator(mock(IAgentGroupStore.class), conversationStore,
                 mock(IScheduleStore.class), mock(AuditLedgerService.class),
-                new GroupSigningGuard(null, null, null, "default"), tokens, mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), tokens, mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
                 new SimpleMeterRegistry().counter("test.hitl.resume"),
@@ -972,7 +1015,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 activeTokens, executorService, new CallerIdentityContext(null, null),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"),

@@ -31,9 +31,9 @@ import java.util.Map;
  * <p>
  * The list matters only when a configuration names an endpoint: a configuration
  * without one uses the provider's built-in endpoint and is not checked (see
- * {@code ChatModelRegistry.ENDPOINT_KEYS}). The default hosts below are
- * therefore what an editor may legitimately <em>spell out</em>, not a
- * precondition for the default endpoint to work.
+ * {@code EndpointParameters}). The default hosts below are therefore what an
+ * editor may legitimately <em>spell out</em>, not a precondition for the
+ * default endpoint to work.
  */
 final class SetupSecretHosts {
 

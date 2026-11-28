@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.pricing.SpendSinks;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -39,7 +40,7 @@ class TurnCostMeterTest {
         when(quotaService.getDefaultTenantId()).thenReturn(TENANT);
         when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK);
         meterRegistry = new SimpleMeterRegistry();
-        meter = new TurnCostMeter(quotaService, meterRegistry);
+        meter = new TurnCostMeter(quotaService, meterRegistry, SpendSinks.NONE);
     }
 
     @Test
@@ -293,7 +294,7 @@ class TurnCostMeterTest {
         var store = new InMemoryTenantQuotaStore(TENANT, true, -1, -1, -1, 0.01);
         var service = new TenantQuotaService(store, new SimpleMeterRegistry(), TENANT);
         service.setQuota(new TenantQuota(TENANT, -1, -1, -1, 0.01, true));
-        var realMeter = new TurnCostMeter(service, new SimpleMeterRegistry());
+        var realMeter = new TurnCostMeter(service, new SimpleMeterRegistry(), SpendSinks.NONE);
 
         assertTrue(service.checkCostBudget(TENANT).allowed());
         realMeter.meterSettledStep(memoryWithCost(0.006));

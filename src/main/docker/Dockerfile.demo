@@ -52,8 +52,8 @@ COPY docs/ docs/
 RUN rm -f docs/changelog.md docs/code-review-standards.md docs/incident-response.md docs/SUMMARY.md
 
 # The Manager and the Chat UI. `package` builds both (frontend-maven-plugin in
-# prepare-package: it downloads Node into ui/node, then `npm ci` and
-# `npm run build` in each), and the demo's own story runs through the Manager —
+# prepare-package: it downloads Node into ui/node, runs `npm ci` once at the
+# ui/ workspaces root, then `npm run build` in each app), and the demo's own story runs through the Manager —
 # the Platform Operator, the wizard, HITL approvals. Without this COPY the ui/
 # directory did not exist in the build context, `npm ci` failed on a missing
 # package.json, and the documented `docker compose -f docker-compose.openwebui.yml
@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -B package -DskipTests
 
 # ── Runtime ──
-FROM eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0
+FROM eclipse-temurin:25-jre@sha256:4ed132f6832e9804b123e89a849a7b4502756ae64a4ee08ebab939d9d5d0a9fa
 
 ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
@@ -117,4 +117,9 @@ EXPOSE 7070
 # run-java.sh and no JAVA_OPTS_APPEND, so the flag has to be spelled out here or the demo
 # image silently runs Jlama on scalar tensor operations. See src/main/docker/Dockerfile
 # and JlamaRuntimeFlagsTest, which grades both images.
-ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
+#
+# -XX:-UseBASE64Intrinsics: the interim Java4Shell (CVE-2026-114938) mitigation, as in
+# src/main/docker/Dockerfile, which explains it. Both base images now carry a fixed OpenJDK
+# (confirmed with `java -version`); it goes with the production image's copy, in a change of
+# its own. Java4ShellMitigationTest grades both.
+ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-XX:-UseBASE64Intrinsics", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]

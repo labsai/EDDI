@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -520,6 +521,49 @@ class GdprComplianceServiceTest {
         assertEquals("conv-1", convExport.conversationId());
         assertEquals("agent-1", convExport.agentId());
         assertEquals(ConversationState.ENDED, convExport.state());
+    }
+
+    @Test
+    void exportUserData_includesConversationTitleAndPin() throws Exception {
+        // A title is derived conversation content (§2.5 of the frontend plan): it is
+        // exported with the conversation it names — read live, else from the archived
+        // copy a soft delete leaves.
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1", "conv-2"));
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+        var titled = new ConversationDescriptor();
+        titled.setTitle("Trip to Rome");
+        titled.setTitleSource(ConversationDescriptor.TitleSource.USER);
+        titled.setPinned(true);
+        when(conversationDescriptorStore.readDescriptorWithHistory("conv-1", 0)).thenReturn(titled);
+        when(conversationDescriptorStore.readDescriptorWithHistory("conv-2", 0))
+                .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(2, export.conversations().size(), "a missing descriptor drops only the title, not the conversation");
+        var first = export.conversations().getFirst();
+        assertEquals("Trip to Rome", first.title());
+        assertTrue(first.pinned());
+        assertNull(export.conversations().get(1).title());
+        assertFalse(export.conversations().get(1).pinned());
+    }
+
+    @Test
+    void deleteUserData_erasesConversationTitlesWithTheirDescriptors() throws Exception {
+        // The title, its source and the pin live on the conversation descriptor only;
+        // erasure removes every version of it (live and archived) per conversation.
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
     }
 
     @Test

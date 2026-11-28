@@ -69,6 +69,29 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<List<String>> EXPRESSIONS_MATCHES = MemoryKey.of("expressions:matches");
 
+    /**
+     * How sure the parser is of {@link #EXPRESSIONS_PARSED}: the accuracy of the
+     * least accurate match that contributed an expression, 0..1 (1 = every
+     * contributing word matched as typed; a typo correction, a case mismatch or a
+     * phrase fragment lowers it; for a semantic-fallback match it is the similarity
+     * score). Absent when nothing was understood. Written by InputParserTask.
+     */
+    public static final MemoryKey<Double> EXPRESSIONS_CONFIDENCE = MemoryKey.of("expressions:confidence");
+
+    /**
+     * Other readings of the input, best first, each as an expression string —
+     * stored only when the parser's {@code maxAlternatives} is above 0. Written by
+     * InputParserTask.
+     */
+    public static final MemoryKey<List<String>> EXPRESSIONS_ALTERNATIVES = MemoryKey.of("expressions:alternatives");
+
+    /**
+     * {@code true} when the input had more tokens than the parser's
+     * {@code maxInputTokens} and only the first ones were parsed. Absent otherwise.
+     * Written by InputParserTask.
+     */
+    public static final MemoryKey<Boolean> EXPRESSIONS_INPUT_TRUNCATED = MemoryKey.of("expressions:inputTruncated");
+
     /** Extracted intent names. Written by InputParserTask. */
     public static final MemoryKey<List<String>> INTENTS = MemoryKey.ofPublic("intents");
 
@@ -76,6 +99,18 @@ public final class MemoryKeys {
 
     /** Action strings emitted by behavior rules. Read by most downstream tasks. */
     public static final MemoryKey<List<String>> ACTIONS = MemoryKey.ofPublic("actions");
+
+    // ---- HITL ----
+
+    /**
+     * The plan hash a HITL resume was admitted against ({@code HitlPlanHash}).
+     * Written by {@code Conversation#resume}; read by {@code LifecycleManager} into
+     * the audit entries of the tasks the resume runs. A colon key: not visible to
+     * templates.
+     *
+     * @since 6.8.0
+     */
+    public static final MemoryKey<String> HITL_PLAN_HASH = MemoryKey.of("hitl:plan_hash");
 
     // ---- Langchain ----
 
@@ -405,6 +440,16 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<List<String>> ATTACHMENT_EXTRACTS = MemoryKey.of("attachments:extracts");
 
+    /**
+     * Files this conversation shared with another conversation this turn, one row
+     * per file: {@code fileName}, {@code targetAgentId} and {@code reason}
+     * ({@code ShareResult.toStepRecords}). Never a storage reference. Non-public —
+     * written by the tool that shared, for audit and the detailed view.
+     *
+     * @since 6.7.0
+     */
+    public static final MemoryKey<List<Map<String, String>>> ATTACHMENTS_SHARED = MemoryKey.of("attachments:shared");
+
     // ---- Dynamic agents ----
 
     /**
@@ -436,4 +481,45 @@ public final class MemoryKeys {
      * which sees keys as strings and never resolves a typed {@code MemoryKey}.
      */
     public static final String DYNAMIC_TORN_DOWN_AGENT_IDS = "dynamic:torn_down_agent_ids";
+
+    // ---- Agent Health ----
+
+    /**
+     * The id of the turn execution that ran this step ({@code String}, a UUID) —
+     * part of the Agent Health turn row's key. Written by {@code Conversation} at
+     * the end of the step's first execution, only when absent: a HITL resume and a
+     * rerun continue the same step and keep it, so their row replaces the earlier
+     * one, while a say after an undo runs on a new step and gets a new id. At the
+     * end, not the start, for the reason {@link #AGENT_VERSION} gives. Internal:
+     * not in the simple conversation snapshot.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_EXECUTION_ID = "health:execution_id";
+
+    /**
+     * The execution ids ({@code List<String>}) of the steps an undo moved to the
+     * redo cache and this step's turn then discarded — the Agent Health rows the
+     * recorder marks {@code discarded}. Written by {@code Conversation} on the new
+     * step, at its end; the counterpart of {@link #AUDIT_DISCARDED_COST}. Absent on
+     * every other step.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_DISCARDED_EXECUTIONS = "health:discarded_executions";
+
+    /**
+     * Every failed LLM attempt of this step, recovered or not ({@code List<Map>} of
+     * {@code {class, model, recovery}}): {@code class} a {@code FailureClass} name,
+     * {@code model} the model when known, and {@code recovery} what the engine did
+     * next — {@code retry} (same model again), {@code cascade} (escalated, or an
+     * earlier step's answer served), {@code fallback} ({@code onError: fallback})
+     * or {@code none}. Written by the LLM task's recovery path
+     * ({@code LlmFailureRecords}), at most {@code LlmFailureRecords.MAX_RECORDS}
+     * entries; read by Agent Health. Without it a retried or cascaded failure left
+     * no trace on the step — only untagged counters. Holds no message text.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_LLM_FAILURES = "health:llm_failures";
 }

@@ -144,6 +144,25 @@ class SlackHitlSupportTest {
     }
 
     @Test
+    void actionValue_carriesThePlanHashAfterTheCardId() {
+        String plan = "v1:" + "ab".repeat(32);
+        String value = SlackHitlSupport.buildActionValue("my-int", "conv-1", "card-a", plan);
+        assertEquals("my-int|conv-1|card-a|" + plan, value);
+        var v = SlackHitlSupport.parseActionValue(value);
+        assertEquals("conv-1", v.subject());
+        assertEquals("card-a", v.cardId());
+        assertEquals(plan, v.planHash());
+        // A card posted before plan hashing, or for a pause without one, carries none.
+        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1|card-a").planHash());
+        assertEquals("my-int|conv-1|card-a", SlackHitlSupport.buildActionValue("my-int", "conv-1", "card-a", ""));
+        // Never appended to a value without a card id.
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null, plan));
+        var g = SlackHitlSupport.parseActionValue(SlackHitlSupport.buildActionValue("my-int", "group:gc-9", "card-b", plan));
+        assertEquals("gc-9", g.groupConversationId());
+        assertEquals(plan, g.planHash());
+    }
+
+    @Test
     void parseActionValue_integrationBound_conversation() {
         var v = SlackHitlSupport.parseActionValue("my-int|conv-1");
         assertNotNull(v);

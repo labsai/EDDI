@@ -86,7 +86,7 @@ public class CalculatorTool {
     @Tool("Converts between different units of measurement")
     public String convertUnits(@P("Numeric value to convert") double value,
                                @P("Unit to convert from: celsius, fahrenheit, kelvin, m, km, feet, miles, kg, lb, liters or gallons") String fromUnit,
-                               @P("Unit to convert to, from the same list and of the same kind") String toUnit) {
+                               @P("Unit to convert to. Supported pairs, either way: celsius-fahrenheit, celsius-kelvin, km-miles, m-feet, kg-lb, liters-gallons") String toUnit) {
 
         try {
             double result = performConversion(value, fromUnit.toLowerCase(), toUnit.toLowerCase());

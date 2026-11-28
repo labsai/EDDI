@@ -269,8 +269,8 @@ describe("cascade escalation", () => {
 
 describe("active tool", () => {
   it("SET_ACTIVE_TOOL sets and clears the name", () => {
-    const on = chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: "calculator" });
-    expect(on.activeTool).toBe("calculator");
+    const on = chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: { text: "calculator", phrase: false } });
+    expect(on.activeTool).toEqual({ text: "calculator", phrase: false });
 
     expect(chatReducer(on, { type: "SET_ACTIVE_TOOL", tool: null }).activeTool).toBeNull();
   });
@@ -285,7 +285,7 @@ describe("active tool", () => {
   it("FINISH_STREAMING clears it — no tool is running once the turn is over", () => {
     const state: ChatState = {
       ...initialState,
-      activeTool: "calculator",
+      activeTool: { text: "calculator", phrase: false },
       isProcessing: true,
       messages: [makeMsg({ isStreaming: true })],
     };
@@ -294,13 +294,13 @@ describe("active tool", () => {
   });
 
   it("CLEAR_MESSAGES clears it, so a new conversation never inherits it", () => {
-    const state: ChatState = { ...initialState, activeTool: "calculator" };
+    const state: ChatState = { ...initialState, activeTool: { text: "calculator", phrase: false } };
 
     expect(chatReducer(state, { type: "CLEAR_MESSAGES" }).activeTool).toBeNull();
   });
 
   it("an escalation drops the tool the abandoned model was running", () => {
-    const state: ChatState = { ...initialState, activeTool: "calculator" };
+    const state: ChatState = { ...initialState, activeTool: { text: "calculator", phrase: false } };
 
     const next = chatReducer(state, { type: "SET_ESCALATING", value: true });
 
@@ -311,7 +311,7 @@ describe("active tool", () => {
   it("lowering escalation leaves a running tool alone", () => {
     // SET_ESCALATING false is dispatched on every token; it must neither wipe
     // the tool nor allocate a new state when nothing changed.
-    const state: ChatState = { ...initialState, activeTool: "calculator" };
+    const state: ChatState = { ...initialState, activeTool: { text: "calculator", phrase: false } };
 
     expect(chatReducer(state, { type: "SET_ESCALATING", value: false })).toBe(state);
   });

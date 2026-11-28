@@ -42,7 +42,7 @@ run = "mvn formatter:format"
 description = "Auto-format Java sources using the project Eclipse formatter"
 
 [tasks.docker-build]
-run = "mvn clean package '-Dquarkus.container-image.build=true'"
+run = ["mvn clean package -DskipTests", "docker build -f src/main/docker/Dockerfile -t labsai/eddi:local ."]
 description = "Build the app + Docker image"
 
 

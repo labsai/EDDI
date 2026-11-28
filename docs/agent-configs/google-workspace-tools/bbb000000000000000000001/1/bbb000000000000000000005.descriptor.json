@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.llm/llmstore/llms/bbb000000000000000000005?version=1",
+  "name" : "Google Workspace Assistant (recipe)",
+  "description" : "LLM task with the workflow's httpcalls as tools and no built-in tools",
+  "deleted" : false
+}

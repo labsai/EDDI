@@ -14,7 +14,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -71,10 +70,9 @@ class PrePostUtilsJsonInjectionTest {
     @BeforeEach
     void setUp() {
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
-        IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
+        prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -203,8 +201,7 @@ class PrePostUtilsJsonInjectionTest {
     void realQuteRenderRoundTripsUnsafeValuesAndReusesTheCompiledTemplate() throws Exception {
         var realTemplatingEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
 
-        var realPrePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
-                realTemplatingEngine, dataFactory, mock(SecretPropertyVault.class));
+        var realPrePostUtils = new PrePostUtils(mock(IJsonSerialization.class), realTemplatingEngine, dataFactory, mock(SecretPropertyVault.class));
 
         var texts = List.of("say \"hi\"", "line one\nline two", "back\\slash", "eddiRow0000");
         List<Map<String, String>> items = texts.stream().map(text -> Map.of("text", text)).toList();

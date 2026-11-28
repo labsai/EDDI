@@ -39,7 +39,7 @@ class MongoUserMemoryStoreVisibilityTest {
     @Test
     @DisplayName("Mongo, no groups: the filter is exactly the user's own scope — no team branch at all")
     void mongo_noGroups_userScopeOnly() {
-        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of()));
+        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of(), false));
 
         assertTrue(json.contains("user-1"), json);
         assertFalse(json.contains(IUserMemoryStore.TEAM_OWNER_PREFIX), json);
@@ -48,7 +48,7 @@ class MongoUserMemoryStoreVisibilityTest {
     @Test
     @DisplayName("Mongo, with groups: the team branch matches derived group: owners only, alongside the untouched user scope")
     void mongo_withGroups_additiveTeamBranch() {
-        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of("g1", "g2")));
+        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of("g1", "g2"), false));
 
         assertTrue(json.contains("\"group:g1\"") && json.contains("\"group:g2\""),
                 "team owners are DERIVED from the supplied group ids: " + json);
@@ -62,7 +62,7 @@ class MongoUserMemoryStoreVisibilityTest {
     @Test
     @DisplayName("Mongo: another user's id never appears in the filter — the team branch cannot cross humans")
     void mongo_teamBranch_cannotNameAnotherHuman() {
-        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of("g1")));
+        String json = render(MongoUserMemoryStore.buildVisibilityFilter("user-1", "agent-a", List.of("g1"), false));
 
         // The only owner ids in the filter are the caller's own and group:g1.
         assertFalse(json.contains("user-2"), json);

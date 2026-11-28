@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.agent/agentstore/agents/bbb000000000000000000000?version=1",
+  "name" : "Google Workspace Assistant (recipe)",
+  "description" : "Recipe: Gmail and Drive as LLM tools on each user's own Google account, through a PER_USER OAuth connection. Searches and reads mail, writes drafts (never sends), searches and reads Drive files. See docs/google-workspace.md.",
+  "deleted" : false
+}

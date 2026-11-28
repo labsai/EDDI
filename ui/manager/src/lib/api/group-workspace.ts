@@ -1,7 +1,7 @@
-import { api } from "../api-client";
-import type { SharedTaskList, TaskItem } from "./groups";
-import { seg } from "./path-segment";
-import type { WorkspaceHandoffs } from "./team-handoffs";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { SharedTaskList, TaskItem } from "@eddi/app-kit/lib/api/groups";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
+import type { WorkspaceHandoffs } from "@eddi/app-kit/lib/api/team-handoffs";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +
@@ -51,6 +51,8 @@ export interface Cadence {
 /** Per-member reliability counters (I13) — RECORDING only; nothing in v1 routes, weights, or filters assignment on these numbers. */
 export interface MemberStats {
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   tasksFailed: number;
 }
 
@@ -58,9 +60,27 @@ export interface MemberStats {
 export interface WorkspaceMetrics {
   discussions: number;
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   totalCost: number;
   lastRunAt: string | null;
   perMemberStats: Record<string, MemberStats>;
+}
+
+/**
+ * One cadence run's retry feedback on a backlog task (backend
+ * `GroupWorkspace.BacklogFeedback`), kept beside the task's description. The text
+ * is model-written: render it as plain text only.
+ */
+export interface BacklogFeedback {
+  taskId: string;
+  /** The cadence discussion that left it. */
+  runId: string;
+  text: string;
+  /** The agent whose text it is, or `null` when none wrote it (a person, an approver's edit, the engine). */
+  authorAgentId: string | null;
+  /** Whether a reader required peer verification when it was written. */
+  verified: boolean;
 }
 
 /**
@@ -82,6 +102,8 @@ export interface GroupWorkspace {
   pulledTaskIds: string[];
   /** Cross-team handoff state: the intake inbox and the origin of handed-off tasks. Absent on a backend that predates handoff. */
   handoffs?: WorkspaceHandoffs;
+  /** Retry feedback of the backlog tasks, oldest first, at most 8 per task. Absent on older workspaces. */
+  backlogFeedback?: BacklogFeedback[];
   created: string;
   lastModified: string;
   revision: string;

@@ -8,7 +8,7 @@
   "buildCmd": "node .design-sync/build-css.mjs",
   "cssEntry": ".design-sync/.cache/compiled.css",
   "extraFonts": [
-    "node_modules/@fontsource-variable/noto-sans/index.css"
+    "../node_modules/@fontsource-variable/noto-sans/index.css"
   ],
   "readmeHeader": ".design-sync/conventions.md",
   "provider": {
@@ -70,7 +70,7 @@
     "AccessibleDialog": "src/components/ui/accessible-dialog.tsx",
     "AlertDialog": "src/components/ui/alert-dialog.tsx",
     "Badge": "src/components/ui/badge.tsx",
-    "Button": "src/components/ui/button.tsx",
+    "Button": "../packages/ui/src/primitives/button.tsx",
     "Card": "src/components/ui/card.tsx",
     "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
     "ErrorBoundary": "src/components/ui/error-boundary.tsx",

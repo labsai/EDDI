@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 import { describe, it, expect } from "vitest";
-import { RESOURCE_TYPE_ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "../../resource-type-icons";
-import { RESOURCE_TYPES } from "../resources";
+import { RESOURCE_TYPE_ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "@eddi/app-kit/lib/resource-type-icons";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 import {
   EXTENSION_TYPE_INFO,
   EXTENSION_TO_RESOURCE_SLUG,
@@ -13,7 +13,7 @@ import {
   getExtensionTypeConfig,
   getExtensionSortOrder,
   sortExtensionTypes,
-} from "../extensions";
+} from "@eddi/app-kit/lib/api/extensions";
 
 /**
  * These tests validate that the frontend extension registry and RESOURCE_TYPES
@@ -130,9 +130,10 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
     expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.behavior"]).toBe("rules");
   });
 
-  it("labels the v6 api-calls step as current and the v5 spelling as legacy", () => {
+  it("labels both names of the api-calls step the same, and neither as legacy", () => {
+    // ai.labs.httpcalls is ApiCallsTask.ID, the canonical name; ai.labs.apicalls is its alias.
+    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.httpcalls"]?.label).toBe("API Calls");
     expect(EXTENSION_TYPE_INFO["eddi://ai.labs.apicalls"]?.label).toBe("API Calls");
-    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.httpcalls"]?.label).toBe("API Calls (legacy)");
   });
 
   it("hasResourceStore returns true for rag", () => {
@@ -182,7 +183,7 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
 
   it("getExtensionLabel resolves a known type through i18n", () => {
     expect(getExtensionLabel("eddi://ai.labs.apicalls", t)).toBe("API Calls");
-    expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls (legacy)");
+    expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls");
   });
 
   it("getExtensionIcon returns the unknown-type icon for unknown, resolves for known", () => {

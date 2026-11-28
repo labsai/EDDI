@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import i18n from "@/i18n/config";
 import { CreateConnectionDialog } from "@/components/connections/create-connection-dialog";
 
 /**
@@ -36,7 +37,7 @@ async function toCredentials(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CreateConnectionDialog — the auth type chooser", () => {
-  it("is a real radio group, not four unrelated radios", async () => {
+  it("is a real radio group, not five unrelated radios", async () => {
     // `role="radio"` with no owning radiogroup is invalid ARIA: the options are
     // announced with no group name and no "1 of 4", on the one decision the
     // wizard itself calls unchangeable afterwards.
@@ -44,7 +45,7 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
 
     const group = screen.getByRole("radiogroup");
     expect(group).toBeInTheDocument();
-    expect(within(group).getAllByRole("radio")).toHaveLength(4);
+    expect(within(group).getAllByRole("radio")).toHaveLength(5);
   });
 
   it("moves the selection with the arrow keys", async () => {
@@ -78,6 +79,106 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
       "tabindex",
       "-1",
     );
+  });
+});
+
+describe("CreateConnectionDialog — templates", () => {
+  it("offers the presets, and choosing one fills the draft", async () => {
+    const user = userEvent.setup();
+    await renderDialog();
+
+    const chooser = screen.getByTestId("create-connection-preset");
+    const google = within(chooser).getByTestId("create-connection-preset-option-google-service-account");
+    expect(within(chooser).getByTestId("create-connection-preset-option-entra-app-certificate")).toBeInTheDocument();
+
+    await user.selectOptions(chooser, google);
+
+    expect(screen.getByTestId("create-connection-preset-description")).toHaveTextContent(
+      /RFC 7523 JWT bearer/,
+    );
+    // The preset sets the auth type, which the chooser shows as selected.
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-type-choice-OAUTH2_JWT_BEARER")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
+  });
+  it("drops an origin typed for the previous configuration when a preset is applied", async () => {
+    const user = userEvent.setup();
+    let sent: Record<string, unknown> | null = null;
+    server.use(
+      http.post("*/connectionstore/connections", async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/connectionstore/connections/new-1?version=1" },
+        });
+      }),
+    );
+    await renderDialog();
+
+    // Leave text in the origin box that blur cannot commit: a valid origin
+    // becomes a chip on blur (which the preset replaces), but one with no
+    // scheme stays pending.
+    await toCredentials(user);
+    await user.type(screen.getByTestId("create-connection-header-name"), "X-Api-Key");
+    await user.type(
+      screen.getByTestId("create-connection-header-value-secret-input"),
+      "${{vault:notion-key}",
+    );
+    await user.click(screen.getByTestId("create-connection-next"));
+    await user.type(screen.getByTestId("create-connection-origins-input"), "stale.example.com");
+
+    // Back to the basics, apply a preset, then return to a static key (a type
+    // switch keeps the preset's allowlist).
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const chooser = screen.getByTestId("create-connection-preset");
+    await user.selectOptions(
+      chooser,
+      within(chooser).getByTestId("create-connection-preset-option-google-service-account"),
+    );
+    await user.click(screen.getByTestId("auth-type-choice-STATIC"));
+
+    await user.click(screen.getByTestId("create-connection-next"));
+    await screen.findByTestId("create-connection-header-name");
+    await user.type(screen.getByTestId("create-connection-header-name"), "X-Api-Key");
+    await user.type(
+      screen.getByTestId("create-connection-header-value-secret-input"),
+      "${{vault:google-key}",
+    );
+    await user.click(screen.getByTestId("create-connection-next"));
+
+    expect(screen.getByTestId("create-connection-origins-input")).toHaveValue("");
+    await user.click(screen.getByTestId("create-connection-submit"));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.baseUrlAllowlist).toEqual(["https://www.googleapis.com"]);
+  });
+});
+
+describe("CreateConnectionDialog — template labels come from the locale", () => {
+  it("renders the translated label of a preset, not the JSON fallback", async () => {
+    // A sentinel bundle proves the option text is looked up by key: with the
+    // translation call removed the JSON fallback would be shown instead.
+    const key = "google-service-account";
+    const original = i18n.getResource(i18n.language, "translation", `connections.presets.${key}.label`);
+    i18n.addResourceBundle(
+      i18n.language,
+      "translation",
+      { connections: { presets: { [key]: { label: "Sentinel template label" } } } },
+      true,
+      true,
+    );
+    try {
+      await renderDialog();
+      expect(
+        screen.getByTestId(`create-connection-preset-option-${key}`),
+      ).toHaveTextContent("Sentinel template label");
+    } finally {
+      i18n.addResource(i18n.language, "translation", `connections.presets.${key}.label`, original as string);
+    }
   });
 });
 

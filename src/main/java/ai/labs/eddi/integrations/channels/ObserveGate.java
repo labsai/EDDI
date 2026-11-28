@@ -53,10 +53,12 @@ import java.util.concurrent.TimeUnit;
  * The caller supplies the number, so a future source of total spend needs no
  * change here.
  *
- * <h2>Every limit here is PER NODE</h2> Counters live in {@code ICacheFactory},
- * whose only implementation is an in-process Caffeine cache; nothing is shared
- * between replicas. A deployment of N nodes behind a load balancer therefore
- * permits N times each cap: N times {@code maxDailyResponses}, N times {@code
+ * <h2>Every limit here is PER NODE</h2> Counters live in the
+ * {@code channel-observe-windows} cache, an in-process Caffeine cache that
+ * {@code CacheFactory} does not back with a shared KV bucket even in cluster
+ * mode; nothing is shared between replicas. A deployment of N nodes behind a
+ * load balancer therefore permits N times each cap: N times
+ * {@code maxDailyResponses}, N times {@code
  * maxCostPerDay}, and N replies inside one cooldown, one per node. The caps are
  * a true ceiling only on a single-node deployment.
  * <p>
@@ -202,7 +204,7 @@ public class ObserveGate {
      * cannot both be told there is room for one more.
      * <p>
      * Reading and booking as separate steps would tell two racing callers yes: the
-     * CAS in {@link #mutate} stops one increment overwriting the other, not both
+     * CAS in {@link #addCost} stops one increment overwriting the other, not both
      * being permitted. Here the limits are re-checked inside the loop against the
      * window the write will actually replace, so exactly one caller wins the last
      * slot.

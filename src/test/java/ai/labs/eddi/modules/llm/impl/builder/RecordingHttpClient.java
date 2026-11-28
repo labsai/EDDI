@@ -30,6 +30,8 @@ final class RecordingHttpClient implements HttpClient, HttpClientBuilder {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final List<HttpRequest> requests = new ArrayList<>();
+    private Duration connectTimeout;
+    private Duration readTimeout;
 
     /** The single request sent; fails when there was none. */
     HttpRequest request() {
@@ -74,23 +76,26 @@ final class RecordingHttpClient implements HttpClient, HttpClientBuilder {
         return this;
     }
 
+    /** What the provider client configured, so the timeout can be compared too. */
     @Override
     public Duration connectTimeout() {
-        return null;
+        return connectTimeout;
     }
 
     @Override
     public HttpClientBuilder connectTimeout(Duration timeout) {
+        this.connectTimeout = timeout;
         return this;
     }
 
     @Override
     public Duration readTimeout() {
-        return null;
+        return readTimeout;
     }
 
     @Override
     public HttpClientBuilder readTimeout(Duration timeout) {
+        this.readTimeout = timeout;
         return this;
     }
 }

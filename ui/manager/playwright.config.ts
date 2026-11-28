@@ -32,7 +32,10 @@ const AGAINST_BACKEND =
   // rather than leaving it to the caller means `npm run test:e2e:auth` cannot fail
   // with "localhost:7070 is already used" — which is what it reports when Playwright
   // tries to start Vite on the port the backend already holds.
-  process.argv.includes("--project=auth");
+  process.argv.includes("--project=auth") ||
+  // The operator tier, likewise, needs its own compose stack (a model stub
+  // beside EDDI) and drives the bundle that stack serves.
+  process.argv.includes("--project=operator");
 
 /**
  * Seeded localStorage (onboarding already dismissed), re-pointed at whatever
@@ -143,7 +146,7 @@ export default defineConfig({
       name: "ui",
       testDir: "./e2e",
       // Nothing under e2e/ is this tier's except its own specs.
-      testIgnore: ["**/integration/**", "**/fullstack/**", "**/auth/**"],
+      testIgnore: ["**/integration/**", "**/fullstack/**", "**/auth/**", "**/operator/**"],
       // Mock-backed, so it has no shared backend to race over and keeps the
       // parallelism the top-level `fullyParallel: false` turns off.
       fullyParallel: true,
@@ -179,6 +182,17 @@ export default defineConfig({
     {
       name: "auth",
       testDir: "./e2e/auth",
+      use: { ...devices["Desktop Chrome"] },
+    },
+
+    // ── Tier 5: Operator activation (real backend + a deterministic model stub) ──
+    // The Platform Operator activated through the Manager end to end: spec
+    // check, setup-api, deploy, gate read-back, both canaries, a real tool
+    // call. Needs docker-compose.integration-operator.yml layered on the
+    // integration compose file; see e2e/operator/.
+    {
+      name: "operator",
+      testDir: "./e2e/operator",
       use: { ...devices["Desktop Chrome"] },
     },
 

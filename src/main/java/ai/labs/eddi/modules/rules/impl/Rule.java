@@ -72,7 +72,8 @@ public class Rule {
 
         Rule that = (Rule) o;
 
-        return name.equals(that.getName());
+        // Rule names are optional (RuleDeserialization accepts a rule without one).
+        return Objects.equals(name, that.getName());
     }
 
     @Override

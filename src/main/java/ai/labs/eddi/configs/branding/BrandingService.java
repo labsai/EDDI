@@ -55,9 +55,10 @@ import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
  * database read is worth it (plan R2). Every rendered output is keyed on
  * {@link ResolvedBrand#revision()}, which only ever grows.
  * <p>
- * <b>Writes</b> need the revision they were based on (409 when it moved), are
- * refused while locked (409), and leave an INFO audit line with the user, both
- * revisions and the changed fields.
+ * <b>Writes</b>: a settings edit needs the revision it was based on (409 when
+ * it moved), image writes and reset retry on top of a concurrent change; all
+ * are refused while locked (409), and leave an INFO audit line with the user,
+ * both revisions and the changed fields.
  * <p>
  * {@link #current(BrandRequest)} is the single entry point for reading: a
  * per-tenant resolver would slot in there (plan §4.6).

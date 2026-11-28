@@ -27,7 +27,9 @@ public interface IApiCallExecutor {
      *            The template data objects for variable substitution
      * @param targetServerUrl
      *            The target server URL
-     * @return The response object (parsed JSON or raw string)
+     * @return the call's outcome as a map: {@code httpCode}, plus {@code body}
+     *         (parsed JSON or text) and {@code headers} when they are kept; empty
+     *         for a fire-and-forget call
      * @throws LifecycleException
      *             if execution fails
      */
@@ -76,5 +78,22 @@ public interface IApiCallExecutor {
      *             when the target is refused
      */
     default void rejectTemplatedAuthority(String targetDestination) {
+    }
+
+    /**
+     * Refuses a target URL whose literal host the SSRF check {@link #execute}
+     * applies would refuse: a cloud instance-metadata address always, and, with
+     * {@code eddi.security.ssrf-protection.enabled=true}, a loopback, private or
+     * internal host that is not on
+     * {@code eddi.security.ssrf-protection.allowed-hosts}. Called at deploy time
+     * with the same decision logic, so the agent fails to deploy with a message
+     * naming the host and the fix instead of failing the first conversation. A
+     * templated or {@code ${vars:...}} host, and a host that does not resolve at
+     * deploy, are left to the check at execution.
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    default void rejectRefusedLiteralTarget(String targetDestination) {
     }
 }

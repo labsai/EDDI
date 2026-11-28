@@ -99,6 +99,69 @@ Credentials → Set password). `install.sh --with-auth` does it for `eddi` and
 prints a one-time password; add `--demo-users` for the other two. They used to
 ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 
+### Compose files and overlays
+
+Run from a checkout of the repository (or a directory holding the compose files):
+
+```bash
+# Default (EDDI + MongoDB)
+docker compose up
+
+# PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
+# docker-compose.yml (an overlay cannot un-declare the base's mongodb service).
+# The database password has no default. Generate it ONCE into .env, which
+# compose reads on every run: PostgreSQL keeps the first password in its
+# volume, so a new one on a later run is a password the database rejects
+# (install.sh --db=postgres writes it into .env for you).
+# .env holds secrets, so only you may read it: it is created under umask 077,
+# an existing one is tightened, and nothing is written unless both succeeded.
+# The leading \n keeps the entry on its own line when the file's last line has
+# no newline.
+(umask 077 && touch .env) && chmod 600 .env && {
+  grep -q '^POSTGRES_PASSWORD=' .env || printf '\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+}
+docker compose -f docker-compose.postgres-only.yml up
+
+# With Keycloak authentication. No realm account ships a password (see the
+# header of docker-compose.auth.yml, or let install.sh --with-auth set one)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
+
+# With Prometheus + Grafana monitoring
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+
+# With a local LLM — Ollama on the same Docker network, reachable as
+# http://ollama:11434 (no host.docker.internal needed)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+
+# The same local LLM, on the host's NVIDIA GPUs — layered on the Ollama overlay
+# above, never instead of it (all it adds is `gpus: all`)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml \
+  -f docker-compose.ollama-nvidia.yml up -d
+
+# Auth + monitoring + NATS together (overlays stack in any combination)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml \
+  -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
+
+# A cluster: three EDDI replicas behind a round-robin load balancer, a
+# three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own.
+# Its three secrets are generated ONCE into .env, for the same reason as above:
+# the MongoDB volume keeps its first password, and the vault's contents can only
+# be decrypted with the master key they were encrypted under.
+# -hex, not -base64: MONGO_PASSWORD goes into the MongoDB connection string as
+# written, and base64's `/` and `+` change the meaning of a URI.
+(umask 077 && touch .env) && chmod 600 .env &&
+  for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
+    grep -q "^${key}=" .env || printf '\n%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
+  done
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (cluster mode with one replica and one NATS server), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](open-webui-integration.md) demo of the OpenAI-compatible API, and `docker-compose.cluster.yml`, the multi-replica stack above (see [Clustering](clustering.md)).
+
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty (`OLLAMA_PULL_MODEL=`) to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
+
+`docker-compose.ollama-nvidia.yml` adds GPU access to that Ollama and needs two things of the host, neither of which it degrades gracefully without: **Docker Compose 2.30.0 or newer**, which is where the `gpus` service attribute was introduced — older versions fail on it, so check `docker compose version` — and the **NVIDIA Container Toolkit** configured as a Docker runtime. `gpus: all` is a device *request*: with no GPU driver registered, the daemon cannot satisfy it and the container fails to start (`could not select device driver "" with capabilities: [[gpu]]`) rather than quietly falling back to the CPU. If you want Ollama on the CPU, leave this overlay off.
+
 ### Manual Docker Setup
 
 Create a network and start MongoDB on it (the same `mongo:7.0.43` image `docker-compose.yml` pins). EDDI's default connection string points at a host named `mongodb`, so the container name matters:
@@ -154,7 +217,7 @@ docker run --name eddi \
 | `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` | `false`                      | Opt out of the production auth requirement. Required to boot with OIDC disabled |
 | `EDDI_MCP_ALLOW_UNAUTHENTICATED` | `false`                           | Knowingly expose `/mcp` without authentication. Required to boot with OIDC disabled |
 | `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED` | `false`                   | Knowingly expose `/secretstore` without authentication. Required to boot with OIDC disabled |
-| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
+| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, `*.localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 
@@ -164,7 +227,7 @@ docker run --name eddi \
 | -------------------------- | --------------------------------------------- | ----------- |
 | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
 | `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
-| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters or a known default) |
+| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters, fewer than 6 distinct characters, or a known default/placeholder) unless `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` |
 | `POSTGRES_PASSWORD`        | *(required)*                                  | `docker-compose.postgres-only.yml` only: the database password for both PostgreSQL and EDDI. No default — the file used to ship `eddi`/`eddi`. The postgres image reads it at first init only, so keep it stable; `install.sh --db=postgres` generates one into `.env` |
 | `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` | `eddi` / `changeme` | MongoDB's root user, created on first init. Only `mongod` and the one-shot `mongodb-app-user` service see it; EDDI does not connect with it |
 | `MONGO_APP_USERNAME`       | `eddi_app`                                    | EDDI's own MongoDB user: `readWrite` + `dbAdmin` on `eddi`, nothing else. `mongodb-app-user` creates it, or resets its password, on every `up` — including on a volume from before it existed, so no manual migration is needed |
@@ -188,10 +251,11 @@ Administrators can also turn it off on the Manager's **Updates** page; that is s
 ### AI Tools
 
 ```bash
--e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=your_key \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=your_cx
+-e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+-e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=your_key
 ```
+
+(`google` still works with `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY` and `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX` until Google shuts the Custom Search JSON API down on 2027-01-01; see [langchain.md → Web Search Tool](langchain.md#web-search-tool).)
 
 ```bash
 -e EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=your_key
@@ -206,7 +270,7 @@ docker run --name eddi \
   -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
-  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_KEY \
+  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+  -e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=YOUR_KEY \
   -d labsai/eddi:latest
 ```

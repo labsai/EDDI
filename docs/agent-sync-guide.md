@@ -131,7 +131,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/preview?sourceUrl=https:/
 
 `targetId` and `targetVersion` are `null` for a `CREATE`, and `matchStrategy` records how the match was found (e.g. `targetAgent`, `position`, `type`, `name` — `null` for `CREATE`).
 
-`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `parser`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`.
+`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `parser`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`, plus `schedule` in a ZIP import preview.
 
 **Actions explained:**
 
@@ -198,8 +198,8 @@ the status code — checking `response.ok` alone reports a half-applied sync as 
 | `201 Created` | Everything landed and something was written. |
 | `207 Multi-Status` | **Partially applied** — `failures[]` in the body names every resource that could not be written. |
 
-Two failures are reported apart from those, because they are not this instance's
-fault and the operator can act on both:
+The failures below are reported apart from those, as ordinary error statuses, so the
+operator can tell what to fix:
 
 | Status | Meaning |
 |--------|---------|
@@ -222,9 +222,22 @@ The body of a single sync is an `UpgradeResult`:
   "skipped": 5,
   "failures": [
     { "sourceId": "…", "resourceType": "langchain", "name": "GPT Config", "reason": "…" }
-  ]
+  ],
+  "warnings": [
+    "Agent local-agent-id: signInterAgentMessages was turned off: signInterAgentMessages needs a signing key, and this agent declares none. …"
+  ],
+  "compatible": false,
+  "compatibilityGeneration": 4
 }
 ```
+
+`warnings` lists what the run wrote differently from the source, and why. Everything in it
+was written, so it does not make the answer a `207`; it is left out when empty. Today its only
+entry is a signing flag the target cannot honour — see the identity bullet under
+[Key Design Decisions](#key-design-decisions).
+
+`compatible` and `compatibilityGeneration` say how the agent version the sync wrote was declared and which
+[compatibility generation](deployment-management-of-agents.md#the-compatibility-generation) it carries.
 
 `/backup/import/sync/batch` answers a JSON array of `BatchSyncResult`
 (`sourceAgentId`, `targetAgentId`, `result`, `error`) — one entry per request, in request
@@ -277,12 +290,12 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `sourceUrl` | Yes | Base URL of the source EDDI instance |
-| `sourceAgentId` | Yes (single) | Agent ID on the remote instance |
+| `sourceAgentId` | Yes (single) | Agent ID on the remote instance. It has to be an EDDI resource id (hex, or a UUID): it becomes part of the paths read from the source, so anything else is a `400` before a request is sent — in a batch, that entry's error |
 | `sourceAgentVersion` | No | Version to sync (null = latest) |
 | `targetAgentId` | No | Local agent to upgrade. When omitted, the target is **the agent an earlier sync or import promoted from this source agent**, recognised by the `originId` its descriptor records — so repeating a sync never creates a second copy. Only when there is none (or `createNew=true`) is the agent created: the source's own export archive is fetched and imported with `strategy=create`, and the new agent records the source's id as its `originId`. The preview marks a target found this way with `matchStrategy: "originId"` on the agent row |
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
 | `selectedResources` | No (execute only) | Comma-separated ids of the preview rows to apply (the row's `sourceId`; for a `REMOVE` row that is the target's id). Omit to apply everything; an empty value is a `400`. A `CONFLICT` row is applied only when named here |
-| `workflowOrder` | No (execute only) | Desired workflow order after sync |
+| `workflowOrder` | No (execute only) | Desired workflow order after sync: comma-separated workflow ids of the target (a list in a `SyncRequest`). Unlisted workflows follow in their current order; without it, new workflows are appended |
 | `compatible` | No (execute only; default `false`) | Declare the agent version this sync writes **compatible** with the one it replaces, so conversations running on the target switch to it on their next turn. By default the version is a breaking change and they stay where they are. A `SyncRequest` takes `"compatible": true` per agent. No effect when the sync creates a new agent or writes nothing. See [Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync) |
 
 > **Note:** `sourceUrl` and agent parameters are query parameters. Batch endpoints accept `SyncMapping[]` / `SyncRequest[]` as a JSON request body for the per-agent mappings; both take an optional `createNew`, and a `SyncRequest` whose `selectedResources` is an empty list fails that entry the same way.
@@ -321,10 +334,10 @@ Agent Sync uses **structural matching** — not ID matching — to pair source a
 - **Edits made during a sync are kept:** a resource saved on this instance between the preview the sync builds and its write is reported as a failure ("changed on this instance … preview and sync again"), never overwritten. Only a version the store has but its descriptor never recorded — the trace of a lost descriptor write — or a version this same sync just wrote (a resource two target workflows share) is written over
 - **Shared resources:** a resource two source workflows share is written to each target workflow's own copy, as the preview lists it per workflow
 - **Bounded reads:** a source agent may name at most 256 workflows, and each remote document is fetched once per sync however often it is referenced
-- **Secret scrubbing:** every document read from the source goes through the secret scrubber first — the store endpoints hand out raw configuration, so without it the source's plaintext credentials reached the preview (and the operator's browser) and were written into the target. The target keeps its own secrets: wherever the source has a scrubbed credential **or a vault reference**, the target's own value at the same place is put back before anything is compared or written. Which vault entry an environment uses is that environment's business — staging's `${vault:openai-key}` never replaces production's `${vault:prod-openai-key}`. Only where the target has nothing there (a first promotion, a newly added call) does the source's reference travel, as the hint of which entry to create. A scrubbed **literal** credential is put back only where the request still goes where the target's did: if the source changes a `targetServerUrl`, `baseUrl`, `url`, `endpoint`, `host` or an absolute request path of that object, the placeholder stays and the operator supplies the value — a hidden credential is never bound to a destination someone else chose. A vault reference still comes from the target there, since the key's `allowedHosts` decides where its secret may go
+- **Secret scrubbing:** every document read from the source goes through the secret scrubber first — the store endpoints hand out raw configuration, so without it the source's plaintext credentials reached the preview (and the operator's browser) and were written into the target. The target keeps its own secrets: wherever the source has a scrubbed credential **or a vault reference**, the target's own value at the same place is put back before anything is compared or written. Which vault entry an environment uses is that environment's business — staging's `${vault:openai-key}` never replaces production's `${vault:prod-openai-key}`. Only where the target has nothing there (a first promotion, a newly added call) does the source's reference travel, as the hint of which entry to create. A scrubbed **literal** credential is put back only where the request still goes where the target's did: if the source changes an endpoint parameter of that object — any key ending in `url` (`targetServerUrl`, `baseUrl`, `serverUrl`, …), `uri`, `endpoint`, `apiEndpoint`, `apiBase`, `api_base`, `host` or `hostname`, the same keys the LLM registry checks a key's `allowedHosts` against — or an absolute request path, the placeholder stays and the operator supplies the value — a hidden credential is never bound to a destination someone else chose. A vault reference still comes from the target there, since the key's `allowedHosts` decides where its secret may go
 - **SSRF protection:** The remote URL is validated against this deployment's policy — HTTPS-only and no private address by default, relaxed per [Reaching the source instance](#reaching-the-source-instance) — and redirects are never followed, so a 3xx from the source surfaces as a failed read rather than re-sending the bearer token elsewhere. The policy is applied again to every request the sync sends, right before it is sent, so a DNS name that resolved to a public address at validation and later to an internal one is refused rather than handed the bearer token; with `allow-private-targets` or an `allowed-sources` origin, only the cloud metadata service is refused there. On a first promotion, the `Location` the source's export answers with is not followed either: only the archive's file name is taken from it, and the download goes to the already-approved base URL
 - **Added and removed steps travel:** a step the source added is created and wired into the target workflow when that workflow is updated, and a step it removed is dropped with it. A workflow the source added arrives with all its resources, named by their ids on the target; one it removed comes off the agent. A new resource is created only when the update that places it is certain to happen — if its workflow, or a sibling step's new resource, was left out of `selectedResources`, it is reported in `failures[]` instead of being created unreferenced
-- **Agent-level settings travel, the identity does not:** HITL configuration, capabilities, memory policy, channels and the rest of the agent document are taken from the source (with the target's secrets kept). The agent's `identity` is bound to its instance — its private key lives in that instance's vault — and is never replaced
+- **Agent-level settings travel, the identity does not:** HITL configuration, capabilities, memory policy, channels and the rest of the agent document are taken from the source (with the target's secrets kept). The agent's `identity` is bound to its instance — its private key lives in that instance's vault — and is never replaced. So `security.signInterAgentMessages` travels only where the target's own newest key is usable: otherwise the sync writes it off and says so in `warnings` (listed under the result on the Manager's Sync page and in its import dialog) instead of having the agent save refused. A first promotion creates the agent with no identity and signing off (and says so the same way); an admin on the target generates its key (`POST /agentstore/agents/{id}/signing-keys`, `eddi-admin`) and turns signing on, and later syncs then carry the flag
 - **A missing resource is recreated, not refused:** when the target's workflow *does* have the step but the resource it names no longer exists — the store confirms it is gone, not merely unreadable — the resource is created from the source and the step repointed at it
 
 ## What a promotion carries, and what it does not

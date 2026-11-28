@@ -6,7 +6,7 @@ import {
   useSkills,
   useCapabilitySearch,
   useSkillRegistry,
-} from "@/hooks/use-capabilities";
+} from "@eddi/app-kit/hooks/use-capabilities";
 
 function createWrapper() {
   const queryClient = new QueryClient({

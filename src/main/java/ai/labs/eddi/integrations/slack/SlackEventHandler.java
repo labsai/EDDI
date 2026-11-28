@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -79,8 +80,6 @@ public class SlackEventHandler {
      * its own — see {@code mentionsThisBot}.
      */
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
-
-    /** Maximum Slack message length (safe limit under 4000). */
 
     /** Retry budget for reading the HITL bookmark after a pause (see H10). */
     private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
@@ -211,8 +210,6 @@ public class SlackEventHandler {
      *            the unique event ID (for dedup)
      * @param event
      *            the parsed event JSON as a Map
-     */
-    /**
      * @param botUserId
      *            this app's own Slack user id, from the event envelope, or
      *            {@code null} when it did not carry one. Used only to tell a
@@ -313,11 +310,6 @@ public class SlackEventHandler {
     }
 
     /**
-     * Whether {@code type} appears anywhere in the throwable's cause chain.
-     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
-     * between it and the handler, so a top-level {@code instanceof} would miss it.
-     */
-    /**
      * Whether {@code route} belongs to the app whose signing secret verified the
      * event: its integration's (or legacy connector's) secret equals the verified
      * one. Fails closed when nothing was verified.
@@ -327,6 +319,11 @@ public class SlackEventHandler {
                 && ChannelTargetRouter.secretsEqual(route.signingSecret(), origin.verifiedSigningSecret());
     }
 
+    /**
+     * Whether {@code type} appears anywhere in the throwable's cause chain.
+     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
+     * between it and the handler, so a top-level {@code instanceof} would miss it.
+     */
     private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             if (type.isInstance(c)) {
@@ -1015,7 +1012,8 @@ public class SlackEventHandler {
 
         // The button value carries the owning integration name and this card's id,
         // so the decision is bound to THIS integration and THIS card.
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId);
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId,
+                bookmark != null ? HitlPlanHash.presentable(bookmark.getHitlPlanHash()) : null);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(
@@ -1597,7 +1595,10 @@ public class SlackEventHandler {
     }
 
     /**
-     * Post a message to Slack, chunking if it exceeds Slack's 4000-char limit.
+     * Post a message to Slack, escaped and split into at most
+     * {@link SlackMrkdwn#MAX_MESSAGES} messages of at most
+     * {@link SlackMrkdwn#MAX_MESSAGE_LENGTH} characters (Slack recommends staying
+     * under 4,000).
      *
      * @param botToken
      *            explicit bot token (if {@code null}, falls back to router lookup)

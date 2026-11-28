@@ -10,19 +10,20 @@ import {
   Sparkles,
   CheckCircle2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { PreviewNotices } from "@/components/agents/import-steps/preview-step";
+import { ResultWarnings } from "@/components/agents/result-warnings";
 import { PromotionCompatibilityPanel } from "@/components/agents/promotion-compatibility-panel";
 import { writesOverExistingAgent } from "@/lib/promotion-impact";
 import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
-import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import type {
   BatchSyncExecution,
   DocumentDescriptor,
@@ -31,7 +32,7 @@ import type {
   SyncRequest,
 } from "@/lib/api/backup";
 import { hasFailures, parseResourceUri } from "@/lib/api/backup";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;
@@ -195,6 +196,12 @@ export function SyncPage() {
     // its old preview.
     setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
 
+    // The rows stay editable while the preview runs, and Connect can relist
+    // them. A preview describes the source version and target a row was sent
+    // with, so it is applied only to a row that is still checked and still
+    // names both; any other row is left unpreviewed.
+    const sentFor = new Map(syncMappings.map((s) => [s.sourceAgentId, s]));
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -202,7 +209,16 @@ export function SyncPage() {
           // Match previews back to mappings
           setMappings((prev) =>
             prev.map((m) => {
-              if (!m.checked) return m;
+              const sent = sentFor.get(m.remoteId);
+              if (
+                !m.checked ||
+                !sent ||
+                sent.sourceAgentVersion !== m.remoteVersion ||
+                sent.targetAgentId !== m.localTargetId ||
+                sent.createNew !== m.createNew
+              ) {
+                return m;
+              }
               const p = previews.find(
                 (pr) => pr.sourceAgentId === m.remoteId
               );
@@ -568,6 +584,11 @@ function SyncOutcome({
     0
   );
   const failedAgents = results.filter((r) => r.error || hasFailures(r.result));
+  // Written, but not as the source has it — signing turned off on a target that
+  // cannot sign, for one. Named per agent: a first promotion's text does not say which.
+  const warnings = results.flatMap((r) =>
+    (r.result?.warnings ?? []).map((w) => `${names.get(r.sourceAgentId) ?? r.sourceAgentId}: ${w}`)
+  );
 
   return (
     <div
@@ -613,6 +634,8 @@ function SyncOutcome({
             </li>
           ))}
       </ul>
+
+      <ResultWarnings warnings={warnings} />
 
       {wrote > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="sync-redeploy-hint">

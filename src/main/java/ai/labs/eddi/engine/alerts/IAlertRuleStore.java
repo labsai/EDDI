@@ -38,6 +38,9 @@ public interface IAlertRuleStore {
 
     long count(String agentId, boolean onlyThatAgent);
 
+    /** The rules over every agent, enabled or not. */
+    long countAllAgents();
+
     /** The enabled rules watching {@code agentId}: listing it, or every agent. */
     List<AlertRule> findEnabledForAgent(String agentId);
 

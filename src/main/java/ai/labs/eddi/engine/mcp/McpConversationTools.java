@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -175,7 +176,7 @@ public class McpConversationTools {
             + "Returns a JSON array of Agent deployment statuses.")
     public String listAgents(@ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                       defaultValue = "production") String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_agents"));
         try {
             var env = parseEnvironment(environment);
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
@@ -191,7 +192,7 @@ public class McpConversationTools {
     public String listAgentConfigs(@ToolArg(description = "Filter string to search Agent names (optional)", required = false) String filter,
                                    @ToolArg(description = "Maximum number of results (default: 20)", required = false,
                                             defaultValue = "20") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_agent_configs"));
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
@@ -209,7 +210,7 @@ public class McpConversationTools {
     public String createConversation(@ToolArg(description = "Agent ID (required)") String agentId,
                                      @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                               defaultValue = "production") String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_conversation"));
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -239,7 +240,7 @@ public class McpConversationTools {
                               @ToolArg(description = "The user message to send to the Agent (required)") String message,
                               @ToolArg(description = "Deprecated — ignored; the conversation keeps the environment it was started in (optional)",
                                        required = false) String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("talk_to_agent"));
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (conversationId == null || conversationId.isBlank())
@@ -295,7 +296,7 @@ public class McpConversationTools {
                                          required = false) String conversationId,
                                 @ToolArg(description = "Environment: 'production' (default) or 'test'; applies only when a new conversation is created",
                                          required = false, defaultValue = "production") String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("chat_with_agent"));
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (message == null || message.isBlank())
@@ -372,7 +373,7 @@ public class McpConversationTools {
                                             defaultValue = "false") Boolean returnDetailed,
                                    @ToolArg(description = "Comma-separated list of what to return (optional). Section names (conversationSteps, conversationOutputs, conversationProperties) return whole sections; output keys (e.g. 'input,output,actions') return only those keys of conversationOutputs. Omitted or empty = everything.",
                                             required = false) String returningFields) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_conversation"));
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
@@ -433,7 +434,7 @@ public class McpConversationTools {
             + "This is the preferred tool for reviewing what was said in a conversation.")
     public String readConversationLog(@ToolArg(description = "Conversation ID (required)") String conversationId,
                                       @ToolArg(description = "Number of recent steps to include (default: all)", required = false) Integer logSize) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_conversation_log"));
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
@@ -460,7 +461,7 @@ public class McpConversationTools {
                                              required = false) String conversationState,
                                     @ToolArg(description = "Maximum number of results (default: 20, max: 100)", required = false,
                                              defaultValue = "20") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_conversations"));
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -473,7 +474,8 @@ public class McpConversationTools {
                 try {
                     state = ConversationState.valueOf(conversationState.trim().toUpperCase());
                 } catch (IllegalArgumentException e) {
-                    return errorJson("Invalid conversationState: " + conversationState + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
+                    return errorJson("Invalid conversationState: " + conversationState
+                            + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
                 }
             }
 
@@ -505,11 +507,11 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
-            + "Returns the AgentConfiguration JSON with all package references.")
+    @Tool(name = "get_agent", description = "Get an agent's full configuration including its workflows, name, and description. "
+            + "Returns the AgentConfiguration JSON with all workflow references.")
     public String getAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                            @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_agent"));
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -559,7 +561,7 @@ public class McpConversationTools {
                                          required = false) String level,
                                 @ToolArg(description = "Maximum number of log entries to return (default: 50)", required = false,
                                          defaultValue = "50") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.OBSERVE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_agent_logs"));
         // An unscoped or agent-only read pulls from a shared server-side buffer that
         // mixes every user's workflow logs, provider errors and diagnostics — an
         // operator surface, not one user's data. The REST log endpoint
@@ -615,7 +617,7 @@ public class McpConversationTools {
     public String readAuditTrail(@ToolArg(description = "Conversation ID (required)") String conversationId,
                                  @ToolArg(description = "Maximum number of entries to return (default: 20)", required = false,
                                           defaultValue = "20") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.OBSERVE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_audit_trail"));
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
@@ -689,7 +691,7 @@ public class McpConversationTools {
                                           required = false) String filter,
                                  @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                           defaultValue = "production") String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("discover_agents"));
         try {
             var env = parseEnvironment(environment);
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
@@ -759,7 +761,7 @@ public class McpConversationTools {
                               @ToolArg(description = "The user message to send (required)") String message,
                               @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                        defaultValue = "production") String environment) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("chat_managed"));
         if (intent == null || intent.isBlank())
             return errorJson("intent is required");
         if (userId == null || userId.isBlank())
@@ -782,7 +784,7 @@ public class McpConversationTools {
             // The trigger check above looks at the trigger's CURRENT targets, but a
             // retained conversation runs on the agent it was started with. After a
             // retarget or a revoked share that agent may no longer be usable by this
-            // caller — re-check the conversation's own agent, as send_message and the
+            // caller — re-check the conversation's own agent, as talk_to_agent and the
             // REST say() do. The guard refuses a non-owner and an owner without USE
             // on the agent alike, so the answer is the neutral one, not the
             // "you do not own" message below.
@@ -835,6 +837,11 @@ public class McpConversationTools {
                     LogSanitizer.sanitize(intent), LogSanitizer.sanitize(userId));
             meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", "chat_managed").increment();
             return errorJson("Access denied: you do not own this managed conversation");
+        } catch (IConversationService.AgentNotReadyException e) {
+            // Not a failure: no version of the trigger's agent is deployed yet (startup,
+            // rolling deploy). REST answers 503 with Retry-After for the same case.
+            LOGGER.infof("chat_managed: agent for intent %s not ready yet", LogSanitizer.sanitize(intent));
+            return errorJson("Agent for intent '" + intent + "' is not ready yet; retry shortly", "UNAVAILABLE", null);
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent", e);
@@ -940,17 +947,17 @@ public class McpConversationTools {
 
     /**
      * Get an existing user conversation for the intent+userId, or create a new one.
-     * Mirrors the logic from {@code RestAgentManagement.initUserConversation}.
+     * Claims the mapping the way {@code RestAgentManagement.initUserConversation}
+     * does: an ended mapping is deleted only while it still names the ended
+     * conversation, and a lost insert adopts the winner
+     * ({@link IUserConversationStore#createOrAdopt}). Unlike REST it also re-checks
+     * that the trigger still exists before reusing a mapping.
      */
     private UserConversation getOrCreateManagedConversation(String intent, String userId, Deployment.Environment env) throws Exception {
 
-        // Try to read existing conversation
-        UserConversation existing = null;
-        try {
-            existing = userConversationStore.readUserConversation(intent, userId);
-        } catch (IResourceStore.ResourceStoreException ignored) {
-            // Not found — will create
-        }
+        // A store failure is not "no mapping": creating one would orphan the
+        // conversation the user already has. The store answers null when none exists.
+        UserConversation existing = userConversationStore.readUserConversation(intent, userId);
 
         if (existing != null) {
             // Validate that the trigger still exists — if it was deleted,
@@ -990,8 +997,10 @@ public class McpConversationTools {
                 LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
                         intent, userId, existing.getConversationId());
             }
-            // Ended or stale — delete and create fresh
-            userConversationStore.deleteUserConversation(intent, userId);
+            // Ended or stale — replace it. Conditioned on the ended id: a concurrent
+            // call that replaced it already keeps its fresh mapping, and this one
+            // adopts that below.
+            userConversationStore.deleteUserConversationIfMatches(intent, userId, existing.getConversationId());
         }
 
         // Create a new conversation from the Agent trigger
@@ -1000,8 +1009,10 @@ public class McpConversationTools {
             throw new RuntimeException("No Agent trigger configured for intent: " + intent);
         }
 
-        // Pick first deployment
-        AgentDeployment deployment = trigger.getAgentDeployments().getFirst();
+        // A random deployment, as RestAgentManagement.selectAgentDeployment picks it:
+        // a trigger with several deployments spreads its users across them.
+        var deployments = trigger.getAgentDeployments();
+        AgentDeployment deployment = deployments.get(ThreadLocalRandom.current().nextInt(deployments.size()));
         String agentId = deployment.getAgentId();
         var usedEnv = deployment.getEnvironment() != null ? deployment.getEnvironment() : env;
 
@@ -1016,11 +1027,34 @@ public class McpConversationTools {
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 
-        // Store the user conversation mapping
-        var userConversation = new UserConversation(intent, userId, usedEnv, agentId, conversationId);
-        userConversationStore.createUserConversation(userConversation);
+        // Claim the mapping, or adopt the one a concurrent call stored first.
+        UserConversation claimed;
+        try {
+            claimed = userConversationStore.createOrAdopt(new UserConversation(intent, userId, usedEnv, agentId, conversationId));
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // Not claimed, so nothing reaches this conversation. Unchecked too: the
+            // MongoDB store lets driver failures through as they are.
+            endUnclaimedConversation(conversationId);
+            throw e;
+        }
+        if (!conversationId.equals(claimed.getConversationId())) {
+            endUnclaimedConversation(conversationId);
+        }
+        return claimed;
+    }
 
-        return userConversation;
+    /**
+     * Ends a conversation this call started but could not claim the mapping for, so
+     * it does not sit as a live conversation nobody can reach. Best effort, like
+     * the channel adapters' lost-create-race cleanup: the call already has the
+     * conversation it will use, or is failing for another reason.
+     */
+    private void endUnclaimedConversation(String conversationId) {
+        try {
+            conversationService.endConversation(conversationId, "system:lost-create-race");
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not end the unclaimed managed conversation %s", LogSanitizer.sanitize(conversationId));
+        }
     }
 
     /**

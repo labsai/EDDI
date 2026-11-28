@@ -17,9 +17,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -114,6 +117,49 @@ class SpaceHeaderTest {
             var response = ArgumentCaptor.forClass(Response.class);
             verify(request).abortWith(response.capture());
             assertEquals(403, response.getValue().getStatus());
+        }
+
+        /**
+         * Security review 2026-11, B10: the header is matched exactly and
+         * case-sensitively — group names are case-sensitive — and that stays. The
+         * refusal used to call the caller a non-member of their own team when the id
+         * merely differed in case or carried a trailing slash.
+         */
+        @Test
+        @DisplayName("a near miss of the caller's own space is still refused, with a message that says why instead of 'not a member'")
+        void nearMissIsRefusedWithAnExplanation() {
+            for (String nearMiss : List.of("TEAM:engineering", "team:Engineering", "team:engineering/", "team:/engineering")) {
+                var request = request("POST", nearMiss);
+
+                filter().filter(request);
+
+                var response = ArgumentCaptor.forClass(Response.class);
+                verify(request).abortWith(response.capture());
+                assertEquals(403, response.getValue().getStatus(), nearMiss);
+                String message = errorOf(response.getValue());
+                assertTrue(message.contains("None of your spaces has the id '" + nearMiss + "'"), message);
+                assertTrue(message.contains("case-sensitively"), message);
+                assertTrue(message.contains("GET /workspaces"), message);
+                assertFalse(message.contains("not a member"), message);
+                assertFalse(message.contains(Subjects.teamSpace("engineering") + "'"), "the caller's spaces are not listed: " + message);
+            }
+        }
+
+        @Test
+        @DisplayName("the echoed header value is sanitised")
+        void echoedHeaderIsSanitised() {
+            var request = request("POST", "team:x" + (char) 7 + "bell");
+
+            filter().filter(request);
+
+            var response = ArgumentCaptor.forClass(Response.class);
+            verify(request).abortWith(response.capture());
+            assertTrue(errorOf(response.getValue()).contains("'team:xbell'"), errorOf(response.getValue()));
+        }
+
+        @SuppressWarnings("unchecked")
+        private static String errorOf(Response response) {
+            return ((Map<String, String>) response.getEntity()).get("error");
         }
 
         @Test

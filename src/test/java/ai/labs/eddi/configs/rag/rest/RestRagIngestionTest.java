@@ -144,8 +144,8 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_carriesTheWarningWhenThereIsOne() {
-        when(ragIngestionService.getStatus("ing-1")).thenReturn("completed");
-        when(ragIngestionService.getWarning("ing-1")).thenReturn("previous version still retrievable");
+        when(ragIngestionService.getStatus("rag-123", "ing-1")).thenReturn("completed");
+        when(ragIngestionService.getWarning("rag-123", "ing-1")).thenReturn("previous version still retrievable");
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "ing-1");
 
@@ -158,7 +158,7 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_unknownIdIs404() {
-        when(ragIngestionService.getStatus("never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
+        when(ragIngestionService.getStatus("rag-123", "never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "never-started");
 
@@ -171,7 +171,7 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_shouldReturnStatus() {
-        when(ragIngestionService.getStatus("ing-123")).thenReturn("completed");
+        when(ragIngestionService.getStatus("rag-123", "ing-123")).thenReturn("completed");
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "ing-123");
 

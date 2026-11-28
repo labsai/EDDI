@@ -312,7 +312,7 @@ class OpenAiBridgeSessionAndErrorTest {
             var turn = bridge.prepare(statefulModel, firstTurn("s", "Hi"), noHeaders(), USER_ID);
 
             assertEquals(CONVERSATION_ID, turn.conversationId());
-            verify(userConversationStore).deleteUserConversation(any(), eq(USER_ID));
+            verify(userConversationStore).deleteUserConversationIfMatches(any(), eq(USER_ID), eq(OTHER_CONVERSATION_ID));
             verify(conversationService, never()).endConversation(OTHER_CONVERSATION_ID);
         }
 
@@ -329,7 +329,7 @@ class OpenAiBridgeSessionAndErrorTest {
             var turn = bridge.prepare(statefulModel, firstTurn("s", "Hi"), headers, USER_ID);
 
             assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
-            verify(userConversationStore, never()).deleteUserConversation(any(), any());
+            verify(userConversationStore, never()).deleteUserConversationIfMatches(any(), any(), any());
         }
 
         @Test

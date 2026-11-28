@@ -9,6 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Classifies the RAW result of one tool call for the {@link ToolRepeatGuard}.
+ * It is the single definition of a failed call: the {@code tool_result} event
+ * status, the {@code toolQuotas} give-back and the tool history endpoint
+ * ({@code RestToolHistory}) read it too.
  * <p>
  * Tool results have no common failure structure, so this maps the shapes EDDI
  * actually produces onto four outcomes:
@@ -34,13 +37,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * <p>
  * Pure and static: no state, safe from any thread.
  */
-final class ToolOutcomeClassifier {
+public final class ToolOutcomeClassifier {
 
     /** What happened to one tool call. */
-    enum Outcome {
+    public enum Outcome {
         SUCCESS, FAILED_RETRYABLE, FAILED_TERMINAL, NOT_EXECUTED;
 
-        boolean isFailure() {
+        public boolean isFailure() {
             return this == FAILED_RETRYABLE || this == FAILED_TERMINAL;
         }
     }
@@ -59,7 +62,7 @@ final class ToolOutcomeClassifier {
     }
 
     /** Classifies a raw tool result; a null or blank result is a success. */
-    static Outcome classify(String raw) {
+    public static Outcome classify(String raw) {
         if (raw == null) {
             return Outcome.SUCCESS;
         }

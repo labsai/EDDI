@@ -64,7 +64,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `enabled` | boolean | `false` | Master toggle for cascading |
 | `strategy` | string | `"cascade"` | Execution strategy. Only `cascade` (sequential) is implemented; `parallel` and any unknown value warn at deploy time and run sequentially. |
 | `evaluationStrategy` | string | `"structured_output"` | How confidence is evaluated (see below) |
-| `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
+| `enableInAgentMode` | boolean | `true` | Whether the cascade runs when the task has tools — its own or its workflow's `httpcalls` / `mcpcalls` tools (see [Agent Mode](#agent-mode)) |
 | `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...}, "inputPricePer1M": 0.15, "outputPricePer1M": 0.6 }` (prices optional; they make the judge's spend count toward `maxCostPerRun` and the reported cost; negative values fail deployment). Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
 | `acceptanceCriterion` | string | — | One sentence telling the judge what an acceptable answer must do, e.g. `"The answer gives concrete steps and does not tell the user to contact support"`. Only the judge reads it: without a `judgeModel` it has no effect, and deployment logs a warning. See [`judge_model`](#judge_model). |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
@@ -84,6 +84,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
+| `pricing` | object | from the catalog | Cache and long-context prices for this step's model — the same object as the task's [`pricing`](model-pricing.md#the-pricing-object-on-a-task-or-cascade-step). |
 | `maxFormatRetries` | int | task `responseValidation.maxRetries` | Same-model corrective re-asks this step gets before the cascade escalates (`0..3`). `0` for an expensive last-resort model. See [Format recovery and escalation](#format-recovery-and-escalation). |
 
 > **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
@@ -198,7 +199,7 @@ When streaming (SSE), a **guaranteed-accept step** is streamed **live** token-by
 
 ### Trace
 
-The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
+The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`, or `circuit_open` for a step skipped by the circuit breaker). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
 
 ### Response metadata
 
@@ -238,7 +239,9 @@ When the audit collector is active, the cascade writes:
 
 ## Agent Mode
 
-When `enableInAgentMode` is `true` (default), the cascade also works when tools (built-in, MCP, HTTP calls, A2A) are configured — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
+When `enableInAgentMode` is `true` (default), the cascade also works when the task has tools — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
+
+"Has tools" means the same tools the task gets without a cascade, decided once per turn from the tool assembly the loop runs on: the task's own `tools`, built-ins (`enableBuiltInTools`) and `a2aAgents`, **and** the tools the workflow contributes — its `httpcalls` and `mcpcalls` steps (unless `enableHttpCallTools` / `enableMcpCallTools` is `false`) — and the attachment-reading tool on a turn that offers it. An agent whose only tools are its workflow's (for example one built by `setup_agent` with `mcpServerUrls` and built-in tooling off) therefore runs the tool loop in every cascade step, answers in one chunk when streaming, and uses `judge_model` / `heuristic` instead of `structured_output`. The reply tool of `answerMode: "tool"` is not counted: such a task always runs the tool loop, whatever `enableInAgentMode` says.
 
 **Escalation does not replay tools.**
 
@@ -255,7 +258,7 @@ When `enableInAgentMode` is `true` (default), the cascade also works when tools 
 
 **Cancellation:** when a step times out, the orchestrator checks for interruption between tool-loop iterations and before each tool, so it stops launching further side-effectful tools. A tool already in flight when the timeout fires may still complete — keep cascade-in-agent-mode tools idempotent where possible.
 
-When `enableInAgentMode` is `false`, cascading is skipped in agent mode and the standard single-model path is used.
+When `enableInAgentMode` is `false`, cascading is skipped for a task that has tools in the sense above — workflow `httpcalls` / `mcpcalls` tools included — and the standard single-model path (with its tool loop) is used.
 
 ## Configure-time Validation
 
@@ -293,7 +296,7 @@ A 3-tier cascade for a customer support agent, with pricing so savings are measu
       },
       {
         "type": "anthropic",
-        "parameters": { "modelName": "claude-sonnet-4-6" },
+        "parameters": { "modelName": "claude-sonnet-4-6", "apiKey": "${vault:anthropic-key}" },
         "confidenceThreshold": null,
         "timeoutMs": 30000,
         "inputPricePer1M": 3.00,

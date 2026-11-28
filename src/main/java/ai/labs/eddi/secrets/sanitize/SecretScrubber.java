@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.sanitize;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -121,7 +122,10 @@ public class SecretScrubber {
             // export rewrote modelName to ${vault:REDACTED} and the imported agent failed
             // every turn with "model not found". Credential-shaped names (apiKey, token,
             // ...) are still caught by the name checks, which run before this exemption.
-            "modelname", "model", "modelid", "deploymentname", "embeddingmodel", "embeddingmodelname");
+            "modelname", "model", "modelid", "deploymentname", "embeddingmodel", "embeddingmodelname",
+            // titleGeneration.llmModel on an agent: "claude-haiku-4-5-20251001" scores over
+            // it too.
+            "llmmodel");
 
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
@@ -146,6 +150,11 @@ public class SecretScrubber {
             "authorization", "pwd", "passphrase", "privatekey", "private_key");
 
     /**
+     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
+     */
+    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
+
+    /**
      * Qualifiers that turn a credential noun into a COUNT of them.
      * <p>
      * Without this the suffix rule above is a round-trip bug on the most common LLM
@@ -164,11 +173,6 @@ public class SecretScrubber {
      * {@code accessToken}, {@code refreshToken} and {@code authToken} do not begin
      * with a quantity.
      */
-    /**
-     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
-     */
-    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
-
     private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
 
     /**
@@ -239,12 +243,24 @@ public class SecretScrubber {
     }
 
     /**
-     * Scrub potential plaintext secrets from a JSON string. Returns the sanitized
-     * JSON, or the original string if parsing fails.
+     * Scrub potential plaintext secrets from a JSON string.
+     * <p>
+     * Fails closed, like {@link #containsCredential(String)}: a document that
+     * cannot be parsed has not been shown to be free of credentials, so it is never
+     * handed back as it stands. Even serializer output can fail here: Jackson's
+     * read constraints, such as the nesting depth, do not bind the writer. The
+     * export then aborts, or skips the section it was building; an agent sync's
+     * remote source skips the document.
+     * <p>
+     * The exception carries neither the input nor the parser's exception as its
+     * cause: a parse error quotes the source text it stopped at, which may be the
+     * credential, and a cause is printed with the stack trace that logs it.
      *
      * @param json
      *            the JSON string to scrub
      * @return sanitized JSON with secrets replaced by ${vault:REDACTED}
+     * @throws IllegalStateException
+     *             when {@code json} cannot be parsed or written back
      */
     public String scrubJson(String json) {
         if (json == null || json.isBlank()) {
@@ -255,9 +271,9 @@ public class SecretScrubber {
             JsonNode root = objectMapper.readTree(json);
             scrubNode(root, null);
             return objectMapper.writeValueAsString(root);
-        } catch (Exception e) {
-            LOGGER.warnv("Failed to parse JSON for scrubbing, returning original: {0}", e.getMessage());
-            return json;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not parse a document for secret scrubbing; refusing to pass it on unscrubbed ("
+                    + e.getClass().getSimpleName() + ")");
         }
     }
 
@@ -387,7 +403,10 @@ public class SecretScrubber {
             }
         }
         String decided = scrubSingleValue(fieldName, parentFieldName, textValue);
-        if (decided != null || isStructuralFieldName(fieldName) || looksLikeUrl(textValue)) {
+        // A structural name only exempts the value from the entropy check (inside
+        // scrubSingleValue): a provider key pasted into "model" or "llmModel" still
+        // gets the shape rules below, or it would leave in the export as it is.
+        if (decided != null || looksLikeUrl(textValue)) {
             return decided;
         }
         return requestMaterial ? redactFreeText(textValue) : redactCredentialShapes(textValue);
@@ -476,12 +495,41 @@ public class SecretScrubber {
         if (text == null || text.isEmpty()) {
             return null;
         }
-        String redacted = SecretRedactionFilter.redactCredentialShapes(text);
+        // Vault references are left out of the scan: they are pointers, kept legible,
+        // and a key NAME can itself look like a credential ("${vault:sk-prod-key}"),
+        // which the shape rules would otherwise rewrite into a pointer to another key.
+        // Only the text between references is scanned, segment by segment, so no
+        // match can reach into a reference — a connection string's password rule
+        // would otherwise swallow the ${vault:pw} in
+        // "jdbc:postgresql://u:${vault:pw}@db".
+        var references = VAULT_REFERENCE.findAll(text);
+        if (references.isEmpty()) {
+            String redacted = redactShapesIn(text);
+            return redacted.equals(text) ? null : redacted;
+        }
+        var out = new StringBuilder(text.length());
+        int from = 0;
+        for (var reference : references) {
+            out.append(redactShapesIn(text.substring(from, reference.start()))).append(reference.text());
+            from = reference.end();
+        }
+        out.append(redactShapesIn(text.substring(from)));
+        String redacted = out.toString();
+        return redacted.equals(text) ? null : redacted;
+    }
+
+    /**
+     * The credential shape rules over one stretch of text that holds no reference.
+     */
+    private static String redactShapesIn(String segment) {
+        if (segment.isEmpty()) {
+            return segment;
+        }
+        String redacted = SecretRedactionFilter.redactCredentialShapes(segment);
         for (Pattern shape : EXPORT_CREDENTIAL_SHAPES) {
             redacted = shape.matcher(redacted).replaceAll(Matcher.quoteReplacement(SecretRedactionFilter.REDACTED));
         }
-        redacted = MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
-        return redacted.equals(text) ? null : redacted;
+        return MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
     }
 
     /**
@@ -611,6 +659,14 @@ public class SecretScrubber {
         String redacted = SecretRedactionFilter.redact(input);
         if (redacted.equals(input)) {
             return null;
+        }
+        return restoreMasks(redacted, masked);
+    }
+
+    /** Puts every masked original back into {@code redacted}, in one pass. */
+    private static String restoreMasks(String redacted, List<String> masked) {
+        if (masked.isEmpty()) {
+            return redacted;
         }
         // Every mask restored in ONE pass. A String.replace per expression was
         // O(expressions x length), and a three-character {a} is an expression.
@@ -775,7 +831,6 @@ public class SecretScrubber {
         return url.substring(0, queryStart) + "?" + out + fragment;
     }
 
-    /** An http(s) URL — the only shape {@link UriRedactor} is meant to be given. */
     /**
      * Any {@code scheme://authority} value, not just the two web schemes.
      * <p>

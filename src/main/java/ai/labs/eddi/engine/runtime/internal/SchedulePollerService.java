@@ -66,7 +66,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * one included — reclaims a schedule whose fire is still running and starts a
  * second copy. {@link #init} enforces {@code lease-timeout > fire-timeout +
  * grace} and raises the effective lease, with a warning, when the configuration
- * says otherwise.
+ * says otherwise. The store measures a lease's age on the database's clock (see
+ * {@link IScheduleStore#tryClaim}), so that bound holds however far the
+ * instances' own clocks disagree.
  * <p>
  * Supports two trigger types:
  * <ul>
@@ -284,9 +286,8 @@ public class SchedulePollerService {
 
         try {
             Instant now = Instant.now();
-            Instant leaseExpiry = now.minus(effectiveLeaseTimeout);
 
-            List<ScheduleConfiguration> dueSchedules = scheduleStore.findDueSchedules(now, leaseExpiry, maxRetries);
+            List<ScheduleConfiguration> dueSchedules = scheduleStore.findDueSchedules(now, effectiveLeaseTimeout, maxRetries);
 
             if (!dueSchedules.isEmpty()) {
                 LOGGER.debugf("[SCHEDULE] Found %d due schedules", dueSchedules.size());
@@ -316,7 +317,7 @@ public class SchedulePollerService {
                     // Read BEFORE the claim overwrites it: a due row still CLAIMED is one
                     // whose lease expired with no outcome recorded.
                     boolean staleClaim = schedule.getFireStatus() == FireStatus.CLAIMED;
-                    if (claimSchedule(schedule, now, leaseExpiry)) {
+                    if (claimSchedule(schedule, now)) {
                         if (staleClaim) {
                             onUnreportedFire(schedule);
                         } else {
@@ -395,9 +396,9 @@ public class SchedulePollerService {
      * "instances racing for the same schedule" — react to an operator pressing a
      * button.
      */
-    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry) {
+    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now) {
         try {
-            boolean claimed = tryClaimFor(schedule, now, leaseExpiry);
+            boolean claimed = tryClaimFor(schedule, now, true);
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
@@ -414,10 +415,19 @@ public class SchedulePollerService {
      * interpret. A store error is NOT a claim conflict: reporting it as one told a
      * manual caller "already being fired" during a database blip, which is a
      * statement about the cluster that nobody had checked.
+     *
+     * @param dueOnly
+     *            {@code true} for the poller, whose claim must also find the row
+     *            still due ({@link IScheduleStore#tryClaim}); {@code false} for a
+     *            manual fire, which may fire early
+     *            ({@link IScheduleStore#tryClaimAnyTime})
      */
-    private boolean tryClaimFor(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry)
+    private boolean tryClaimFor(ScheduleConfiguration schedule, Instant now, boolean dueOnly)
             throws IResourceStore.ResourceStoreException {
-        if (!scheduleStore.tryClaim(schedule.getId(), instanceId, now, leaseExpiry)) {
+        boolean claimed = dueOnly
+                ? scheduleStore.tryClaim(schedule.getId(), instanceId, now, effectiveLeaseTimeout)
+                : scheduleStore.tryClaimAnyTime(schedule.getId(), instanceId, now, effectiveLeaseTimeout);
+        if (!claimed) {
             return false;
         }
         // tryClaim() returns only a boolean; it does not hand back the fireId it
@@ -629,8 +639,8 @@ public class SchedulePollerService {
      * <p>
      * A due time that has NOT yet arrived is kept as it is rather than rolled
      * forward. Only a polled fire is guaranteed to be overdue; a manual "fire now"
-     * claims at any time — {@code tryClaim} deliberately has no
-     * {@code nextFire <= now} guard — so an operator firing a daily heartbeat in
+     * claims at any time — through {@code tryClaimAnyTime}, which deliberately has
+     * no {@code nextFire <= now} guard — so an operator firing a daily heartbeat in
      * the morning, into a conversation a human happens to be chatting in, would
      * otherwise push tonight's delivery out by a whole interval. Nothing ran, so
      * nothing was consumed: the still-pending fire IS the next cadence, and
@@ -896,14 +906,13 @@ public class SchedulePollerService {
 
     /**
      * Claim a schedule on behalf of a manual {@code POST /schedules/{id}/fire}, on
-     * exactly the terms the poller itself claims on.
+     * the terms the poller itself claims on — except that the schedule need not be
+     * due yet ({@link IScheduleStore#tryClaimAnyTime}).
      * <p>
-     * The lease expiry is the whole point of routing this through here. Passing
-     * {@code now} as the expiry would match the CAS clause that steals a
-     * <em>crashed</em> instance's claim ({@code claimedAt <= leaseExpiry}) and so
+     * The lease is the whole point of routing this through here. A zero lease would
+     * match the CAS clause that steals a <em>crashed</em> instance's claim and so
      * would seize the claim of a fire that is still running — the opposite of what
-     * claiming is for. {@code now - leaseTimeout} steals only a genuinely stale
-     * claim.
+     * claiming is for. The effective lease steals only a genuinely stale claim.
      * <p>
      * A store failure PROPAGATES rather than becoming {@code false}. The caller
      * turns {@code false} into "409 — already being fired", which during a database
@@ -917,8 +926,7 @@ public class SchedulePollerService {
      *             if the claim could not be attempted at all
      */
     public boolean claimForManualFire(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
-        Instant now = Instant.now();
-        return tryClaimFor(schedule, now, now.minus(effectiveLeaseTimeout));
+        return tryClaimFor(schedule, Instant.now(), false);
     }
 
     /**

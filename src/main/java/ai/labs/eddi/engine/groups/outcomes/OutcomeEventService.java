@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OutcomeConfig;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.groups.outcomes.IOutcomeEventStore.InsertOutcome;
 import ai.labs.eddi.engine.groups.outcomes.OutcomeEvent.SubjectType;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -30,7 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
 
 /**
  * Records the real-world outcomes of a team's work and offers them back: to the
@@ -131,20 +131,18 @@ public class OutcomeEventService {
             count("not_found");
             return new Result(Status.NOT_FOUND, "No task with that id on this team's backlog.", null);
         }
-        if (store.countBySubject(groupId, event.subjectId()) >= config.maxPerSubject()) {
-            // A retry of an event already stored is still a duplicate, not a refusal.
-            if (event.idempotencyKey() != null && !store.listBySubject(groupId, event.subjectId(), config.maxPerSubject()).stream()
-                    .noneMatch(e -> e.id().equals(event.id()))) {
-                return new Result(Status.DUPLICATE, "That outcome was already recorded.", event);
-            }
+        // The store checks the per-subject cap and inserts in one step: a count taken
+        // here first would let concurrent posts at the cap all through.
+        InsertOutcome stored = store.insert(event, config.maxPerSubject());
+        if (stored == InsertOutcome.DUPLICATE) {
+            // A retry of an event already stored -- on a full subject too.
+            count("duplicate");
+            return new Result(Status.DUPLICATE, "That outcome was already recorded.", event);
+        }
+        if (stored == InsertOutcome.FULL) {
             count("subject_full");
             return new Result(Status.SUBJECT_FULL, "This " + event.subjectType().name().toLowerCase() + " already carries "
                     + config.maxPerSubject() + " outcomes. Record a summarising reading instead of more events.", null);
-        }
-        boolean inserted = store.insertIfAbsent(event);
-        if (!inserted) {
-            count("duplicate");
-            return new Result(Status.DUPLICATE, "That outcome was already recorded.", event);
         }
         trim(groupId, config, now);
         count("recorded");
@@ -203,11 +201,6 @@ public class OutcomeEventService {
     /** Deletes every outcome of a deleted team. */
     public long deleteForGroup(String groupId) {
         return store.deleteByGroup(groupId);
-    }
-
-    /** The provider the context builder calls for a RETRO phase. */
-    public Function<String, String> retroDigestProvider() {
-        return this::retroDigest;
     }
 
     // === internals ===

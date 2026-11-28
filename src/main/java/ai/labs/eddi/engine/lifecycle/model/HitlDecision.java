@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import ai.labs.eddi.engine.hitl.audit.HitlChannel;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -68,6 +69,20 @@ public class HitlDecision {
      */
     private String pauseId;
     /**
+     * Optional: the {@code planHash} of the pause this decision was made for, as
+     * reported by {@code approval-status}. It binds the decision to the exact plan
+     * the reviewer saw — for a tool pause the tool names and canonicalized
+     * arguments of every pending call, for a rule pause the pending actions — and a
+     * decision whose hash differs from the pause's is refused with a conflict
+     * before anything runs. Omitted, the decision is accepted as before unless
+     * strict plan binding is on (agent {@code hitlConfig.requirePlanHash}, group
+     * {@code hitlConfig.requirePlanHash}, or {@code eddi.hitl.plan-hash.strict}),
+     * in which case it is refused with a 400.
+     *
+     * @since 6.8.0
+     */
+    private String planHash;
+    /**
      * Optional secret context for the resumed turn only — the same shape as a say
      * request's {@code context}. A client whose paused turn carried a credential as
      * a {@code "secret": true} context entry (replaced by a placeholder when the
@@ -120,6 +135,40 @@ public class HitlDecision {
      */
     @JsonIgnore
     private String decisionId;
+    /**
+     * The plan hash the pause was committed with, as the resume admitted it —
+     * recorded in the decision's audit entry whether or not the decision carried
+     * it. Server-side only, never read from a body.
+     *
+     * @since 6.8.0
+     */
+    @JsonIgnore
+    private String committedPlanHash;
+    /**
+     * How the decision related to the pause's plan ({@code HitlPlanBinding.Outcome}
+     * name), for the audit entry. Server-side only.
+     *
+     * @since 6.8.0
+     */
+    @JsonIgnore
+    private String planBinding;
+    /**
+     * How a mandatory approval this decision gives was accepted
+     * ({@code MandatoryApproverCheck}): who approved and, for an administrator, on
+     * whose behalf. Set by the resume path after the approver was checked, read by
+     * the resumed tool loop — which executes a mandatory call only when it is set —
+     * and by the decision's audit entry. Server-side only, never read from a body.
+     */
+    @JsonIgnore
+    private MandatoryApprovalAttribution mandatoryApproval;
+    /**
+     * The same, per approved mandatory call (call id to attribution): a batch may
+     * hold calls with different approver rules, and each call is executed and
+     * recorded with its own. {@link #getMandatoryApproval()} is the strictest of
+     * them, for the decision's audit entry. Server-side only.
+     */
+    @JsonIgnore
+    private Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -188,6 +237,20 @@ public class HitlDecision {
         this.pauseId = pauseId;
     }
 
+    public String getPlanHash() {
+        return planHash;
+    }
+
+    public void setPlanHash(String planHash) {
+        this.planHash = planHash;
+    }
+
+    /** Whether this decision names a plan hash. */
+    @JsonIgnore
+    public boolean namesPlan() {
+        return planHash != null && !planHash.isBlank();
+    }
+
     public Map<String, Context> getContext() {
         return context;
     }
@@ -223,6 +286,39 @@ public class HitlDecision {
     }
 
     @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApproval() {
+        return mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApproval(MandatoryApprovalAttribution mandatoryApproval) {
+        this.mandatoryApproval = mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public Map<String, MandatoryApprovalAttribution> getMandatoryApprovalsByCallId() {
+        return mandatoryApprovalsByCallId;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApprovalsByCallId(Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId) {
+        this.mandatoryApprovalsByCallId = mandatoryApprovalsByCallId;
+    }
+
+    /**
+     * How the approval of mandatory call {@code callId} was accepted, or null. Per
+     * call when the resume path recorded it per call; otherwise the decision-wide
+     * attribution.
+     */
+    @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApprovalOf(String callId) {
+        if (mandatoryApprovalsByCallId != null) {
+            return callId == null ? null : mandatoryApprovalsByCallId.get(callId);
+        }
+        return mandatoryApproval;
+    }
+
+    @JsonIgnore
     public String getDecisionId() {
         return decisionId;
     }
@@ -230,5 +326,22 @@ public class HitlDecision {
     @JsonIgnore
     public void setDecisionId(String decisionId) {
         this.decisionId = decisionId;
+    }
+
+    @JsonIgnore
+    public String getCommittedPlanHash() {
+        return committedPlanHash;
+    }
+
+    @JsonIgnore
+    public String getPlanBinding() {
+        return planBinding;
+    }
+
+    /** Records how this decision was bound to its pause's plan (server-side). */
+    @JsonIgnore
+    public void bindPlan(String committedPlanHash, String planBinding) {
+        this.committedPlanHash = committedPlanHash;
+        this.planBinding = planBinding;
     }
 }

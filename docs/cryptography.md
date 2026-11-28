@@ -1,6 +1,6 @@
 # Cryptography and Post-Quantum Readiness
 
-> **Status:** Inventory current as of 2026-10-15. Guarded by `CryptoInventoryTest`.
+> **Status:** Inventory current as of 2026-11-06. Guarded by `CryptoInventoryTest`.
 
 This page lists every cryptographic algorithm EDDI uses, what each one protects, and how exposed it is to a future quantum computer. It also describes what EDDI is doing about that exposure.
 
@@ -35,12 +35,17 @@ Two attacks follow from that:
 | Vault value checksums (dedup / match without decrypting) | `HmacSHA256` keyed with a random per-deployment key, over tenant id and value. Legacy rows hold a bare `SHA-256`. | `secrets/crypto/VaultChecksum` | ✅ |
 | Audit ledger entry integrity | `HmacSHA256` over a versioned canonical form of each entry. The key is configured (`eddi.audit.hmac-key`) or derived from the vault master key with `PBKDF2WithHmacSHA256` and then pinned in the vault (see [Audit Ledger](audit-ledger.md)). | `engine/audit/AuditHmac`, `AuditKeyring` | ✅ Quantum-safe, but symmetric: only a key holder can verify, not a third party |
 | Audit ledger keyed pseudonyms for erased users | `HmacSHA256` | `engine/audit/AuditHmac` | ✅ |
-| Agent identity and signed inter-agent envelopes | **Ed25519** | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
-| Agent signature on audit entries | **Ed25519**, over the entry's HMAC | `engine/audit/AuditLedgerService` (via `AgentSigningService`) | ❌ Classical signature |
+| Agent identity and signed inter-agent envelopes | **Ed25519** (an agent's signing key pair comes from `KeyPairGenerator` `Ed25519` when an admin asks for one with `POST /agentstore/agents/{id}/signing-keys`; the private half goes straight to the secrets vault, only the public half is stored on the agent) | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
+| Agent signature on audit entries | **Ed25519**, over `eddi-audit-entry:` and the entry's HMAC, stored as `v<keyVersion>:<signature>` and checked by `/auditstore/verify` against the key the entry's agent version signs with, as long as the agent has not revoked it; a plain signature written by 6.7.0 or earlier is checked over the bare HMAC against the legacy `identity.publicKey` | `engine/audit/AuditAgentSigner` (via `AgentSigningService`) | ❌ Classical signature |
 | Slack request verification | `HmacSHA256` (scheme defined by Slack) | `integrations/slack/SlackSignatureVerifier` | ✅ |
+| Signed webhook channel: inbound request verification | `HmacSHA256` (`X-Eddi-Signature` or a provider's scheme) | `integrations/webhook/WebhookSignatureVerifier` (via `integrations/channels/HmacSignatures`) | ✅ |
+| Alert webhook delivery: signature on outbound alerts | `HmacSHA256` over timestamp and body | `engine/alerts/AlertSenders` (via `integrations/channels/HmacSignatures`) | ✅ |
+| Cluster control-plane messages (node RPCs, replies, cluster events) | `HmacSHA256` signature with a shared `eddi.cluster.signing.key`, body hashed with `SHA-256`; user-id hashes on NATS sealed with `AES/GCM/NoPadding` under a key derived from it | `engine/cluster/ClusterMessageSigner` (see [Clustering](clustering.md)) | ✅ |
+| HITL oversight sampling decision | `HmacSHA256` keyed from the audit signing key (or a random per-node key) | `engine/hitl/oversight/samples/SamplingKey` | ✅ |
 | Inbound mail sender authentication: DKIM signature **verification** only (EDDI never signs mail) | RSA-SHA256 (`Signature` `SHA256withRSA`, keys from `KeyFactory` `RSA`, at least 1024 bits; `rsa-sha1` refused) and **Ed25519** (RFC 8463), body hash `SHA-256` | `engine/mail/DkimVerifier` | ❌ Classical signature, chosen by the sending domain rather than by EDDI |
 | Content hashes, cache keys, idempotency and dedup keys | `SHA-256` | `MessageDigest` call sites across the codebase | ✅ Not used for secrecy |
-| NATS client TLS context | `SSLContext` `TLS` with the JDK's default trust and key managers | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
+| HITL plan binding — the `planHash` a decision must match (integrity of what an approval lets run, not secrecy) | `SHA-256` over a canonical JSON document; a tool-call plan includes a 128-bit per-pause nonce from `SecureRandom`, never served, so the published hash is no guessing oracle over the raw arguments | `engine/hitl/HitlPlanHash` | ✅ |
+| NATS client TLS context | `SSLContext` `TLS` with the configured NATS key and trust stores, or the JDK defaults when none are set | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
 | OIDC / JWT verification | RS256, ES256 and similar, as chosen by the issuer (for example Keycloak) | `quarkus-oidc` configuration | ❌ Classical signature, decided by the identity provider rather than by EDDI |
 | Inbound TLS (HTTP server) | JDK JSSE through Vert.x | `quarkus.http.ssl*` configuration, or a reverse proxy | ❌ Classical key exchange |
 | Outbound TLS (LLM providers, HTTP calls, MCP, A2A, Slack, agent sync) | JDK JSSE (`java.net.http.HttpClient`) and Vert.x | — | ❌ Classical key exchange |
@@ -50,7 +55,7 @@ All algorithms come from the JDK's own providers. BouncyCastle is on the classpa
 
 ## What is quantum-safe today
 
-**Safe:** everything symmetric, which covers the secrets vault, the vault checksums, the HMAC integrity of the audit ledger, and Slack verification.
+**Safe:** everything symmetric, which covers the secrets vault, the vault checksums, the HMAC integrity of the audit ledger, cluster message signing, and the Slack, webhook and alert signatures.
 
 **Not yet safe:** the Ed25519 agent signatures, and every TLS connection. TLS is the more urgent of the two, because it is exposed to harvest-now-decrypt-later.
 
@@ -74,10 +79,9 @@ Until EDDI runs on a JDK whose JSSE offers a hybrid group:
 EDDI's post-quantum work is aimed at these outcomes:
 
 1. **A maintained inventory.** This page, together with `CryptoInventoryTest`.
-2. **Agent signatures that can actually be verified.** Agent signatures on audit entries will record which key version produced them, protect that version against tampering, and be checked by the audit verification endpoints.
-3. **Crypto-agile agent signing.** Agent keys will be able to use ML-DSA-65 or a hybrid of Ed25519 and ML-DSA-65. A per-agent *minimum algorithm* policy will reject signatures from weaker keys, so that an attacker who can forge Ed25519 cannot downgrade a migrated agent. Ed25519 stays the default.
-4. **Audit evidence that third parties can verify.** Optional checkpoints will sign a Merkle root of publicly recomputable digests of the entries with a post-quantum key. An auditor can then check the ledger offline with a public key pinned out of band, which the symmetric HMAC alone does not allow.
-5. **TLS visibility.** EDDI will log at startup whether hybrid post-quantum key exchange is available, and the documentation will give verified guidance for inbound TLS.
+2. **Crypto-agile agent signing.** Agent keys will be able to use ML-DSA-65 or a hybrid of Ed25519 and ML-DSA-65. A per-agent *minimum algorithm* policy will reject signatures from weaker keys, so that an attacker who can forge Ed25519 cannot downgrade a migrated agent. Ed25519 stays the default.
+3. **Audit evidence that third parties can verify.** Optional checkpoints will sign a Merkle root of publicly recomputable digests of the entries with a post-quantum key. An auditor can then check the ledger offline with a public key pinned out of band, which the symmetric HMAC alone does not allow.
+4. **TLS visibility.** EDDI will log at startup whether hybrid post-quantum key exchange is available, and the documentation will give verified guidance for inbound TLS.
 
 The ledger's HMAC canonical forms are frozen and will not change as part of this work. Existing configurations and stored data will keep verifying exactly as before.
 

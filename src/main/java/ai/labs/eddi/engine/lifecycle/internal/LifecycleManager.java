@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -62,6 +63,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_PRICING;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.HITL_PLAN_HASH;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -129,7 +131,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  * @see ILifecycleTask
  * @see IConversationMemory
- * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
+ * @see ai.labs.eddi.engine.runtime.IConversationCoordinator
  */
 public class LifecycleManager implements ILifecycleManager {
 
@@ -171,7 +173,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
-     * initialization based on package configuration.
+     * initialization based on workflow configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -241,7 +243,11 @@ public class LifecycleManager implements ILifecycleManager {
      * @throws LifecycleException
      *             if any task execution fails
      * @throws ConversationStopException
-     *             if STOP_CONVERSATION action is triggered
+     *             if STOP_CONVERSATION action is triggered, or the conversation was
+     *             cancelled
+     * @throws ConversationPauseException
+     *             if a task pauses the conversation (PAUSE_CONVERSATION action or a
+     *             gated tool call)
      */
     @SuppressWarnings("null") // Objects.requireNonNullElse guarantees non-null but Eclipse JDT doesn't track
                               // it
@@ -697,7 +703,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // user-controlled, so they can carry secrets (API keys, bearer
                 // tokens). The audit-ledger path already scrubs the same content via
                 // AuditLedgerService; this brings the live-display path to parity.
-                summary.put("toolTrace", redactToolTrace(toolTrace));
+                summary.put("toolTrace", ToolTraceRedaction.redactTrace(toolTrace));
             }
             // Cascade confidence (when model cascade is active) — written as a Double by
             // LlmTask's cascade branch. It used to write a String under a different key
@@ -763,39 +769,6 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Deep-redacts a collected tool trace before it is placed on the SSE
-     * {@code task_complete} summary. Each entry is a {@code Map} whose
-     * {@code arguments}/{@code result} strings are LLM- or user-controlled and may
-     * contain secrets. Mirrors {@code AuditLedgerService}'s scrub so the two
-     * outward-facing channels redact the same way. Returns a fresh structure — the
-     * trace stored in conversation memory is left intact for the owner-scoped
-     * {@code RestToolHistory} endpoint.
-     */
-    private static List<Object> redactToolTrace(List<Object> trace) {
-        List<Object> redacted = new ArrayList<>(trace.size());
-        for (Object entry : trace) {
-            redacted.add(redactTraceValue(entry));
-        }
-        return redacted;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Object redactTraceValue(Object value) {
-        if (value instanceof String s) {
-            return SecretRedactionFilter.redact(s);
-        } else if (value instanceof Map<?, ?> map) {
-            Map<String, Object> scrubbed = new LinkedHashMap<>(map.size());
-            for (Map.Entry<String, Object> e : ((Map<String, Object>) map).entrySet()) {
-                scrubbed.put(e.getKey(), redactTraceValue(e.getValue()));
-            }
-            return scrubbed;
-        } else if (value instanceof List<?> list) {
-            return list.stream().map(LifecycleManager::redactTraceValue).toList();
-        }
-        return value;
-    }
-
-    /**
      * Build an audit entry capturing a task's execution data. Maps memory data into
      * input/output/llmDetail/toolCalls fields.
      */
@@ -808,6 +781,14 @@ public class LifecycleManager implements ILifecycleManager {
         IData<String> inputData = currentStep.getLatestData("input");
         if (inputData != null && inputData.getResult() != null) {
             input.put("userInput", inputData.getResult());
+        }
+        // A task that runs because a human approved a plan records which plan: the
+        // hash the resume was admitted against (HitlPlanHash), written to the step by
+        // Conversation#resume. Every task the resume runs carries it, since all of
+        // them run under that approval.
+        IData<String> planHashData = currentStep.getLatestData(HITL_PLAN_HASH);
+        if (planHashData != null && planHashData.getResult() != null) {
+            input.put("hitlPlanHash", planHashData.getResult());
         }
 
         // Collect output data (what the task wrote)
@@ -897,19 +878,6 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Filters lifecycle tasks to execute only those starting from specified types.
-     *
-     * <p>
-     * This enables partial workflow execution. For example, if you specify
-     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
-     * but skip earlier tasks like parsing.
-     * </p>
-     *
-     * @param lifecycleTaskTypes
-     *            list of task type prefixes to match
-     * @return filtered list of tasks to execute
-     */
-    /**
      * Returns the ABSOLUTE index of the first task whose type matches any of the
      * requested types (prefix match); selective execution runs that task and all
      * subsequent ones. Returns -1 when no task matches.
@@ -989,8 +957,8 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
-     * called during Agent initialization, when the agent's package configuration is
-     * being loaded.
+     * called during Agent initialization, when the agent's workflow configuration
+     * is being loaded.
      * </p>
      *
      * <p>
@@ -1002,7 +970,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <li>Semantic parsing (dictionaries)</li>
      * <li>Behavior rules</li>
      * <li>Property extraction</li>
-     * <li>HTTP calls / LangChain</li>
+     * <li>HTTP calls / LLM</li>
      * <li>Output generation</li>
      * </ol>
      *
@@ -1324,8 +1292,8 @@ public class LifecycleManager implements ILifecycleManager {
      * authoritative, so a wrapper's message can never outrank them. Message
      * heuristics are only consulted when no typed cause matches.
      *
-     * @return one of: "timeout", "transport", "rate_limit", "content_filter",
-     *         "unknown"
+     * @return one of: "timeout", "transport", "stack_overflow", "rate_limit",
+     *         "content_filter", "unknown"
      */
     static String classifyError(Throwable e) {
         for (Throwable current = e; current != null; current = current.getCause()) {
@@ -1361,7 +1329,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * Creates a redacted, truncated summary of an exception for audit and SSE
-     * events. Unlike {@link #summarizeException(Exception)} (which sanitizes for
+     * events. Unlike {@link #summarizeException(Throwable)} (which sanitizes for
      * LLM consumption at 200 chars), this preserves full detail at 500 chars for
      * admin visibility — URLs and class names are deliberately kept, since the
      * audience is privileged and needs them to diagnose. Credentials are not: they

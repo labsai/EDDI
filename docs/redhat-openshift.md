@@ -51,7 +51,7 @@ The EDDI container image is submitted to Red Hat for container certification for
 | **Required labels**    | `name`, `vendor`, `version`, `release`, `summary`, `description`                               |
 | **OpenShift labels**   | `io.k8s.display-name`, `io.k8s.description`, `io.openshift.tags`                               |
 | **Health check**       | Docker-native `HEALTHCHECK` on `/q/health/ready`                                               |
-| **Security scanning**  | Trivy image scan in CI blocks push on OS-level CVEs                                            |
+| **Security scanning**  | Trivy image scan in CI blocks the push on CRITICAL/HIGH CVEs that have a fix (`ignore-unfixed`; exceptions in `.trivyignore`) |
 
 ### Automated Certification Workflow
 
@@ -85,8 +85,6 @@ Every push to `main` or release tag that produces a Docker image is validated by
 | `REDHAT_REGISTRY_KEY`      | The project's registry key (the robot account's password)                                    |
 | `DOCKER_USERNAME`          | Docker Hub username (used by `ci.yml`, not by certification)                                 |
 | `DOCKER_PASSWORD`          | Docker Hub password (used by `ci.yml`, not by certification)                                 |
-| `QUAY_USERNAME`          | Quay.io robot account (optional, for Quay.io publishing) |
-| `QUAY_PASSWORD`          | Quay.io password (optional)                              |
 
 ---
 

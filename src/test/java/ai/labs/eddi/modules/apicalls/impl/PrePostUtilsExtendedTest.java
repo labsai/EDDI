@@ -16,7 +16,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -40,17 +39,15 @@ class PrePostUtilsExtendedTest {
 
     private PrePostUtils prePostUtils;
     private IJsonSerialization jsonSerialization;
-    private IMemoryItemConverter memoryItemConverter;
     private ITemplatingEngine templatingEngine;
     private IDataFactory dataFactory;
 
     @BeforeEach
     void setUp() {
         jsonSerialization = mock(IJsonSerialization.class);
-        memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
+        prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
     }
 
     @Nested

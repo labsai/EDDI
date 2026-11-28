@@ -21,7 +21,9 @@ import java.time.Instant;
 /**
  * Nonce-based replay protection for signed envelopes.
  * <p>
- * Three-stage validation:
+ * Three-stage validation (a null or blank nonce is rejected up front as
+ * {@link NonceValidation#REPLAY}; in cluster mode the duplicate check can also
+ * fail closed with {@link NonceValidation#UNAVAILABLE}):
  * <ol>
  * <li><strong>Freshness:</strong> Reject if {@code timestampMs} is older than
  * {@code maxAgeMs} (default 5 minutes)</li>

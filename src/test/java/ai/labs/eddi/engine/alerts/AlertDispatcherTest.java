@@ -52,7 +52,7 @@ class AlertDispatcherTest {
 
     private static AlertSettings settings(boolean enabled, int capacity) {
         return new AlertSettings(enabled, capacity, Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2),
-                Duration.ofDays(90), Duration.ofSeconds(10), Optional.empty());
+                Duration.ofDays(90), Duration.ofSeconds(10), Optional.empty(), 50);
     }
 
     @Test

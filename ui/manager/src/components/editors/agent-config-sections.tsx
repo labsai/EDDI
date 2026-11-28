@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
   Fingerprint,
+  KeyRound,
   Brain,
   Moon,
   Plus,
@@ -24,8 +25,8 @@ import {
   Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import { useSkills } from "@eddi/app-kit/hooks/use-capabilities";
+import type { Agent, AgentPublicKey, ChannelConnector } from "@eddi/app-kit/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -35,18 +36,19 @@ import {
   type AgentHitlConfig,
   type HitlRejectionAction,
   type ToolApprovalsConfig,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
-import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
-import { CONFIDENCE_COLORS } from "@/lib/constants";
-import { EditorSection } from "./editor-section";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@eddi/app-kit/lib/hitl-config";
+import { CONFIDENCE_COLORS } from "@eddi/app-kit/lib/constants";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
-import { ApprovalContextEditor } from "./approval-context-editor";
-import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ApprovalContextEditor } from "@eddi/app-kit/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@eddi/app-kit/lib/hitl-approval-context";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Button } from "@eddi/ui";
 import { toast } from "sonner";
 
 /** What every agent-detail section takes from the page. */
@@ -127,42 +129,88 @@ function DraftNumberInput({
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
-/** Security flags that the backend rejects (cryptographic signing not yet available). */
-const INERT_SECURITY_FLAGS = ["signInterAgentMessages", "signMcpInvocations", "requirePeerVerification"] as const;
+/** The security flags the backend has; `signMcpInvocations` was removed there. */
+type SecurityFlag = "signInterAgentMessages" | "requirePeerVerification";
+
+/**
+ * The page's "Generate signing key" and "Revoke" actions. Absent hides the
+ * buttons: both endpoints are admin-only, since whoever can mint or retire a
+ * key decides what signs as the agent.
+ */
+export interface SigningKeyAction {
+  onGenerate: () => void;
+  /** Revokes key `keyVersion` (0 = the legacy `identity.publicKey`). */
+  onRevoke: (keyVersion: number) => void;
+  /** True while a key is being generated or revoked. */
+  pending: boolean;
+  /** Why changing keys is not possible right now; the buttons are disabled while set. */
+  disabledReason?: string;
+}
+
+/** `AgentPublicKey.MAX_VERSION`: a declared version above it is malformed and never signs. */
+const MAX_KEY_VERSION = 1_000_000;
+
+/**
+ * The key the agent signs with, as the backend picks it: the highest version
+ * from 1 to {@link MAX_KEY_VERSION}, revoked or not. Undefined when there is
+ * none, and the legacy `identity.publicKey` signs.
+ */
+function newestSigningKey(keys: AgentPublicKey[]): AgentPublicKey | undefined {
+  let newest: AgentPublicKey | undefined;
+  for (const k of keys) {
+    const version = k.version ?? 0;
+    if (version < 1 || version > MAX_KEY_VERSION) continue;
+    // Of a version declared twice, the backend takes a revoked entry if there is
+    // one (`AgentIdentity.signingKey()`), else the first.
+    const newestVersion = newest?.version ?? 0;
+    if (version > newestVersion || (version === newestVersion && k.revoked && !newest?.revoked)) newest = k;
+  }
+  return newest;
+}
 
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  signingKeyAction,
+}: AgentSectionProps & { signingKeyAction?: SigningKeyAction }) {
   const { t } = useTranslation();
-  const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
-  const hasAnyFlagEnabled = INERT_SECURITY_FLAGS.some((f) => agent.security?.[f]);
+  const keys = agent.identity?.keys ?? [];
+  const legacyKey = agent.identity?.publicKey;
+  const hasSigningKey = keys.length > 0 || !!legacyKey;
+  // The backend refuses a save with signing on unless the key that would sign is
+  // usable. That refusal is certain when there is no such key, or when it is
+  // revoked: the agent signs with its newest key and never falls back to an
+  // older one (`AgentIdentity.signingKeyVersion()`).
+  const signingKey = newestSigningKey(keys);
+  const hasUsableKey = signingKey ? !signingKey.revoked : !!legacyKey;
+  const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasUsableKey;
+  /** The key the admin asked to revoke, awaiting confirmation. */
+  const [revokeVersion, setRevokeVersion] = useState<number | null>(null);
+  const keyButtonsDisabled = disabled || !!signingKeyAction?.pending || !!signingKeyAction?.disabledReason;
 
-  function handleToggle(field: typeof INERT_SECURITY_FLAGS[number]) {
-    const current = agent.security?.[field] ?? false;
-    if (!current) {
-      // Toggling ON → show confirmation dialog first
-      setPendingFlag(field);
-      return;
-    }
-    // Toggling OFF → safe, no confirmation needed
-    doToggle(field, true);
+  function revokeButton(keyVersion: number) {
+    if (!signingKeyAction) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setRevokeVersion(keyVersion)}
+        disabled={keyButtonsDisabled}
+        title={signingKeyAction.disabledReason}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+        data-testid={`revoke-signing-key-${keyVersion}`}
+      >
+        {t("agentDetail.revokeSigningKey", "Revoke")}
+      </button>
+    );
   }
 
-  function doToggle(field: typeof INERT_SECURITY_FLAGS[number], currentValue: boolean) {
+  function toggle(field: SecurityFlag) {
     onChange({
       ...agent,
-      security: { ...agent.security, [field]: !currentValue },
+      security: { ...agent.security, [field]: !(agent.security?.[field] ?? false) },
     });
-  }
-
-  function confirmPendingFlag() {
-    if (pendingFlag) {
-      doToggle(pendingFlag, false);
-      setPendingFlag(null);
-    }
   }
 
   return (
@@ -172,7 +220,9 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
       accent="text-rose-500"
       variant="card"
       modified={modified}
-      defaultOpen={!!(agent.security?.signInterAgentMessages || agent.security?.signMcpInvocations || agent.identity?.agentDid)}
+      defaultOpen={
+        !!(agent.security?.signInterAgentMessages || agent.security?.requirePeerVerification || agent.identity?.agentDid) || hasSigningKey
+      }
     >
       {/* Identity */}
       <div className="space-y-3" data-testid="identity-section">
@@ -185,17 +235,14 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <DraftInput
+            {/* Read-only: the identity is engine-owned, and a save keeps the stored one. */}
+            <input
               type="text"
               value={agent.identity?.agentDid ?? ""}
-              onCommit={(v) =>
-                onChange({
-                  ...agent,
-                  identity: { ...agent.identity, agentDid: v || undefined },
-                })
-              }
+              readOnly
               placeholder="did:eddi:agent:..."
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
+              data-testid="identity-agent-did"
             />
           </div>
           <div>
@@ -206,20 +253,36 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               type="text"
               value={agent.identity?.publicKey ?? ""}
               readOnly
-              placeholder={t("agentDetail.publicKeyHint", "Auto-generated on first signing")}
+              placeholder={t("agentDetail.publicKeyHint", "Legacy key; generated keys are listed below")}
               className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
             />
           </div>
         </div>
 
-        {/* Versioned keys (if any exist from multi-key rotation) */}
-        {(agent.identity?.keys?.length ?? 0) > 0 ? (
+        {/* The legacy key and the versioned ones side by side: generating a key
+            keeps the legacy one, which peers still trust for v0 signatures until
+            it is revoked. */}
+        {hasSigningKey && (
           <div className="space-y-1.5">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("agentDetail.publicKeys", "Public Keys")}
             </label>
             <div className="space-y-1">
-              {agent.identity!.keys!.map((k, ki) => (
+              {legacyKey && (
+                <div
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
+                  data-testid="signing-key-legacy"
+                >
+                  <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    {t("agentDetail.legacyKey", "Legacy key (v0)")}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+                    {legacyKey.slice(0, 24)}…
+                  </span>
+                  {revokeButton(0)}
+                </div>
+              )}
+              {keys.map((k, ki) => (
                 <div
                   key={ki}
                   className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
@@ -230,31 +293,75 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
                   <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
                     {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
                   </span>
-                  {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
-                    <span className="text-[9px] text-destructive font-medium">
-                      {t("agentDetail.keyExpired", "Expired")}
-                    </span>
+                  {k.revoked ? (
+                    <>
+                      <span className="text-[9px] text-destructive font-medium" data-testid={`signing-key-revoked-${k.version}`}>
+                        {t("agentDetail.keyRevoked", "Revoked")}
+                      </span>
+                      {/* Deleting the private half is best effort: revoking again
+                          retries it, as the confirmation dialog says. */}
+                      {k.version != null && revokeButton(k.version)}
+                    </>
+                  ) : (
+                    <>
+                      {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
+                        <span className="text-[9px] text-destructive font-medium">
+                          {t("agentDetail.keyExpired", "Expired")}
+                        </span>
+                      )}
+                      {k.version != null && revokeButton(k.version)}
+                    </>
                   )}
                 </div>
               ))}
             </div>
           </div>
-        ) : agent.identity?.publicKey ? (
-          <div className="space-y-1.5">
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("agentDetail.publicKeys", "Public Keys")}
-            </label>
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
-              <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                {t("agentDetail.legacyKey", "Legacy key (v0)")}
-              </span>
-              <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
-                {agent.identity.publicKey.slice(0, 24)}…
-              </span>
-            </div>
+        )}
+
+        {signingKeyAction && (
+          <div className="flex items-start gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={signingKeyAction.onGenerate}
+              disabled={keyButtonsDisabled}
+              className="shrink-0 gap-1"
+              data-testid="generate-signing-key"
+            >
+              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("agentDetail.generateSigningKey", "Generate signing key")}
+            </Button>
+            <p className="text-[10px] text-muted-foreground" data-testid="generate-signing-key-hint">
+              {signingKeyAction.disabledReason ??
+                t(
+                  "agentDetail.generateSigningKeyHint",
+                  "Creates a new Ed25519 key pair and saves it as a new agent version. The private key stays in the secrets vault; the agent signs with the newest key.",
+                )}
+            </p>
           </div>
-        ) : null}
+        )}
       </div>
+
+      {signingKeyAction && (
+        <AlertDialog
+          open={revokeVersion !== null}
+          onOpenChange={(open) => !open && setRevokeVersion(null)}
+          title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
+          description={t(
+            "agentDetail.revokeSigningKeyDesc",
+            "Peers stop trusting every message signed with this key, whenever it was signed. Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it; a revoked versioned key stays listed, marked revoked. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
+          )}
+          confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
+          cancelLabel={t("common.cancel", "Cancel")}
+          variant="destructive"
+          onConfirm={() => {
+            if (revokeVersion !== null) signingKeyAction.onRevoke(revokeVersion);
+            setRevokeVersion(null);
+          }}
+          isPending={signingKeyAction.pending}
+        />
+      )}
 
       {/* Security toggles */}
       <div className="space-y-2 border-t border-border pt-3" data-testid="security-toggles">
@@ -263,8 +370,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           {t("agentDetail.securityFlags", "Signing & Verification")}
         </h3>
 
-        {/* Inline warning when any flag is enabled */}
-        {hasAnyFlagEnabled && (
+        {signingWithoutKey && (
           <div
             className="flex items-start gap-2 rounded-lg border border-warn-400/30 bg-warn-50 px-3 py-2.5 dark:bg-warn-900/15 dark:border-warn-700/30"
             data-testid="security-flag-warning"
@@ -272,21 +378,23 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           >
             <AlertTriangle className="h-4 w-4 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
             <p className="text-[11px] text-warn-800 dark:text-warn-300 leading-relaxed">
-              {t("agentDetail.securityFlagWarning", "Cryptographic signing is not yet available in this version. The backend will reject saves with these flags enabled (HTTP 400).")}
+              {t(
+                "agentDetail.signingNeedsKey",
+                "This agent has no usable signing key (none is declared, or the newest one is revoked), so a save with signing on is refused. An admin can generate one above.",
+              )}
             </p>
           </div>
         )}
 
         {([
-          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign inter-agent (A2A) messages"), t("agentDetail.signA2ADesc", "Cryptographically sign outbound A2A messages for tamper-proofing")],
-          ["signMcpInvocations", t("agentDetail.signMcp", "Sign MCP invocations"), t("agentDetail.signMcpDesc", "Attach signatures to MCP tool calls for secure server verification")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Reject inbound A2A tasks from agents that can't prove their identity")],
+          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it. In a group, once any member, the moderator or the facilitator requires verification, votes, negotiation tables and lessons count only signed entries for everyone, so every agent that writes there should sign. A verifying agent gets no artifact tools. In every conversation, 1:1 chats included, it is shown no group- or global-visible memory about the user that another agent wrote")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input
               type="checkbox"
               checked={agent.security?.[field] ?? false}
-              onChange={() => handleToggle(field)}
+              onChange={() => toggle(field)}
               disabled={disabled}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid={`security-flag-${field}`}
@@ -298,17 +406,6 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </label>
         ))}
       </div>
-
-      {/* Confirmation dialog for enabling a security flag */}
-      <AlertDialog
-        open={!!pendingFlag}
-        onOpenChange={(open) => { if (!open) setPendingFlag(null); }}
-        title={t("agentDetail.securityFlagConfirmTitle", "Enable security flag?")}
-        description={t("agentDetail.securityFlagConfirmDesc", "Cryptographic signing is not yet available in this version. Enabling this flag will cause the backend to reject saves with HTTP 400. Are you sure you want to proceed?")}
-        confirmLabel={t("agentDetail.securityFlagConfirmBtn", "Enable anyway")}
-        cancelLabel={t("common.cancel", "Cancel")}
-        onConfirm={confirmPendingFlag}
-      />
     </EditorSection>
   );
 });
@@ -323,11 +420,13 @@ function SkillAutocomplete({
   onChange,
   onSelect,
   placeholder,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSelect: (skill: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const { data: allSkills } = useSkills();
   const [open, setOpen] = useState(false);
@@ -381,6 +480,7 @@ function SkillAutocomplete({
       <input
         type="text"
         value={value}
+        disabled={disabled}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setHighlighted(-1); }}
         onFocus={() => { if (value.trim()) setOpen(true); }}
         onKeyDown={handleKeyDown}
@@ -608,6 +708,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                   <span className="flex-1 text-xs font-medium text-foreground">{cap.skill}</span>
                   {/* Confidence badge */}
                   <select
+                    disabled={disabled}
                     value={cap.confidence ?? "medium"}
                     onChange={(e) => updateConfidence(i, e.target.value)}
                     className={`h-7 rounded-full border px-2 text-[10px] font-semibold focus:outline-none focus:ring-1 focus:ring-ring ${confidenceColors[cap.confidence ?? "medium"] ?? ""}`}
@@ -663,6 +764,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
             value={newSkill}
             onChange={setNewSkill}
             onSelect={addCapability}
+            disabled={disabled}
             placeholder={t("agentDetail.capabilityPlaceholder", "Search or type a skill name...")}
           />
           <button
@@ -747,6 +849,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.defaultVisibility", "Default Visibility")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.defaultVisibility ?? "self"}
                   onChange={(e) => patchConfig({ defaultVisibility: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -760,6 +863,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.maxRecallEntries", "Max Recall")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={cfg.maxRecallEntries ?? 50}
                   onCommit={(v) => patchConfig({ maxRecallEntries: v })}
                   fallback={50}
@@ -771,6 +875,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.maxEntriesPerUser", "Max per User")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={cfg.maxEntriesPerUser ?? 500}
                   onCommit={(v) => patchConfig({ maxEntriesPerUser: v })}
                   fallback={500}
@@ -785,6 +890,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.onCapReached", "On Cap Reached")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.onCapReached ?? "evict_oldest"}
                   onChange={(e) => patchConfig({ onCapReached: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -798,6 +904,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.recallOrder", "Recall Order")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.recallOrder ?? "most_recent"}
                   onChange={(e) => patchConfig({ recallOrder: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -816,15 +923,15 @@ export const UserMemorySection = memo(function UserMemorySection({
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
-                  <DraftNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
-                  <DraftNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
-                  <DraftNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
             </div>
@@ -851,38 +958,34 @@ export const UserMemorySection = memo(function UserMemorySection({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
-                      <DraftInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
-                      <DraftInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DraftInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <DraftNumberInput value={dream.maxCostPerRun ?? 0.5} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={0.5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput disabled={disabled} value={dream.maxCostPerRun ?? 0.5} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={0.5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
-                      <DraftNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
-                      <DraftNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput disabled={disabled} value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                      <input type="checkbox" checked={dream.detectContradictions ?? true} onChange={(e) => patchDream({ detectContradictions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                      <input disabled={disabled} type="checkbox" checked={dream.detectContradictions ?? true} onChange={(e) => patchDream({ detectContradictions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
                       {t("agentDetail.detectContradictions", "Detect contradictions")}
                     </label>
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                      <input type="checkbox" checked={dream.summarizeInteractions ?? false} onChange={(e) => patchDream({ summarizeInteractions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                      <input disabled={disabled} type="checkbox" checked={dream.summarizeInteractions ?? false} onChange={(e) => patchDream({ summarizeInteractions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
                       {t("agentDetail.summarizeInteractions", "Summarize interactions")}
                     </label>
                   </div>
@@ -1395,6 +1498,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 {t("agentDetail.hitlPauseReason", "Approval reason (shown to approvers)")}
               </label>
               <DraftInput
+                disabled={disabled}
                 type="text"
                 value={hitl.pauseReason ?? ""}
                 onCommit={(v) => patchHitl({ pauseReason: v.trim() ? v : null })}
@@ -1442,6 +1546,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   {t("agentDetail.hitlApprovalTimeout", "Approval timeout (ISO-8601)")}
                 </label>
                 <input
+                  disabled={disabled}
                   type="text"
                   value={timeoutDraft}
                   onChange={(e) => {
@@ -1708,6 +1813,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                   {t("agentDetail.maxCheckpoints", "Max Checkpoints")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={sm.maxCheckpointsPerConversation ?? 10}
                   onCommit={(v) => patchSm({ maxCheckpointsPerConversation: v })}
                   min={1}

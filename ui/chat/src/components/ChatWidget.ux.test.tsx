@@ -4,19 +4,19 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
-import { setAuthToken } from "@/api/http";
+import { setAuthToken } from "@eddi/core";
 import { setLocale } from "@/i18n";
 
 const originalFetch = globalThis.fetch;
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   vi.restoreAllMocks();
   vi.useRealTimers();
-  setLocale("en");
+  await setLocale("en");
   setAuthToken(null);
   document.title = "";
 });
@@ -27,14 +27,11 @@ beforeEach(() => {
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-          <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider>
+      <ChatLocationProvider initialPath={path}>
+        <ChatWidget />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 
@@ -120,7 +117,13 @@ describe("failed sends give the draft back", () => {
     );
   });
 
-  it("keeps partial text, says the connection dropped, and re-reads the conversation", async () => {
+  it("keeps partial text, says it is reconnecting, and shows the reply the turn settled with", async () => {
+    /** A current-step read as the backend answers it: the latest STORED step. */
+    const stored = (stamp: string, text: string) => ({
+      conversationState: "READY",
+      conversationSteps: [{ timestamp: stamp, conversationStep: [{ key: "output:text:0", value: text, timestamp: stamp }] }],
+      conversationOutputs: [{ output: [{ type: "text", text }] }],
+    });
     const backend = install({
       send: () => {
         const enc = new TextEncoder();
@@ -129,7 +132,12 @@ describe("failed sends give the draft back", () => {
             start(c) {
               c.enqueue(enc.encode("event: token\ndata: half an answ\n\n"));
               // Erroring at once would discard the queued token; drop the link after it.
-              setTimeout(() => c.error(new TypeError("network error")), 20);
+              setTimeout(() => {
+                // The turn runs on: the server stores it while the client is
+                // offline. Until then a read shows the step before it.
+                backend.snapshot = stored("t2", "half an answer, settled on the server");
+                c.error(new TypeError("network error"));
+              }, 20);
             },
           }),
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
@@ -140,17 +148,19 @@ describe("failed sends give the draft back", () => {
     await screen.findByText("Hello there");
     const readsBefore = backend.calls.filter((c) => c.method === "GET").length;
 
+    backend.snapshot = stored("t1", "Hello there");
     await typeAndSend("tell me more");
 
-    await screen.findByText(/Connection lost/);
+    expect(await screen.findByTestId("reconnecting-indicator")).toHaveTextContent(/Reconnecting/);
     expect(screen.getByText(/half an answ/)).toBeInTheDocument();
     // The user's message stays (it was consumed), and no draft is pushed back.
     expect(screen.getByText("tell me more", { selector: "p" })).toBeInTheDocument();
-    await waitFor(() =>
-      expect(backend.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(
-        readsBefore,
-      ),
-    );
+    // The re-read finds the turn settled; its reply replaces the partial one.
+    expect(
+      await screen.findByText("half an answer, settled on the server", {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("reconnecting-indicator")).toBeNull();
+    expect(backend.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(readsBefore);
     expect((screen.getByTestId("chat-input") as HTMLTextAreaElement).value).toBe("");
   });
 
@@ -663,7 +673,7 @@ describe("accent colours", () => {
 
 describe("language", () => {
   it("renders widget copy in the language chosen", async () => {
-    setLocale("de");
+    await setLocale("de");
     install({ snapshot: { conversationState: "READY", conversationSteps: [], conversationOutputs: [] } });
     renderAt("/chat/production/agent-1");
 

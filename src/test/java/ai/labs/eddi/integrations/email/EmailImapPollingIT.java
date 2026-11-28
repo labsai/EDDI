@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
@@ -28,6 +29,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
+import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import ai.labs.eddi.integrations.email.transport.ImapMailTransport;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
@@ -145,7 +147,8 @@ class EmailImapPollingIT {
                 authenticator,
                 conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
                 new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), attachments, mock(EmailOwnerNotifier.class),
-                new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
+                mock(EmailReplySender.class), mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Duration.ofMinutes(30),
+                Duration.ofDays(30));
 
         ConnectionResolver resolver = mock(ConnectionResolver.class);
         when(resolver.authTypeOf("${connection:mailbox}")).thenReturn(Optional.of(AuthType.BASIC));

@@ -29,6 +29,11 @@ services:
       # entirely, including the first check after the first boot; that also wins
       # over the switch on the Manager's Updates page.
       - "EDDI_UPDATE_CHECK_ENABLED=${EDDI_UPDATE_CHECK_ENABLED:-true}"
+      # Web search provider. DuckDuckGo needs no key; with brave and a key set
+      # the websearch tool uses the Brave Search API. Brave without a key falls
+      # back to DuckDuckGo (see docs/langchain.md).
+      - "EDDI_TOOLS_WEBSEARCH_PROVIDER=${EDDI_TOOLS_WEBSEARCH_PROVIDER:-duckduckgo}"
+      - "EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=${EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY:-}"
       # While authentication is off EDDI answers only requests addressed to
       # localhost, an IP address, host.docker.internal (and its Podman/gateway
       # siblings) or a host listed here (UnauthenticatedRequestGuard

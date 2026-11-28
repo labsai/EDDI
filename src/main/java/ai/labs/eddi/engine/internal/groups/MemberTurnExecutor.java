@@ -12,16 +12,19 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupMembersUnresolvableException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
@@ -55,14 +58,15 @@ import java.util.stream.Collectors;
  * Extracted from {@code GroupConversationService} (Wave R, R1 step 4) as a pure
  * move — no behavior change.
  * <p>
- * Holds a reference back to the owning {@link GroupConversationService} for two
- * things a member turn cannot do standalone: a {@code GROUP}-type member
- * recurses into a nested sub-discussion via the facade's own public
- * {@code discuss}/{@code cancelDiscussion}, and attachment granting reuses the
+ * Holds a reference back to the owning {@link GroupConversationService} for
+ * what a member turn cannot do standalone: a {@code GROUP}-type member recurses
+ * into a nested sub-discussion via the facade's own public
+ * {@code discuss}/{@code cancelDiscussion}, attachment granting reuses the
  * facade's {@code grantAndInjectAttachments} (widened to {@code public} for
  * this) rather than duplicating its field-injected-{@code IAttachmentStore}
- * construction dance here. Both are pre-existing facade methods, not new
- * coupling introduced by this class.
+ * construction dance here, and the team-budget calls ({@code chargeTeamBudget},
+ * {@code teamBudgetTemplateValues}) live on the facade too. These are
+ * pre-existing facade methods, not new coupling introduced by this class.
  *
  * @author ginccc
  */
@@ -84,6 +88,46 @@ public class MemberTurnExecutor {
      */
     private static final String MEMBER_PAUSE_NOTE = "member agent requested human approval (PAUSE_CONVERSATION) — not supported inside group "
             + "discussions; configure group-level HITL via requiresApproval instead";
+
+    /*
+     * The errorReason of a turn that produced no answer. Short and stable: the
+     * transcript is stored, shown in every UI and quoted in the SSE stream, so it
+     * never carries provider, driver or exception text — that goes to the log.
+     */
+    /** The member agent is not deployed. */
+    public static final String REASON_NOT_DEPLOYED = "Agent not deployed";
+    /** The deployment lookup for the member agent failed. */
+    public static final String REASON_UNAVAILABLE = "Agent unavailable";
+    /** The member's private conversation could not be started. */
+    public static final String REASON_START_FAILED = "Failed to start conversation";
+    /** The member's turn threw. */
+    public static final String REASON_EXECUTION_FAILED = "Agent execution failed";
+    /**
+     * The member's turn ended with its conversation in ERROR and no output — a
+     * provider outage, an unreachable model, a failing pipeline task.
+     */
+    public static final String REASON_ERROR_STATE = "Agent failed to produce an answer (its conversation ended in ERROR)";
+    /** A nested GROUP member's discussion failed or ended without an answer. */
+    public static final String REASON_SUB_GROUP_FAILED = "Sub-group discussion failed";
+    /** A nested GROUP member could not start: the depth limit. */
+    public static final String REASON_SUB_GROUP_DEPTH = "Sub-group depth exceeded";
+    /** A nested GROUP member's discussion was cancelled on its own. */
+    public static final String REASON_SUB_GROUP_CANCELLED = "Sub-group discussion was cancelled";
+    /** A turn released by the discussion's immediate cancel. */
+    public static final String REASON_CANCELLED = "Cancelled";
+    /** A nested GROUP member could not start: the parent's turn budget is spent. */
+    public static final String REASON_TURN_BUDGET = "Turn budget exhausted";
+    /**
+     * A timed-out turn whose RETRY was skipped: the timed-out turn could not be
+     * stopped, and a retry would have queued behind it in the same conversation.
+     */
+    public static final String REASON_TIMEOUT_NOT_RETRIED = "Timeout — not retried, the timed-out turn did not stop";
+
+    /**
+     * How long a RETRY after a timeout waits for the cancelled first attempt to end
+     * (capped by the turn timeout).
+     */
+    public static final int RETRY_DRAIN_SECONDS = 5;
 
     private static final Environment DEFAULT_ENV = Environment.production;
 
@@ -155,9 +199,20 @@ public class MemberTurnExecutor {
                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
                                             GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
             throws GroupDiscussionException {
+        // S4: every member or engine turn — phase speakers, convergence judge,
+        // facilitator, dissent round, vote tie-break, task-force plan/verify/bids —
+        // refuses to start once the discussion is cancelled, and a turn without its
+        // own cancellation is released by CANCEL_IMMEDIATE like a phase speaker's.
+        DiscussionControlToken token = groupConversationService != null ? groupConversationService.controlTokenOf(gc.getId()) : null;
+        DiscussionCancellation.checkpoint(token);
+        DiscussionCancellation.Link link = cancellation == null && token != null ? DiscussionCancellation.link(token) : null;
         try {
-            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, cancellation, conversationKey);
+            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener,
+                    link != null ? link.cancellation() : cancellation, conversationKey);
         } finally {
+            if (link != null) {
+                link.close();
+            }
             // I17: announce artifact writes this turn made. In a finally because an
             // accepted write already happened whatever the turn's own outcome —
             // a timeout or cancellation after the write must not swallow the event.
@@ -306,7 +361,7 @@ public class MemberTurnExecutor {
                     throw new GroupDiscussionException("Agent %s is not deployed and onMemberUnavailable=FAIL".formatted(member.agentId()));
                 }
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Agent not deployed", targetAgentId);
+                        Instant.now(), REASON_NOT_DEPLOYED, targetAgentId);
             }
         } catch (GroupDiscussionException e) {
             throw e;
@@ -314,9 +369,39 @@ public class MemberTurnExecutor {
             if (protocol.onMemberUnavailable() == ProtocolConfig.MemberUnavailablePolicy.FAIL) {
                 throw new GroupDiscussionException("Cannot reach agent %s: %s".formatted(member.agentId(), e.getMessage()), e);
             }
+            LOGGER.warnf("Agent %s unavailable for group %s: %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
+            // Unavailable, like not deployed: decided by onMemberUnavailable, a SKIPPED
+            // turn.
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    Instant.now(), "Agent unavailable: " + e.getMessage(), targetAgentId);
+                    Instant.now(), REASON_UNAVAILABLE, targetAgentId);
         }
+
+        // Snapshot instead of handing out the live list: the groupTranscript context
+        // is serialised on the member conversation's own thread while the
+        // orchestrator keeps appending entries. Collections.synchronizedList makes
+        // add() safe but NOT iteration — publishing it by reference produced
+        // intermittent ConcurrentModificationExceptions that failed a member turn at
+        // random.
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        // For a member that requires peer verification, every agent entry that does
+        // not verify is replaced by a [withheld] placeholder (see
+        // GroupSigningGuard.viewFor). Its rendered prompt went through the same filter
+        // in GroupContextBuilder.buildPhaseInput.
+        var view = signingGuard.viewFor(member.agentId(), gc, transcriptSnapshot);
+        if (view.requirement() == GroupSigningGuard.Requirement.UNKNOWN) {
+            // Neither a fully withheld transcript (wrong if the member never asked
+            // for verification) nor an unverified one (wrong if it did) is a fair
+            // basis for a reply that stays in the transcript. Checked before the member
+            // conversation is started: a skipped turn must not use up the first turn,
+            // which is the one that is given the discussion's attachments.
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Its peer-verification setting could not be read", targetAgentId);
+        }
+        transcriptSnapshot = view.transcript();
 
         // Get or create private conversation
         String convKey = conversationKey != null ? conversationKey : member.agentId();
@@ -335,7 +420,7 @@ public class MemberTurnExecutor {
                 if (e instanceof QuotaRefusal refusal) {
                     throw new GroupDiscussionException(refusal.refusalSummary() + ": " + e.getMessage(), e);
                 }
-                return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
+                return handleAgentFailure(member, phaseIdx, phase, protocol, e, REASON_START_FAILED, targetAgentId);
             }
         }
 
@@ -343,15 +428,6 @@ public class MemberTurnExecutor {
         InputData inputData = new InputData();
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
-        // Snapshot instead of handing out the live list: this context is serialised
-        // on the member conversation's own thread while the orchestrator keeps
-        // appending entries. Collections.synchronizedList makes add() safe but NOT
-        // iteration — publishing it by reference produced intermittent
-        // ConcurrentModificationExceptions that failed a member turn at random.
-        List<TranscriptEntry> transcriptSnapshot;
-        synchronized (gc.getTranscript()) {
-            transcriptSnapshot = List.copyOf(gc.getTranscript());
-        }
         // Scoped like the rendered prompt: this key reaches every template in the
         // member's workflow, so it may not show what the phase's contextScope hides.
         context.put("groupTranscript", new Context(Context.ContextType.object,
@@ -375,10 +451,6 @@ public class MemberTurnExecutor {
             groupConversationService.grantAndInjectAttachments(gc, privateConvId, context);
         }
 
-        // Wave 6: Peer verification — if the receiving agent requires it,
-        // verify all signed entries from prior speakers before sending context
-        signingGuard.verifyPriorEntriesIfRequired(member.agentId(), gc);
-
         inputData.setContext(context);
 
         // Call through ConversationService with retry
@@ -389,12 +461,16 @@ public class MemberTurnExecutor {
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : defaultMaxRetries;
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : defaultAgentTimeoutSeconds;
 
+        // The response of the attempt in flight — a timeout RETRY waits for it to end
+        // after cancelling it, before asking again (K7).
+        CompletableFuture<String> attemptInFlight = null;
         while (true) {
             if (cancellation != null && cancellation.isCancelled()) {
                 throw new GroupConversationService.MemberTurnCancelledException();
             }
             try {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
+                attemptInFlight = responseFuture;
                 final String convId = privateConvId;
                 // #3: a member agent's own behavior rule may emit PAUSE_CONVERSATION,
                 // pausing its private conversation (AWAITING_HUMAN). Member-level HITL
@@ -406,6 +482,11 @@ public class MemberTurnExecutor {
                 // auto-resolved gracefully (system:group REJECTED), a RULE pause needs
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
+                // The member's pipeline failed (e.g. its model is unreachable): the
+                // conversation ends in ERROR with no output keys. That is a FAILED
+                // turn, decided after the callback under onAgentFailure — never text
+                // standing in for an answer.
+                final boolean[] memberErrored = {false};
 
                 Consumer<String> toolObserver = listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
                 ConversationResponseHandler memberHandler = snapshot -> {
@@ -415,12 +496,9 @@ public class MemberTurnExecutor {
                     }
 
                     String response = contextBuilder.extractResponse(snapshot);
-                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
-                    // returns empty because there are no output keys — only pipeline metadata.
-                    // Surface the failure as explicit content so the transcript entry is not empty.
-                    if ((response == null || response.isEmpty()) && snapshot != null
-                            && snapshot.getConversationState() == ConversationState.ERROR) {
-                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    if (endedInErrorWithoutAnswer(snapshot, response)) {
+                        memberErrored[0] = true;
+                        response = null;
                     }
 
                     // This callback runs on a COORDINATOR thread, not the member-turn
@@ -483,6 +561,9 @@ public class MemberTurnExecutor {
                     response = responseFuture.get(timeout, TimeUnit.SECONDS);
                 } catch (ExecutionException ee) {
                     if (cancellation != null && cancellation.isCancelled()) {
+                        if (cancellation.stopsInFlight()) {
+                            stopMemberTurn(member, convId);
+                        }
                         throw new GroupConversationService.MemberTurnCancelledException();
                     }
                     throw ee;
@@ -502,14 +583,33 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
+                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey, cancellation);
                         if (graceful != null) {
+                            // The resumed run failed: the same member failure as an ERROR
+                            // without a pause, under the same policy — ABORT stops the phase,
+                            // SKIP keeps the contentless FAILED entry. Never a retry: that
+                            // would replay the tool call the group just rejected.
+                            if (graceful.outcome() == TurnOutcome.FAILED) {
+                                return failedTurn(member, phaseIdx, phase, protocol, graceful.errorReason(), targetAgentId);
+                            }
                             return graceful;
                         }
                     }
                     // RULE pause (needs a real human) or a TOOL_CALL graceful attempt
                     // that could not complete → existing SKIP + cancel handling.
                     return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
+                }
+
+                // A failed member turn is a failure like an exception: RETRY retries
+                // it, ABORT aborts, SKIP records it as FAILED with no content.
+                if (memberErrored[0]) {
+                    LOGGER.warnf("Agent %s ended its group turn in ERROR without output (group %s, conversation %s)",
+                            LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(convId));
+                    if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
+                        retries++;
+                        continue;
+                    }
+                    return failedTurn(member, phaseIdx, phase, protocol, REASON_ERROR_STATE, targetAgentId);
                 }
 
                 // I4: an abstention replaces the typed contribution entirely — the
@@ -520,16 +620,12 @@ public class MemberTurnExecutor {
                     return abstentionEntry(member, phaseIdx, phase, targetAgentId);
                 }
 
-                // Wave 6: Sign inter-agent messages with full envelope if configured
-                GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
-                        member.agentId(), gc.getGroupId(), response, phase.name());
-
-                var entry = new TranscriptEntry(
+                // Signed if the member's config says so; the signature binds the entry
+                // to this conversation and phase.
+                return signingGuard.sign(gc, new TranscriptEntry(
                         member.agentId(), member.displayName(), response,
                         phaseIdx, phase.name(), entryType, Instant.now(),
-                        null, targetAgentId, signing.signature(),
-                        signing.nonce(), signing.timestampMs(), signing.keyVersion());
-                return entry;
+                        null, targetAgentId));
 
             } catch (GroupConversationService.MemberTurnCancelledException e) {
                 // Cooperative cancellation is not a member failure: never retried, never
@@ -541,6 +637,15 @@ public class MemberTurnExecutor {
                     throw new GroupConversationService.MemberTurnCancelledException();
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
+                    // K7: the timed-out turn is still running in the same member
+                    // conversation; a retry would queue behind it and bill twice. Ask it
+                    // to stop (cooperative: effective at its next task boundary, a running
+                    // model call is not interrupted) and retry only if it ended within the
+                    // wait — otherwise record the timeout without a retry.
+                    if (!stopTimedOutAttempt(member, privateConvId, attemptInFlight, timeout, cancellation)) {
+                        return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(),
+                                TranscriptEntryType.SKIPPED, TurnOutcome.TIMED_OUT, REASON_TIMEOUT_NOT_RETRIED, targetAgentId);
+                    }
                     retries++;
                     LOGGER.warnf("Agent %s timed out (attempt %d/%d), retrying...", member.agentId(), retries, maxRetries);
                     continue;
@@ -551,8 +656,8 @@ public class MemberTurnExecutor {
                     throw new GroupTimeoutException(
                             "Agent %s timed out and onAgentFailure=ABORT".formatted(member.agentId()), null);
                 }
-                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Timeout after " + timeout + "s", targetAgentId);
+                return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        TurnOutcome.TIMED_OUT, "Timeout after " + timeout + "s", targetAgentId);
 
             } catch (ConversationAwaitingApprovalException e) {
                 // Member's private conversation is (or became) AWAITING_HUMAN before the say
@@ -579,6 +684,11 @@ public class MemberTurnExecutor {
                 // its private history, since the group transcript rides in with every
                 // turn's context.
                 if (cause instanceof IConversationService.ConversationEndedException && !replacedEndedConversation) {
+                    // K2: a deleted or ended discussion ends its members' conversations
+                    // first — that is no reason to start fresh ones for it.
+                    if (groupConversationService != null && groupConversationService.discussionEnded(gc.getId())) {
+                        throw new GroupConversationService.MemberTurnCancelledException();
+                    }
                     replacedEndedConversation = true;
                     try {
                         String endedConvId = privateConvId;
@@ -594,7 +704,7 @@ public class MemberTurnExecutor {
                         if (restartFailure instanceof QuotaRefusal refusal) {
                             throw new GroupDiscussionException(refusal.refusalSummary() + ": " + restartFailure.getMessage(), restartFailure);
                         }
-                        return handleAgentFailure(member, phaseIdx, phase, protocol, restartFailure, "Failed to start conversation",
+                        return handleAgentFailure(member, phaseIdx, phase, protocol, restartFailure, REASON_START_FAILED,
                                 targetAgentId);
                     }
                 }
@@ -603,7 +713,7 @@ public class MemberTurnExecutor {
                     LOGGER.warnf("Agent %s failed (attempt %d/%d): %s", member.agentId(), retries, maxRetries, cause.getMessage());
                     continue;
                 }
-                return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
+                return handleAgentFailure(member, phaseIdx, phase, protocol, cause, REASON_EXECUTION_FAILED, targetAgentId);
             }
         }
     }
@@ -699,9 +809,37 @@ public class MemberTurnExecutor {
                                                      int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId, String costKey) {
+        return tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId, costKey, null);
+    }
+
+    /**
+     * As above, with the turn's cancellation scope: the resume wait is registered
+     * with it, so an immediate cancel releases the wait instead of leaving it to
+     * run to the member timeout, and stops the resumed private turn.
+     *
+     * @throws GroupConversationService.MemberTurnCancelledException
+     *             when the discussion was cancelled while the resume ran
+     */
+    public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                     int timeoutSeconds, int phaseIdx,
+                                                     DiscussionPhase phase, TranscriptEntryType entryType,
+                                                     String targetAgentId, String costKey,
+                                                     GroupConversationService.MemberTurnCancellation cancellation) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
+
+        // Cancelled before the resume started: start no new turn. The member's pause
+        // is cancelled instead, as for any pause the group cannot honour.
+        if (cancellation != null && cancellation.isCancelled()) {
+            try {
+                conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
+            } catch (Exception e) {
+                LOGGER.debugf("Could not cancel the paused turn of member %s: %s", LogSanitizer.sanitize(member.agentId()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+            throw new GroupConversationService.MemberTurnCancelledException();
+        }
 
         var decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.REJECTED);
@@ -717,14 +855,34 @@ public class MemberTurnExecutor {
                     new ConversationResponseHandler() {
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                            resumeFuture.complete(snapshot);
+                            try {
+                                book(snapshot);
+                            } finally {
+                                resumeFuture.complete(snapshot);
+                            }
                         }
 
                         @Override
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                            // Dropped without producing a fresh answer — treat as
-                            // "could not complete" so the caller falls back.
-                            resumeFuture.complete(null);
+                            try {
+                                book(snapshot);
+                            } finally {
+                                // Dropped without producing a fresh answer — treat as
+                                // "could not complete" so the caller falls back.
+                                resumeFuture.complete(null);
+                            }
+                        }
+
+                        // Whatever the resumed run did, it created what it created and
+                        // spent what it spent. Booked here, as the ordinary turn's
+                        // callback does, not after the wait: a cancel or timeout that
+                        // releases the wait first must not lose the spend or the agents
+                        // the group's cleanup has to undeploy.
+                        private void book(SimpleConversationMemorySnapshot snapshot) {
+                            if (snapshot != null) {
+                                GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
+                                GroupCostLedger.accumulateMemberCost(gc, costKey, snapshot);
+                            }
                         }
                     }, true, true, List.of());
         } catch (Exception e) {
@@ -735,24 +893,28 @@ public class MemberTurnExecutor {
 
         SimpleConversationMemorySnapshot resumed;
         try {
+            if (cancellation != null) {
+                cancellation.register(resumeFuture);
+            }
             resumed = resumeFuture.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw cancelledDuringResume(member, convId, cancellation);
+            }
             LOGGER.warnf("Graceful tool-pause resume did not complete within %ds for member '%s' (conv %s) — falling back to SKIP+cancel",
                     timeoutSeconds, member.agentId(), convId);
             return null;
         } catch (Exception e) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw cancelledDuringResume(member, convId, cancellation);
+            }
             LOGGER.warnf("Graceful tool-pause resume errored for member '%s' (conv %s): %s — falling back to SKIP+cancel",
                     member.agentId(), convId, e instanceof ExecutionException && e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
             return null;
-        }
-
-        // Whatever the resumed run did — answered, abstained or paused again — it
-        // created what it created and spent what it spent: the same bookkeeping as
-        // the ordinary turn, before any return, so the next member's ceiling check
-        // sees this spend.
-        if (resumed != null) {
-            GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
-            GroupCostLedger.accumulateMemberCost(gc, costKey, resumed);
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(resumeFuture);
+            }
         }
 
         // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
@@ -763,9 +925,13 @@ public class MemberTurnExecutor {
         }
 
         String response = contextBuilder.extractResponse(resumed);
-        if ((response == null || response.isEmpty())
-                && resumed.getConversationState() == ConversationState.ERROR) {
-            response = "[Agent failed to produce output — conversation entered ERROR state]";
+        if (endedInErrorWithoutAnswer(resumed, response)) {
+            // The resumed run failed: a FAILED turn, not text standing in for an
+            // answer. No retry here — the gated call was already rejected once.
+            LOGGER.warnf("Member '%s' ended in ERROR without output after the group's tool rejection (conv %s)",
+                    LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(convId));
+            return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    TurnOutcome.FAILED, REASON_ERROR_STATE, targetAgentId);
         }
 
         LOGGER.infof("Member '%s' produced a tool-less contribution after group auto-rejection (conv %s)",
@@ -773,12 +939,12 @@ public class MemberTurnExecutor {
 
         // Signed exactly like the normal path above: this is a real member
         // contribution with the same role in the transcript, and peers read it
-        // through the same verifyPriorEntriesIfRequired. Returning it unsigned meant
-        // a signing-enabled agent silently produced an unverifiable entry whenever
-        // its tool pause was auto-rejected — the one branch where an entry's
-        // provenance matters most, since its content was shaped by a rejection the
-        // agent did not choose. signOutgoingMessage yields UNSIGNED when signing is
-        // off, so this is a no-op for agents that never sign.
+        // through the same GroupSigningGuard.visibleTo. Returned unsigned, a peer
+        // that requires verification would withhold it whenever the member's tool
+        // pause was auto-rejected — the one branch where an entry's provenance
+        // matters most, since its content was shaped by a rejection the agent did
+        // not choose. sign() returns the entry unchanged when signing is off, so
+        // this is a no-op for agents that never sign.
         // I4: same abstention rule as the normal path. A member whose gated tool call
         // was auto-rejected can legitimately conclude it has nothing to add; without
         // this the identical reply becomes a real contribution on one path and an
@@ -787,13 +953,8 @@ public class MemberTurnExecutor {
             return abstentionEntry(member, phaseIdx, phase, targetAgentId);
         }
 
-        GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
-                member.agentId(), gc.getGroupId(), response, phase.name());
-
-        return new TranscriptEntry(member.agentId(), member.displayName(), response,
-                phaseIdx, phase.name(), entryType, Instant.now(),
-                null, targetAgentId, signing.signature(),
-                signing.nonce(), signing.timestampMs(), signing.keyVersion());
+        return signingGuard.sign(gc, new TranscriptEntry(member.agentId(), member.displayName(), response,
+                phaseIdx, phase.name(), entryType, Instant.now(), null, targetAgentId));
     }
 
     /**
@@ -811,6 +972,20 @@ public class MemberTurnExecutor {
         return new TranscriptEntry(member.agentId(), member.displayName(), null,
                 phaseIdx, phase.name(), TranscriptEntryType.ABSTAINED, Instant.now(),
                 null, targetAgentId);
+    }
+
+    /**
+     * The discussion was cancelled while a tool-pause resume ran: stop the resumed
+     * private turn when the cancel is immediate, and hand back the cancellation to
+     * throw — a cancel is not a failed resume.
+     */
+    private GroupConversationService.MemberTurnCancelledException cancelledDuringResume(
+                                                                                        GroupMember member, String convId,
+                                                                                        GroupConversationService.MemberTurnCancellation cancellation) {
+        if (cancellation.stopsInFlight()) {
+            stopMemberTurn(member, convId);
+        }
+        return new GroupConversationService.MemberTurnCancelledException();
     }
 
     /**
@@ -883,10 +1058,38 @@ public class MemberTurnExecutor {
             Double remainingBudget = bindingCeiling == null
                     ? null
                     : Math.max(0.0, bindingCeiling - gc.getTotalCost());
+            // K8: the child runs under the turns this discussion has left, and hears
+            // its cancel. With no turn left, no child is started at all.
+            DiscussionControlToken parentToken = groupConversationService.controlTokenOf(gc.getId());
+            DiscussionCancellation.checkpoint(parentToken);
+            // S1: claimed up front — in a parallel batch, sibling GROUP members each get
+            // a share of what remains, not each the whole of it.
+            Integer claimedTurns = gc.claimLegTurns();
+            if (claimedTurns != null && claimedTurns <= 0) {
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), REASON_TURN_BUDGET, targetAgentId);
+            }
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget, gc.getId());
+            GroupConversation subConversation;
+            int childTurns = claimedTurns != null ? claimedTurns : 0;
+            try {
+                subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
+                        gc.getAttachments(), remainingBudget, gc.getId(), parentToken, claimedTurns);
+                childTurns = subConversation.legTurnsUsed();
+            } catch (GroupDepthExceededException | GroupMembersUnresolvableException
+                    | GroupConversationService.NestedGroupNotFoundException e) {
+                // Refused before the child ran a turn (including a subgroup deleted since
+                // the parent saved: the lookup fails before the child exists).
+                childTurns = 0;
+                throw e;
+            } finally {
+                // S2: the child's turns count against this discussion however it ended;
+                // one that threw mid-run is charged its whole claim.
+                if (claimedTurns != null) {
+                    gc.settleLegTurns(claimedTurns, childTurns);
+                }
+            }
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
@@ -907,8 +1110,9 @@ public class MemberTurnExecutor {
             // save-time validation rejects HUMAN members in nested groups, but the
             // child config can gain a human AFTER the parent saved; this is the
             // runtime backstop.
-            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL
-                    || subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
+            boolean strandedPause = subConversation.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT;
+            if (strandedPause) {
                 LOGGER.warnf("Sub-group '%s' paused (%s) — nested pauses are not supported in v1; cancelling sub-pause",
                         subGroupId, subConversation.getState());
                 try {
@@ -918,6 +1122,15 @@ public class MemberTurnExecutor {
                     LOGGER.warnf("Failed to cancel stranded sub-group pause %s: %s",
                             subConversation.getId(), cancelEx.getMessage());
                 }
+            }
+
+            // The parent's cancel is honoured only now: the child's spend is on the
+            // books and a stranded child pause is released first, so neither is lost to
+            // the checkpoint. Answer extraction stays after it, so a cancelled parent
+            // still gets no child reply.
+            DiscussionCancellation.checkpoint(parentToken);
+
+            if (strandedPause) {
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
                         TranscriptEntryType.SKIPPED, Instant.now(),
                         subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT
@@ -926,39 +1139,174 @@ public class MemberTurnExecutor {
                         targetAgentId);
             }
 
-            // Extract the synthesized answer, or concatenate all responses
+            // S8: only an ANSWERED child is an answer. A cancelled one is skipped; a
+            // failed one, or one that ended without an answer, is a failed turn of this
+            // member — its partial entries are never passed off as the member's answer.
+            if (subConversation.getState() == GroupConversationState.CANCELLED) {
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), REASON_SUB_GROUP_CANCELLED, targetAgentId);
+            }
+            if (subConversation.getState() == GroupConversationState.FAILED
+                    || (subConversation.getOutcome() != null && subConversation.getOutcome() != GroupConversation.DiscussionOutcome.ANSWERED)) {
+                LOGGER.warnf("Sub-group '%s' ended %s (%s) — recording a failed turn for member '%s'", LogSanitizer.sanitize(subGroupId),
+                        subConversation.getState(), subConversation.getOutcomeReason(), LogSanitizer.sanitize(member.agentId()));
+                return failedTurn(member, phaseIdx, phase, protocol, REASON_SUB_GROUP_FAILED, targetAgentId);
+            }
+
+            // The synthesized answer, or — for a style without synthesis — the answered
+            // contributions
             String response = subConversation.getSynthesizedAnswer();
             if (response == null || response.isBlank()) {
-                response = subConversation.getTranscript().stream().filter(e -> e.content() != null)
+                response = subConversation.getTranscript().stream().filter(TranscriptEntry::answered)
                         .map(e -> "%s: %s".formatted(e.speakerDisplayName(), e.content())).collect(Collectors.joining("\n\n"));
+            }
+            if (response.isBlank()) {
+                return failedTurn(member, phaseIdx, phase, protocol, REASON_SUB_GROUP_FAILED, targetAgentId);
             }
 
             return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
                     targetAgentId);
 
+        } catch (GroupConversationService.MemberTurnCancelledException e) {
+            // The parent was cancelled: not a failure of this member.
+            throw e;
         } catch (GroupDepthExceededException e) {
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    Instant.now(), "Sub-group depth exceeded: " + e.getMessage(), targetAgentId);
+                    Instant.now(), REASON_SUB_GROUP_DEPTH, targetAgentId);
         } catch (Exception e) {
-            return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Sub-group discussion failed", targetAgentId);
+            return handleAgentFailure(member, phaseIdx, phase, protocol, e, REASON_SUB_GROUP_FAILED, targetAgentId);
         }
     }
 
+    /**
+     * A member turn that failed, under {@code protocol.onAgentFailure}:
+     * {@code ABORT} throws, anything else records a FAILED entry. The cause goes to
+     * the log only — {@code reason} is one of the stable {@code REASON_*} texts,
+     * because the entry is stored, rendered and streamed.
+     */
     public TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,
-                                              String prefix, String targetAgentId)
+                                              String reason, String targetAgentId)
             throws GroupDiscussionException {
-
-        if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
-            throw new GroupDiscussionException(
-                    "%s for agent %s and onAgentFailure=ABORT: %s".formatted(prefix, member.agentId(), cause.getMessage()));
-        }
-        return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED, Instant.now(),
-                prefix + ": " + cause.getMessage(), targetAgentId);
+        LOGGER.warnf("%s for member %s: %s", reason, LogSanitizer.sanitize(member.agentId()),
+                cause != null ? LogSanitizer.sanitize(cause.getMessage()) : "");
+        return failedTurn(member, phaseIdx, phase, protocol, reason, targetAgentId);
     }
 
+    private TranscriptEntry failedTurn(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, String reason,
+                                       String targetAgentId)
+            throws GroupDiscussionException {
+        if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+            throw new GroupDiscussionException("%s for agent %s and onAgentFailure=ABORT".formatted(reason, member.agentId()));
+        }
+        return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                TurnOutcome.FAILED, reason, targetAgentId);
+    }
+
+    /**
+     * Stops a timed-out attempt before its retry: cancels the member conversation's
+     * running turn and waits (at most {@link #RETRY_DRAIN_SECONDS}, never longer
+     * than the turn timeout) for the attempt to end.
+     * <p>
+     * The cancel is cooperative: it takes effect at the turn's next task boundary,
+     * and a model call already running is not interrupted. So a retry happens only
+     * when the first attempt stops within the wait; otherwise the turn is recorded
+     * {@code TIMED_OUT} and not retried. A timed-out turn that finishes later still
+     * writes its reply into the member's private history, which the member's next
+     * turn sees as earlier context (known, not marked).
+     * <p>
+     * It uses {@code cancelConversation}, the narrowest existing API: it would also
+     * cancel a pause the late turn committed — which a group cancels anyway
+     * ({@link #handleMemberPause}). A cancel limited to the in-flight turn
+     * ({@code cancelInFlightTurn}, on a sibling branch) is the follow-up.
+     *
+     * The wait hears the discussion's cancel: the attempt is registered with
+     * {@code cancellation}, which releases it.
+     *
+     * @return whether the attempt ended, so a retry will not queue behind it
+     * @throws GroupConversationService.MemberTurnCancelledException
+     *             when the discussion was cancelled during the wait
+     */
+    private boolean stopTimedOutAttempt(GroupMember member, String convId, CompletableFuture<String> attempt, int timeoutSeconds,
+                                        GroupConversationService.MemberTurnCancellation cancellation) {
+        if (attempt == null || attempt.isDone()) {
+            return true;
+        }
+        try {
+            conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
+        } catch (Exception e) {
+            LOGGER.debugf("Could not cancel the timed-out turn of member %s: %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
+        if (cancellation != null) {
+            cancellation.register(attempt);
+        }
+        try {
+            attempt.get(Math.max(1, Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds)), TimeUnit.SECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException e) {
+            // Released by a cancel, not ended: the attempt may still be running.
+            if (cancellation != null && cancellation.isCancelled()) {
+                if (cancellation.stopsInFlight()) {
+                    stopMemberTurn(member, convId);
+                }
+                throw new GroupConversationService.MemberTurnCancelledException();
+            }
+            return true;
+        } catch (TimeoutException e) {
+            LOGGER.warnf("Agent %s: the timed-out turn did not stop within %ds — not retrying it", LogSanitizer.sanitize(member.agentId()),
+                    Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds));
+            return false;
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(attempt);
+            }
+        }
+    }
+
+    /**
+     * Stops the member's running conversation turn (best effort): the discussion
+     * was cancelled immediately, and its LLM call should not run — and bill — on.
+     */
+    private void stopMemberTurn(GroupMember member, String convId) {
+        try {
+            conversationService.cancelConversation(convId, ControlSignal.CANCEL_IMMEDIATE, "system:group");
+        } catch (Exception e) {
+            LOGGER.debugf("Could not stop the running turn of member %s (conversation %s): %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(convId), LogSanitizer.sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * A member conversation that ended in ERROR and left no output: its pipeline
+     * failed, so there is nothing the member said.
+     */
+    static boolean endedInErrorWithoutAnswer(SimpleConversationMemorySnapshot snapshot, String response) {
+        return (response == null || response.isEmpty()) && snapshot != null
+                && snapshot.getConversationState() == ConversationState.ERROR;
+    }
+
+    /**
+     * {@code entry}, signed for its speaker exactly as a member turn's own entry
+     * is: for the engine's re-recordings of a reply under another type (a
+     * {@code DISSENT}, a {@code BID}), since the signature covers the type.
+     */
+    public TranscriptEntry sign(GroupConversation gc, TranscriptEntry entry) {
+        return signingGuard.sign(gc, entry);
+    }
+
+    /**
+     * A FAILED entry for a turn that threw past {@link #executeAgentTurn}. The
+     * {@code message} (exception text) is logged, never stored: the entry carries
+     * {@link #REASON_EXECUTION_FAILED}.
+     */
     public TranscriptEntry errorEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String message) {
         String agentId = member != null ? member.agentId() : "unknown";
         String displayName = member != null ? member.displayName() : "Unknown";
-        return new TranscriptEntry(agentId, displayName, null, phaseIdx, phase.name(), TranscriptEntryType.ERROR, Instant.now(), message, null);
+        LOGGER.warnf("Member turn of %s failed: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(message));
+        return TranscriptEntry.notAnswered(agentId, displayName, phaseIdx, phase.name(), TranscriptEntryType.ERROR, TurnOutcome.FAILED,
+                REASON_EXECUTION_FAILED, null);
     }
 }

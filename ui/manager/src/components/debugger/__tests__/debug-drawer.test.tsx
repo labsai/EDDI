@@ -3,9 +3,9 @@ import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { DebugDrawer } from "@/components/debugger/debug-drawer";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { ThemeProvider } from "@eddi/ui";
+import { DebugDrawer } from "@eddi/app-kit/components/debugger/debug-drawer";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 // Use agentId: null to prevent LiveLogViewer from creating EventSource (not available in jsdom)
 function renderDrawer(props = { conversationId: "conv-1", agentId: null as string | null }) {

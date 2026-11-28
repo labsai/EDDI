@@ -15,6 +15,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
@@ -153,7 +156,7 @@ public class McpHitlTools {
     public String listPendingApprovals(
                                        @ToolArg(description = "Max entries to return (default: 200, capped at 1000)", required = false,
                                                 defaultValue = "200") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_pending_approvals"));
         try {
             int effectiveLimit = parseIntOrDefault(limit, 200);
             var result = hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
@@ -180,7 +183,7 @@ public class McpHitlTools {
                                     @ToolArg(description = "Conversation ID") String conversationId,
                                     @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                              defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_approval_status"));
         if (conversationId == null || conversationId.isBlank()) {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
@@ -226,6 +229,11 @@ public class McpHitlTools {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
+            // The plan hash a decision passes back as planHash (HitlPlanHash).
+            // "" for none and for HitlPlanHash.UNAVAILABLE (not a plan a decision can
+            // name).
+            String planHash = paused ? HitlPlanHash.presentable(snapshot.getHitlPlanHash()) : null;
+            summary.put("planHash", planHash != null ? planHash : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
@@ -254,6 +262,12 @@ public class McpHitlTools {
         return resumeConversation(conversationId, verdict, note, pauseId, null, null, null);
     }
 
+    /** {@code resume_conversation} without a {@code planHash} (6.8). */
+    public String resumeConversation(String conversationId, String verdict, String note, String pauseId, String editedAnswer,
+                                     String reasonCode, String toolDecisionsJson) {
+        return resumeConversation(conversationId, verdict, note, pauseId, editedAnswer, reasonCode, toolDecisionsJson, null);
+    }
+
     /**
      * {@code pauseId} is optional. Passed, the decision applies only to that pause:
      * a conversation that has since been resumed and paused again answers
@@ -267,7 +281,10 @@ public class McpHitlTools {
                   + "(case-insensitive). Resolves both RULE and TOOL_CALL pauses. The decision is attributed to the "
                   + "authenticated caller. Pass pauseId (from get_approval_status) to bind the decision to the pause "
                   + "you reviewed: if the conversation has since paused again on a different request, the decision "
-                  + "is refused with errorCode PAUSE_CHANGED. Optional: editedAnswer approves a RULE pause with your "
+                  + "is refused with errorCode PAUSE_CHANGED. Pass planHash (from get_approval_status) to bind it to the "
+                  + "exact plan you reviewed (tool names and arguments, or the pending actions): a different plan is "
+                  + "refused with errorCode PLAN_CHANGED, and agents that require it (hitlConfig.requirePlanHash) refuse "
+                  + "a decision without it with errorCode PLAN_HASH_REQUIRED. Optional: editedAnswer approves a RULE pause with your "
                   + "own final answer (agents with hitlConfig.review.allowAnswerEdits); reasonCode explains a rejection "
                   + "or an edit; toolDecisionsJson decides TOOL_CALL pauses per call "
                   + "({\"<callId>\":{\"verdict\":\"APPROVED\",\"amendedArguments\":{...},\"reasonCode\":\"TONE\"}}). "
@@ -285,8 +302,10 @@ public class McpHitlTools {
                                               required = false) String reasonCode,
                                      @ToolArg(description = "TOOL_CALL pauses: JSON object of callId to {verdict, note, "
                                              + "amendedArguments, reasonCode}",
-                                              required = false) String toolDecisionsJson) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+                                              required = false) String toolDecisionsJson,
+                                     @ToolArg(description = "planHash from get_approval_status — the exact plan this decision is for",
+                                              required = false) String planHash) {
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("resume_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -310,6 +329,7 @@ public class McpHitlTools {
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
             decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
+            decision.setPlanHash(planHash != null && !planHash.isBlank() ? planHash.trim() : null);
             McpReviewArguments.applyReview(decision, editedAnswer, reasonCode);
             decision.setToolDecisions(McpReviewArguments.toolDecisions(jsonSerialization, toolDecisionsJson));
             conversationService.resumeConversation(conversationId, decision, null);
@@ -318,11 +338,21 @@ public class McpHitlTools {
                     + "\",\"verdict\":\"" + parsed.name() + "\"}";
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call needs a mandatory approval this caller cannot give; the pause is
+            // untouched. Fixed text.
+            return errorJson(e.getMessage(), "FORBIDDEN", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Conversation not found", "NOT_FOUND", null);
+        } catch (IConversationService.PlanMismatchException e) {
+            return errorJson("The pending approval's plan is not the one this decision was made for — re-read "
+                    + "get_approval_status and review the current plan", "PLAN_CHANGED", null);
         } catch (IConversationService.PauseMismatchException e) {
             return errorJson("The pending approval changed since this decision was made — re-read get_approval_status "
                     + "and decide again", "PAUSE_CHANGED", null);
+        } catch (HitlPlanBinding.PlanHashRequired e) {
+            return errorJson("This approval requires planHash (from get_approval_status); the pause was not consumed",
+                    "PLAN_HASH_REQUIRED", null);
         } catch (McpReviewArguments.BadArgument e) {
             return errorJson(e.getMessage(), "BAD_REQUEST", null);
         } catch (IllegalArgumentException e) {
@@ -348,7 +378,7 @@ public class McpHitlTools {
           description = "Cancel a paused or running regular conversation. Attributed to the authenticated caller.")
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_conversation"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -399,7 +429,7 @@ public class McpHitlTools {
                                             @ToolArg(description = "Group ID") String groupId,
                                             @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                      defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_group_pending_approvals"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -419,7 +449,7 @@ public class McpHitlTools {
     public String listAllGroupPendingApprovals(
                                                @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                         defaultValue = "100") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_all_group_pending_approvals"));
         try {
             var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
             meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
@@ -439,7 +469,7 @@ public class McpHitlTools {
                                          @ToolArg(description = "Group conversation ID") String conversationId,
                                          @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                                   defaultValue = "summary") String detail) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_group_approval_status"));
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
@@ -480,6 +510,8 @@ public class McpHitlTools {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
+            // The plan hash a decision passes back as planHash (HitlPlanHash#forGroup).
+            summary.put("planHash", awaitingApproval ? HitlPlanHash.forGroup(gc) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
@@ -529,6 +561,13 @@ public class McpHitlTools {
         return approveGroupPhase(groupId, conversationId, verdict, note, taskApprovalsJson, pauseId, null, null, null);
     }
 
+    /** {@code approve_group_phase} without a {@code planHash} (6.8). */
+    public String approveGroupPhase(String groupId, String conversationId, String verdict, String note, String taskApprovalsJson,
+                                    String pauseId, String editedAnswer, String reasonCode, String taskDecisionsJson) {
+        return approveGroupPhase(groupId, conversationId, verdict, note, taskApprovalsJson, pauseId, editedAnswer, reasonCode,
+                taskDecisionsJson, null);
+    }
+
     /**
      * {@code pauseId} is optional. Passed, the decision applies only to that pause:
      * a discussion that has since been resumed and paused again answers
@@ -543,7 +582,10 @@ public class McpHitlTools {
                   + "and only the resulting state to an approver-only caller. The decision is attributed "
                   + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
                   + "to the pause you reviewed: if the discussion has since paused again, the decision is refused "
-                  + "with errorCode PAUSE_CHANGED. Optional (groups with hitlConfig.review.allowResultEdits): "
+                  + "with errorCode PAUSE_CHANGED. Pass planHash (from get_group_approval_status) to bind it to the exact "
+                  + "work under review: a different plan is refused with errorCode PLAN_CHANGED, and groups that require "
+                  + "it (hitlConfig.requirePlanHash) refuse a decision without it with errorCode PLAN_HASH_REQUIRED. "
+                  + "Optional (groups with hitlConfig.review.allowResultEdits): "
                   + "taskDecisionsJson decides tasks with an edited result "
                   + "({\"<taskId>\":{\"verdict\":\"APPROVED\",\"editedResult\":\"...\",\"reasonCode\":\"SCOPE\"}}, "
                   + "instead of taskApprovals); editedAnswer replaces a SYNTHESIS phase's output; reasonCode explains a "
@@ -563,8 +605,10 @@ public class McpHitlTools {
                                     @ToolArg(description = "Reason code for a rejection or an edit", required = false) String reasonCode,
                                     @ToolArg(description = "JSON object of task-id to {verdict, note, editedResult, reasonCode}; "
                                             + "exclusive with taskApprovals",
-                                             required = false) String taskDecisionsJson) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+                                             required = false) String taskDecisionsJson,
+                                    @ToolArg(description = "planHash from get_group_approval_status — the exact plan this decision is for",
+                                             required = false) String planHash) {
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("approve_group_phase"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -618,6 +662,7 @@ public class McpHitlTools {
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
             decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
+            decision.setPlanHash(planHash != null && !planHash.isBlank() ? planHash.trim() : null);
             GroupApprovalRequest request = new GroupApprovalRequest();
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
@@ -635,9 +680,15 @@ public class McpHitlTools {
         } catch (ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            return errorJson("The pending approval's plan is not the one this decision was made for — re-read "
+                    + "get_group_approval_status and review the current plan", "PLAN_CHANGED", null);
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             return errorJson("The pending approval changed since this decision was made — re-read "
                     + "get_group_approval_status and decide again", "PAUSE_CHANGED", null);
+        } catch (HitlPlanBinding.PlanHashRequired e) {
+            return errorJson("This approval requires planHash (from get_group_approval_status); nothing was changed",
+                    "PLAN_HASH_REQUIRED", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                     + "or already approved", "WRONG_STATE", null);
@@ -673,7 +724,7 @@ public class McpHitlTools {
                                                  required = false) String content,
                                         @ToolArg(description = "For a TIE_BREAK pause: exactly one of the pendingOptions",
                                                  required = false) String choice) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("submit_group_human_input"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -722,7 +773,7 @@ public class McpHitlTools {
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.HITL);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_group_discussion"));
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -747,7 +798,7 @@ public class McpHitlTools {
             }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
             return cancelled
-                    ? "{\"status\":\"CANCELLED\"}"
+                    ? "{\"status\":\"" + cancelStatus(conversationId) + "\"}"
                     : errorJson("Group conversation is already in a terminal state — nothing to cancel",
                             "WRONG_STATE", null);
         } catch (ForbiddenException e) {
@@ -760,6 +811,27 @@ public class McpHitlTools {
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);
             return errorJson("Failed to cancel group discussion", "INTERNAL", null);
+        }
+    }
+
+    /**
+     * The truth about a cancel just accepted: {@code CANCELLING} while the
+     * discussion still runs (it stops before its next turn), otherwise the state it
+     * ended in — {@code CANCELLED}, or {@code COMPLETED}/{@code FAILED} when it
+     * finished before the cancel landed. Unreadable reads as {@code CANCELLING}:
+     * the accepted signal does not establish that execution has stopped, so a
+     * terminal status needs a successful read.
+     */
+    private String cancelStatus(String conversationId) {
+        try {
+            var state = groupConversationService.readGroupConversation(conversationId).getState();
+            if (state == GroupConversation.GroupConversationState.IN_PROGRESS || state == GroupConversation.GroupConversationState.SYNTHESIZING
+                    || state == GroupConversation.GroupConversationState.CREATED) {
+                return "CANCELLING";
+            }
+            return state != null ? state.name() : "CANCELLING";
+        } catch (Exception e) {
+            return "CANCELLING";
         }
     }
 

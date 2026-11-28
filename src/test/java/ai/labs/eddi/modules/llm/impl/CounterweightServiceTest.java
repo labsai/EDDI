@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -162,6 +163,39 @@ class CounterweightServiceTest {
         assertEquals(0.0, meterRegistry.counter("eddi.counterweight.strict.downgraded").count());
     }
 
+    /**
+     * An unknown level resolves no preset, and the early "no injection" return used
+     * to count it as {@code normal} — so the unknown-level warning and counter were
+     * unreachable and a typo such as {@code "stirct"} looked like a healthy normal
+     * activation.
+     */
+    @Test
+    void apply_unknownLevel_countsAsUnknownNotNormal() {
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("foo");
+
+        assertEquals("Base prompt", service.apply("Base prompt", config, null));
+        assertEquals(1.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "unknown").count());
+        assertEquals(0.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "normal").count());
+    }
+
+    /**
+     * Custom instructions inject at any level; at {@code normal} that is a normal
+     * activation, not an unknown one.
+     */
+    @Test
+    void apply_normalLevelWithCustomInstructions_countsAsNormal() {
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("normal");
+        config.setCustomInstructions(List.of("Be brief."));
+
+        assertTrue(service.apply("Base prompt", config, null).contains("Be brief."));
+        assertEquals(1.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "normal").count());
+        assertEquals(0.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "unknown").count());
+    }
+
     @Test
     void apply_metrics_normalNotIncrementedForCautious() {
         var config = new CounterweightConfig();
@@ -181,6 +215,24 @@ class CounterweightServiceTest {
 
         String result = service.apply("Base prompt", config, null);
         assertTrue(result.contains("BEHAVIORAL GUIDELINES"));
+    }
+
+    @Test
+    void apply_strictLevel_isAppliedUnderTurkishDefaultLocale() {
+        Locale previous = Locale.getDefault();
+        try {
+            // Default-locale lowercasing turns "STRICT" into "strıct" (dotless i)
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            var config = new CounterweightConfig();
+            config.setEnabled(true);
+            config.setLevel("STRICT");
+
+            String result = service.apply("Base prompt", config, null);
+            assertTrue(result.contains("STRICT MODE"), result);
+            assertEquals(1.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "strict").count());
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 
     @Test

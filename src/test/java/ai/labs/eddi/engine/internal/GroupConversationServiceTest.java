@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -33,6 +32,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -80,8 +81,6 @@ class GroupConversationServiceTest {
     private AgentSigningService agentSigningService;
     @Mock
     private IAgentStore agentStore;
-    @Mock
-    private NonceCacheService nonceCacheService;
 
     private GroupConversationService service;
     /** Real registry (not a mock) so the new operation counters can be asserted. */
@@ -98,7 +97,7 @@ class GroupConversationServiceTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                mock(IScheduleStore.class), null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -553,7 +552,7 @@ class GroupConversationServiceTest {
             assertEquals("Unknown", entry.speakerDisplayName());
             assertNull(entry.content());
             assertEquals(TranscriptEntryType.ERROR, entry.type());
-            assertEquals("some error", entry.errorReason());
+            assertEquals(MemberTurnExecutor.REASON_EXECUTION_FAILED, entry.errorReason()); // K9: the message is logged, not stored
             assertEquals(0, entry.phaseIndex());
             assertEquals("TestPhase", entry.phaseName());
         }
@@ -569,7 +568,7 @@ class GroupConversationServiceTest {
             assertEquals("Agent X", entry.speakerDisplayName());
             assertNull(entry.content());
             assertEquals(TranscriptEntryType.ERROR, entry.type());
-            assertEquals("timeout occurred", entry.errorReason());
+            assertEquals(MemberTurnExecutor.REASON_EXECUTION_FAILED, entry.errorReason());
             assertEquals(2, entry.phaseIndex());
         }
     }
@@ -1002,7 +1001,32 @@ class GroupConversationServiceTest {
 
             assertThrows(GroupDiscussionException.class,
                     () -> service.followUpWithMember("gc-1", "Alice", "hello"));
-            // finally-block must restore COMPLETED so the conversation stays usable
+            // finally-block must restore COMPLETED so the conversation stays usable — now
+            // by
+            // a conditional write that also keeps the failed turn's bookkeeping
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        }
+
+        @Test
+        void followUp_agentCallFails_andTheBookkeepingWriteFails_stillRestoresCompletedState() throws Exception {
+            givenGroupConfigReadable();
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            // The stored state, changed only by a compare-and-set that matches it: the
+            // in-memory document is set COMPLETED before the failed write, so it cannot
+            // show whether the restore reached the store.
+            var stored = new AtomicReference<>(GroupConversationState.COMPLETED);
+            when(conversationStore.compareAndSetState(eq("gc-1"), any(), any()))
+                    .thenAnswer(inv -> stored.compareAndSet(inv.getArgument(1), inv.getArgument(2)));
+            doThrow(new RuntimeException("agent boom")).when(conversationService)
+                    .say(any(), eq("agentA"), eq("convA"), any(), any(), any(), any(), anyBoolean(), any());
+            doThrow(new RuntimeException("store down")).when(conversationStore).updateIfState(any(), any());
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+
+            assertEquals(GroupConversationState.COMPLETED, stored.get(), "the stored state is back at COMPLETED");
             verify(conversationStore).compareAndSetState("gc-1",
                     GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
         }

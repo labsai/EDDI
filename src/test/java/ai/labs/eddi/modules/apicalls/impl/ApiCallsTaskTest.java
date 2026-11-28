@@ -415,6 +415,31 @@ class ApiCallsTaskTest {
         }
 
         @Test
+        @DisplayName("checks the literal target of targetServerUrl and of every absolute path — not of a relative one")
+        void literalTargetsCheckedAtDeploy() throws Exception {
+            ApiCallsConfiguration apiConfig = new ApiCallsConfiguration();
+            apiConfig.setTargetServerUrl("http://example.com/");
+            var absolute = new ApiCall();
+            var absoluteRequest = new Request();
+            absoluteRequest.setPath(" http://10.0.0.5/x");
+            absolute.setRequest(absoluteRequest);
+            var relative = new ApiCall();
+            var relativeRequest = new Request();
+            relativeRequest.setPath("/relative");
+            relative.setRequest(relativeRequest);
+            apiConfig.setHttpCalls(List.of(absolute, relative));
+            when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(apiConfig);
+            doThrow(new IllegalArgumentException("private host refused")).when(httpCallExecutor).rejectRefusedLiteralTarget("http://10.0.0.5/x");
+
+            Map<String, Object> config = Map.of("uri", "eddi://config/123");
+            var refused = assertThrows(WorkflowConfigurationException.class, () -> task.configure(config, Map.of()));
+            assertTrue(refused.getMessage().contains("private host refused"), refused.getMessage());
+            assertTrue(refused.getMessage().contains("(uri:eddi://config/123)"), refused.getMessage());
+            verify(httpCallExecutor).rejectRefusedLiteralTarget("http://example.com");
+            verify(httpCallExecutor, never()).rejectRefusedLiteralTarget("/relative");
+        }
+
+        @Test
         @DisplayName("throws when targetServerUrl is empty")
         void emptyTargetServerUrl() throws Exception {
             ApiCallsConfiguration apiConfig = new ApiCallsConfiguration();

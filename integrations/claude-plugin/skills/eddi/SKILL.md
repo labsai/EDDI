@@ -103,7 +103,16 @@ authoring tool.
 - For long discussions (always for `TASK_FORCE`), `start_group_discussion` returns at once;
   poll `read_group_conversation` sparingly and tell the user it is still running. It has
   finished at `COMPLETED`, `FAILED`, `REJECTED` or `CANCELLED`; at `AWAITING_APPROVAL` or
-  `AWAITING_HUMAN_INPUT` it waits for a person (next section).
+  `AWAITING_HUMAN_INPUT` it waits for a person (next section). `cancel_group_discussion`
+  answers `CANCELLING` while the running member turn finishes, otherwise the state the
+  discussion ended in.
+- `COMPLETED` is not the same as answered: check `outcome`. `NO_ANSWER` (the synthesis
+  failed, or the turn limit or cost ceiling stopped the run) and `FAILED` (no member
+  answered — often a provider outage) come with a reason code; tell the user there
+  is no answer and why, instead of presenting the transcript as one. `outcome` describes the
+  latest round: a continued discussion can be `COMPLETED` with `FAILED`. A transcript entry
+  whose `outcome` is `SKIPPED`, `FAILED` or `TIMED_OUT` is a member that did not answer, not something it
+  said; an entry with no `outcome` field comes from an older server and is read as before.
 - Afterwards: `followup_with_member` asks one member a question with its full context;
   `continue_group_discussion` runs another round on a new question;
   `list_group_conversations` finds earlier ones.
@@ -128,8 +137,11 @@ decides.
    happen if approved — the tool call and its arguments, or the paused phase.
 3. Only with the user's explicit verdict for this item: `resume_conversation` (or
    `approve_group_phase`) with `verdict` `APPROVED` or `REJECTED`, and **always pass the
-   `pauseId` you read**, so the decision cannot land on a different request that paused
-   since. A `PAUSE_CHANGED` error means exactly that — read the status again and ask again.
+   `pauseId` and the `planHash` you read**, so the decision cannot land on a different
+   request that paused since, nor on a plan other than the one you showed the user. A
+   `PAUSE_CHANGED` or `PLAN_CHANGED` error means exactly that — re-read the status, then
+   ask the user for a fresh decision. `PLAN_HASH_REQUIRED` means the agent requires the `planHash` and you did not
+   send it (an empty `planHash` in the status is a pause from before plan hashing: omit it).
    When the user wants to approve **with changes**: `resume_conversation` takes
    `editedAnswer` (the final answer of a rule pause, when `pauseDetails.editableAnswer` is
    present) and `toolDecisionsJson` (a verdict per call, optionally with amended arguments);

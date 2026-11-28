@@ -150,8 +150,15 @@ public final class SlackHitlEditModal {
      *            the card's message ts
      * @param callId
      *            the tool call edited (TOOL_CALL), or null
+     * @param planHash
+     *            the plan hash the card carried (6.8), or null
      */
-    public record Metadata(String integration, String subject, String cardId, String pauseId, String channel, String ts, String callId) {
+    public record Metadata(String integration, String subject, String cardId, String pauseId, String channel, String ts, String callId,
+            String planHash) {
+
+        public Metadata(String integration, String subject, String cardId, String pauseId, String channel, String ts, String callId) {
+            this(integration, subject, cardId, pauseId, channel, ts, callId, null);
+        }
 
         String encode() {
             var map = new LinkedHashMap<String, String>();
@@ -163,6 +170,9 @@ public final class SlackHitlEditModal {
             map.put("ts", ts);
             if (callId != null) {
                 map.put("call", callId);
+            }
+            if (planHash != null) {
+                map.put("h", planHash);
             }
             try {
                 String encoded = JSON.writeValueAsString(map);
@@ -179,7 +189,7 @@ public final class SlackHitlEditModal {
             try {
                 JsonNode node = JSON.readTree(encoded);
                 return new Metadata(text(node, "i"), text(node, "s"), text(node, "c"), text(node, "p"), text(node, "ch"), text(node, "ts"),
-                        text(node, "call"));
+                        text(node, "call"), text(node, "h"));
             } catch (Exception e) {
                 return null;
             }
@@ -229,7 +239,7 @@ public final class SlackHitlEditModal {
             return null;
         }
         var bound = new Metadata(metadata.integration(), metadata.subject(), metadata.cardId(), metadata.pauseId(), metadata.channel(),
-                metadata.ts(), callId).encode();
+                metadata.ts(), callId, metadata.planHash()).encode();
         if (bound == null) {
             return null;
         }
@@ -372,6 +382,7 @@ public final class SlackHitlEditModal {
         var decision = new HitlDecision();
         decision.setVerdict(edit ? HitlVerdict.APPROVED : HitlVerdict.REJECTED);
         decision.setPauseId(metadata.pauseId());
+        decision.setPlanHash(metadata.planHash());
         decision.setDecidedBy("slack:" + slackUserId);
         String note = value(state, BLOCK_NOTE);
         decision.setNote(note != null && !note.isBlank() ? note.trim() : "Decided via Slack by " + slackUserId);

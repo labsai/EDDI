@@ -15,7 +15,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,17 +46,15 @@ class PrePostUtilsTest {
 
     private PrePostUtils prePostUtils;
     private IJsonSerialization jsonSerialization;
-    private IMemoryItemConverter memoryItemConverter;
     private ITemplatingEngine templatingEngine;
     private IDataFactory dataFactory;
 
     @BeforeEach
     void setUp() {
         jsonSerialization = mock(IJsonSerialization.class);
-        memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
+        prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
     }
 
     // ==================== verifyHttpCode ====================
@@ -158,32 +155,52 @@ class PrePostUtilsTest {
             assertSame(templateData, result);
         }
 
+        /**
+         * The caller's map carries what conversation memory does not: an LLM tool
+         * call's arguments ({@code {id}}), and in a rule-triggered batch the response
+         * an earlier call of the same turn saved ({@code {weather}}). Rebuilding the
+         * template data from memory after the instructions dropped both, so every later
+         * template rendered them empty.
+         */
         @Test
-        @DisplayName("PreRequest with instructions executes and refreshes template data")
-        void preRequestWithInstructions_executesAndRefreshes() throws Exception {
+        @DisplayName("PreRequest instructions update the caller's template data in place and keep what it already held")
+        void preRequestWithInstructions_updatesCallerMapInPlace() throws Exception {
             var memory = mock(IConversationMemory.class);
-            var properties = mock(ConversationProperties.class);
-            when(memory.getConversationProperties()).thenReturn(properties);
+            when(memory.getConversationProperties()).thenReturn(new ConversationProperties(null));
 
             var instruction = new PropertyInstruction();
-            instruction.setName("testProp");
+            instruction.setName("p");
             instruction.setFromObjectPath("");
-            instruction.setValueString("testValue");
+            instruction.setValueString("v");
             instruction.setScope(Property.Scope.conversation);
 
             var preRequest = new PreRequest();
             preRequest.setPropertyInstructions(List.of(instruction));
-
-            var refreshedData = new HashMap<String, Object>();
-            refreshedData.put("refreshed", true);
-            when(memoryItemConverter.convert(memory)).thenReturn(refreshedData);
             when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(i -> i.getArgument(0));
 
-            var result = prePostUtils.executePreRequestPropertyInstructions(
-                    memory, new HashMap<>(), preRequest);
+            Map<String, Object> callerData = new HashMap<>();
+            callerData.put("id", "42");
+            callerData.put("weather", Map.of("temp", 21));
 
-            assertSame(refreshedData, result);
-            verify(memoryItemConverter).convert(memory);
+            var result = prePostUtils.executePreRequestPropertyInstructions(memory, callerData, preRequest);
+
+            assertSame(callerData, result, "the caller's map is updated, not replaced");
+            assertEquals("42", result.get("id"));
+            assertEquals(Map.of("temp", 21), result.get("weather"));
+            assertEquals(Map.of("p", "v"), result.get("properties"));
+        }
+
+        @Test
+        @DisplayName("an empty instruction list leaves the caller's map as it was")
+        void emptyInstructionList_keepsCallerMap() throws Exception {
+            var preRequest = new PreRequest();
+            preRequest.setPropertyInstructions(List.of());
+            Map<String, Object> callerData = new HashMap<>(Map.of("id", "42"));
+
+            var result = prePostUtils.executePreRequestPropertyInstructions(mock(IConversationMemory.class), callerData, preRequest);
+
+            assertSame(callerData, result);
+            assertEquals(Map.of("id", "42"), result);
         }
 
         @Test
@@ -192,7 +209,6 @@ class PrePostUtilsTest {
             var memory = mock(IConversationMemory.class);
             var properties = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(properties);
-            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
             when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(i -> i.getArgument(0));
 
             var instruction = new PropertyInstruction();

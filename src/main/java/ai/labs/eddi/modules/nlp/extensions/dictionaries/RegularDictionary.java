@@ -8,7 +8,6 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.model.*;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -73,19 +72,61 @@ public class RegularDictionary implements IDictionary {
         return Collections.unmodifiableList(phrases);
     }
 
+    /**
+     * Index of the phrases' words: value (compared ignoring case) to the distinct
+     * words with that value (one per spelling). Built lazily, dropped whenever
+     * phrases change.
+     * <p>
+     * {@link #lookupTerm(String)} runs for every input token, and it used to stream
+     * every word of every phrase twice — and to return one match per phrase that
+     * contains the word, plus a 0.9 case-insensitive copy of each exact match. All
+     * of those are the same word to the phrase matcher (which compares words by
+     * value), so every extra copy only multiplied the combinations the parser has
+     * to enumerate.
+     */
+    private volatile Map<String, List<IWord>> phraseWordIndex;
+
+    private Map<String, List<IWord>> phraseWordIndex() {
+        Map<String, List<IWord>> index = phraseWordIndex;
+        if (index == null) {
+            // Keyed with the same case-insensitive equivalence as the words map
+            // (String.CASE_INSENSITIVE_ORDER, i.e. equalsIgnoreCase): ROOT lower-casing is
+            // not equivalent to it - Turkish dotless and dotted i lower-case to different
+            // keys yet compare equal ignoring case.
+            Map<String, List<IWord>> built = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (IPhrase phrase : phrases) {
+                for (IWord partOfPhrase : phrase.getWords()) {
+                    List<IWord> spellings = built.computeIfAbsent(partOfPhrase.getValue(), k -> new ArrayList<>(1));
+                    if (spellings.stream().noneMatch(known -> known.getValue().equals(partOfPhrase.getValue()))) {
+                        spellings.add(partOfPhrase);
+                    }
+                }
+            }
+            index = built;
+            phraseWordIndex = index;
+        }
+        return index;
+    }
+
     @Override
     public List<IFoundWord> lookupTerm(String lookup) {
-        List<IFoundWord> ret = phrases.stream().flatMap(phrase -> phrase.getWords().stream())
-                .filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup)).map(partOfPhrase -> new FoundWord(partOfPhrase, false, 1.0))
-                .collect(Collectors.toList());
+        List<IFoundWord> ret = new ArrayList<>();
 
-        phrases.stream().flatMap(phrase -> phrase.getWords().stream()).filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup))
-                .map(partOfPhrase -> new FoundWord(partOfPhrase, false, 0.9)).collect(Collectors.toList()).stream()
-                .filter(foundWord -> !ret.contains(foundWord)).forEach(ret::add);
+        List<IWord> phraseWords = phraseWordIndex().get(lookup);
+        if (phraseWords != null) {
+            // exact spelling first, then the case-insensitive ones
+            phraseWords.stream().filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup))
+                    .forEach(partOfPhrase -> ret.add(new FoundWord(partOfPhrase, false, 1.0)));
+            phraseWords.stream().filter(partOfPhrase -> !partOfPhrase.getValue().equals(lookup))
+                    .forEach(partOfPhrase -> ret.add(new FoundWord(partOfPhrase, false, 0.9)));
+        }
 
         IWord word;
         if ((word = words.get(lookup)) != null) {
-            boolean isCaseSensitiveMatch = words.keySet().stream().parallel().anyMatch(key -> key.equals(lookup));
+            // The map is case-insensitive; the stored word's own spelling says whether
+            // this was an exact hit. (This used to scan every key, on a parallel
+            // stream, per input token.)
+            boolean isCaseSensitiveMatch = word.getValue().equals(lookup);
             ret.add(new FoundWord(word, !isCaseSensitiveMatch, isCaseSensitiveMatch ? 1.0 : 0.9));
         }
 
@@ -117,11 +158,13 @@ public class RegularDictionary implements IDictionary {
     public void addPhrase(String value, Expressions expressions) {
         phrases.add(new Phrase(value, expressions, languageCode));
         allWordsCache = null;
+        phraseWordIndex = null;
     }
 
     public void setPhrases(List<IPhrase> phrases) {
         this.phrases = phrases;
         allWordsCache = null;
+        phraseWordIndex = null;
     }
 
     public void setWords(Map<String, IWord> words) {

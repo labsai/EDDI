@@ -17,4 +17,8 @@ public class OutboundBlockedException extends IllegalArgumentException {
     public OutboundBlockedException(String message, Throwable cause) {
         super(message, cause);
     }
+
+    public OutboundBlockedException(String message) {
+        super(message);
+    }
 }

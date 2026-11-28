@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { useSearchParams } from "react-router-dom";
-import { server } from "@/test/mocks/server";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 function renderDetail() {

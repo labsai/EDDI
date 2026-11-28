@@ -173,7 +173,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         // test
-        List<RawSolution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parseAllReadings(lookupString, "en");
 
         // assert
         assertEquals(8, suggestions.size());

@@ -124,7 +124,7 @@ class GroupConversationServiceConcurrencyTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         doReturn(agent).when(agentFactory).getLatestReadyAgent(any(), any());
         var convCounter = new AtomicInteger();
@@ -461,14 +461,26 @@ class GroupConversationServiceConcurrencyTest {
                 ProtocolConfig.MemberUnavailablePolicy.SKIP);
 
         var attempts = new AtomicInteger();
+        var hanging = new AtomicReference<IConversationService.ConversationResponseHandler>();
         doAnswer(inv -> {
             // Attempts 1 and 2 never answer: the member runs into its OWN timeout and
             // takes executeAgentTurn's RETRY branch. Attempt 3 answers immediately.
             if (attempts.incrementAndGet() >= 3) {
                 handlerOf(inv.getArgument(8)).onComplete(snapshot("retried answer"));
+            } else {
+                hanging.set(handlerOf(inv.getArgument(8)));
             }
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        // K7: a RETRY first cancels the timed-out attempt and waits for it to end —
+        // here the cancel ends it, so the retry may run.
+        doAnswer(inv -> {
+            var handler = hanging.getAndSet(null);
+            if (handler != null) {
+                handler.onComplete(snapshot("stopped"));
+            }
+            return IConversationService.CancelOutcome.CANCELLED;
+        }).when(conversationService).cancelConversation(any(), any(), any());
 
         invoke(parallelPhaseMethod(), gc, config(List.of(member(0))), List.of(member(0)),
                 phase(PhaseType.OPINION, TurnOrder.PARALLEL), protocol, QUESTION, 0, null,
@@ -502,17 +514,23 @@ class GroupConversationServiceConcurrencyTest {
         assertEquals(11L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.ABORT, 2,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
-        // RETRY: maxRetries + 1 attempts, so the batch cannot cut a retry short.
-        assertEquals(31L, GroupConversationService.parallelBatchBudgetSeconds(
+        // RETRY: maxRetries + 1 attempts, plus the drain of the timed-out attempt
+        // before each retry (min(5s, timeout)), so the batch cannot cut a retry short:
+        // 3 x 10 + 2 x 5 + 1.
+        assertEquals(41L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.RETRY, 2,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
         // A short timeout keeps the 1s FLOOR rather than 10% of 2s.
         assertEquals(3L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(2, ProtocolConfig.MemberFailurePolicy.SKIP, 0,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // The drain never waits longer than the turn timeout: 2 x 2 + 1 x 2 + 1.
+        assertEquals(7L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(2, ProtocolConfig.MemberFailurePolicy.RETRY, 1,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
         // Unset values fall back to the same defaults executeAgentTurn applies:
-        // 180s per attempt, 2 retries -> 540 + ceil(18) = 558.
-        assertEquals(558L, GroupConversationService.parallelBatchBudgetSeconds(
+        // 180s per attempt, 2 retries -> 540 + 2 x 5 drain + ceil(18) = 568.
+        assertEquals(568L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(0, ProtocolConfig.MemberFailurePolicy.RETRY, 0,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
         // The grace itself: floor below 10s, proportional above it.

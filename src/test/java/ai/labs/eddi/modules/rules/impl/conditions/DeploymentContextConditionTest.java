@@ -5,8 +5,6 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -66,38 +64,6 @@ class DeploymentContextConditionTest {
     }
 
     @Test
-    void execute_tagMatchesPresent_success() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("high-risk", "internal"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
-
-        assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
-    void execute_tagMatchesMissing_fail() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("low-risk", "internal"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
-
-        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
-    void execute_tagMatchesNoTagsData_fail() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        when(currentStep.getLatestData("agent:tags")).thenReturn(null);
-
-        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
     void execute_noWhenConfigured_matchesAnyEnv() {
         doReturn("production").when(condition).resolveDeploymentEnv();
         condition.setConfigs(Map.of());
@@ -133,15 +99,64 @@ class DeploymentContextConditionTest {
         assertEquals("high-risk", result.get("tagMatches"));
     }
 
+    /**
+     * Agents carry no tags: nothing ever wrote the {@code agent:tags} key the
+     * condition read, so a rule with {@code tagMatches} could never fire —
+     * including a safety rule meant to force cautious behaviour in production.
+     * {@code tagMatches} is retired: refused on save, accepted on load.
+     */
     @Test
-    void execute_tagMatchesCaseInsensitive() {
+    void retiredConfiguration_tagMatches_isReported() {
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
+
+        assertDoesNotThrow(() -> condition.validateConfiguration(), "a stored ruleset must still load");
+        var retired = condition.retiredConfiguration();
+        assertNotNull(retired);
+        assertTrue(retired.contains("tagMatches"), retired);
+        assertTrue(retired.contains("contextmatcher"), retired);
+    }
+
+    @Test
+    void retiredConfiguration_blankTagMatches_isNone() {
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "  "));
+
+        assertNull(condition.retiredConfiguration());
+    }
+
+    @Test
+    void retiredConfiguration_whenOnly_isNone() {
+        condition.setConfigs(Map.of("when", "production"));
+
+        assertNull(condition.retiredConfiguration());
+    }
+
+    /**
+     * A stored rule with {@code tagMatches} keeps the behaviour it always had: it
+     * never matches, whatever the environment.
+     */
+    @Test
+    void execute_storedTagMatches_neverMatches() {
         doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "HIGH-RISK"));
 
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("high-risk"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
+        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
 
-        assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
+        condition.setConfigs(Map.of("tagMatches", "high-risk"));
+        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
+    }
+
+    /**
+     * Under a negation the inner condition's FAIL made the rule fire on every turn.
+     * That is what a stored ruleset did before the upgrade, so it still does.
+     */
+    @Test
+    void execute_negatedStoredTagMatches_stillSucceeds() throws Exception {
+        doReturn("production").when(condition).resolveDeploymentEnv();
+        condition.setConfigs(Map.of("tagMatches", "high-risk"));
+        var negation = new Negation();
+        negation.setConditions(List.of(condition));
+
+        assertEquals(SUCCESS, negation.execute(memory, Collections.emptyList()));
     }
 
     @Test

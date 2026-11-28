@@ -245,7 +245,7 @@ public class GroupVerdictIT extends BaseIntegrationIT {
 
         List<JsonNode> verification = entriesOfType(gc, "VERIFICATION");
         assertTrue(verification.stream().anyMatch(e -> e.path("content").asText()
-                .equals("Returned for rework (1/1): " + TASK_SUBJECT + " — " + VERIFIER_FEEDBACK)),
+                .equals("Returned for rework (1/1): " + TASK_SUBJECT + " — the verifier's feedback is on the task")),
                 "the transcript records the return for rework: " + verification);
 
         List<LoggedRequest> memberRequests = requests(MEMBER_PATH);

@@ -6,8 +6,12 @@ package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry.Assessment;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -235,5 +239,159 @@ class UserMemoryEntryTest {
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("fact"));
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("context"));
         assertEquals(3, UserMemoryEntry.DEFAULT_CATEGORIES.size());
+    }
+
+    // --- who wrote the value: what a reader that requires peer verification goes
+    // by
+
+    /**
+     * A global entry keeps its owner when another agent writes it, so the owner
+     * says nothing about who wrote the value: the last writer does.
+     */
+    @Test
+    void writtenByAgentOtherThan_goesByTheLastWriterNotTheOwner() {
+        var overwrittenByAnother = memory("u1", null, "agent-a");
+        var overwrittenByTheReader = memory("u1", "agent-a", "agent-v");
+        var overwrittenByTheUser = memory("u1", "agent-a", null);
+
+        assertTrue(overwrittenByAnother.writtenByAgentOtherThan("agent-v"), "the user's key, another agent's value");
+        assertFalse(overwrittenByTheReader.writtenByAgentOtherThan("agent-v"), "another agent's key, the reader's value");
+        assertFalse(overwrittenByTheUser.writtenByAgentOtherThan("agent-v"), "a value no agent wrote");
+    }
+
+    /**
+     * An entry about to be written, or one stored before writers were recorded, was
+     * written by its owner.
+     */
+    @Test
+    void theOwnerWritesAnEntryThatNamesNoOtherWriter() {
+        var written = new UserMemoryEntry(null, "u1", "k", "v", "fact", Visibility.global, "agent-a", List.of(), null, false, 0, null, null);
+
+        assertEquals("agent-a", written.lastWriterAgentId());
+        assertTrue(written.writtenByAgentOtherThan("agent-v"));
+    }
+
+    /**
+     * A team's lessons are stored under its reserved owner by the engine, from the
+     * team's records as its records rule counts them, not by any agent.
+     */
+    @Test
+    void aTeamsLessonIsWrittenByNoAgent() {
+        assertFalse(memory("group:g1", "retro", "retro").writtenByAgentOtherThan("agent-v"));
+    }
+
+    private static UserMemoryEntry memory(String userId, String owner, String lastWriter) {
+        return new UserMemoryEntry("id", userId, "k", "v", "fact", Visibility.global, owner, List.of(), null, false, 0, null, null, lastWriter);
+    }
+
+    // === assessment ===
+
+    @Test
+    void legacyConstructor_isAccepted() {
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null);
+        assertEquals(Assessment.ACCEPTED, entry.assessment());
+        assertNull(entry.supersededBy());
+    }
+
+    @Test
+    void nullAssessment_isAccepted() {
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null, null, "x");
+        assertEquals(Assessment.ACCEPTED, entry.assessment());
+        assertNull(entry.supersededBy(), "a pointer is only kept on a SUPERSEDED entry");
+    }
+
+    @Test
+    void supersededBy_keptOnlyWhenSuperseded() {
+        var superseded = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null,
+                Assessment.SUPERSEDED, "2");
+        assertEquals("2", superseded.supersededBy());
+        assertNull(superseded.withAssessment(Assessment.CONTESTED, "2").supersededBy());
+    }
+
+    @Test
+    void withAssessment_keepsEverythingElse_andMirrorsConflicted() {
+        Instant at = Instant.parse("2026-10-01T00:00:00Z");
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.group, "a", List.of("g"), "c", false, 3, at, at);
+
+        var contested = entry.withAssessment(Assessment.CONTESTED, null);
+        assertEquals(Assessment.CONTESTED, contested.assessment());
+        assertTrue(contested.conflicted());
+        assertEquals(at, contested.updatedAt());
+        assertEquals(3, contested.accessCount());
+        assertEquals(List.of("g"), contested.groupIds());
+
+        assertFalse(contested.withAssessment(Assessment.ACCEPTED, null).conflicted());
+    }
+
+    @Test
+    void parse_isLenient() {
+        assertEquals(Assessment.ACCEPTED, Assessment.parse(null));
+        assertEquals(Assessment.ACCEPTED, Assessment.parse(""));
+        assertEquals(Assessment.ACCEPTED, Assessment.parse("DISPUTED"));
+        assertEquals(Assessment.CONTESTED, Assessment.parse("contested"));
+        assertEquals(Assessment.SUPERSEDED, Assessment.parse(" SUPERSEDED "));
+    }
+
+    @Test
+    void json_withoutAssessment_readsAsAccepted_andNewFieldsRoundTrip() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var legacy = mapper.readValue("""
+                {"id":"1","userId":"u","key":"k","value":"v","category":"fact","visibility":"self","sourceAgentId":"a",
+                 "groupIds":[],"conflicted":false,"accessCount":0}
+                """, UserMemoryEntry.class);
+        assertEquals(Assessment.ACCEPTED, legacy.assessment());
+
+        var superseded = legacy.withAssessment(Assessment.SUPERSEDED, "2");
+        String json = mapper.writeValueAsString(superseded);
+        assertTrue(json.contains("\"assessment\":\"SUPERSEDED\""), json);
+        assertTrue(json.contains("\"supersededBy\":\"2\""), json);
+        assertEquals(superseded, mapper.readValue(json, UserMemoryEntry.class));
+    }
+
+    @Test
+    void sourceEntryIds_absentReadsAsNone_andSurvivesAssessmentAndJson() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var legacy = mapper.readValue("""
+                {"id":"1","userId":"u","key":"k","value":"v","category":"fact","visibility":"self","sourceAgentId":"a"}
+                """, UserMemoryEntry.class);
+        assertEquals(List.of(), legacy.sourceEntryIds());
+
+        var consolidated = legacy.withSourceEntryIds(Arrays.asList("a1", null, "b2"));
+        assertEquals(List.of("a1", "b2"), consolidated.sourceEntryIds(), "nulls are dropped");
+        assertEquals(List.of("a1", "b2"), consolidated.withAssessment(Assessment.CONTESTED, null).sourceEntryIds());
+
+        String json = mapper.writeValueAsString(consolidated);
+        assertTrue(json.contains("\"sourceEntryIds\":[\"a1\",\"b2\"]"), json);
+        assertEquals(consolidated, mapper.readValue(json, UserMemoryEntry.class));
+
+        var fifteenArgs = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null,
+                Assessment.ACCEPTED, null);
+        assertEquals(List.of(), fifteenArgs.sourceEntryIds());
+    }
+
+    @Test
+    void asStatement_clearsEveryVerdict() {
+        var base = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null);
+        assertSame(base, base.asStatement(), "an accepted entry is returned as is");
+
+        var superseded = base.withAssessment(Assessment.SUPERSEDED, "2").asStatement();
+        assertEquals(Assessment.ACCEPTED, superseded.assessment());
+        assertNull(superseded.supersededBy());
+
+        var contested = base.withAssessment(Assessment.CONTESTED, null).asStatement();
+        assertEquals(Assessment.ACCEPTED, contested.assessment());
+        assertFalse(contested.conflicted());
+
+        var flaggedOnly = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, true, 0, null, null);
+        assertFalse(flaggedOnly.asStatement().conflicted(), "conflicted without CONTESTED is not kept either");
+    }
+
+    @Test
+    void asStatement_keepsSourceEntryIds() {
+        var consolidated = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null)
+                .withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.CONTESTED, null).asStatement().sourceEntryIds(),
+                "provenance is not a verdict: Dream's consolidation write goes through asStatement");
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.SUPERSEDED, "x").asStatement().sourceEntryIds());
     }
 }

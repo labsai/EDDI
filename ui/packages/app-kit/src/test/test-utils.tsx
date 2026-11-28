@@ -1,0 +1,117 @@
+import { render, type RenderOptions } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ThemeProvider } from "@eddi/ui";
+import type { ReactElement } from "react";
+import { GrantRequiredDialogHost } from "../components/secrets/grant-required-dialog";
+import { AuthContext, GUEST_CONTEXT } from "../components/auth/auth-context";
+
+/**
+ * Render `routes` at `path` for a Keycloak session holding `roles` — how the
+ * role-aware screens of both apps are tested. Any path no route matches renders
+ * `data-testid="where"` with that path, so a test can assert where a redirect
+ * went.
+ */
+export function renderAs(roles: string[], path: string, routes: Array<[string, ReactElement]>) {
+  /** Where a redirect landed. */
+  function Where() {
+    const location = useLocation();
+    return <div data-testid="where">{location.pathname}</div>;
+  }
+  return render(
+    <AuthContext.Provider value={{ ...GUEST_CONTEXT, method: "keycloak", roles }}>
+      <MemoryRouter initialEntries={[path]}>
+        <QueryClientProvider client={createTestQueryClient()}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <Routes>
+              {routes.map(([pattern, element]) => (
+                <Route key={pattern} path={pattern} element={element} />
+              ))}
+              <Route path="*" element={<Where />} />
+            </Routes>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    </AuthContext.Provider>,
+  );
+}
+
+export function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
+interface ExtendedRenderOptions extends Omit<RenderOptions, "wrapper"> {
+  initialRoute?: string;
+}
+
+export function renderWithProviders(
+  ui: ReactElement,
+  { initialRoute = "/", ...options }: ExtendedRenderOptions = {}
+) {
+  const queryClient = createTestQueryClient();
+
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <MemoryRouter initialEntries={[initialRoute]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            {children}
+            {/* Every deploy flow asks its vault-grant question through this one
+                host, as the app does beside its toaster. */}
+            <GrantRequiredDialogHost />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+  }
+
+  return {
+    ...render(ui, { wrapper: Wrapper, ...options }),
+    queryClient,
+  };
+}
+
+/**
+ * Render a page component inside MemoryRouter with a route pattern.
+ * Centralises boilerplate duplicated across 10+ page-level test files.
+ *
+ * @param path - The initial URL, e.g. "/manage/resources/behavior/res1"
+ * @param element - The JSX element to render at the route
+ * @param routePattern - The React Router pattern, defaults to `path`
+ * @param client - A prepared QueryClient, for the cases the default cannot
+ *   express: a cache primed *before* the first render (a page reached from a
+ *   list that seeds it), or a non-default `staleTime` (the default here is 0,
+ *   under which every entry is stale immediately and a refetch papers over
+ *   anything that depends on cached data surviving).
+ */
+export function renderPage(
+  path: string,
+  element: ReactElement,
+  routePattern?: string,
+  client?: QueryClient
+) {
+  const queryClient = client ?? createTestQueryClient();
+
+  return {
+    ...render(
+      <MemoryRouter initialEntries={[path]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <Routes>
+              <Route path={routePattern ?? path} element={element} />
+            </Routes>
+            <GrantRequiredDialogHost />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    ),
+    queryClient,
+  };
+}
+
+export { default as userEvent } from "@testing-library/user-event";

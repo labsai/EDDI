@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -972,7 +973,7 @@ class MongoScheduleStoreTest {
     void findDueSchedules() throws Exception {
         setupSchedulePageIteration();
 
-        List<ScheduleConfiguration> result = store.findDueSchedules(Instant.now(), Instant.now().minusSeconds(60), 3);
+        List<ScheduleConfiguration> result = store.findDueSchedules(Instant.now(), Duration.ofMinutes(1), 3);
         assertEquals(1, result.size());
 
         // An unsorted limit returns the same arbitrary subset every poll once more
@@ -989,17 +990,17 @@ class MongoScheduleStoreTest {
     @DisplayName("tryClaim — returns true when claimed")
     void tryClaimSuccess() throws Exception {
         Document result = new Document("_id", "sched-1");
-        when(scheduleCollection.findOneAndUpdate(any(Bson.class), any(Bson.class))).thenReturn(result);
+        when(scheduleCollection.findOneAndUpdate(any(Bson.class), anyList())).thenReturn(result);
 
-        assertTrue(store.tryClaim("sched-1", "instance-1", Instant.now(), Instant.now().minusSeconds(300)));
+        assertTrue(store.tryClaim("sched-1", "instance-1", Instant.now(), Duration.ofMinutes(5)));
     }
 
     @Test
     @DisplayName("tryClaim — returns false when already claimed")
     void tryClaimFail() throws Exception {
-        when(scheduleCollection.findOneAndUpdate(any(Bson.class), any(Bson.class))).thenReturn(null);
+        when(scheduleCollection.findOneAndUpdate(any(Bson.class), anyList())).thenReturn(null);
 
-        assertFalse(store.tryClaim("sched-1", "instance-1", Instant.now(), Instant.now().minusSeconds(300)));
+        assertFalse(store.tryClaim("sched-1", "instance-1", Instant.now(), Duration.ofMinutes(5)));
     }
 
     // ==================== markCompleted ====================

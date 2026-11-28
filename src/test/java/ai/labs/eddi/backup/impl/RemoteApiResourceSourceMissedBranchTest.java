@@ -79,6 +79,24 @@ class RemoteApiResourceSourceMissedBranchTest {
         }
     }
 
+    /**
+     * Every other source-read failure is a {@code RemoteReadException} — the type
+     * {@code RestImportService.syncFailure} turns into 502 — and an agent the
+     * remote does not list is one of them, not a bare {@code RuntimeException}.
+     */
+    @Test
+    @DisplayName("an agent the remote does not list fails as a RemoteReadException")
+    void unlistedAgentIsARemoteReadFailure() throws Exception {
+        doReturn(new DocumentDescriptor[0]).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
+
+        RemoteApiResourceSource source = new RemoteApiResourceSource(
+                "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
+
+        var thrown = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readAgent);
+        assertInstanceOf(RemoteApiResourceSource.RemoteReadException.class, thrown.getCause(), "the unlisted-agent failure itself");
+        assertTrue(thrown.getCause().getMessage().contains("is not listed on"), thrown.getCause().getMessage());
+    }
+
     // ─── httpGet — auth token ───────────────────────────────────────────
 
     @Nested

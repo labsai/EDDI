@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider, chatReducer, initialState } from "@/store/chat-store";
 
@@ -28,13 +28,11 @@ beforeEach(() => {
 
 function renderWidget(query = "") {
   return render(
-    <MemoryRouter initialEntries={[`/chat/production/agent-1${query}`]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider>
+      <ChatLocationProvider initialPath={`/chat/production/agent-1${query}`}>
+        <ChatWidget />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 

@@ -262,13 +262,13 @@ class KvLeaseManagerAdminTest {
         while (kv.get("w.c.conv1").isEmpty() && System.currentTimeMillis() < deadline) {
             Thread.sleep(20);
         }
-        List<LeaseSnapshot> leases = a.snapshot("", 100);
+        List<LeaseSnapshot> leases = a.snapshot(100);
         assertEquals(2, leases.size(), "waiter markers must not be listed as leases: " + leases);
         LeaseSnapshot conv1 = leases.stream().filter(l -> l.key().equals("c.conv1")).findFirst().orElseThrow();
         assertEquals("a", conv1.holder().node());
         assertEquals("b", conv1.waitingNode());
         assertTrue(conv1.renewedAt() > 0);
-        assertEquals(1, a.snapshot("c.conv2", 100).size());
+        assertEquals(1, a.snapshot(1).size(), "at most max leases are listed");
         assertEquals("b", a.peekSnapshot("c.conv1").orElseThrow().waitingNode());
         assertTrue(a.peekSnapshot("c.none").isEmpty());
         assertEquals("b", new String(kv.get("w.c.conv1").orElseThrow().value(), StandardCharsets.UTF_8));

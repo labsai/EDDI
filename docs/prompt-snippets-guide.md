@@ -149,6 +149,8 @@ All endpoints require `eddi-admin` or `eddi-editor` role.
 | `POST` | `/snippetstore/snippets` | Create a snippet |
 | `PUT` | `/snippetstore/snippets/{id}?version=1` | Update a snippet |
 | `DELETE` | `/snippetstore/snippets/{id}?version=1` | Delete a snippet (add `permanent=true` to remove it and its history; default `false`) |
+| `GET` | `/snippetstore/snippets/{id}/currentversion` | The current version number (`text/plain`) |
+| `POST` | `/snippetstore/snippets/{id}/currentversion` | `303` redirect to the current version |
 
 Create and update answer `400` when `name` violates the `[a-z0-9_]+` pattern.
 

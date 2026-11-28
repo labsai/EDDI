@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import dev.langchain4j.agent.tool.P;
@@ -16,6 +18,7 @@ import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -25,8 +28,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for tearing down dynamically created agents. Constructed
- * per-invocation by {@code AgentOrchestrator} with the factory, agent store,
- * and the lists of created/retained agent IDs from the group conversation.
+ * per-invocation by {@code DynamicAgentToolsProvider} with the factory, agent
+ * store, and the lists of created/retained agent IDs from the group
+ * conversation.
  *
  * <p>
  * Only agents that were created during the current discussion can be torn down
@@ -47,7 +51,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class TeardownAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(TeardownAgentTool.class);
@@ -72,8 +77,8 @@ public class TeardownAgentTool {
     private final String groupConversationId;
 
     /**
-     * {@code deploymentStore} may be null; teardown then skips retiring deployment
-     * records.
+     * {@code deploymentStore} may be null; teardown then leaves the deployment
+     * records alone.
      *
      * @param conversationId
      *            the conversation this tool runs in
@@ -131,10 +136,17 @@ public class TeardownAgentTool {
             }
 
             // --- Undeploy ---
+            // The records first, the registry second: the deployment sweep deploys what
+            // is recorded deployed and not served, so a sweep running between a
+            // registry drop and the record write would deploy the agent again.
+            List<Integer> flipped = markDeploymentRecordsUndeployed(agentId);
             try {
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
                 LOGGER.infof("[TEARDOWN] Undeployed agent '%s'", agentId);
             } catch (Exception e) {
+                // Still served: the records go back to deployed, or they would say
+                // undeployed for an agent that answers.
+                restoreDeploymentRecords(agentId, flipped);
                 LOGGER.warnf("[TEARDOWN] Undeploy failed for agent '%s': %s", agentId, e.getMessage());
                 return "❌ Failed to undeploy agent '%s': %s".formatted(agentId, e.getMessage());
             }
@@ -222,6 +234,46 @@ public class TeardownAgentTool {
         tornDownAgentIds.add(agentId);
         createdAgentIds.remove(agentId);
         retainedAgentIds.remove(agentId);
+    }
+
+    /**
+     * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
+     * REST undeploy does. The deployment sweep deploys what is recorded and no
+     * longer served, so a record left saying deployed would undo this undeploy
+     * within about ten seconds. Called BEFORE the registry removal, for the same
+     * reason. Never fatal.
+     *
+     * @return the versions whose record this flipped, so a registry removal that
+     *         fails can put them back
+     */
+    private List<Integer> markDeploymentRecordsUndeployed(String agentId) {
+        List<Integer> flipped = new ArrayList<>();
+        if (deploymentStore == null) {
+            return flipped;
+        }
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
+                if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
+                    deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                    flipped.add(info.getAgentVersion());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[TEARDOWN] Could not mark the deployment record(s) of agent '%s' undeployed: %s", sanitize(agentId), e.getMessage());
+        }
+        return flipped;
+    }
+
+    /** Puts back the records {@link #markDeploymentRecordsUndeployed} flipped. */
+    private void restoreDeploymentRecords(String agentId, List<Integer> versions) {
+        for (Integer version : versions) {
+            try {
+                deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, version, DeploymentStatus.deployed);
+            } catch (Exception e) {
+                LOGGER.errorf("[TEARDOWN] Agent '%s' version %d is still deployed, but its deployment record now says undeployed: %s",
+                        sanitize(agentId), version, e.getMessage());
+            }
+        }
     }
 
     /**

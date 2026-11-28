@@ -78,8 +78,10 @@ calls are reported at deploy time, per step and as `eddi.llm.calls.unpriced`, an
 Bedrock cache tokens and Gemini thinking tokens are counted — see
 [What the providers report](model-pricing.md#what-the-providers-report).
 
-Group transcript window summaries and stance summaries are charged to the tenant too, and are
-skipped (plain truncation, an extracted stance) once the budget is spent. If the quota store is
+Group transcript window summaries, stance summaries and the
+[SERVICE convergence judge](group-service-judge.md) are charged to the tenant too. Once the budget is
+spent the summaries are skipped (plain truncation, an extracted stance) and the judge is not run — that
+check counts as "not converged" and the discussion goes on. If the quota store is
 unreadable when one is charged, the amount is carried to the next group system charge on that node
 and its spend event is withheld until the tenant counter takes it; a carried amount is held in memory,
 so a node that restarts before the store recovers loses it.
@@ -183,8 +185,8 @@ call whose real prompt tokenizes worse than that estimate can cost more than it 
 
 **What is *not* reserved.** The mode bounds the model phase of each LLM task and priced tool calls.
 The smaller paid side calls — a same-model re-ask, a cascade judge, a guardrail classifier, a rolling
-summary, group transcript summaries, Dream — still go through the ordinary read-only gate and are
-charged at settle, so they can add a little on top of the reservation; the reserved amount of the
+summary, group transcript and stance summaries, the SERVICE convergence judge, Dream — still go
+through the ordinary read-only gate and are charged at settle, so they can add a little on top of the reservation; the reserved amount of the
 task they belong to normally already covers them. Embeddings are not priced. The limit is therefore a
 hard ceiling for the calls that carry the cost, not a bit-exact one.
 
@@ -213,10 +215,15 @@ All five operations sit under `/administration/quotas` and require the `eddi-adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/administration/quotas` | List every configured tenant quota |
-| `GET` | `/administration/quotas/{tenantId}` | Read one tenant's quota |
-| `PUT` | `/administration/quotas/{tenantId}` | Create or replace one tenant's quota |
+| `GET` | `/administration/quotas/{tenantId}` | Read one tenant's quota (`404` when the tenant has no row) |
+| `PUT` | `/administration/quotas/{tenantId}` | Create or replace one tenant's quota; the path's `tenantId` wins over the body's |
 | `GET` | `/administration/quotas/{tenantId}/usage` | Read the tenant's current counters |
 | `POST` | `/administration/quotas/{tenantId}/usage/reset` | Zero the tenant's counters |
+
+Over MCP an administrator's client reads the quota and usage with `read_tenant_quota` and changes it with
+`update_tenant_quota`: lowering a limit or enabling the quota applies at once, raising a limit, making it unlimited
+or disabling it is filed for an administrator's approval in the Manager — see
+[Spend-Control Changes](spend-control-changes.md). Resetting the counters has no tool.
 
 ### Quota shape
 
@@ -264,9 +271,12 @@ pick it up within the 5-second cache TTL.
   "monthlyCostUsd": 0.0,
   "minuteWindowStart": "2026-09-07T14:32:00Z",
   "dayStart": "2026-09-07T00:00:00Z",
-  "costMonth": "2026-09"
+  "costMonth": "2026-09",
+  "reservedUsd": 0.0
 }
 ```
+
+`reservedUsd` is the budget held for running turns by the [hard ceiling](#hard-ceiling-cost-reservation-opt-in); it is `0` while that mode is off.
 
 Counters from an expired window read as zero rather than as their stale value, so a `conversationsToday`
 of `0` on a tenant that was busy yesterday is correct, not a lost write.

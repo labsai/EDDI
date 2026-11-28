@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Download, Lock, Palette, RefreshCw, RotateCcw, Save } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Button } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
+import { Input } from "@eddi/app-kit/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { BrandPreview } from "@/components/branding/brand-preview";
 import { BrandAssetSlotCard } from "@/components/branding/brand-asset-slot";
@@ -18,7 +18,7 @@ import {
   useUpdateBranding,
   useUploadBrandAsset,
 } from "@/hooks/use-branding";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import {
   brandingErrorInfo,
   downloadKeycloakTheme,
@@ -26,9 +26,9 @@ import {
   type BrandingErrorInfo,
   type BrandingView,
   type BrandUpdate,
-} from "@/lib/api/branding";
-import { DEFAULT_BRAND, BRAND_ASSET_SLOTS, type BrandAssetFlags, type BrandAssetSlot } from "@/lib/brand";
-import { resolveBrandColors, UNBRANDED_COLORS, type BrandColorValues } from "@/lib/brand-css";
+} from "@eddi/app-kit/lib/api/branding";
+import { DEFAULT_BRAND, BRAND_ASSET_SLOTS, type BrandAssetFlags, type BrandAssetSlot } from "@eddi/app-kit/lib/brand";
+import { resolveBrandColors, UNBRANDED_COLORS, type BrandColorValues } from "@eddi/app-kit/lib/brand-css";
 import {
   checkBrandText,
   contrastRatio,
@@ -39,10 +39,10 @@ import {
   TAGLINE_MAX,
   toPickerValue,
   type BrandTextProblem,
-} from "@/lib/brand-validation";
+} from "@eddi/app-kit/lib/brand-validation";
 import { WriteTimeoutError, withWriteTimeout } from "@/lib/brand-write-guard";
 import { isForbidden } from "@/lib/access";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 type ColorKey = keyof BrandColorValues;
 const COLOR_KEYS: readonly ColorKey[] = ["primary", "primaryForeground", "darkPrimary", "darkPrimaryForeground", "chatAccent"];

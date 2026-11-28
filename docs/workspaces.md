@@ -28,6 +28,7 @@ Two switches, and they mean different things.
 | `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment: that team's members create there by default, everyone else keeps their personal space. **Changeable at runtime.** |
 | `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
+| `eddi.workspaces.directory.stale-after` | *(unset → never)* | How long after a person's last recorded sign-in the directory stops counting them as a team member — see [stale entries](#stale-entries-stale-after). |
 
 **Recording and enforcing are deliberately separate.** Deploy the release,
 let attribution accumulate, confirm in the Manager that agents show the owners
@@ -86,6 +87,10 @@ and re-sharing stay with whoever created it.
 
 ### Access levels
 
+> Which of the agents a person may use are *offered* to them in Workforce is a separate, opt-in
+> question: see the [End-User Catalog](catalog.md). `published` and `internal` resources are
+> listed there automatically while workspaces are enforced.
+
 | Level | Can | Cannot |
 | --- | --- | --- |
 | `USE` | Start conversations with the deployed agent; see its name and description. | Read the configuration, its workflows, tools or vault references. |
@@ -96,6 +101,25 @@ and re-sharing stay with whoever created it.
 `USE` and `VIEW` are separate because letting a colleague *talk to* an agent is
 a different act from letting them *read how it was built* — and the first is by
 far the more common request.
+
+### Team membership inside a conversation
+
+Team membership always comes from the **current token's** groups claim. A REST
+request reads it directly. Inside a conversation turn — a tool runs on a worker
+or virtual thread, where the token is no longer readable — the teams are a
+snapshot taken when the request that started the turn arrived, carried with
+the caller's identity to every thread the turn uses
+(`CallerIdentityContext.current().teamSubjects()`). The snapshot is not
+refreshed mid-turn and is never stored with the conversation, so a membership
+change in Keycloak applies from the caller's next request.
+
+It is empty — "no team", never "unknown" — whenever no token stands behind the
+turn: scheduled runs, team cadences, and a turn resumed after somebody other
+than its owner approved a paused tool call (the approver's own teams are never
+added). Team features fail closed there. The user directory's recorded teams
+(see [Finding people](#finding-people-the-user-directory)) are last-seen
+memberships: they are never a fallback for an empty snapshot and never grant a
+team membership (a schedule uses them only to *narrow* its creator's teams).
 
 ---
 
@@ -116,12 +140,12 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/descriptorstore/descriptors/{id}/shares` | Owner, space, visibility, grants, and the caller's effective level. |
-| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level`. The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
-| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke a subject's grant. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `private` / `space` / `internal` / `published`. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces — personal work becoming team work. Ownership does not change. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership. **Administrators only.** |
-| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, optional `message`). See [Notifications](#notifications-and-access-requests). |
+| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level` (default `VIEW`). The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
+| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke the grant of `subject`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `visibility` to `private` / `space` / `internal` / `published`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces (`spaceId`) — personal work becoming team work. Ownership does not change. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership to `ownerId`, optionally into `spaceId`. **Administrators only.** |
+| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, default `USE`; optional `message`, cut to 500 characters). See [Notifications](#notifications-and-access-requests). |
 
 Every change except a request takes `dryRun=true`, which answers with the same
 `updated` / `skipped` lists and changes nothing. The Manager uses it to show what
@@ -167,7 +191,7 @@ what sharing with an email address used to do. An unverified email is never a
 way to find somebody: whoever can set their own address could otherwise collect
 shares meant for someone else.
 
-`GET /workspaces/directory?q=` powers the share box's suggestions. The share
+`GET /workspaces/directory?q=&limit=` (default 10, at most 25) powers the share box's suggestions. The share
 dialog labels each grant with the person's name, and flags grants that match no
 recorded user (typically ones made before the directory existed) so an owner can
 remove them. The directory is covered by GDPR erasure and export. Set
@@ -198,8 +222,63 @@ its search is deliberately narrow:
   The directory is refreshed from the token about every ten minutes while
   someone is signed in; a person removed from a team keeps that membership in
   the directory — and stays suggested to their former teammates — until they
-  next sign in. Nothing expires a directory entry by age; GDPR erasure removes
-  one.
+  next sign in, or until `eddi.workspaces.directory.stale-after` passes (below).
+  GDPR erasure removes an entry outright.
+
+#### Stale entries (`stale-after`)
+
+EDDI has no signal from the identity provider when somebody leaves a team; it
+only sees their next token. `eddi.workspaces.directory.stale-after` bounds how
+long an old token's teams are believed. It takes a duration (`90d`, `P90D`,
+`2160h`). **Unset — the default — means never**, which is the behaviour before
+the property existed.
+
+A person whose last recorded sign-in is older than the window counts as a member
+of **no** team in the directory:
+
+- they are no longer suggested to non-administrators in the share box — the team-scoped
+  search applies the window in the database query
+  (`IUserDirectoryStore.searchWithinTeams`), so a page of results is never
+  filled with people who are then dropped;
+- their email address is no longer shown to former teammates, in suggestions or
+  in a resource's grant list — those see the username, like anybody outside the
+  team.
+
+The boundary is inclusive: somebody seen exactly `stale-after` ago still counts.
+
+**The entry is hidden, not deleted.** Their next sign-in re-records it from the
+token they then carry and refreshes `lastSeen`: they come back for the teams
+that token still lists — not for one they have since left. Another EDDI
+instance may keep showing its cached copy of the entry in grant lists for up to
+two minutes. Meanwhile a share typed by
+their exact username or verified email still resolves to them, their grants
+still show their name, and a grant to them is not flagged as "matches no
+recorded user".
+
+**Grants are not affected.** Whether somebody can reach a resource is decided
+against their *live* token on every request, never against the directory: a
+person with a stale entry keeps every grant their token still qualifies for,
+and a removed team member loses team access as soon as the token they present
+no longer carries the team, whether or not a window is set.
+
+**Administrators still see everybody.** `eddi-admin`'s search is not windowed
+and shows a stale person exactly as before — with their email, unless
+`expose-email` is off — since the directory is theirs to manage. Stale entries
+are not marked as such in the suggestions.
+
+The window is honoured from one hour up: `lastSeen` is refreshed only about
+every ten minutes while somebody is active, so a shorter value would hide
+people who are signed in right now. A shorter positive value is raised to an
+hour, one longer than a century is lowered to a century (the cutoff would
+otherwise fall outside what the database can store), and a zero or negative one
+is read as "never" — each with a warning in the log.
+
+Not covered by the window: the team-member lists used to fan out
+[notifications](#notifications-and-access-requests) and to warn that a shared-with team has no
+recorded members, and the team names an administrator is offered — these still
+read every recorded entry. Re-validating membership against the identity
+provider itself (SCIM, or a back-channel query) would remove the need for a
+window altogether; it is future work.
 
 ### Where new resources land
 
@@ -216,8 +295,11 @@ A default team never files somebody's work in a team they are not in: their
 work would otherwise be readable and editable by people they never chose to
 share it with.
 
-A header naming a space the caller is not a member of is refused with 403
-before anything is created.
+A header naming none of the caller's spaces is refused with 403 before
+anything is created. The value must be one of the ids `GET /workspaces` lists,
+exactly: it is compared case-sensitively (group names are case-sensitive) and
+only surrounding whitespace is ignored, so `TEAM:engineering` or
+`team:engineering/` is refused as well. The refusal quotes the value received.
 
 ### Notifications and access requests
 
@@ -241,7 +323,7 @@ every notification that names the person, at any age.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first. |
+| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first (`limit` default 50, at most 200). |
 | `GET` | `/workspaces/notifications/count` | `{"unread": n}` — cheap enough to poll. |
 | `POST` | `/workspaces/notifications/read` | Mark `{"ids": [...]}` read, or all of them with `{}`. |
 
@@ -440,6 +522,12 @@ administrator — in the Manager's **Workspaces** page, or:
 | `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. A create under `enforce` carries `allowedAgents` and `allowedHosts` (`["*"]` for "any"), as on [the tenant vault](secrets-vault.md#required-on-a-create). |
 | `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
 
+Space ids are opaque and may contain `%` — a group `a|b` is `team:a%7Cb` — so
+`space` is sent URL-encoded, exactly as `GET /workspaces` lists it
+(`encodeURIComponent(id)`, here `team%3Aa%257Cb`). Sent raw, the id is decoded
+once on the way in, arrives as `team:a|b`, and is refused with 403: it matches
+none of the caller's spaces.
+
 Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
 `${vars:<tenant>/model}`, where every response names the tenant. Membership is
 what authorizes, and it is checked where a human acts: **deploying an agent that
@@ -508,7 +596,26 @@ from:
 - **`STORED`** — changed at runtime; kept in the database.
 - **`DEFAULT`** — neither.
 
-Changes reach every node within seconds.
+Changes reach every node within seconds. A stored `legacy-visibility` other than
+`shared` or `admin-only` — the API refuses one, so only a direct database edit
+can store it — is ignored: the default applies, the setting reports `DEFAULT`,
+and a single `WARN` names the value.
+
+### Resources that predate ownership
+
+A resource created before ownership was recorded has a descriptor with no owner
+and no space. Under `legacy-visibility=shared` every user may **read, use, edit
+and deploy** it, so an upgrade hides nothing and stops no one's work. Nobody but
+an administrator **owns** it: deleting it, sharing it or revoking a share,
+changing its visibility (publishing it), moving it to another space, and reading
+its grant list all need `OWN`, so a non-admin is refused them and the Manager
+does not offer them. An absent owner is not a grant of ownership; otherwise any
+user could publish a colleague's pre-upgrade agent to anonymous callers, or move
+it into their own space and so take it from everyone else.
+
+An explicit share still counts in full: a user granted `OWN` on a legacy
+resource holds it. To hand a resource over for good, assign an owner with
+`PUT /descriptorstore/descriptors/{id}/shares/owner`.
 
 ### Resources with no descriptor at all
 
@@ -546,9 +653,12 @@ configuration would break every shared agent.
 2. Leave `eddi.workspaces.enabled=false`. New resources are attributed to their
    creators from this point on.
 3. Check the owners look right.
-4. Set `eddi.workspaces.enabled=true`.
-5. Optionally move to `legacy-visibility=admin-only` once the pre-existing
-   resources have been assigned owners with the ownership-transfer endpoint.
+4. Set `eddi.workspaces.enabled=true`. Pre-existing resources stay readable and
+   editable by everyone, but deleting, sharing, publishing or moving one is
+   admin-only until it has an owner — see
+   [Resources that predate ownership](#resources-that-predate-ownership).
+5. Assign owners to the pre-existing resources with the ownership-transfer
+   endpoint, then optionally move to `legacy-visibility=admin-only`.
 
 Rolling back is setting the flag to `false`. The recorded ownership is inert
 while enforcement is off.

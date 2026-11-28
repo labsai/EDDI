@@ -568,7 +568,17 @@ class PostgresResourceStorageTest {
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
         var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
         var history = storage.newHistoryResourceFor(resource, true);
+        PreparedStatement deleteStatement = mock(PreparedStatement.class);
+        PreparedStatement tombstoneStatement = mock(PreparedStatement.class);
+        when(deleteStatement.executeUpdate()).thenReturn(1);
+        when(tombstoneStatement.executeUpdate()).thenReturn(1);
         when(preparedStatement.executeUpdate()).thenReturn(1);
+        // the delete is version-checked; the tombstone is the upsert that sets deleted
+        when(connection.prepareStatement(
+                argThat((String sql) -> sql != null && sql.startsWith("DELETE FROM resources ") && sql.contains("AND version = ?"))))
+                .thenReturn(deleteStatement);
+        when(connection.prepareStatement(argThat((String sql) -> sql != null && sql.contains("DO UPDATE SET deleted = TRUE"))))
+                .thenReturn(tombstoneStatement);
 
         storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
 
@@ -576,9 +586,15 @@ class PostgresResourceStorageTest {
         inOrder.verify(connection).setAutoCommit(false);
         inOrder.verify(connection).commit();
         verify(connection, never()).rollback();
-        verify(connection).prepareStatement(argThat((String sql) -> sql.startsWith("DELETE FROM resources ") && sql.contains("AND version = ?")));
+        // The delete comes first: it takes the row lock and decides whether there is
+        // anything to tombstone (see storeHistoryAndRemove_writesNoTombstone...).
+        // Each statement is its own mock, so each one's close is verified.
+        InOrder statements = inOrder(deleteStatement, tombstoneStatement);
+        statements.verify(deleteStatement).executeUpdate();
         // The tombstone must set the flag even over a row an update already archived.
-        verify(connection).prepareStatement(argThat((String sql) -> sql.contains("DO UPDATE SET deleted = TRUE")));
+        statements.verify(tombstoneStatement).executeUpdate();
+        verify(deleteStatement).close();
+        verify(tombstoneStatement).close();
     }
 
     @Test
@@ -587,18 +603,18 @@ class PostgresResourceStorageTest {
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
         var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
         var history = storage.newHistoryResourceFor(resource, true);
-        // tombstone written, version-checked delete matches nothing, the live row is
-        // still there (at v2)
-        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+        // the version-checked delete matches nothing and the live row is still there
+        // (at v2)
+        when(preparedStatement.executeUpdate()).thenReturn(0);
         when(resultSet.next()).thenReturn(true);
 
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1));
 
-        // Rolling back takes the tombstone with it: v1 stays ordinary history of a live
-        // resource.
+        // v1 stays ordinary history of a live resource: no tombstone is ever written.
         verify(connection).rollback();
         verify(connection, never()).commit();
+        verify(connection, never()).prepareStatement(argThat((String sql) -> sql.contains("DO UPDATE SET deleted = TRUE")));
     }
 
     @Test
@@ -607,13 +623,30 @@ class PostgresResourceStorageTest {
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
         var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
         var history = storage.newHistoryResourceFor(resource, true);
-        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+        when(preparedStatement.executeUpdate()).thenReturn(0);
         when(resultSet.next()).thenReturn(false);
 
         storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
 
         verify(connection).commit();
         verify(connection, never()).rollback();
+    }
+
+    @Test
+    void storeHistoryAndRemove_writesNoTombstoneWhenThereWasNothingLeftToRemove() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
+        var history = storage.newHistoryResourceFor(resource, true);
+        // a permanent removal erased the resource between the caller's read and this
+        // call: the delete matches nothing and no live row remains
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(resultSet.next()).thenReturn(false);
+
+        storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
+
+        // A tombstone here would put the erased resource's data back into the history.
+        verify(connection, never()).prepareStatement(argThat((String sql) -> sql.contains("DO UPDATE SET deleted = TRUE")));
     }
 
     @Test
@@ -638,7 +671,8 @@ class PostgresResourceStorageTest {
 
         assertThrows(RuntimeException.class, () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1));
 
-        // Otherwise the resource is archived as deleted while its live row remains.
+        // The delete went through but the tombstone failed: otherwise the resource is
+        // gone without the archived copy that makes it a deletion.
         verify(connection).rollback();
         verify(connection, never()).commit();
     }
@@ -1322,6 +1356,22 @@ class PostgresResourceStorageTest {
         // literal key here would compare against a key spelled with a dot, which
         // never exists — the CAS would report a spurious conflict.
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'state' = ?"), sql.getValue());
+    }
+
+    @Test
+    void containsIgnoreCase_isAnEscapedIlike_neverAPattern() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{new IResourceFilter.QueryFilters(
+                List.of(new IResourceFilter.QueryFilter("title", new IResourceFilter.ContainsIgnoreCase("50%_a\\b"))))}, null, 0, 10);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("data ->> 'title' ILIKE ? ESCAPE '\\'"), sql.getValue());
+        // %, _ and \ are wildcards / the escape in LIKE: each is escaped, so the text
+        // is matched literally. Bound as a parameter, never spliced into the SQL.
+        verify(preparedStatement).setString(2, "%50\\%\\_a\\\\b%");
+        assertFalse(sql.getValue().contains("50"), sql.getValue());
     }
 
     // ==================== substring search: planning and indexing

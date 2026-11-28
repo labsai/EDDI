@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -75,18 +76,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Responsibilities:
  * <ul>
- * <li>Collect enabled built-in tools based on task configuration</li>
- * <li>Build tool specifications and executors via reflection</li>
- * <li>Run the iterative tool-calling loop (max 10 iterations)</li>
+ * <li>Assemble the turn's tools (built-in, HTTP-call, MCP, A2A and the other
+ * {@code ToolSourceProvider} sources) into specifications and executors</li>
+ * <li>Run the iterative tool-calling loop (10 iterations by default, set per
+ * task by {@code maxToolIterations}, engine ceiling 100)</li>
  * <li>Manage budget checks, rate limiting, caching, and cost tracking via
  * ToolExecutionService</li>
  * <li>Produce an execution trace for debugging</li>
  * </ul>
  * <p>
- * A stateless singleton, per the pipeline-component contract: every field is
- * {@code final} except the two write-once attachment services, which are
- * deployment-scoped collaborators rather than per-conversation state. All
- * conversational state travels through the {@code IConversationMemory}
+ * A stateless singleton, per the pipeline-component contract: the only
+ * non-{@code final} fields are the {@code volatile} field-injected
+ * collaborators (attachment, deployment, group, artifact, audit and guardrail
+ * services), which are deployment-scoped rather than per-conversation state.
+ * All conversational state travels through the {@code IConversationMemory}
  * argument. Constructing it directly (as the unit tests do) stays supported —
  * the annotations below only add the managed instance that {@code LlmTask}
  * injects.
@@ -115,7 +118,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * {@link ToolContextBudget#DEFAULT_MAX_TOOL_CONTEXT_TOKENS} (R2 step 3) kept
      * declared here since it is reflected/referenced by class name in tests.
      *
-     * @see #enforceToolContextBudget
+     * @see ToolContextBudget#enforceToolContextBudget
      */
     static final int DEFAULT_MAX_TOOL_CONTEXT_TOKENS = ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
 
@@ -385,17 +388,16 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private final ToolResultGuardrail toolResultGuardrail;
 
     /**
-     * The SAME estimator factory {@code LlmTask} uses to window conversation
-     * history, reused here to meter the in-turn tool context. Deliberately not a
-     * second estimator: one accounting rule for both halves of the request means a
-     * budget expressed in tokens keeps meaning the same thing wherever it is set.
-     */
-
-    /**
      * In-turn tool-context budget enforcement, extracted to
      * {@link ToolContextBudget} (R2 step 3). Constructed here (not a CDI bean, per
      * the collaborator pattern rule 3.0-4) since its only dependency —
      * {@code tokenCounterFactory} — is already a constructor parameter.
+     * <p>
+     * That is the SAME estimator factory {@code LlmTask} uses to window
+     * conversation history, reused to meter the in-turn tool context. Deliberately
+     * not a second estimator: one accounting rule for both halves of the request
+     * means a budget expressed in tokens keeps meaning the same thing wherever it
+     * is set.
      * <p>
      * Named {@code toolContextBudgetGuard}, not {@code toolContextBudget} — {@code
      * runToolCallLoop} already has a local {@code int toolContextBudget} (the
@@ -636,8 +638,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                                  ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
 
-        // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
-        // prologue the resume path uses.
+        // Discover + register all tools (every ToolSourceProvider: built-in, http,
+        // mcp, a2a, ...) — the SAME prologue the resume path uses.
         ToolSetup setup = buildToolSetup(task, memory);
 
         // No tools? Return null — caller should use legacy mode.
@@ -647,6 +649,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
                 transcriptMaxBytes, jsonPolicy, exchangeRecorder);
+    }
+
+    /**
+     * Assembles the turn's tools exactly as {@link #executeIfToolsEnabled} does and
+     * reports whether any of them is not the reply tool.
+     *
+     * @see IAgentOrchestrator#offersTools
+     */
+    @Override
+    public boolean offersTools(LlmConfiguration.Task task, IConversationMemory memory) {
+        ToolSetup setup = buildToolSetup(task, memory);
+        String replyTool = setup.answerToolName();
+        return setup.toolSpecs().stream().anyMatch(spec -> !spec.name().equals(replyTool));
     }
 
     /**
@@ -709,10 +724,10 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * the loop until the model produces a final response — or re-pauses on a fresh
      * gated call.
      * <p>
-     * <strong>Task 8 ships only the signature.</strong> The body is implemented in
-     * Task 9. {@code LlmTask.executeResume} calls this method; the Task-8 unit test
-     * mocks the orchestrator, so the stub is never actually reached. The signature
-     * here is byte-identical to what Task 9 fills in.
+     * Delegates to {@link ToolLoopResumer#resumeToolLoop}, with a tool setup
+     * rebuilt from the task exactly as the live path builds it. This overload
+     * resumes with {@link JsonResponseFormatPolicy#DISABLED}.
+     * {@code LlmTask.executeResume} calls it.
      *
      * @param chatModel
      *            the resolved chat model for the paused task (rebuilt by
@@ -726,6 +741,9 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            gated calls
      * @param decision
      *            the human decision being applied
+     * @param toolHitlEnabled
+     *            whether the tool-approval gate is active for the resumed turn, so
+     *            a fresh gated call can pause again
      * @return the execution result (final response + tool trace)
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
@@ -765,7 +783,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * plus the built-in-only specs (needed for LAZY activation).
      *
      * @param toolSpecs
-     *            every registered tool spec (built-in + http + mcp + a2a)
+     *            every registered tool spec (built-in, http, mcp, a2a and the other
+     *            sources)
      * @param toolExecutors
      *            dispatch name → executor for every registered tool
      * @param toolSources
@@ -793,11 +812,37 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            the terminal reply tool of {@code answerMode: "tool"} (also
      *            present in {@code toolSpecs}, with no executor), or null when the
      *            task answers in text
+     * @param mandatoryApprovalRules
+     *            the mandatory, argument-aware approval rules the tool sources
+     *            attached this turn
+     *            ({@code ToolSourceProvider#mandatoryApprovals}); a call one
+     *            matches is gated whatever the agent's approval patterns say. Never
+     *            null
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
             Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
-            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool,
+            List<MandatoryApprovalRule> mandatoryApprovalRules) {
+
+        ToolSetup {
+            mandatoryApprovalRules = mandatoryApprovalRules == null ? List.of() : List.copyOf(mandatoryApprovalRules);
+        }
+
+        /** A setup without mandatory-approval rules. */
+        ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+                Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+                Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+                Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            this(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers, answerTool,
+                    List.of());
+        }
+
+        /** This setup with {@code rules} as its mandatory-approval rules. */
+        ToolSetup withMandatoryApprovalRules(List<MandatoryApprovalRule> rules) {
+            return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers,
+                    answerTool, rules);
+        }
 
         /** A setup without a reply tool. */
         ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
@@ -824,11 +869,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
         var ctx = toolAssemblyContext(task, memory);
         var merger = ToolSourceRegistry.newMerger();
 
-        // Phase 1 — the object-producing sources, in exactly the order
-        // collectAllBuiltInTools added them: the nine plain beans, then user memory
-        // and conversation recall, then the dynamic-agent block, then readAttachment
-        // last. That last position is why AttachmentToolsProvider exists separately
-        // from ContextualToolsProvider. Every one is a provider now, so a single
+        // Phase 1 — the object-producing sources, in the order collectAllBuiltInTools
+        // adds its share of them: the nine plain beans, then user memory and
+        // conversation recall, then the dynamic-agent block, then the group-task,
+        // team-handoff and artifact sources, then readAttachment (the optional
+        // agent-ops provider is appended after it). That late position is why
+        // AttachmentToolsProvider exists separately from ContextualToolsProvider. Every
+        // one is a provider now, so a single
         // failing source costs the turn only its own tools.
         var contextual = contextualToolsProvider();
         var phaseOne = new ArrayList<ToolSourceProvider>(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
@@ -882,12 +929,18 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
+        // The mandatory, argument-aware approval rules the providers attached to their
+        // tools this turn. Carried on the setup through the LAZY completion and the
+        // reply tool alike, so the live loop and the resume classify with the same
+        // rules.
+        var mandatoryRules = merger.mandatoryApprovalRules();
         if (externalLazy) {
-            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task).withMandatoryApprovalRules(mandatoryRules),
+                    task);
         }
         var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
-                assembled.toolEndpoints(), assembled.toolRequestResolvers());
+                assembled.toolEndpoints(), assembled.toolRequestResolvers(), null, mandatoryRules);
         return withAnswerTool(setup, task);
     }
 
@@ -937,7 +990,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
         if (onlyTool) {
             AnswerTool.noteOnlyTool(task);
         }
-        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool);
+        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool,
+                setup.mandatoryApprovalRules());
     }
 
     private static <V> Map<String, V> copyOf(Map<String, V> map) {

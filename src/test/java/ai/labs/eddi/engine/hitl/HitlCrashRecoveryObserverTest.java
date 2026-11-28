@@ -532,6 +532,123 @@ class HitlCrashRecoveryObserverTest {
     }
 
     @Nested
+    @DisplayName("Group discussions interrupted by a restart")
+    class InterruptedGroupTests {
+
+        private final Instant processStart = Instant.now().minus(10, ChronoUnit.MINUTES);
+
+        private GroupConversation runningGc(String id, GroupConversationState state, Instant lastModified) {
+            var gc = new GroupConversation();
+            gc.setId(id);
+            gc.setState(state);
+            gc.setLastModified(lastModified);
+            return gc;
+        }
+
+        private void running(GroupConversationState state, GroupConversation... gcs) throws Exception {
+            when(gcStore.findByState(eq(state), isNull(), anyInt())).thenReturn(List.of(gcs));
+        }
+
+        @Test
+        @DisplayName("IN_PROGRESS discussion last written before the process started is cancelled")
+        void inProgressBeforeStartCancelled() throws Exception {
+            running(GroupConversationState.IN_PROGRESS,
+                    runningGc(GC_ID, GroupConversationState.IN_PROGRESS, processStart.minus(1, ChronoUnit.MINUTES)));
+            when(groupConversationService.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL)).thenReturn(true);
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService).cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL);
+        }
+
+        @Test
+        @DisplayName("SYNTHESIZING discussion last written before the process started is cancelled")
+        void synthesizingBeforeStartCancelled() throws Exception {
+            running(GroupConversationState.SYNTHESIZING,
+                    runningGc(GC_ID, GroupConversationState.SYNTHESIZING, processStart.minus(1, ChronoUnit.HOURS)));
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService).cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL);
+        }
+
+        @Test
+        @DisplayName("a discussion written after the process started is a live leg of this process — left alone")
+        void writtenAfterStartLeftAlone() throws Exception {
+            running(GroupConversationState.IN_PROGRESS,
+                    runningGc(GC_ID, GroupConversationState.IN_PROGRESS, processStart.plusSeconds(1)));
+            running(GroupConversationState.SYNTHESIZING,
+                    runningGc("gc-2", GroupConversationState.SYNTHESIZING, processStart));
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
+        }
+
+        @Test
+        @DisplayName("a discussion with no lastModified is of unknown age — left alone")
+        void unknownAgeLeftAlone() throws Exception {
+            running(GroupConversationState.IN_PROGRESS, runningGc(GC_ID, GroupConversationState.IN_PROGRESS, null));
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
+        }
+
+        @Test
+        @DisplayName("recover-in-progress=false leaves interrupted group discussions alone")
+        void gatedByRecoverInProgress() throws Exception {
+            running(GroupConversationState.IN_PROGRESS,
+                    runningGc(GC_ID, GroupConversationState.IN_PROGRESS, processStart.minus(1, ChronoUnit.DAYS)));
+
+            observer(true, false).runRecovery(processStart);
+
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
+        }
+
+        @Test
+        @DisplayName("a failing cancel does not stop the next discussion, nor the SYNTHESIZING scan")
+        void failingCancelDoesNotStopTheRest() throws Exception {
+            Instant before = processStart.minus(5, ChronoUnit.MINUTES);
+            running(GroupConversationState.IN_PROGRESS,
+                    runningGc("gc-a", GroupConversationState.IN_PROGRESS, before),
+                    runningGc("gc-b", GroupConversationState.IN_PROGRESS, before));
+            running(GroupConversationState.SYNTHESIZING, runningGc("gc-c", GroupConversationState.SYNTHESIZING, before));
+            when(groupConversationService.cancelDiscussion("gc-a", ControlSignal.CANCEL_GRACEFUL))
+                    .thenThrow(new RuntimeException("store down"));
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService).cancelDiscussion("gc-b", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelDiscussion("gc-c", ControlSignal.CANCEL_GRACEFUL);
+        }
+
+        @Test
+        @DisplayName("a failing IN_PROGRESS scan does not skip the SYNTHESIZING scan")
+        void failingScanDoesNotSkipTheOtherState() throws Exception {
+            when(gcStore.findByState(eq(GroupConversationState.IN_PROGRESS), isNull(), anyInt()))
+                    .thenThrow(new RuntimeException("query failed"));
+            running(GroupConversationState.SYNTHESIZING,
+                    runningGc(GC_ID, GroupConversationState.SYNTHESIZING, processStart.minus(1, ChronoUnit.MINUTES)));
+
+            observer(true, true).runRecovery(processStart);
+
+            verify(groupConversationService).cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL);
+        }
+
+        @Test
+        @DisplayName("the cluster sweep never cancels group discussions — a group holds no lease to prove it dead")
+        void clusterSweepLeavesGroupsAlone() throws Exception {
+            running(GroupConversationState.IN_PROGRESS,
+                    runningGc(GC_ID, GroupConversationState.IN_PROGRESS, Instant.now().minus(1, ChronoUnit.DAYS)));
+
+            observer(true, true).runClusterRecovery(id -> true);
+
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("Pending-approval retention sweep — Finding #32")
     class RetentionSweep {
 

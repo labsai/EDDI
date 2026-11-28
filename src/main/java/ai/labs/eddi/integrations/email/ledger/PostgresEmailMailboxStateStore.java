@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -26,6 +27,12 @@ import java.util.Optional;
  * {@code email_mailbox_notices} (primary key {@code (integration_id,
  * notice_key)}, so a claim is an insert that does nothing on conflict), created
  * on first use.
+ * <p>
+ * The cursor is {@code mailbox_cursor} (serialised) plus the legacy IMAP
+ * columns {@code uid_validity}/{@code last_uid}, mapped by
+ * {@link StoredCursor}. {@code mailbox_cursor} is added to an existing table
+ * with {@code ADD COLUMN IF NOT EXISTS}; a row written before opaque cursors
+ * has it NULL and loads as the same IMAP cursor from the legacy columns.
  */
 @ApplicationScoped
 @DefaultBean
@@ -42,6 +49,7 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
                 folder VARCHAR(255),
                 uid_validity BIGINT NOT NULL DEFAULT 0,
                 last_uid BIGINT NOT NULL DEFAULT 0,
+                mailbox_cursor TEXT,
                 since TIMESTAMP,
                 failures INTEGER NOT NULL DEFAULT 0,
                 backoff_until TIMESTAMP,
@@ -50,6 +58,8 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
                 spent_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
                 updated_at TIMESTAMP
             )
+            """, """
+            ALTER TABLE email_mailbox_state ADD COLUMN IF NOT EXISTS mailbox_cursor TEXT
             """, """
             CREATE TABLE IF NOT EXISTS email_mailbox_notices (
                 integration_id VARCHAR(255) NOT NULL,
@@ -89,7 +99,7 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     @Override
     public Optional<MailboxState> read(String integrationId) {
-        String sql = "SELECT folder, uid_validity, last_uid, since, failures, backoff_until, last_error, budget_day, spent_usd, updated_at FROM "
+        String sql = "SELECT folder, uid_validity, last_uid, mailbox_cursor, since, failures, backoff_until, last_error, budget_day, spent_usd, updated_at FROM "
                 + TABLE + " WHERE integration_id = ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, integrationId);
@@ -97,8 +107,9 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
                 if (!rows.next()) {
                     return Optional.empty();
                 }
-                return Optional.of(new MailboxState(integrationId, rows.getString("folder"), rows.getLong("uid_validity"), rows.getLong("last_uid"),
-                        instant(rows.getTimestamp("since")), rows.getInt("failures"), instant(rows.getTimestamp("backoff_until")),
+                MailboxCursor cursor = StoredCursor.read(rows.getString("mailbox_cursor"), rows.getLong("uid_validity"), rows.getLong("last_uid"));
+                return Optional.of(new MailboxState(integrationId, rows.getString("folder"), cursor, instant(rows.getTimestamp("since")),
+                        rows.getInt("failures"), instant(rows.getTimestamp("backoff_until")),
                         rows.getString("last_error"), rows.getString("budget_day"), rows.getDouble("spent_usd"),
                         instant(rows.getTimestamp("updated_at"))));
             }
@@ -108,18 +119,20 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
     }
 
     @Override
-    public void saveCursor(String integrationId, String folder, long uidValidity, long lastUid, Instant since, Instant now) {
-        String sql = "INSERT INTO " + TABLE + " (integration_id, folder, uid_validity, last_uid, since, failures, backoff_until, last_error, "
-                + "updated_at) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT (integration_id) DO UPDATE SET folder = EXCLUDED.folder, "
-                + "uid_validity = EXCLUDED.uid_validity, last_uid = EXCLUDED.last_uid, since = EXCLUDED.since, failures = 0, "
-                + "backoff_until = NULL, last_error = NULL, updated_at = EXCLUDED.updated_at";
+    public void saveCursor(String integrationId, String folder, MailboxCursor cursor, Instant since, Instant now) {
+        String sql = "INSERT INTO " + TABLE + " (integration_id, folder, uid_validity, last_uid, mailbox_cursor, since, failures, backoff_until, "
+                + "last_error, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT (integration_id) DO UPDATE SET "
+                + "folder = EXCLUDED.folder, uid_validity = EXCLUDED.uid_validity, last_uid = EXCLUDED.last_uid, "
+                + "mailbox_cursor = EXCLUDED.mailbox_cursor, since = EXCLUDED.since, failures = 0, backoff_until = NULL, last_error = NULL, "
+                + "updated_at = EXCLUDED.updated_at";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, integrationId);
             statement.setString(2, folder);
-            statement.setLong(3, uidValidity);
-            statement.setLong(4, lastUid);
-            statement.setTimestamp(5, timestamp(since));
-            statement.setTimestamp(6, timestamp(now));
+            statement.setLong(3, StoredCursor.legacyUidValidity(cursor));
+            statement.setLong(4, StoredCursor.legacyLastUid(cursor));
+            statement.setString(5, StoredCursor.serialized(cursor));
+            statement.setTimestamp(6, timestamp(since));
+            statement.setTimestamp(7, timestamp(now));
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write the mailbox cursor", e);

@@ -8,8 +8,10 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestGroupTemplates;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
+import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -66,6 +68,11 @@ public class RestGroupTemplates implements IRestGroupTemplates {
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", e.getMessage())).build();
+        } catch (WebApplicationException | ForbiddenException e) {
+            // The store's own answer: a 403 for an assigned agent the caller may not
+            // use, or whatever status it chose. Not an internal error, and not logged
+            // as one.
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to instantiate template %s", sanitize(templateId));
             return Response.serverError().build();

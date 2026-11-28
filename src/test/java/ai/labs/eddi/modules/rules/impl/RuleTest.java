@@ -166,6 +166,15 @@ class RuleTest {
         assertEquals(rule, rule);
     }
 
+    /** Rule names are optional; comparing an unnamed rule must not throw. */
+    @Test
+    void equality_unnamedRules() {
+        assertDoesNotThrow(() -> new Rule(null).equals(new Rule("r1")));
+        assertNotEquals(new Rule(null), new Rule("r1"));
+        assertNotEquals(new Rule("r1"), new Rule(null));
+        assertEquals(new Rule(null), new Rule(null));
+    }
+
     // --- toString ---
 
     @Test

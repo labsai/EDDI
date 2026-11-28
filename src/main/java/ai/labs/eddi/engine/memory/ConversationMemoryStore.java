@@ -22,8 +22,10 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
@@ -60,9 +62,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 /**
  * MongoDB implementation of {@link IConversationMemoryStore}.
  * <p>
- * Annotated {@code @DefaultBean} so that future database backends (e.g.,
- * PostgreSQL) can provide an alternative implementation activated via
- * {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
+ * {@code DataStoreProducers} picks this store or
+ * {@code PostgresConversationMemoryStore} by {@code eddi.datastore.type}.
  *
  * @author ginccc
  */
@@ -121,7 +122,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      */
     private static final List<String> RESUME_ONLY_BATCH_FIELDS = List.of("hitlPendingToolCalls.chatTranscriptJson",
             "hitlPendingToolCalls.gatingAssistantMessageJson", "hitlPendingToolCalls.traceSoFar", "hitlPendingToolCalls.fingerprint",
-            "hitlPendingToolCalls.calls.argumentsRaw");
+            "hitlPendingToolCalls.planNonce", "hitlPendingToolCalls.calls.argumentsRaw");
     /**
      * Keys the append path handles with a dedicated operator, so they must not also
      * be {@code $set} or {@code $unset}: the two step/output arrays are pushed to,
@@ -1244,14 +1245,14 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         return ids;
     }
 
+    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
+
     /**
      * Projected fields for pending-approval summaries — never the full document.
      * {@code hitlPendingToolCalls.calls.toolName} pulls in ONLY the tool names
      * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
      * stays cheap and never risks exposing tool-call arguments.
      */
-    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
-
     private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
             KEY_HITL_PAUSED_AT, "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
@@ -1323,13 +1324,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public void raiseFence(String conversationId, long fence) {
+    public long raiseFence(String conversationId, long fence) {
         // $max: never lowers; the revision is deliberately not touched, so the turn
         // that is about to write on the revision it loaded does not conflict with it.
-        conversationCollectionDocument.updateOne(
-                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
-                        Filters.or(Filters.exists(KEY_FENCE, false), Filters.lt(KEY_FENCE, fence))),
-                Updates.max(KEY_FENCE, fence));
+        // One round trip that also answers the fence the document carried before it:
+        // below `fence` the raise moved it, otherwise it is the stored fence.
+        Document before = conversationCollectionDocument.findOneAndUpdate(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Updates.max(KEY_FENCE, fence),
+                new FindOneAndUpdateOptions().projection(new Document(KEY_FENCE, 1)).returnDocument(ReturnDocument.BEFORE));
+        return before != null && before.get(KEY_FENCE) instanceof Number stored ? stored.longValue() : 0;
+    }
+
+    @Override
+    public boolean liftFence(String conversationId, long expected, long lifted) {
+        return conversationCollectionDocument.updateOne(
+                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)), Filters.eq(KEY_FENCE, expected)),
+                Updates.set(KEY_FENCE, lifted)).getModifiedCount() == 1;
     }
 
     @Override
@@ -1342,7 +1353,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
         // would linger on an ended or cancelled conversation document.
         for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
-                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext", "hitlPlanHash",
                 "hitlPauseType", "hitlPendingToolCalls")) {
             unset.append(field, "");
         }

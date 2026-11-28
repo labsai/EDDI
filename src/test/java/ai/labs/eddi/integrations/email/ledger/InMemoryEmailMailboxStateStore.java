@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.integrations.email.transport.MailboxCursor;
+
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,20 +25,20 @@ public class InMemoryEmailMailboxStateStore implements IEmailMailboxStateStore {
     }
 
     private MailboxState current(String id) {
-        return states.getOrDefault(id, new MailboxState(id, null, 0, 0, null, 0, null, null, null, 0.0, null));
+        return states.getOrDefault(id, new MailboxState(id, null, null, null, 0, null, null, null, 0.0, null));
     }
 
     @Override
-    public synchronized void saveCursor(String integrationId, String folder, long uidValidity, long lastUid, Instant since, Instant now) {
+    public synchronized void saveCursor(String integrationId, String folder, MailboxCursor cursor, Instant since, Instant now) {
         MailboxState s = current(integrationId);
         states.put(integrationId,
-                new MailboxState(integrationId, folder, uidValidity, lastUid, since, 0, null, null, s.budgetDay(), s.spentUsd(), now));
+                new MailboxState(integrationId, folder, cursor, since, 0, null, null, s.budgetDay(), s.spentUsd(), now));
     }
 
     @Override
     public synchronized void recordFailure(String integrationId, int failures, Instant backoffUntil, String lastError, Instant now) {
         MailboxState s = current(integrationId);
-        states.put(integrationId, new MailboxState(integrationId, s.folder(), s.uidValidity(), s.lastUid(), s.since(), failures, backoffUntil,
+        states.put(integrationId, new MailboxState(integrationId, s.folder(), s.cursor(), s.since(), failures, backoffUntil,
                 lastError, s.budgetDay(), s.spentUsd(), now));
     }
 
@@ -44,7 +46,7 @@ public class InMemoryEmailMailboxStateStore implements IEmailMailboxStateStore {
     public synchronized double addSpend(String integrationId, String day, double amountUsd, Instant now) {
         MailboxState s = current(integrationId);
         double spent = day.equals(s.budgetDay()) ? s.spentUsd() + amountUsd : amountUsd;
-        states.put(integrationId, new MailboxState(integrationId, s.folder(), s.uidValidity(), s.lastUid(), s.since(), s.failures(), s.backoffUntil(),
+        states.put(integrationId, new MailboxState(integrationId, s.folder(), s.cursor(), s.since(), s.failures(), s.backoffUntil(),
                 s.lastError(), day, spent, now));
         return spent;
     }

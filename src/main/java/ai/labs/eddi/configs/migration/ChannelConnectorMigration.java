@@ -8,17 +8,26 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
+import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.configs.IRestVersionInfo.versionQueryParam;
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
+import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 import java.util.*;
@@ -37,13 +46,30 @@ import java.util.Locale;
  * {@code ChannelIntegrationConfiguration} per unique {@code channelId}, merging
  * multiple agents targeting the same channel into a multi-target config.
  *
+ * <h3>Every created channel gets its descriptor</h3> The router, the REST
+ * listings and this migration's own duplicate check all find channel
+ * configurations by listing {@code ai.labs.channel} descriptors, and nothing
+ * writes one for an in-process create ({@code DocumentDescriptorFilter} runs
+ * only for HTTP responses). The first version of this migration wrote none: its
+ * channels were invisible, the router kept routing through the legacy
+ * connectors, and a re-run after a partial failure created every channel again.
+ * The completion flag was therefore renamed, so a deployment that finished that
+ * first run migrates once more and gets visible configurations. The documents
+ * the first run created stay where they are, unreferenced: no API lists or
+ * reads them, and removing them would need a scan of the raw collection for
+ * nothing a user can reach.
+ *
  * @since 6.1.0
  */
 @ApplicationScoped
 public class ChannelConnectorMigration {
 
     private static final Logger LOGGER = Logger.getLogger(ChannelConnectorMigration.class);
-    private static final String MIGRATION_KEY = "channel-connector-migration-complete";
+    /**
+     * {@code -v2}: the first run, recorded as
+     * {@code channel-connector-migration-complete}, wrote no descriptors.
+     */
+    private static final String MIGRATION_KEY = "channel-connector-migration-v2-complete";
 
     /**
      * Trigger keywords reserved by the router — migration must not generate these.
@@ -106,39 +132,44 @@ public class ChannelConnectorMigration {
         // Group connectors by channelType:channelId
         var channelGroups = new LinkedHashMap<String, List<ConnectorEntry>>();
 
+        List<DeploymentInfo> statuses;
         try {
-            var statuses = deploymentStore.readDeploymentInfos(deployed);
-            for (var status : statuses) {
-                if (status.getAgentId() == null || status.getAgentVersion() == null) {
-                    continue;
-                }
-                String agentId = status.getAgentId();
-                try {
-                    var agentConfig = agentStore.read(agentId, status.getAgentVersion());
-                    if (agentConfig == null || agentConfig.getChannels() == null) {
-                        continue;
-                    }
-                    for (var connector : agentConfig.getChannels()) {
-                        if (connector.getType() == null || connector.getConfig() == null) {
-                            continue;
-                        }
-                        String channelId = connector.getConfig().get("channelId");
-                        if (channelId == null || channelId.isBlank()) {
-                            continue;
-                        }
-                        String channelType = connector.getType().toString().toLowerCase(Locale.ROOT);
-                        String groupKey = channelType + ":" + channelId;
-                        channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
-                                .add(new ConnectorEntry(connector, agentId, channelType,
-                                        lookupAgentName(agentId, status.getAgentVersion())));
-                    }
-                } catch (Exception e) {
-                    LOGGER.warnf("Skipping agent %s during channel migration: %s", agentId, e.getMessage());
-                }
-            }
+            statuses = deploymentStore.readDeploymentInfos(deployed);
         } catch (Exception e) {
             LOGGER.warn("Failed to read deployment infos for channel migration", e);
             throw new RuntimeException("Cannot read deployment infos", e);
+        }
+        for (var status : statuses) {
+            if (status.getAgentId() == null || status.getAgentVersion() == null) {
+                continue;
+            }
+            String agentId = status.getAgentId();
+            AgentConfiguration agentConfig;
+            try {
+                agentConfig = agentStore.read(agentId, status.getAgentVersion());
+            } catch (Exception e) {
+                LOGGER.warnf("Skipping agent %s during channel migration: %s", agentId, e.getMessage());
+                continue;
+            }
+            if (agentConfig == null || agentConfig.getChannels() == null) {
+                continue;
+            }
+            // Outside the skip above, deliberately: a descriptor that cannot be read aborts
+            // the run (see readAgentDescriptor).
+            DocumentDescriptor agentDescriptor = readAgentDescriptor(agentId, status.getAgentVersion());
+            for (var connector : agentConfig.getChannels()) {
+                if (connector.getType() == null || connector.getConfig() == null) {
+                    continue;
+                }
+                String channelId = connector.getConfig().get("channelId");
+                if (channelId == null || channelId.isBlank()) {
+                    continue;
+                }
+                String channelType = connector.getType().toString().toLowerCase(Locale.ROOT);
+                String groupKey = channelType + ":" + channelId;
+                channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
+                        .add(new ConnectorEntry(connector, agentId, channelType, agentDescriptor));
+            }
         }
 
         // Pre-load existing channel configs to avoid creating duplicates on retry.
@@ -216,13 +247,25 @@ public class ChannelConnectorMigration {
             config.setTargets(targets);
             config.setDefaultTargetName(targets.get(0).getName());
 
+            IResourceStore.IResourceId createdId;
             try {
-                channelStore.create(config);
-                created++;
-                LOGGER.infof("  Migrated channel %s:%s (%d targets)", channelType, channelId, targets.size());
+                createdId = channelStore.create(config);
             } catch (Exception e) {
                 failed++;
                 LOGGER.warnf("  Failed to create config for %s:%s — %s", channelType, channelId, e.getMessage());
+                continue;
+            }
+            try {
+                descriptorStore.createDescriptor(createdId.getId(), createdId.getVersion(),
+                        channelDescriptor(createdId, config, first.agentDescriptor()));
+                created++;
+                LOGGER.infof("  Migrated channel %s:%s (%d targets)", channelType, channelId, targets.size());
+            } catch (Exception e) {
+                // Without its descriptor the config is invisible to the router and to the
+                // duplicate check, so the next run would create it again: undo it instead.
+                failed++;
+                LOGGER.warnf("  Failed to write the descriptor for %s:%s — %s", channelType, channelId, e.getMessage());
+                removeCreatedChannel(createdId);
             }
         }
 
@@ -230,12 +273,61 @@ public class ChannelConnectorMigration {
     }
 
     private record ConnectorEntry(ChannelConnector connector, String agentId,
-            String channelType, String agentName) {
+            String channelType, DocumentDescriptor agentDescriptor) {
+
+        /** The agent's display name, or {@code null} when it has none. */
+        String agentName() {
+            if (agentDescriptor == null || agentDescriptor.getName() == null || agentDescriptor.getName().isBlank()) {
+                return null;
+            }
+            return agentDescriptor.getName();
+        }
+    }
+
+    /**
+     * The descriptor of a migrated channel: named like the configuration, and owned
+     * and filed like the agent it routes to by default, so whoever could see that
+     * agent sees its channel.
+     * <p>
+     * The agent's visibility is copied only when it is {@code private}. Any wider
+     * one becomes {@code space}, the default for a new resource: a channel holds
+     * the bot's credentials, and an agent published or opened to the organisation
+     * <em>to talk to</em> does not make its channel configuration something
+     * everyone should read. Grants are not copied, for the same reason. An agent
+     * without a descriptor, or without an owner, leaves the channel unowned, as
+     * legacy data — which is what that agent is too.
+     */
+    private static DocumentDescriptor channelDescriptor(IResourceStore.IResourceId createdId,
+                                                        ChannelIntegrationConfiguration config, DocumentDescriptor agentDescriptor) {
+        var descriptor = ResourceUtilities.createDocumentDescriptor(createURI(
+                IRestChannelIntegrationStore.resourceURI, createdId.getId(), versionQueryParam, createdId.getVersion()));
+        descriptor.setName(config.getName());
+        if (agentDescriptor != null) {
+            descriptor.setOwnerId(agentDescriptor.getOwnerId());
+            descriptor.setSpaceId(agentDescriptor.getSpaceId());
+            descriptor.setVisibility(agentDescriptor.resourceVisibility() == ResourceVisibility.privateAccess
+                    ? ResourceVisibility.privateAccess.wireName()
+                    : ResourceVisibility.space.wireName());
+        }
+        return DescriptorAccess.rebuildIndex(descriptor);
+    }
+
+    private void removeCreatedChannel(IResourceStore.IResourceId createdId) {
+        try {
+            channelStore.deleteAllPermanently(createdId.getId());
+        } catch (Exception e) {
+            LOGGER.errorf(e, "  Channel config %s has no descriptor and could not be removed again; it is unreachable "
+                    + "through every API and can be deleted from the channel collection by hand.", createdId.getId());
+        }
     }
 
     /**
      * Load all existing channel integration configs and return their
      * {@code channelType:channelId} keys. Used to detect duplicates on retry.
+     * <p>
+     * A listing that fails aborts the run, which then retries on the next start:
+     * carrying on without the keys would create a second config for every channel
+     * that already has one.
      */
     private Set<String> loadExistingChannelKeys() {
         var keys = new HashSet<String>();
@@ -263,26 +355,33 @@ public class ChannelConnectorMigration {
                 }
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to load existing channel configs for duplicate check — "
-                    + "migration will proceed but may create duplicates", e);
+            // Only the listing itself lands here; one unreadable config is skipped above.
+            throw new IllegalStateException("Cannot list the existing channel configs, so duplicates cannot be ruled out", e);
         }
         return keys;
     }
 
     /**
-     * Look up the human-readable name for an agent via its document descriptor.
-     * Returns {@code null} if the descriptor is not found or has no name.
+     * Read an agent's document descriptor, for its name and its ownership. Returns
+     * {@code null} when the agent has none, which makes its channel unowned like
+     * the agent itself.
+     * <p>
+     * A read that fails is not an agent without an owner, and treating it as one
+     * would open the channel to everyone under the default legacy policy. It aborts
+     * the run instead, which then retries on the next start. Skipping only that
+     * agent would not do: a channel it shares would be created without its target,
+     * and the retry would skip that channel as already migrated.
      */
-    private String lookupAgentName(String agentId, Integer version) {
+    private DocumentDescriptor readAgentDescriptor(String agentId, Integer version) {
         try {
-            var descriptor = descriptorStore.readDescriptor(agentId, version);
-            if (descriptor != null && descriptor.getName() != null && !descriptor.getName().isBlank()) {
-                return descriptor.getName();
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("Could not read descriptor for agent %s: %s", agentId, e.getMessage());
+            return descriptorStore.readDescriptor(agentId, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            LOGGER.debugf("Agent %s has no descriptor; its channel is migrated unowned", agentId);
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException("Cannot read the descriptor of agent " + agentId
+                    + ", so the owner of its channel is unknown", e);
         }
-        return null;
     }
 
     /**

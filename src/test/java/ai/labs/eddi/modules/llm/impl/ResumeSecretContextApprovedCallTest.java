@@ -228,7 +228,7 @@ class ResumeSecretContextApprovedCallTest {
 
         MemoryItemConverter converter = new MemoryItemConverter();
         var realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        var prePostUtils = new PrePostUtils(json, converter, new TemplatingEngine(realEngine), new DataFactory(),
+        var prePostUtils = new PrePostUtils(json, new TemplatingEngine(realEngine), new DataFactory(),
                 mock(SecretPropertyVault.class));
         var executor = new ApiCallExecutor(httpClient, json, mock(IRuntime.class), prePostUtils, globalVariableResolver, secretResolver,
                 callerIdentityResolver, mock(CallerIdentityContext.class), new RequestRedactor(callerIdentityResolver), null, false, 30_000L,

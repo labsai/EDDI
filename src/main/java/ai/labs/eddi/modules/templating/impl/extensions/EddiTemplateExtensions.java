@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.qute.TemplateExtension;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.UUID;
@@ -29,6 +30,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * <li>{encoder:base64(str)}</li>
  * <li>{encoder:base64Url(str)}</li>
  * <li>{encoder:base64Mime(str)}</li>
+ * <li>{encoder:mimeHeader(str)}</li>
  * </ul>
  */
 public class EddiTemplateExtensions {
@@ -94,5 +96,54 @@ public class EddiTemplateExtensions {
     @TemplateExtension(namespace = "encoder")
     static String base64Mime(String plain) {
         return Base64.getMimeEncoder().encodeToString(plain.getBytes(UTF_8));
+    }
+
+    /**
+     * Payload bytes per encoded word: 39 bytes are 52 base64 characters, so a word
+     * is 64 characters with its {@code =?UTF-8?B?...?=} frame. That is under RFC
+     * 2047's 75-character limit, and {@code Subject: } plus the first word stays
+     * within a 76-character line.
+     */
+    private static final int MIME_WORD_PAYLOAD_BYTES = 39;
+
+    /**
+     * Encodes a header value as RFC 2047 {@code B} encoded words in UTF-8, folded
+     * onto continuation lines.
+     * <p>
+     * Every character is encoded, ASCII included, so the result never carries a raw
+     * CR or LF from the input and cannot end the header it is written into. Words
+     * are split on code-point boundaries, so a multi-byte character is never cut
+     * across two words, and consecutive words are joined with {@code CRLF SP},
+     * which a reader unfolds and decodes back to the original text. The empty
+     * string encodes to the empty string.
+     */
+    @TemplateExtension(namespace = "encoder")
+    static String mimeHeader(String plain) {
+        var encoder = Base64.getEncoder();
+        var out = new StringBuilder();
+        var word = new ByteArrayOutputStream();
+        int i = 0;
+        while (i < plain.length()) {
+            int codePoint = plain.codePointAt(i);
+            byte[] bytes = new String(Character.toChars(codePoint)).getBytes(UTF_8);
+            if (word.size() + bytes.length > MIME_WORD_PAYLOAD_BYTES) {
+                appendMimeWord(out, encoder, word);
+            }
+            word.writeBytes(bytes);
+            i += Character.charCount(codePoint);
+        }
+        appendMimeWord(out, encoder, word);
+        return out.toString();
+    }
+
+    private static void appendMimeWord(StringBuilder out, Base64.Encoder encoder, ByteArrayOutputStream word) {
+        if (word.size() == 0) {
+            return;
+        }
+        if (!out.isEmpty()) {
+            out.append("\r\n ");
+        }
+        out.append("=?UTF-8?B?").append(encoder.encodeToString(word.toByteArray())).append("?=");
+        word.reset();
     }
 }

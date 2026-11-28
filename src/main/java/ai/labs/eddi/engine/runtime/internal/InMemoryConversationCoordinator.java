@@ -38,7 +38,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * {@code eddi.coordinator.queue_depth},
  * {@code eddi.coordinator.total_processed},
  * {@code eddi.coordinator.total_dead_lettered},
- * {@code eddi.coordinator.dead_letters}.</li>
+ * {@code eddi.coordinator.dead_letters}, plus the aliases
+ * {@code eddi.coordinator.dead_lettered} and
+ * {@code eddi.coordinator.dead_letters_retained}.</li>
  * </ul>
  *
  * @author ginccc

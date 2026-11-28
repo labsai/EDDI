@@ -44,7 +44,7 @@ import static com.mongodb.client.model.Updates.set;
  * {@code alertrules}. The scope is stored as {@code scope.allAgents} /
  * {@code scope.agentIds} so "the rules watching agent X" is one indexed query.
  *
- * @since 6.6.0
+ * @since 6.7.0
  */
 @ApplicationScoped
 @DefaultBean
@@ -99,6 +99,11 @@ public class AlertRuleStore implements IAlertRuleStore {
     @Override
     public long count(String agentId, boolean onlyThatAgent) {
         return collection.countDocuments(listFilter(agentId, onlyThatAgent));
+    }
+
+    @Override
+    public long countAllAgents() {
+        return collection.countDocuments(eq("scope.allAgents", true));
     }
 
     @Override

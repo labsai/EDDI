@@ -157,6 +157,9 @@ public class NatsSharedKv implements ISharedKv {
         }
     }
 
+    /** JetStream API error 10054: the message exceeds the stream's maximum size. */
+    private static final int JS_MESSAGE_EXCEEDS_MAXIMUM = 10054;
+
     @FunctionalInterface
     private interface KvCall<T> {
         T call(KeyValue kv) throws IOException, JetStreamApiException, InterruptedException;
@@ -172,6 +175,9 @@ public class NatsSharedKv implements ISharedKv {
         } catch (JetStreamApiException e) {
             forgetHandle(used);
             outcome = "error";
+            if (e.getApiErrorCode() == JS_MESSAGE_EXCEEDS_MAXIMUM) {
+                throw new ClusterValueRefusedException("KV " + op + " on " + bucket + " refused a value over its size limit: " + e.getMessage(), e);
+            }
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (IOException e) {
             forgetHandle(used);
@@ -184,6 +190,11 @@ public class NatsSharedKv implements ISharedKv {
         } catch (ClusterUnavailableException e) {
             outcome = "unavailable";
             throw e;
+        } catch (IllegalArgumentException e) {
+            // jnats refuses a payload over the server's max_payload before sending it: the
+            // connection is fine, the value is too large.
+            outcome = "refused";
+            throw new ClusterValueRefusedException("KV " + op + " on " + bucket + " refused a value over the payload limit: " + e.getMessage(), e);
         } catch (RuntimeException e) {
             // jnats raises IllegalStateException on a closed connection and on a full
             // outgoing queue. Neither makes the handle stale: a new connection gets a new

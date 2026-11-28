@@ -7,16 +7,16 @@
    ────────────────────────────────────────────── */
 
 import { MessagesSquare } from "lucide-react";
-import { useParams } from "react-router-dom";
 
 import { getBrand } from "@/api/brand";
 import { isDemoMode } from "@/api/demo-api";
 import { ChatHeader } from "@/components/ChatHeader";
 import { ChatWidget } from "@/components/ChatWidget";
 import { t } from "@/i18n";
+import { useChatRoute } from "@/location";
 
 export function ChatRoute() {
-  const { environment, agentId } = useParams();
+  const { environment, agentId } = useChatRoute().params;
   if (isDemoMode(environment, agentId) && getBrand().branded) {
     return <DemoUnavailable />;
   }

@@ -13,9 +13,9 @@ import java.util.Optional;
  * Per-team monthly spend and adjustments (F6): one document per
  * {@code (groupId, month)}, month as {@code YYYY-MM} in UTC.
  * <p>
- * <b>Atomicity contract.</b> {@link #addSpend} and {@link #applyAdjustment} are
- * single storage-level operations (a {@code $inc} / {@code INSERT ... ON
- * CONFLICT}), safe across nodes. Every method throws
+ * <b>Atomicity contract.</b> {@link #addSpend}, {@link #applyAdjustment} and
+ * {@link #setAdjustment} are single storage-level operations (a conditional
+ * update, or a locked row), safe across nodes. Every method throws
  * {@link TeamBudgetAccountingUnavailableException} when the database cannot
  * answer; a store never answers 0.0 or "allow" for an outage.
  */
@@ -26,13 +26,18 @@ public interface ITeamBudgetStore {
     /** Bound on {@link TeamBudgetMonth#appliedTransferIds()} kept per month. */
     int MAX_TRANSFER_IDS = 200;
 
-    /** What {@link #applyAdjustment} did. */
+    /** What {@link #applyAdjustment} or {@link #setAdjustment} did. */
     enum AdjustOutcome {
         APPLIED,
-        /** A debit that would leave the cap below the month's spend. */
+        /** A change that would leave the cap below the month's spend. */
         REFUSED,
         /** The {@code transferId} was already applied; nothing changed. */
-        DUPLICATE
+        DUPLICATE,
+        /**
+         * {@link #setAdjustment} only: the stored adjustment is no longer the expected
+         * one; nothing changed.
+         */
+        CONFLICT
     }
 
     /**
@@ -59,6 +64,21 @@ public interface ITeamBudgetStore {
      */
     AdjustOutcome applyAdjustment(String groupId, String month, double deltaUsd, double baseUsd, TeamBudgetMonth.Adjustment entry,
                                   String transferId, Instant expiresAt);
+
+    /**
+     * Replaces the month's adjustment with {@code newAdjustmentUsd}: a
+     * compare-and-set, applied only while the stored adjustment still equals
+     * {@code expectedAdjustmentUsd} (0.0 for a month not stored yet) and
+     * {@code baseUsd + newAdjustmentUsd >= spent}. A cap computed from a snapshot
+     * therefore never lands on top of a change made after the snapshot was read --
+     * which a delta through {@link #applyAdjustment} would.
+     *
+     * @return {@link AdjustOutcome#APPLIED}; {@link AdjustOutcome#CONFLICT} when
+     *         the adjustment changed since it was read; or
+     *         {@link AdjustOutcome#REFUSED} when the cap would drop below the spend
+     */
+    AdjustOutcome setAdjustment(String groupId, String month, double expectedAdjustmentUsd, double newAdjustmentUsd, double baseUsd,
+                                TeamBudgetMonth.Adjustment entry, Instant expiresAt);
 
     /** Removes months whose retention has passed; returns how many. */
     int deleteExpired(Instant now);

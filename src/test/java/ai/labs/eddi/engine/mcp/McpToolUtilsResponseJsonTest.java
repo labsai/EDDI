@@ -54,6 +54,26 @@ class McpToolUtilsResponseJsonTest {
         assertEquals("Re-check.", r.get("error").asText());
     }
 
+    /**
+     * The schedule resource answers its refusals as plain text — a HITL timeout or
+     * continuation that cannot be fired, a claim that was refused, a fire past its
+     * bound. Reduced to "The request failed (HTTP 409)", the caller cannot tell
+     * which, nor what to do instead.
+     */
+    @Test
+    @DisplayName("a plain-text body is the message; the code follows the status")
+    void textBody() throws Exception {
+        JsonNode conflict = result(Response.status(409).entity("Schedule s1 is firing already.").build());
+        assertEquals("CONFLICT", conflict.get("errorCode").asText());
+        assertEquals("Schedule s1 is firing already.", conflict.get("error").asText());
+
+        JsonNode timeout = result(Response.status(504).entity("The fire did not finish within its bound.").build());
+        assertEquals("TIMEOUT", timeout.get("errorCode").asText());
+        assertEquals("The fire did not finish within its bound.", timeout.get("error").asText());
+
+        assertEquals("The request failed (HTTP 400)", result(Response.status(400).entity("  ").build()).get("error").asText());
+    }
+
     @Test
     @DisplayName("a 5xx without a body, or no response at all, is INTERNAL without detail")
     void serverError() throws Exception {

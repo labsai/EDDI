@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatRoute } from "./ChatRoute";
 import { ChatProvider } from "@/store/chat-store";
 import type { ChatConfig } from "@/types";
@@ -56,13 +56,11 @@ afterEach(() => {
 
 function renderAt(path: string, config?: Partial<ChatConfig>) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <ChatProvider config={config}>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatRoute />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider config={config}>
+      <ChatLocationProvider initialPath={path}>
+        <ChatRoute />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 

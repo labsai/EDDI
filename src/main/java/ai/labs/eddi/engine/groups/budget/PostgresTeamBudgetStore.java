@@ -171,24 +171,7 @@ public class PostgresTeamBudgetStore implements ITeamBudgetStore {
         try (Connection connection = dataSourceInstance.get().getConnection()) {
             connection.setAutoCommit(false);
             try {
-                try (PreparedStatement ensure = connection
-                        .prepareStatement(
-                                "INSERT INTO team_budget_months (group_id, month, expires_at_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
-                    ensure.setString(1, groupId);
-                    ensure.setString(2, month);
-                    ensure.setLong(3, expiresAt.toEpochMilli());
-                    ensure.executeUpdate();
-                }
-                TeamBudgetMonth current;
-                try (PreparedStatement lock = connection
-                        .prepareStatement("SELECT " + COLUMNS + " FROM team_budget_months WHERE group_id = ? AND month = ? FOR UPDATE")) {
-                    lock.setString(1, groupId);
-                    lock.setString(2, month);
-                    try (ResultSet rows = lock.executeQuery()) {
-                        rows.next();
-                        current = toMonth(rows);
-                    }
-                }
+                TeamBudgetMonth current = lockMonth(connection, groupId, month, expiresAt);
                 if (transferId != null && current.appliedTransferIds().contains(transferId)) {
                     connection.rollback();
                     return AdjustOutcome.DUPLICATE;
@@ -222,6 +205,67 @@ public class PostgresTeamBudgetStore implements ITeamBudgetStore {
             }
         } catch (SQLException | JsonProcessingException e) {
             throw new TeamBudgetAccountingUnavailableException("Could not adjust the team budget", e);
+        }
+    }
+
+    @Override
+    public AdjustOutcome setAdjustment(String groupId, String month, double expectedAdjustmentUsd, double newAdjustmentUsd, double baseUsd,
+                                       TeamBudgetMonth.Adjustment entry, Instant expiresAt) {
+        createSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                TeamBudgetMonth current = lockMonth(connection, groupId, month, expiresAt);
+                if (current.adjustmentUsd() != expectedAdjustmentUsd) {
+                    connection.rollback();
+                    return AdjustOutcome.CONFLICT;
+                }
+                if (!(baseUsd + newAdjustmentUsd >= current.spentUsd())) {
+                    connection.rollback();
+                    return AdjustOutcome.REFUSED;
+                }
+                List<TeamBudgetMonth.Adjustment> history = new ArrayList<>(current.adjustments());
+                history.add(entry);
+                try (PreparedStatement update = connection
+                        .prepareStatement("UPDATE team_budget_months SET adjustment_usd = ?, adjustments = ? WHERE group_id = ? AND month = ?")) {
+                    update.setDouble(1, newAdjustmentUsd);
+                    update.setString(2,
+                            JSON.writeValueAsString(tail(history, MAX_ADJUSTMENTS).stream().map(PostgresTeamBudgetStore::toMap).toList()));
+                    update.setString(3, groupId);
+                    update.setString(4, month);
+                    update.executeUpdate();
+                }
+                connection.commit();
+                return AdjustOutcome.APPLIED;
+            } catch (SQLException | JsonProcessingException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        } catch (SQLException | JsonProcessingException e) {
+            throw new TeamBudgetAccountingUnavailableException("Could not set the team budget", e);
+        }
+    }
+
+    /**
+     * Creates the month's row if absent and locks it ({@code SELECT ... FOR
+     * UPDATE}) for the rest of the caller's transaction.
+     */
+    private static TeamBudgetMonth lockMonth(Connection connection, String groupId, String month, Instant expiresAt) throws SQLException {
+        try (PreparedStatement ensure = connection
+                .prepareStatement("INSERT INTO team_budget_months (group_id, month, expires_at_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
+            ensure.setString(1, groupId);
+            ensure.setString(2, month);
+            ensure.setLong(3, expiresAt.toEpochMilli());
+            ensure.executeUpdate();
+        }
+        try (PreparedStatement lock = connection
+                .prepareStatement("SELECT " + COLUMNS + " FROM team_budget_months WHERE group_id = ? AND month = ? FOR UPDATE")) {
+            lock.setString(1, groupId);
+            lock.setString(2, month);
+            try (ResultSet rows = lock.executeQuery()) {
+                rows.next();
+                return toMonth(rows);
+            }
         }
     }
 

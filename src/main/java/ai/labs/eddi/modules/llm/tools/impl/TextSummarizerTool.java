@@ -34,7 +34,7 @@ public class TextSummarizerTool {
 
     @Tool("Summarizes long text by extracting the most important sentences. Good for quick overviews of articles or documents.")
     public String summarizeText(@P("The text to summarize") String text,
-                                @P(value = "Number of sentences to keep (default 3)", required = false) Integer numSentences) {
+                                @P(value = "Number of sentences to keep, 1-10 (default 3)", required = false) Integer numSentences) {
 
         try {
             if (numSentences == null || numSentences < 1) {
@@ -119,7 +119,7 @@ public class TextSummarizerTool {
 
     @Tool("Extracts keywords from text based on frequency and importance")
     public String extractKeywords(@P("The text to extract keywords from") String text,
-                                  @P(value = "Number of keywords to return (default 10)", required = false) Integer numKeywords) {
+                                  @P(value = "Number of keywords to return, 1-20 (default 10)", required = false) Integer numKeywords) {
 
         try {
             if (numKeywords == null || numKeywords < 1) {

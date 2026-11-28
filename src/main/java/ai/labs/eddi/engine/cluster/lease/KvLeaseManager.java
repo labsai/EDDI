@@ -44,6 +44,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -61,11 +62,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>a release notification addressed to this node by the holder, which this
  * node told that it is waiting (core NATS, sub-millisecond; it carries the
  * delete marker's revision, so the wake-up acquires in one round trip),</li>
- * <li>a jittered poll every {@code ttl/4}, at most {@value #MAX_POLL_MILLIS}
- * ms, which also notices that a crashed holder's lease expired on the server
+ * <li>a jittered poll roughly every {@code ttl/4} (that base capped at
+ * {@value #MAX_POLL_MILLIS} ms and floored at 50 ms, then spread over 0.5x to
+ * 1.5x), which also notices that a crashed holder's lease expired on the server
  * (server-side TTL, so no clock skew between nodes is involved), and</li>
- * <li>fast takeover: a lease whose holder's presence record is gone (or carries
- * a different boot id, i.e. it restarted) is deleted by compare-and-set and
+ * <li>fast takeover: a lease whose holder's presence record carries a different
+ * boot id (it restarted), or is missing while this node has seen the lease's
+ * revision unchanged for three heartbeats, is deleted by compare-and-set and
  * re-acquired at once.</li>
  * </ul>
  * <b>Validity</b>: a lease is trusted for {@code ttl − 2×heartbeat} after the
@@ -181,6 +184,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
     /**
      * Result of {@link #forceRelease}.
      *
+     * @param outcome
+     *            what the call did
      * @param holder
      *            the holder the lease had, or {@code null}
      * @param currentRevision
@@ -731,7 +736,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     private Held newHeld(String key, long revision, boolean takenOver, String lid, long sentNanos) {
-        return new Held(key, revision, takenOver, lid, sentNanos, validityNanos, this::expired);
+        return new Held(key, revision, takenOver, lid, sentNanos, validityNanos, this::expired, this::stillHeld);
     }
 
     private void timeout(Waiter w) {
@@ -1073,10 +1078,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     /**
-     * Every lease currently in the bucket whose key starts with {@code prefix}, at
-     * most {@code max}, with the node waiting for it where one left a marker.
+     * Every lease currently in the bucket, at most {@code max}, with the node
+     * waiting for it where one left a marker.
      */
-    public List<LeaseSnapshot> snapshot(String prefix, int max) {
+    public List<LeaseSnapshot> snapshot(int max) {
         List<ISharedKv.Entry> all = kv.entries("", Math.max(max, 1) * 2 + 16);
         Map<String, String> waitingByKey = new HashMap<>();
         for (ISharedKv.Entry e : all) {
@@ -1086,7 +1091,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
         List<LeaseSnapshot> leases = new ArrayList<>();
         for (ISharedKv.Entry e : all) {
-            if (e.key().startsWith(WAITER_PREFIX) || (prefix != null && !e.key().startsWith(prefix))) {
+            if (e.key().startsWith(WAITER_PREFIX)) {
                 continue;
             }
             if (leases.size() >= max) {
@@ -1505,13 +1510,37 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
+    /**
+     * Whether {@code h} is still the key's value on the stream leader: this boot's
+     * lease with its lease id, neither lost nor released here.
+     */
+    boolean stillHeld(Held h) {
+        if (h.lost || h.released.get()) {
+            return false;
+        }
+        try {
+            Optional<ISharedKv.Versioned> current = kv.getConsistent(h.key);
+            return current.isPresent() && isThisBoot(decode(current.get())) && h.lid.equals(leaseId(current.get()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Lease %s could not be confirmed: %s", sanitize(h.key), e.getMessage());
+            return false;
+        }
+    }
+
     static final class Held implements LeaseHandle {
         final String key;
-        final long fence;
+        /**
+         * The fencing token: the acquiring write's revision, lifted only when the
+         * conversation's stored fence came from a revision range the bucket lost.
+         */
+        volatile long fence;
+        /** The fence this handle put on the conversation itself; 0 none yet. */
+        volatile long establishedFence;
         final String lid;
         final long since = System.currentTimeMillis();
         private final long validityNanos;
         private final Consumer<Held> onExpired;
+        private final Predicate<Held> confirmer;
         volatile boolean takenOver;
         volatile long revision;
         /** When the last write of this lease that was acknowledged had been sent. */
@@ -1528,7 +1557,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
         final AtomicBoolean expiring = new AtomicBoolean();
         private final List<Runnable> lostCallbacks = new ArrayList<>();
 
-        Held(String key, long fence, boolean takenOver, String lid, long sentNanos, long validityNanos, Consumer<Held> onExpired) {
+        Held(String key, long fence, boolean takenOver, String lid, long sentNanos, long validityNanos, Consumer<Held> onExpired,
+                Predicate<Held> confirmer) {
             this.key = key;
             this.fence = fence;
             this.revision = fence;
@@ -1538,6 +1568,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             this.lastRenewalNanos = sentNanos;
             this.validityNanos = validityNanos;
             this.onExpired = onExpired;
+            this.confirmer = confirmer;
         }
 
         @Override
@@ -1554,6 +1585,28 @@ public class KvLeaseManager implements IConversationLeaseManager {
         @Override
         public Long fence() {
             return fence;
+        }
+
+        @Override
+        public boolean confirmHeld() {
+            return confirmer.test(this);
+        }
+
+        @Override
+        public synchronized void liftFence(long lifted) {
+            if (lifted > fence) {
+                fence = lifted;
+            }
+        }
+
+        @Override
+        public boolean fenceEstablished() {
+            return establishedFence == fence;
+        }
+
+        @Override
+        public synchronized void establishFence() {
+            establishedFence = fence;
         }
 
         /**

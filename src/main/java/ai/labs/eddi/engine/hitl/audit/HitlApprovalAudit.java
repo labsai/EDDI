@@ -191,6 +191,14 @@ public final class HitlApprovalAudit {
         if (r.reasonCode != null) {
             out.put("reasonCode", r.reasonCode);
         }
+        // 6.8: the plan the decision bound to (HitlPlanHash) and how — MATCHED,
+        // NOT_PRESENTED, SYSTEM or LEGACY_UNHASHED (HitlPlanBinding.Outcome).
+        if (r.planHash != null) {
+            out.put("planHash", r.planHash);
+        }
+        if (r.planBinding != null) {
+            out.put("planBinding", r.planBinding);
+        }
         List<Map<String, Object>> units = new ArrayList<>();
         for (HitlDecisionRecord.Unit unit : r.units) {
             var u = new LinkedHashMap<String, Object>();
@@ -281,9 +289,10 @@ public final class HitlApprovalAudit {
 
     /**
      * The entry recording that an approved edit was not applied — screened out by
-     * an output guardrail, or the configuration changed since the pause. The same
-     * pause is then followed by a new pause. Joins its decision by
-     * {@code decisionId}.
+     * an output guardrail, the configuration changed since the pause, or the draft
+     * held redacted content the submitted text would have overwritten with the
+     * placeholder (see the {@code REFUSED_*} reasons). The same pause is then
+     * followed by a new pause. Joins its decision by {@code decisionId}.
      */
     public static AuditEntry editRefusedEntry(String decisionId, String conversationId, String agentId, Integer agentVersion, String userId,
                                               String environment, UnitKind unitKind, String reason, String guardrail) {

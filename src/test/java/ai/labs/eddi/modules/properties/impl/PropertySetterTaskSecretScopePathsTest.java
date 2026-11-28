@@ -43,6 +43,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,6 +58,7 @@ class PropertySetterTaskSecretScopePathsTest {
     private static final String TOKEN = "tok-live-aaaaaaaaaaaaaaaa";
 
     private ISecretProvider secretProvider;
+    private ITemplatingEngine templatingEngine;
     private PropertySetterTask task;
     private ConversationMemory memory;
     private Map<String, Object> templateData;
@@ -66,7 +68,7 @@ class PropertySetterTaskSecretScopePathsTest {
         var expressionProvider = mock(IExpressionProvider.class);
         when(expressionProvider.parseExpressions(anyString())).thenReturn(new Expressions());
         var memoryItemConverter = mock(IMemoryItemConverter.class);
-        var templatingEngine = mock(ITemplatingEngine.class);
+        templatingEngine = mock(ITemplatingEngine.class);
         secretProvider = mock(ISecretProvider.class);
 
         memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
@@ -272,5 +274,79 @@ class PropertySetterTaskSecretScopePathsTest {
 
         assertEquals("replacement", memory.getConversationProperties().get("previousKey").getValueString());
         assertTrue(memory.getConversationProperties().get("accessToken").getValueString().startsWith("${vault:"));
+    }
+
+    /**
+     * Instructions used to be applied once per action of the turn, so one under
+     * {@code "*"} ran once for every action. For a secret each run writes a fresh
+     * vault slot; only the last reference reaches the step history, and deleting
+     * the conversation sweeps only what the history holds — the others were
+     * orphaned.
+     */
+    @Test
+    @DisplayName("a '*' secret instruction is vaulted once per turn, however many actions the turn has")
+    void wildcardSecretInstructionIsVaultedOncePerTurn() throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("first_action", "second_action")));
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+
+        task.execute(memory, setterFor(List.of(setOnActions(List.of("*"), instruction))));
+
+        verify(secretProvider, times(1)).store(any(), eq(TOKEN), anyString(), anyList());
+        assertTrue(memory.getConversationProperties().get("accessToken").getValueString().startsWith("${vault:"));
+    }
+
+    @Test
+    @DisplayName("an instruction selected by several of the turn's actions is applied once")
+    void instructionSelectedBySeveralActionsIsAppliedOnce() throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("first_action", "second_action")));
+        var instruction = new PropertyInstruction();
+        instruction.setName("greeting");
+        instruction.setValueString("hello {properties.name}");
+        instruction.setScope(Scope.conversation);
+
+        task.execute(memory, setterFor(List.of(setOnActions(List.of("first_action"), instruction),
+                setOnActions(List.of("second_action"), instruction), setOnActions(List.of("*"), instruction))));
+
+        verify(templatingEngine, times(1)).processTemplate(eq("hello {properties.name}"), anyMap());
+        assertEquals("hello {properties.name}", memory.getConversationProperties().get("greeting").getValueString());
+    }
+
+    /**
+     * A {@code "*"} default listed before an action's own value used to run again
+     * for every later action of the turn and overwrite that value, so the result
+     * depended on how many actions the turn had and in which order.
+     */
+    @Test
+    @DisplayName("a '*' default does not overwrite an action's own value when a later action selects it again")
+    void wildcardDefaultDoesNotOverwriteALaterSelectedValue() throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("greet", "other")));
+
+        task.execute(memory, setterFor(List.of(setOnActions(List.of("*"), conversationInstruction("mood", "default")),
+                setOnActions(List.of("greet"), conversationInstruction("mood", "hello")))));
+
+        assertEquals("hello", memory.getConversationProperties().get("mood").getValueString());
+    }
+
+    private static PropertyInstruction conversationInstruction(String name, String value) {
+        var instruction = new PropertyInstruction();
+        instruction.setName(name);
+        instruction.setValueString(value);
+        instruction.setScope(Scope.conversation);
+        return instruction;
+    }
+
+    private static SetOnActions setOnActions(List<String> actions, PropertyInstruction instruction) {
+        var setOnActions = new SetOnActions();
+        setOnActions.setActions(actions);
+        setOnActions.setSetProperties(List.of(instruction));
+        return setOnActions;
+    }
+
+    private static IPropertySetter setterFor(List<SetOnActions> setOnActionsList) {
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(setOnActionsList);
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+        return propertySetter;
     }
 }

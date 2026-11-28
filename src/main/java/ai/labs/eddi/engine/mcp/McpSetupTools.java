@@ -47,7 +47,7 @@ public class McpSetupTools {
 
     @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. "
             + "This creates all necessary resources (behavior rules, LLM connection, "
-            + "output set, package, agent), names them, and optionally deploys the agent. "
+            + "output set, workflow, agent), names them, and optionally deploys the agent. "
             + "This is the fastest way to get a new Agent running.")
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
@@ -78,7 +78,7 @@ public class McpSetupTools {
                                       defaultValue = "production") String environment) {
         // Admin-only, exactly like REST /administration/agents/setup: provisioning
         // writes the caller's API key into the vault and picks the new agent's tools.
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("setup_agent"));
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // lets the caller choose the created agent's own tool surface
@@ -141,7 +141,7 @@ public class McpSetupTools {
                                           required = false) String llmBaseUrl,
                                  @ToolArg(description = "Comma-separated MCP server URLs whose tools the agent should also get, alongside the ones generated from the OpenAPI spec (optional).",
                                           required = false) String mcpServerUrls) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_api_agent"));
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // provisions an agent with a caller-chosen endpoint filter, so also letting

@@ -504,6 +504,14 @@ public class ConversationAccessGuard {
     }
 
     /**
+     * Whether authorization is enforced at all. When it is not, every caller is
+     * effectively an administrator and no owner scoping applies.
+     */
+    public boolean authorizationEnabled() {
+        return ownershipValidator.isAuthEnabled();
+    }
+
+    /**
      * The calling principal's name, to attribute an action on a conversation in the
      * audit trail (G4) — e.g. the {@code hitl.approval} cancellation written when a
      * delete or bulk end terminates a pending approval. Falls back to
@@ -518,6 +526,17 @@ public class ConversationAccessGuard {
         } catch (ContextNotActiveException e) {
             return fallbackActor;
         }
+    }
+
+    /**
+     * The owner a listing of the caller's own conversations matches: the caller's
+     * principal name, which a conversation they start records as its owner.
+     * {@code null} without a named caller and with authorization disabled, where a
+     * conversation records the userId the client passed (or a generated anonymous
+     * one) rather than the principal, so there is no owner to match.
+     */
+    public String ownConversationsOwner() {
+        return ownershipValidator.isAuthEnabled() ? callerActor(null) : null;
     }
 
     /**

@@ -13,8 +13,9 @@ Agent (.agent.json)
       ├─ Extension 2: HTTP Calls (eddi://ai.labs.httpcalls)
       └─ Extension 3: Output Sets (eddi://ai.labs.output)
   └─ Workflow 2 (.workflow.json)
-      ├─ Extension 1: Dictionary (eddi://ai.labs.parser.dictionaries.regular)
-      └─ Extension 2: LangChain (eddi://ai.labs.llm)
+      ├─ Extension 1: Parser (eddi://ai.labs.parser), using a regular dictionary
+      │   (eddi://ai.labs.parser.dictionaries.regular) as a parser sub-extension
+      └─ Extension 2: LLM (eddi://ai.labs.llm)
 ```
 
 > `ai.labs.rules` and `ai.labs.apicalls` are registered aliases of `ai.labs.behavior` and `ai.labs.httpcalls`, and `ai.labs.langchain` of `ai.labs.llm`; both spellings work, and the extension store returns the canonical IDs.
@@ -128,6 +129,9 @@ _Response Body_
         defaultValue: true,
         isOptional: true,
       },
+      maxInputTokens: { displayName: "Max Input Tokens", fieldType: "INT", defaultValue: 200, isOptional: true },
+      maxSuggestions: { displayName: "Max Suggestions Evaluated", fieldType: "INT", defaultValue: 1000, isOptional: true },
+      maxSolutions: { displayName: "Max Solutions Collected", fieldType: "INT", defaultValue: 100, isOptional: true },
     },
     extensions: {
       corrections: [
@@ -139,6 +143,12 @@ _Response Body_
               displayName: "Distance",
               fieldType: "INT",
               defaultValue: 2,
+              isOptional: true,
+            },
+            maxCandidates: {
+              displayName: "Max Correction Candidates",
+              fieldType: "INT",
+              defaultValue: 5,
               isOptional: true,
             },
           },

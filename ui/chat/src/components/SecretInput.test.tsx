@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { SecretInput } from "./SecretInput";
+import { SecretInput } from "@eddi/conversation";
 import { ChatProvider } from "@/store/chat-store";
 
 function renderField(subType?: string) {

@@ -47,6 +47,20 @@ public class Dependency implements IRuleCondition {
         }
     }
 
+    /**
+     * Without a {@code reference} the condition can only ever fail, so the rule
+     * that carries it never fires (or, under a negation, always fires). Refused
+     * when a ruleset is saved, naming the rule; a stored one still deploys, with a
+     * WARN, and evaluates as before.
+     */
+    @Override
+    public String retiredConfiguration() {
+        if (reference == null || reference.isBlank()) {
+            return String.format("'%s' requires a '%s' config value naming the behavior rule it depends on.", ID, referenceQualifier);
+        }
+        return null;
+    }
+
     @Override
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
@@ -58,7 +72,11 @@ public class Dependency implements IRuleCondition {
         List<Rule> filteredRules = new LinkedList<>();
         for (RuleGroup behaviorGroup : behaviorSet.getRuleGroups()) {
             for (Rule behaviorRule : behaviorGroup.getRules()) {
-                if (behaviorRule.getName().equals(reference)) {
+                // Rule names are optional: an unnamed rule anywhere in the set must not
+                // turn every dependency lookup into a NullPointerException. A stored
+                // ruleset may still carry a dependency without a reference: it
+                // matches no rule and fails, as it always did.
+                if (reference != null && !reference.isBlank() && reference.equals(behaviorRule.getName())) {
                     filteredRules.add(behaviorRule);
                 }
             }

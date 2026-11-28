@@ -56,7 +56,7 @@ MCP tools are registered under the server's own tool name, without a server pref
 
 ## Types and actions
 
-Every built-in type runs on tool-call arguments: `regex-filter`, `pii-redaction`, `max-length`, `prompt-injection` (catches an injection payload echoed into a post), `judge`, `classifier`, `expression`, `json-object`, and `disclosure`. In the judge's and the classifier's `promptTemplate`, `{output}` is the screened field and `{input}` the user's last message; put the tool's name in the prompt text yourself.
+Every built-in type runs on tool-call arguments: `regex-filter`, `pii-redaction`, `max-length`, `prompt-injection` (catches an injection payload echoed into a post), `judge`, `classifier`, `expression`, `json-object`, and `disclosure`. In the judge's and the classifier's `promptTemplate`, `{output}` is the screened field and `{input}` the user's last message; put the tool's name in the prompt text yourself. Without a `promptTemplate` the classifier receives the same pair as a conversation — the user's last message, then the screened field as the assistant's turn — exactly as in the output phase.
 
 | Action | On the live path |
 | --- | --- |
@@ -117,7 +117,7 @@ Only configuration and EDDI vocabulary: your block message or fix text, the issu
 
 ## Validation
 
-When the configuration is **saved** (HTTP 400): at most 32 entries; `tools` non-empty, at most 32 valid patterns; at most 16 `fields`, each a valid pointer; `action` exactly one of `block`, `redact`, `reprompt`, `warn` (a typo in a hard block is an error, not a silent block); `disclosure` only with `redact`; `maxRetries` 0–5; `onExhausted` absent or `block`; `blockMessage` at most 1,000 characters.
+When the configuration is **saved** (HTTP 400): at most 32 entries; `type` present, at most 64 characters; `tools` non-empty, at most 32 valid patterns; at most 16 `fields`, each a valid pointer; `action` exactly one of `block`, `redact`, `reprompt`, `warn` (a typo in a hard block is an error, not a silent block); `disclosure` only with `redact`; `maxRetries` 0–5; `onExhausted` absent or `block`; `blockMessage` at most 1,000 characters.
 
 When the agent is **deployed**: each entry's parameters are checked by its type, and an unknown type, or one that does not run on tool-call arguments, refuses the deploy. (Input and output guardrails skip an unknown type with a warning instead, so a configuration written for a newer EDDI still loads; this field is new, and a skipped hard block is a disabled one.)
 

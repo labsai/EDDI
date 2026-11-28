@@ -153,6 +153,96 @@ class DependencyTest {
         }));
     }
 
+    /**
+     * Rule names are optional, so a ruleset can hold an unnamed rule. Dependency
+     * used to call {@code getName().equals(reference)} on every rule of the set, so
+     * one unnamed rule anywhere turned every dependency evaluation into a
+     * NullPointerException that failed the turn.
+     */
+    @Test
+    void anUnnamedRuleInTheSetDoesNotBreakTheLookup() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var unnamed = new Rule(null);
+        unnamed.setConditions(List.of(succeeding()));
+        var b = new Rule("b");
+        b.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(unnamed, b)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        var state = TemplateDataScope.call(memory, () -> dependencyOn("b", ruleSet).execute(memory, new ArrayList<>()));
+
+        assertEquals(IRuleCondition.ExecutionState.SUCCESS, state);
+    }
+
+    @Test
+    void retiredConfiguration_missingReference_isReported() {
+        var dependency = new Dependency();
+
+        assertDoesNotThrow(dependency::validateConfiguration, "a stored ruleset must still load");
+        var retired = dependency.retiredConfiguration();
+        assertNotNull(retired);
+        assertTrue(retired.contains("dependency"), retired);
+        assertTrue(retired.contains("reference"), retired);
+    }
+
+    @Test
+    void retiredConfiguration_blankReference_isReported() {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", "  "));
+
+        assertNotNull(dependency.retiredConfiguration());
+    }
+
+    /**
+     * A stored dependency without a reference matches no rule and fails, as it did
+     * before — also when the set holds an unnamed rule.
+     */
+    @Test
+    void execute_storedWithoutReference_fails() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var unnamed = new Rule(null);
+        unnamed.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(unnamed)));
+        ruleSet.setRuleGroups(List.of(group));
+        var dependency = new Dependency();
+        dependency.setContainingRuleSet(ruleSet);
+
+        var state = TemplateDataScope.call(memory, () -> dependency.execute(memory, new ArrayList<>()));
+
+        assertEquals(IRuleCondition.ExecutionState.FAIL, state);
+    }
+
+    @Test
+    void retiredConfiguration_withReference_isNone() {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", "greetingRule"));
+
+        assertNull(dependency.retiredConfiguration());
+    }
+
+    /**
+     * A blank reference is a missing one: it must not match a rule whose name is
+     * blank too, or a condition-less rule would make the dependency succeed.
+     */
+    @Test
+    void execute_blankReference_doesNotMatchABlankRuleName() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var blankNamed = new Rule("");
+        blankNamed.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(blankNamed)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        var state = TemplateDataScope.call(memory, () -> dependencyOn("", ruleSet).execute(memory, new ArrayList<>()));
+
+        assertNotEquals(IRuleCondition.ExecutionState.SUCCESS, state);
+    }
+
     private static Dependency dependencyOn(String reference, RuleSet ruleSet) {
         var dependency = new Dependency();
         dependency.setConfigs(Map.of("reference", reference));

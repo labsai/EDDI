@@ -2,9 +2,9 @@ import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Eye } from "lucide-react";
-import { getAgentUsage, type Agent } from "@/lib/api/agents";
+import { getAgentUsage, type Agent } from "@eddi/app-kit/lib/api/agents";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { EditorSection } from "./editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 
 /**
  * Whether this agent's maintainers may read other people's conversations with
@@ -100,6 +100,7 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
               id="review-notice"
               value={review.notice ?? ""}
               onChange={(e) => patch({ notice: e.target.value.trim() ? e.target.value : null })}
+              disabled={disabled}
               rows={2}
               maxLength={300}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"

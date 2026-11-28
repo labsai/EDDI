@@ -296,7 +296,7 @@ An event's `state`: `PENDING` (delivering, or a target waits for its next retry)
 `lastError`), `INBOX_ONLY`, `DIGEST_PENDING`, `DIGESTED`. `duplicates` counts later
 alerts folded into this one.
 
-Rules: `GET /alerts/rules` (`agentId`), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
+Rules: `GET /alerts/rules` (`agentId`, required unless the caller is an administrator; `index`, `limit` ≤ 100, default 20), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
 `POST /alerts/rules`. Deleting a rule keeps its events.
 
 ## Who may do what
@@ -357,16 +357,46 @@ internal id with it), and forgets an administrator or editor as the acknowledger
 events and the author of rules.
 
 Alert work waits in a queue, so content captured before an erasure can reach the
-store after it. The erasure's first step therefore puts up a short-lived **fence**
-for the user on every node (through the same cluster stop broadcast the conversation
-service uses). An `OUTPUT_MATCH` value captured before the erasure started is not
-stored — that alert still fires, without the value. A rating alert for a rating
-given before the erasure started is dropped altogether: no event is written or
-sent. A queued rating alert also reads the rating again and is dropped when the
-rating is gone or has changed. An event written while the fence went up has its
-value or excerpt blanked before it is delivered. A fence lasts 15 minutes, far longer than the queue takes to
-drain; it only ever holds back content captured *before* the erasure, so a later
+store after it. Alerting therefore takes part in the
+[erasure guarantee for asynchronously written data](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data):
+the erasure first writes durable tombstones of the user and of their conversations,
+then waits, on every node, until the alert work queued before them has been
+written (the alert worker's queue is the drain barrier). Only the write is waited
+for: the first delivery of a fresh alert runs on a separate delivery stage
+(`eddi-alerts-delivery-*` threads), which checks the guard again right before the
+send, so a slow Slack or webhook call does not occupy the drain barrier. It can still
+delay the erasure's redaction step, which waits for a send that already claimed the
+event to finish or for its claim to expire (bounded, see below). When that stage's
+queue is full the send is left to the maintenance pass (the event was stored with
+its retry time a claim lease ahead), counted as
+`eddi_alerts_dropped_total{reason="delivery_queue_full"}`. An `OUTPUT_MATCH` value of an erased
+conversation, or captured before the user's erasure, is not stored — that alert
+still fires, without the value. A rating alert of an erased user or conversation is
+dropped altogether: no event is written or sent. A queued rating alert also reads
+the rating again and is dropped when the rating is gone or has changed. An event
+written while the tombstones went up has its value or excerpt removed before it is
+delivered; if that removal fails, a durable pending removal keeps the erasure's
+`alerts` step failed until it is retried successfully. The tombstones last
+`eddi.gdpr.tombstone-retention` (400 days), longer than any event can wait in the
+queue, and hold back only content captured *before* the erasure, so a later
 conversation of a reused id is not affected.
+
+A rating alert that stores a comment excerpt also stores the rater as an internal,
+keyed subject (`k1:` and an HMAC under the tombstone key — never the user id), so the
+rater's erasure finds, blanks and verifies those excerpts directly, even when the
+ratings themselves are already gone. When the key is unavailable the alert is stored
+without the excerpt.
+
+A **permanent conversation delete** — one conversation, or the retention sweep's
+batch — blanks every `OUTPUT_MATCH` value stored from that conversation **and every
+rating comment excerpt** of an alert about it, with the rater subject either
+carries, with the same guarantee: tombstone, drain on every node, blank, verify —
+and the delete fails (and deletes nothing else) when any of it fails. The alert
+itself stays, with its rule, agent, score, tags and time. The excerpt is
+conversation content: the write side already refuses it for a deleted
+conversation, so the delete removes it too, although the rating it was copied from
+may outlive the conversation. A user erasure does the same for every conversation
+of the user.
 
 **No send starts with erased content once an erasure has completed.** Every send —
 the first delivery and each retry, on any node — first takes a short claim on the
@@ -400,6 +430,18 @@ most 10,000 of each, without naming anybody else.
 | `eddi.alerts.event-retention` | `90d` | Events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call (kept between 1 s and 60 s) |
 | `eddi.alerts.manager-url` | — | The Manager's base URL, for links in delivered alerts |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules that may list one agent, and most rules over every agent (at least 1) |
+
+- **Rule limit.** Every rule watching an agent is evaluated on each of its ratings
+  and failed turns, so the rules per agent are capped. A create or update that would
+  give an agent more than `eddi.alerts.max-rules-per-agent` rules listing it — enabled
+  or not — is refused with 409 `RULE_LIMIT_REACHED`, naming the agent (an every-agent rule is refused with the every-agent count instead); the rules over
+  every agent have a limit of the same size of their own, so at most twice the limit
+  watch one agent. Only what a save adds is counted: an agent the rule already listed,
+  or an every-agent rule that already was one, is not counted again, so after the
+  limit is lowered the existing rules stay editable — only new ones are refused. The
+  check runs before the insert without a lock, so two saves at the same moment can
+  each pass it once.
 
 - The `alerts-maintenance` schedule appears in the schedule list as system-managed.
   Updating, deleting, enabling, disabling or dismissing it — over REST or the MCP
