@@ -810,6 +810,13 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
       content: `${last.content}\n\n⚠️ ${tr("chat.errorWithReason", "Error: {{reason}}", { reason })}`,
       isError: true,
     }));
+    // A pause after part of the reply (`awaiting_approval` mid-turn): the turn
+    // ran, so the reply stays — but the conversation is waiting on a human, and
+    // the approval banner says so, as it does for a pause before any token.
+    if (failure.class === "paused" && ctx.isCurrent()) {
+      const pausedAt = (failure.conversation as { hitlPausedAt?: string } | null | undefined)?.hitlPausedAt ?? null;
+      store.getState().setPaused(true, null, pausedAt);
+    }
     return true;
   }
 

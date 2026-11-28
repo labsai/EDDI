@@ -190,6 +190,43 @@ describe("WorkforceThread – retry after a failed turn", () => {
     expect(region).toHaveAttribute("role", "status");
   });
 
+  it("announces a repeated notice again: the same words are a new node in the live region", async () => {
+    setupMocks(async function* () {
+      yield { type: "done", data: JSON.stringify({ conversationState: "READY", conversationOutputs: [] }) };
+    });
+
+    await renderAndSend("First");
+    await waitFor(() => expect(screen.getByTestId("thread-notice-live")).toHaveTextContent(/without giving an answer/i));
+    const firstNode = screen.getByTestId("thread-notice-live").firstChild;
+
+    await userEvent.setup().type(screen.getByRole("textbox"), "Second");
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() => expect(screen.getAllByText(/without giving an answer/i).length).toBeGreaterThanOrEqual(3));
+    const region = screen.getByTestId("thread-notice-live");
+    expect(region).toHaveTextContent(/without giving an answer/i);
+    expect(region.firstChild).not.toBe(firstNode);
+  });
+
+  it("offers no Retry for a turn whose result cannot be saved by sending it again (retryable: false)", async () => {
+    setupMocks(async function* () {
+      yield {
+        type: "error",
+        data: JSON.stringify({
+          code: "TURN_NOT_STORED",
+          reason: "conversation_too_large",
+          retryable: false,
+          message: "not stored",
+        }),
+      };
+    });
+
+    await renderAndSend("One more thing");
+
+    await waitFor(() => expect(screen.getByTestId("thread-send-error")).toBeInTheDocument());
+    expect(screen.queryByTestId("thread-retry")).toBeNull();
+    expect(screen.getByTestId("thread-dismiss-error")).toBeInTheDocument();
+  });
+
   it("withdraws and re-sends the question when the turn produced nothing", async () => {
     let call = 0;
     setupMocks(async function* () {

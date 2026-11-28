@@ -404,3 +404,112 @@ describe("the backend's turn_not_stored contract, by status and reason", () => {
     expect(c.getSnapshot().restoreDraft).toBe("hello");
   });
 });
+
+describe("a key lives exactly as long as the outcome is unsettled", () => {
+  it("the same words sent while a finished turn's post-stream read runs get a new key", async () => {
+    let releaseRead!: () => void;
+    const slowRead = new Promise<void>((resolve) => (releaseRead = resolve));
+    let reads = 0;
+    const { transport, keys } = setup([() => events(done([reply("one")])), () => events(done([reply("two")]))], {
+      read: vi.fn(async () => {
+        reads += 1;
+        if (reads === 2) await slowRead; // the first turn's post-stream read
+        return { conversationState: "READY", conversationOutputs: [] } as unknown as ConversationSnapshot;
+      }),
+    });
+    const c = await opened(transport);
+    const first = c.send("yes");
+    await vi.waitFor(() => expect(c.getSnapshot().isProcessing).toBe(false));
+    // The composer is released: this is a new message, not a retry of the first.
+    await c.send("yes");
+    releaseRead();
+    await first;
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("a stream error whose outcome is unknown (turn_not_stored, store_failure) keeps the key for the retry", async () => {
+    const { transport, keys } = setup([
+      () => events(ev("error", { message: "store down", code: "turn_not_stored", reason: "store_failure" })),
+      () => events(done([reply("stored after all")])),
+    ]);
+    const c = await opened(transport, { presentFailure: async () => true });
+    await c.send("yes");
+    await c.send("yes");
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("a stream error that settled the turn (no code, it failed) does not keep it", async () => {
+    const { transport, keys } = setup([
+      () => events(ev("token", "half"), ev("error", { message: "upstream died" })),
+      () => events(done([reply("ok")])),
+    ]);
+    const c = await opened(transport, { presentFailure: async () => true });
+    await c.send("yes");
+    await c.send("yes");
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+});
+
+describe("a turn sent without its key is never promised a safe resend", () => {
+  it("the unknown-outcome notice asks to look first when the transport sends no key", async () => {
+    const { transport } = setup([() => throwing(new ApiError(504, "", "t"))], { sendsIdempotencyKeys: () => false });
+    const c = await opened(transport);
+    await c.send("yes");
+    const last = texts(c).slice(-1)[0] ?? "";
+    expect(last).toContain("already have answered it");
+    expect(last).not.toContain("normally will not");
+  });
+
+  it("the streamed unknown-outcome notice does too", async () => {
+    const { transport } = setup(
+      [() => events(ev("error", { message: "store down", code: "turn_not_stored", reason: "store_failure" }))],
+      { sendsIdempotencyKeys: () => false },
+    );
+    const c = await opened(transport);
+    await c.send("yes");
+    const last = texts(c).slice(-1)[0] ?? "";
+    expect(last).toContain("already have answered it");
+  });
+
+  it("with the key sent, the notice keeps its promise", async () => {
+    const { transport } = setup([() => throwing(new ApiError(504, "", "t"))], { sendsIdempotencyKeys: () => true });
+    const c = await opened(transport);
+    await c.send("yes");
+    expect(texts(c).slice(-1)[0] ?? "").toContain("normally will not");
+  });
+});
+
+describe("a non-streamed turn that answers nothing says so", () => {
+  const sayOnly = (snapshot: unknown) =>
+    setup([], { stream: undefined, say: vi.fn(async () => snapshot as Partial<ConversationSnapshot>) });
+
+  it("READY with no output gets the empty-turn notice", async () => {
+    const { transport } = sayOnly({ conversationState: "READY", conversationOutputs: [] });
+    const c = await opened(transport, { streaming: false });
+    await c.send("hello");
+    expect(texts(c).slice(-1)[0]).toContain("finished without giving an answer");
+  });
+
+  it("quick replies alone are an answer", async () => {
+    const { transport } = sayOnly({
+      conversationState: "READY",
+      conversationOutputs: [{ quickReplies: [{ value: "Yes", expressions: "yes" }] }],
+    });
+    const c = await opened(transport, { streaming: false });
+    await c.send("hello");
+    expect(texts(c).join("\n")).not.toContain("finished without giving an answer");
+  });
+
+  it("a reply is not followed by the notice, and neither is a pause", async () => {
+    for (const snapshot of [
+      { conversationState: "READY", conversationOutputs: [reply("hi")] },
+      { conversationState: "AWAITING_HUMAN", conversationOutputs: [] },
+    ]) {
+      const { transport } = sayOnly(snapshot);
+      const c = await opened(transport, { streaming: false });
+      await c.send("hello");
+      expect(texts(c).join("\n")).not.toContain("finished without giving an answer");
+    }
+  });
+});

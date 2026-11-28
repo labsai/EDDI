@@ -427,6 +427,19 @@ class ApiClient {
     this.unauthorizedHandler?.();
   }
 
+  /**
+   * A request was answered 401: force one token refresh, as every `ApiClient`
+   * call and {@link authorizedFetch} do. Resolves true when the caller should
+   * send the request once more. Without a refresher (auth disabled) nothing is
+   * reported, as there; a refresh that fails reports the session as expired.
+   */
+  async recoverFromUnauthorized(): Promise<boolean> {
+    if (!this.tokenRefresher) return false;
+    const refreshed = await this.refreshToken(true);
+    if (!refreshed) this.unauthorizedHandler?.();
+    return refreshed;
+  }
+
   /** Get current auth header (if set). Prefer {@link authorizedFetch}: this one never renews the token. */
   getAuthHeader(): Record<string, string> {
     const auth = this.headers["Authorization"];

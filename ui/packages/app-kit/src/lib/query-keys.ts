@@ -216,10 +216,13 @@ export const AGENT_MUTATION_INVALIDATIONS: readonly (readonly unknown[])[] = [
 /**
  * Everything that shows conversations and must be refreshed when one starts or
  * is deleted: the conversation lists and their history, the dashboard's "recent
- * conversations" card and its counts.
+ * conversations" card and its counts — and the chat's per-agent history
+ * (`chatKeys.history`, cached for 30 s), which a resume also reads: without it a
+ * deleted conversation stayed listed, and resumable, for that long.
  */
 export const CONVERSATION_MUTATION_INVALIDATIONS: readonly (readonly unknown[])[] = [
   ["conversations"],
+  chatKeys.history(),
   ["dashboard", "recent-conversations"],
   ["dashboard", "stats"],
 ];

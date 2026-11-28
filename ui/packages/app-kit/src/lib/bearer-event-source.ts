@@ -121,10 +121,15 @@ export class BearerEventSource {
       let buffer = "";
       const openedAt = Date.now();
       let refilled = false;
+      /** Any byte arrived — a heartbeat comment counts; a 200 with a silent body does not. */
+      let receivedBytes = false;
       // Refill the retry budget once the connection has proven itself: a real event
       // (not a comment — a server that sends one heartbeat and drops would
       // otherwise reset the budget on every attempt and be retried every five
-      // seconds for good), or an uptime of BEARER_MIN_HEALTHY_UPTIME_MS.
+      // seconds for good), or an uptime of BEARER_MIN_HEALTHY_UPTIME_MS with
+      // bytes on the wire. Uptime alone is not proof: a body that never sends a
+      // byte is aborted by the inactivity timer after 45 s, past that uptime, and
+      // would reset the budget on every attempt and never report exhaustion.
       const refill = () => {
         if (refilled) return;
         refilled = true;
@@ -156,6 +161,7 @@ export class BearerEventSource {
             break;
           }
 
+          if (value && value.length > 0) receivedBytes = true;
           const chunk = decoder.decode(value, { stream: true });
           buffer += chunk;
 
@@ -171,7 +177,7 @@ export class BearerEventSource {
           deliver(blocks);
         }
       } finally {
-        if (Date.now() - openedAt >= BEARER_MIN_HEALTHY_UPTIME_MS) refill();
+        if (receivedBytes && Date.now() - openedAt >= BEARER_MIN_HEALTHY_UPTIME_MS) refill();
         // However the loop ended — EOF, close(), a newer connection, a throw — the
         // body is released, so a failing listener cannot leave the reader open.
         void reader.cancel().catch(() => undefined);

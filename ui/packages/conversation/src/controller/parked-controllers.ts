@@ -13,6 +13,10 @@
    aborted, as it always was, so a proxy that swallows the terminal frame cannot
    keep a stream open for good. An idle controller is reset at once.
 
+   Closing or reloading the tab aborts a parked turn as surely as an unmounted
+   page used to, and nothing can bring it back: while a parked controller is
+   still processing, the tab warns before it closes, as the page itself does.
+
    The Manager's chat is one controller for the whole app and uses the controller's
    own `detachedGraceMs`; this is the same behaviour for pages that create one
    controller per visit.
@@ -31,12 +35,29 @@ interface Slot<E extends ParkedEntry> {
   entry: E;
   /** Set while parked: the timer that aborts the turn when the grace runs out. */
   timer: ReturnType<typeof setTimeout> | null;
+  /** Set while parked: the tab-close warning for the turn still running. */
+  leaveGuard: ((event: BeforeUnloadEvent) => void) | null;
+}
+
+export interface ParkedControllersOptions<E> {
+  /**
+   * Called with a parked entry just before its controller is reset for good (the
+   * grace ran out, or `clear`): what only the parked transcript still holds — a
+   * sent image's preview URL, say — is released here, not when its page left.
+   */
+  onDispose?: (entry: E) => void;
 }
 
 export class ParkedControllers<E extends ParkedEntry> {
   private readonly slots = new Map<string, Slot<E>>();
+  private readonly onDispose: ((entry: E) => void) | undefined;
 
-  constructor(private readonly graceMs: number = DETACHED_TURN_GRACE_MS) {}
+  constructor(
+    private readonly graceMs: number = DETACHED_TURN_GRACE_MS,
+    options: ParkedControllersOptions<E> = {},
+  ) {
+    this.onDispose = options.onDispose;
+  }
 
   /**
    * The entry for `key`: the one a turn kept running in while its page was away
@@ -50,10 +71,12 @@ export class ParkedControllers<E extends ParkedEntry> {
         clearTimeout(slot.timer);
         slot.timer = null;
       }
+      // The page is back and guards its own turn.
+      this.unguard(slot);
       return { entry: slot.entry, resumed };
     }
     const entry = create();
-    this.slots.set(key, { entry, timer: null });
+    this.slots.set(key, { entry, timer: null, leaveGuard: null });
     return { entry, resumed: false };
   }
 
@@ -70,11 +93,28 @@ export class ParkedControllers<E extends ParkedEntry> {
       controller.reset();
       return;
     }
+    if (typeof window !== "undefined") {
+      // Read at the moment the tab closes: a turn that finished meanwhile asks nothing.
+      slot.leaveGuard = (event: BeforeUnloadEvent) => {
+        if (!controller.getSnapshot().isProcessing) return;
+        event.preventDefault();
+        // Older browsers need a value set to show the prompt.
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", slot.leaveGuard);
+    }
     slot.timer = setTimeout(() => {
+      this.unguard(slot);
       // Only this slot: a page that came back has replaced the timer with null.
       if (this.slots.get(key) === slot) this.slots.delete(key);
+      this.onDispose?.(slot.entry);
       controller.reset();
     }, this.graceMs);
+  }
+
+  private unguard(slot: Slot<E>): void {
+    if (slot.leaveGuard && typeof window !== "undefined") window.removeEventListener("beforeunload", slot.leaveGuard);
+    slot.leaveGuard = null;
   }
 
   /**
@@ -83,7 +123,12 @@ export class ParkedControllers<E extends ParkedEntry> {
    */
   clear(): void {
     for (const slot of this.slots.values()) {
-      if (slot.timer !== null) clearTimeout(slot.timer);
+      if (slot.timer !== null) {
+        clearTimeout(slot.timer);
+        // Only a parked entry: one in use is still its page's to clean up.
+        this.onDispose?.(slot.entry);
+      }
+      this.unguard(slot);
       slot.entry.controller.reset();
     }
     this.slots.clear();

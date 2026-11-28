@@ -69,5 +69,7 @@ describe("what a mutation refreshes", () => {
     });
     for (const key of CONVERSATION_MUTATION_INVALIDATIONS) expect(has(invalidated, key), JSON.stringify(key)).toBe(true);
     expect(has(invalidated, ["dashboard", "recent-conversations"])).toBe(true);
+    // The chat's history for every agent (30 s cache; a resume reads it too).
+    expect(has(invalidated, ["chat", "history"])).toBe(true);
   });
 });

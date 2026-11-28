@@ -154,6 +154,13 @@ interface ThreadSendError {
    * pause has to be decided first.
    */
   paused: boolean;
+  /**
+   * Whether Retry may send the turn again. False for a turn that ran and whose
+   * result cannot be saved by sending it again (`turn_not_stored` with
+   * `retryable: false`, e.g. a conversation too large): a retry would only run it
+   * once more. Absent means yes.
+   */
+  canRetry?: boolean;
 }
 
 interface GroupContext {
@@ -697,8 +704,11 @@ interface ThreadTurn {
 /** The page's handlers, read by the controller's hooks at call time. */
 interface ThreadHooks {
   t: TFunction;
-  /** The turn did not produce an answer; `userMessageId` is the question to withdraw on retry. */
-  failed: (message: string, paused: boolean, userMessageId: string | null) => void;
+  /**
+   * The turn did not produce an answer; `userMessageId` is the question to
+   * withdraw on retry, `canRetry` false when Retry must not be offered.
+   */
+  failed: (message: string, paused: boolean, userMessageId: string | null, canRetry?: boolean) => void;
 }
 
 /** The first attachment's name, as the input of a turn that sends only files. */
@@ -740,7 +750,20 @@ function createThreadEntry(memberId: string): ThreadEntry {
  * the shared grace period (the same one the Manager's chat has), so the exchange
  * is not discarded by navigating away.
  */
-const threadRegistry = new ParkedControllers<ThreadEntry>();
+const threadRegistry = new ParkedControllers<ThreadEntry>(undefined, {
+  // A parked transcript still shows its sent images on return; their preview
+  // URLs go only when the entry itself does.
+  onDispose: (entry) => revokeSentPreviews(entry.controller.getSnapshot().messages),
+});
+
+/** Release the preview URLs of the images in sent messages. */
+function revokeSentPreviews(messages: readonly { attachments?: readonly { previewUrl?: string }[] }[]): void {
+  messages.forEach((msg) => {
+    msg.attachments?.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    });
+  });
+}
 
 // What a parked thread holds belongs to one person: nothing of it may outlive their
 // session. Sign-out is a page navigation today; this does not depend on that.
@@ -811,7 +834,13 @@ function createThreadConversation(
           // runs the turn again (or, when the conversation is too large, the
           // notice says to start a new one).
           controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-          hooks.failed(sentence({ retryable: failure.retryable }), false, failure.partial ? null : ctx.userMessageId);
+          hooks.failed(
+            sentence({ retryable: failure.retryable }),
+            false,
+            failure.partial ? null : ctx.userMessageId,
+            // Not retryable: sending it again runs the turn again and is not saved either.
+            failure.retryable !== false,
+          );
           return true;
         case "unknownOutcome":
           // The server may have the message and may still be working. It stays on
@@ -915,6 +944,10 @@ function createThreadConversation(
     presentFailure: (failure, ctx) => {
       const hooks = hooksRef.current;
       if (!hooks) {
+        // An ended conversation is the controller's own handling (the ENDED state
+        // and its notice), whether or not anyone is looking: deferring it would
+        // skip both.
+        if (failure.class === "ended") return false;
         // The page was left while the turn ran and it failed: keep the failure and
         // present it when the thread is back, with its question and Retry.
         deferredRef.current = (back) => void present(failure, ctx, back);
@@ -999,6 +1032,13 @@ function WorkforceThread() {
   const { controller, hooksRef, turnRef, toolLog, noteLog, deferredRef } = entry;
   /** The page came back to a thread whose turn kept running: show it, do not re-open the thread. */
   const adoptRef = useRef(resumed);
+  // Per acquisition, not per mount: A -> B -> A changes only the route param, and
+  // the second visit to A must adopt A's parked controller as a remount would.
+  const acquiredRef = useRef(entry);
+  if (acquiredRef.current !== entry) {
+    acquiredRef.current = entry;
+    adoptRef.current = resumed;
+  }
   const conversation = useAgentConversation(controller);
   const conversationId = conversation.conversationId;
   const messages = conversation.messages;
@@ -1015,6 +1055,16 @@ function WorkforceThread() {
     return new Map([...at].map(([step, i]) => [i, step]));
   }, [messages, turnNotes]);
   const isLoading = conversation.isProcessing;
+  /** The latest client notice; the live region below announces it. */
+  const latestNotice = useMemo(() => [...messages].reverse().find((m) => m.kind === "notice") ?? null, [messages]);
+  // A live region announces changes, not what it holds when it appears: a notice
+  // already in the transcript on mount (one a parked turn left) is published one
+  // tick after the region is in the DOM.
+  const [mountedNoticeId, setMountedNoticeId] = useState<string | null | undefined>(() => latestNotice?.id);
+  useEffect(() => {
+    const id = window.setTimeout(() => setMountedNoticeId(null), 0);
+    return () => window.clearTimeout(id);
+  }, []);
   const setConversationId = useCallback(
     (id: string | null) => controller.dispatch({ type: "SET_CONVERSATION_ID", id }),
     [controller],
@@ -1066,7 +1116,7 @@ function WorkforceThread() {
 
   hooksRef.current = {
     t,
-    failed: (message, paused, userMessageId) => {
+    failed: (message, paused, userMessageId, canRetry = true) => {
       const turn = turnRef.current;
       setSendError({
         message,
@@ -1074,6 +1124,7 @@ function WorkforceThread() {
         retryAttachments: turn?.attachments,
         paused,
         pendingUserMessageId: userMessageId,
+        canRetry,
       });
     },
   };
@@ -1082,14 +1133,16 @@ function WorkforceThread() {
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
-  // Revoke all sent-message preview URLs on unmount to prevent SPA memory leaks
+  // Revoke all sent-message preview URLs on unmount to prevent SPA memory leaks —
+  // unless the thread was parked with its turn still running: its transcript (and
+  // the images in it) comes back with the page, and the registry revokes them when
+  // it disposes of the entry. This cleanup runs after the release above.
+  const registryKeyRef = useRef(registryKey);
+  registryKeyRef.current = registryKey;
   useEffect(() => {
     return () => {
-      messagesRef.current.forEach((msg) => {
-        msg.attachments?.forEach((a) => {
-          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-        });
-      });
+      if (threadRegistry.isParked(registryKeyRef.current)) return;
+      revokeSentPreviews(messagesRef.current);
     };
   }, []);
 
@@ -1724,7 +1777,7 @@ function WorkforceThread() {
                     >
                       {t("Workforce.thread.reviewApprovals", "Review pending approvals")}
                     </AppLink>
-                  ) : (
+                  ) : sendError.canRetry !== false ? (
                     <button
                       type="button"
                       onClick={handleRetry}
@@ -1733,7 +1786,7 @@ function WorkforceThread() {
                     >
                       {t("common.retry", "Retry")}
                     </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setSendError(null)}
@@ -1751,7 +1804,12 @@ function WorkforceThread() {
               are lines in the transcript, which is not a live region; this one says
               the latest to assistive technology, once, when it appears. */}
           <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="thread-notice-live">
-            {[...messages].reverse().find((m) => m.kind === "notice")?.content ?? ""}
+            {latestNotice && latestNotice.id !== mountedNoticeId ? (
+              // Keyed by the notice: a second notice with the same words is a new
+              // node, so it is announced again. One already there when the region
+              // mounted (a notice from a parked turn) is rendered after it.
+              <span key={latestNotice.id}>{latestNotice.content}</span>
+            ) : null}
           </div>
 
           <div ref={messagesEndRef} />

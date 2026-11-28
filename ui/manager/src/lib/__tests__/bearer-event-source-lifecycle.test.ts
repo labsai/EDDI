@@ -153,11 +153,24 @@ describe("BearerEventSource lifecycle", () => {
 
   it("a new connection ends the previous one, which neither reconnects nor delivers any more", async () => {
     const signals: AbortSignal[] = [];
+    const bodies: ReadableStreamDefaultController<Uint8Array>[] = [];
     fetchSpy.mockImplementation(async (_url, init) => {
-      signals.push((init as RequestInit).signal as AbortSignal);
-      return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200 });
+      const signal = (init as RequestInit).signal as AbortSignal;
+      const index = signals.length;
+      signals.push(signal);
+      // Abort-aware, as a real fetch body is: aborting the request errors the read.
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodies[index] = controller;
+          signal.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+        },
+      });
+      return new Response(body, { status: 200 });
     });
+    const cancel = vi.spyOn(ReadableStreamDefaultReader.prototype, "cancel");
+    const log = vi.fn();
     const es = new BearerEventSource("http://test/sse");
+    es.addEventListener("log", log);
     await vi.advanceTimersByTimeAsync(10);
     expect(signals).toHaveLength(1);
 
@@ -168,10 +181,41 @@ describe("BearerEventSource lifecycle", () => {
     expect(signals).toHaveLength(2);
     expect(signals[0]!.aborted).toBe(true);
     expect(signals[1]!.aborted).toBe(false);
+    // The superseded reader's pending read settled and it reached its cleanup.
+    expect(cancel).toHaveBeenCalledTimes(1);
     // The superseded attempt's abort is not a failure: nothing was scheduled.
+    // (Well past the base retry delay, short of the current one's 45 s inactivity cut.)
     const calls = fetchSpy.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 3);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(fetchSpy).toHaveBeenCalledTimes(calls);
+    // The current connection still delivers.
+    bodies[1]!.enqueue(new TextEncoder().encode("event: log\ndata: current\n\n"));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect((log.mock.calls[0]![0] as MessageEvent).data).toBe("current");
+    es.close();
+  });
+
+  it("a 200 whose body never sends a byte does not refill the budget by uptime: it is given up on", async () => {
+    fetchSpy.mockImplementation(async (_url, init) => {
+      const signal = (init as RequestInit).signal as AbortSignal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+    await vi.advanceTimersByTimeAsync(0);
+    // Each attempt is cut by the 45 s inactivity timer, past the healthy uptime.
+    for (let i = 0; i < SSE_RECONNECT_MAX_ATTEMPTS + 1 && exhausted.mock.calls.length === 0; i++) {
+      await vi.advanceTimersByTimeAsync(45_000 + SSE_RECONNECT_MAX_DELAY_MS);
+    }
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls.length).toBe(SSE_RECONNECT_MAX_ATTEMPTS + 1);
     es.close();
   });
 });

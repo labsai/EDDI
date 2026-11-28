@@ -299,6 +299,12 @@ interface TurnContext {
   /** This turn's outcome is not settled: its submission keeps its key for a retry. */
   keepSubmission: boolean;
   /**
+   * The request went out with its Idempotency-Key. A cross-origin embed that has
+   * not opted in sends none, and then no notice may promise that resending is
+   * deduplicated.
+   */
+  keyed: boolean;
+  /**
    * The mark of the latest STORED step before this turn (see `latestStepMark`),
    * or null while it is not known. The backend keeps a running say turn in
    * memory only and stores it when it completes, so a read during the turn
@@ -328,6 +334,7 @@ function newTurn(stateBeforeSend: ConversationState | null, userMessageId: strin
     reusedKey: false,
     submissionKey: null,
     keepSubmission: false,
+    keyed: true,
     baseline: null,
     baselineRead: null,
   };
@@ -520,6 +527,8 @@ export class AgentConversation {
 
   /** The key of the turn is past its age limit (or gone): a notice must not promise it is safe to resend. */
   private keyStale(turn: TurnContext): boolean {
+    // No key went out: the backend cannot tell a resend from a new message.
+    if (!turn.keyed) return true;
     const s = this.submission;
     return !s || s.key !== turn.submissionKey || Date.now() - s.createdAt >= SUBMISSION_KEY_MAX_AGE_MS;
   }
@@ -1237,6 +1246,7 @@ export class AgentConversation {
     const turn = newTurn(this.state.conversationState, turnId);
     turn.reusedKey = reusedKey;
     turn.submissionKey = idempotencyKey;
+    turn.keyed = transport.sendsIdempotencyKeys?.() ?? true;
     this.activeTurn = turn;
     if (conversationId && transport.mode !== "local") this.readBaseline(conversationId, turn);
     const failureContext: TurnFailureContext = {
@@ -1274,7 +1284,7 @@ export class AgentConversation {
         // flight: it belongs to a turn nobody is waiting for any more.
         if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({ type: "SET_THINKING", value: false });
-        this.applyTurnSnapshot(snapshot);
+        this.applyTurnSnapshot(snapshot, turn.stateBeforeSend);
         dispatch({ type: "SET_PROCESSING", value: false });
       } else if (this.options.streaming !== false && transport.stream && conversationId) {
         dispatch({ type: "ADD_MESSAGE", message: streamingPlaceholder() });
@@ -1293,7 +1303,7 @@ export class AgentConversation {
         const snapshot = await transport.say(conversationId, text, { context, signal: abort.signal, idempotencyKey });
         if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({ type: "SET_THINKING", value: false });
-        this.applyTurnSnapshot(snapshot);
+        this.applyTurnSnapshot(snapshot, turn.stateBeforeSend);
         dispatch({ type: "SET_PROCESSING", value: false });
       }
     } catch (err) {
@@ -1328,11 +1338,32 @@ export class AgentConversation {
   }
 
   /** Apply a turn answered by one snapshot: its reply, then why it failed, if it did. */
-  private applyTurnSnapshot(snapshot: Partial<ConversationSnapshot>): void {
+  private applyTurnSnapshot(snapshot: Partial<ConversationSnapshot>, stateBeforeSend: ConversationState | null): void {
+    const messagesBefore = this.state.messages.length;
     this.applySnapshot(snapshot);
     this.options.onTurnSnapshot?.(snapshot);
     const failure = this.options.turnFailure?.(snapshot);
-    if (failure) this.dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage(`⚠️ ${failure}`) });
+    if (failure) {
+      this.dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage(`⚠️ ${failure}`) });
+      return;
+    }
+    // The turn finished and nothing came of it — the check `applyDone` makes for
+    // a streamed turn. Anything the reply rendered (a text, an image, quick
+    // replies, a requested field) is an answer; a pause or an end has its own.
+    const state = snapshot.conversationState;
+    const finished = state === "READY" || state === "ERROR" || state === "EXECUTION_INTERRUPTED";
+    const lastOutput = snapshot.conversationOutputs?.[snapshot.conversationOutputs.length - 1];
+    const answered =
+      this.state.messages.length > messagesBefore ||
+      (lastOutput?.output?.length ?? 0) > 0 ||
+      (lastOutput?.quickReplies?.length ?? 0) > 0 ||
+      this.state.activeInputField !== null;
+    if (finished && !answered && !isTurnPaused(snapshot as DoneSnapshot, stateBeforeSend)) {
+      this.dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage(state === "READY" ? "empty" : "failed", null, this.t)),
+      });
+    }
   }
 
   /** Read one streamed turn to its end, then the conversation once more (see `refreshAfterStream`). */
@@ -1420,10 +1451,19 @@ export class AgentConversation {
       throw new StreamEndedError();
     }
     if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
+    // `done` released the composer, and the post-stream read below is still to
+    // come: a send of the same text in that gap must not find this turn's key
+    // and be answered with this turn's stored result. A clean `done` settles the
+    // submission here; an unreadable one is settled by the read that stands in.
+    if (streamDone && !turn.failure && !turn.doneUnreadable && !turn.keepSubmission) this.settle(turn);
 
     let result: TurnResult = { outcome: "sent" };
     if (turn.failure) {
       const failure = turn.failure;
+      // The turn may or may not have been stored (`turn_not_stored` with
+      // `store_failure`, an unknown reason): the retry must carry the same key,
+      // so the backend can answer it from the first attempt.
+      if (failure.class === "unknownOutcome") turn.keepSubmission = true;
       const handled = await this.presentHostFailure(failure, failureContext);
       if (!handled && this.isCurrent(sendGen)) {
         // The host declined: the controller's own notices, and the turn ends.
@@ -1517,7 +1557,10 @@ export class AgentConversation {
     } else if (cls === "unknownOutcome") {
       // It may or may not have been stored: the message stays and the user decides.
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t)) });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t, { stale: this.keyStale(turn) })),
+      });
     } else if (unconsumed) {
       // Refused before it ran — the streaming twin of a 409. Withdraw the
       // optimistic bubble and hand the draft (a secret included, masked)

@@ -10,6 +10,7 @@ import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 import { useAttachmentStaging } from "@eddi/app-kit/hooks/use-attachment-staging";
 import { toast } from "sonner";
 import { AttachmentError, PROGRESS_MIN_BYTES, uploadAttachment } from "@eddi/app-kit/lib/api/attachments";
+import { api } from "@eddi/app-kit/lib/api-client";
 
 /** T1.8 — per-file progress and errors, and a way to try a failed file again. */
 
@@ -90,6 +91,55 @@ describe("uploadAttachment with progress", () => {
     );
     await expect(uploadAttachment("conv1", new File(["x"], "a.txt"), vi.fn())).resolves.toMatchObject({ storageRef: "small" });
     expect(sent).toHaveLength(0);
+  });
+
+  describe("a 401", () => {
+    afterEach(() => {
+      api.setTokenRefresher(null);
+      api.setUnauthorizedHandler(null);
+      api.clearAuthToken();
+    });
+
+    it("forces one token refresh and sends again; the session is not reported expired", async () => {
+      const refresher = vi.fn(async (force: boolean) => {
+        if (force) api.setAuthToken("fresh");
+        return true;
+      });
+      const expired = vi.fn();
+      api.setTokenRefresher(refresher);
+      api.setUnauthorizedHandler(expired);
+      const upload = uploadAttachment("conv1", big("notes.txt"), vi.fn());
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      sent[0]!.respond(401, { error: "token expired" });
+      await vi.waitFor(() => expect(sent).toHaveLength(2));
+      expect(refresher).toHaveBeenCalledWith(true);
+      expect(sent[1]!.headers.Authorization).toBe("Bearer fresh");
+      sent[1]!.respond(201, { storageRef: "r2", filename: "notes.txt" });
+      await expect(upload).resolves.toMatchObject({ storageRef: "r2" });
+      expect(expired).not.toHaveBeenCalled();
+    });
+
+    it("reports the session expired when the forced refresh fails", async () => {
+      const expired = vi.fn();
+      api.setTokenRefresher(async () => false);
+      api.setUnauthorizedHandler(expired);
+      const upload = uploadAttachment("conv1", big("notes.txt"), vi.fn());
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      sent[0]!.respond(401, { error: "token expired" });
+      await expect(upload).rejects.toMatchObject({ status: 401 });
+      expect(sent).toHaveLength(1);
+      expect(expired).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports nothing without a refresher (auth disabled), as the fetch path does", async () => {
+      const expired = vi.fn();
+      api.setUnauthorizedHandler(expired);
+      const upload = uploadAttachment("conv1", big("notes.txt"), vi.fn());
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      sent[0]!.respond(401, { error: "no" });
+      await expect(upload).rejects.toMatchObject({ status: 401 });
+      expect(expired).not.toHaveBeenCalled();
+    });
   });
 
   it("names a dropped connection", async () => {

@@ -159,6 +159,25 @@ function uploadWithProgress(
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<AttachmentResult> {
+  // A 401 gets what every other request gets: one forced token refresh and one
+  // retry, and "session expired" only when that does not help.
+  return sendWithProgress(url, formData, onProgress, signal).catch(async (error: unknown) => {
+    if (!(error instanceof AttachmentError) || error.status !== 401 || signal?.aborted) throw error;
+    if (!(await api.recoverFromUnauthorized())) throw error;
+    return sendWithProgress(url, formData, onProgress, signal).catch((retryError: unknown) => {
+      if (retryError instanceof AttachmentError && retryError.status === 401) api.reportUnauthorized();
+      throw retryError;
+    });
+  });
+}
+
+/** One XMLHttpRequest upload; a 401 rejects like any other status (the caller recovers). */
+function sendWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<AttachmentResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(cancelledError());
@@ -183,8 +202,6 @@ function uploadWithProgress(
         headers: { "Content-Type": xhr.getResponseHeader("Content-Type") ?? "application/json" },
       });
       if (!response.ok) {
-        // A 401 after the token was renewed: the session is gone — say so.
-        if (xhr.status === 401) api.reportUnauthorized();
         void toAttachmentError(response).then(reject, reject);
         return;
       }

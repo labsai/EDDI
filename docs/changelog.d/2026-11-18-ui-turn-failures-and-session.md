@@ -108,8 +108,29 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   authentication off neither is mounted, so the bar no longer shows a box that appears and vanishes on every load.
   `workforce-topbar.test.tsx` covers both cases.
 
+### Second review round (same branch, 2026-11-28)
+
+- **Idempotency keys.** A clean `done` settles the submission before the post-stream read, so a send of the same
+  text after the composer is released gets a new key; a streamed `turn_not_stored` whose outcome is unknown
+  (`store_failure`, unknown reason) keeps its key for the retry. The transport says whether the key is actually sent
+  (`sendsIdempotencyKeys`); a turn sent without one, and the streamed unknown-outcome notice, use the "look at the
+  conversation first" wording instead of promising a deduplicated resend.
+- **Controller.** A non-streamed turn that answers nothing gets the same empty-turn notice as a streamed one.
+- **Manager.** An `awaiting_approval` frame after part of the reply keeps the reply and raises the pause banner. A
+  progress upload answered 401 forces one token refresh and retries once, as `authorizedFetch` does; without a
+  refresher nothing is reported. Deleting a conversation refreshes `chatKeys.history`.
+- **`BearerEventSource`.** The uptime refill needs bytes on the wire: a 200 that never sends one is cut by the
+  inactivity timer after 45 s and no longer resets the budget, so it reaches `onexhausted`.
+- **Workforce.** A parked turn still processing keeps the tab-close warning (`ParkedControllers` installs it while
+  parked); a parked thread whose conversation ended gets the controller's ENDED handling; A -> B -> A by route adopts
+  A's running controller; Retry is hidden for a `turn_not_stored` with `retryable: false`; the live region
+  re-announces a repeated notice and one present when it mounts; sent-image preview URLs of a parked thread are
+  revoked when the registry disposes of the entry (`onDispose`), not when the page leaves.
+
 ### Not done
 
+- A response-less cross-origin failure is still classified `notAccepted` (`reachOf`); whether it should be
+  `unknownOutcome` is open on the PR.
 - `Last-Event-ID` for `BearerEventSource` (named in I10): the log and cluster streams do not send event ids.
 - The group board's streams (`GroupDiscussion`) have no leave guard or grace of their own.
 - Q7 beyond the `localStorage` item (phone chat list, board session scoping, ENDED display in the thread, …).

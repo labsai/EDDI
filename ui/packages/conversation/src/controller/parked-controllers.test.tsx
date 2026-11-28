@@ -149,3 +149,56 @@ describe("clear (sign-out, or another person)", () => {
     expect(again.resumed).toBe(false);
   });
 });
+
+describe("a parked turn and the tab", () => {
+  const closing = () => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it("warns before the tab closes while a parked turn runs, and stops once it settles", async () => {
+    const registry = new ParkedControllers<{ controller: AgentConversation }>();
+    const { finish, turn } = await entryWithRunningTurn(registry, "k");
+    registry.release("k");
+    expect(closing()).toBe(true);
+    finish();
+    await turn;
+    expect(closing()).toBe(false);
+  });
+
+  it("hands the warning back to the page when it returns, and drops it with the grace", async () => {
+    const registry = new ParkedControllers<{ controller: AgentConversation }>();
+    await entryWithRunningTurn(registry, "a");
+    registry.release("a");
+    registry.acquire("a", () => {
+      throw new Error("must resume");
+    });
+    expect(closing()).toBe(false); // the page guards its own turn now
+    await entryWithRunningTurn(registry, "b");
+    registry.release("b");
+    expect(closing()).toBe(true);
+    await vi.advanceTimersByTimeAsync(DETACHED_TURN_GRACE_MS + 1);
+    expect(closing()).toBe(false);
+    registry.clear();
+  });
+
+  it("disposes of a parked entry only when the grace runs out, never when an idle page leaves", async () => {
+    const disposed: string[] = [];
+    const registry = new ParkedControllers<{ controller: AgentConversation; name: string }>(undefined, {
+      onDispose: (entry) => disposed.push(entry.name),
+    });
+    const idle = registry.acquire("idle", () => ({ controller: new AgentConversation({ transport: slowTransport().transport }), name: "idle" }));
+    await idle.entry.controller.open(false);
+    registry.release("idle");
+    const s = slowTransport();
+    const { entry } = registry.acquire("busy", () => ({ controller: new AgentConversation({ transport: s.transport }), name: "busy" }));
+    await entry.controller.open(false);
+    void entry.controller.send("question");
+    await vi.waitFor(() => expect(entry.controller.getSnapshot().isProcessing).toBe(true));
+    registry.release("busy");
+    expect(disposed).toEqual([]);
+    await vi.advanceTimersByTimeAsync(DETACHED_TURN_GRACE_MS + 1);
+    expect(disposed).toEqual(["busy"]);
+  });
+});

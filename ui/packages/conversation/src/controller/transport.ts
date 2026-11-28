@@ -84,6 +84,12 @@ export interface AgentTransport {
    * have reached the agent, so its message was not sent.
    */
   crossOrigin?(): boolean;
+  /**
+   * Whether a turn's Idempotency-Key is actually sent (on another origin only
+   * after an opt-in). Default: yes. A turn sent without one cannot be told apart
+   * from a new message, so its notices never promise that resending is safe.
+   */
+  sendsIdempotencyKeys?(): boolean;
 }
 
 /** The calls a server-backed transport makes; @eddi/core's by default. */
@@ -140,6 +146,7 @@ export function createConversationTransport(
     mode: "conversation",
     ...common(calls),
     crossOrigin: () => !defaultHttp.isSameOrigin(),
+    sendsIdempotencyKeys: () => defaultHttp.sendsIdempotencyKeys(),
     start: () => calls().startConversation(target.environment, target.agentId, target.userId),
     stream: (id, text, { context, signal, idempotencyKey }) =>
       calls().sendMessageStreaming(id ?? "", text, { context, signal, idempotencyKey }),
@@ -157,6 +164,7 @@ export function createManagedTransport(
     mode: "managed",
     ...common(calls),
     crossOrigin: () => !defaultHttp.isSameOrigin(),
+    sendsIdempotencyKeys: () => defaultHttp.sendsIdempotencyKeys(),
     openManaged: async (fresh) => {
       if (fresh) await calls().endManagedConversation(target.intent, target.userId);
       return calls().loadManagedConversation(target.intent, target.userId);
