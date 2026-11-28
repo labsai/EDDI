@@ -35,6 +35,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -121,6 +122,27 @@ public class SlackEventHandler {
     private final ExecutorService executorService;
 
     /**
+     * Inbound events admitted and not yet finished — running or waiting to run.
+     * Taken on the webhook thread with {@code tryAcquire}, so the HTTP request
+     * never waits for it. The executor creates a virtual thread per task, which
+     * bounds nothing by itself: a burst of events (or of Slack's retries) used to
+     * start as many concurrent turns as there were events.
+     */
+    private final Semaphore admittedEvents;
+
+    /**
+     * Events actually being processed. An admitted event's virtual thread blocks on
+     * this — cheap for a virtual thread — which is what makes the excess of
+     * {@link #admittedEvents} over this a queue.
+     */
+    private final Semaphore runningEvents;
+
+    /** Last time an overload was logged, so a burst logs once, not per event. */
+    private final AtomicLong lastOverloadWarnMillis = new AtomicLong();
+
+    private static final long OVERLOAD_WARN_INTERVAL_MILLIS = 10_000L;
+
+    /**
      * Timeouts and the API retry budget. These were compile-time constants, so an
      * agent whose turn legitimately ran past sixty seconds always failed on Slack
      * and worked over {@code /v1}, with no way to tune it short of a rebuild.
@@ -186,13 +208,42 @@ public class SlackEventHandler {
         this.approvalRecords = approvalRecords;
         this.userMemoryStore = userMemoryStore;
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
+        int running = Math.max(1, slackConfig.getMaxConcurrentEvents());
+        this.runningEvents = new Semaphore(running);
+        this.admittedEvents = new Semaphore(running + Math.max(0, slackConfig.getMaxQueuedEvents()));
     }
+
+    /**
+     * What became of an inbound event. Only {@link #OVERLOADED} changes the HTTP
+     * answer: the webhook refuses the delivery with a retryable status so that
+     * Slack sends it again.
+     */
+    public enum Admission {
+        /** Handed to a worker. */
+        ACCEPTED,
+        /** Already seen under the same {@code event_id} — a Slack retry. */
+        DUPLICATE,
+        /**
+         * Every processing slot and queue place is taken. The event's dedup claim is
+         * released, so Slack's redelivery is processed rather than taken for a
+         * duplicate.
+         */
+        OVERLOADED
+    }
+
+    /** How long shutdown waits for admitted events before interrupting them. */
+    private static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(10);
 
     @PreDestroy
     void shutdown() {
+        shutdown(SHUTDOWN_GRACE);
+    }
+
+    /** {@link #shutdown()} with the grace period as a parameter, for tests. */
+    void shutdown(Duration grace) {
         executorService.shutdown();
         try {
-            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+            if (!executorService.awaitTermination(grace.toMillis(), TimeUnit.MILLISECONDS)) {
                 executorService.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -216,8 +267,8 @@ public class SlackEventHandler {
      *            message addressed to this bot from one that merely mentions
      *            somebody — see {@code handleObservedMessage}.
      */
-    public void handleEventAsync(String eventId, Map<String, Object> event, String botUserId) {
-        handleEventAsync(eventId, event, botUserId, EventOrigin.UNKNOWN);
+    public Admission handleEventAsync(String eventId, Map<String, Object> event, String botUserId) {
+        return handleEventAsync(eventId, event, botUserId, EventOrigin.UNKNOWN);
     }
 
     /**
@@ -265,48 +316,116 @@ public class SlackEventHandler {
      * @param origin
      *            workspace and signing integration established by the webhook — see
      *            {@link EventOrigin}
+     * @return whether the event was handed to a worker, skipped as a duplicate, or
+     *         refused because inbound processing is at capacity
+     *         ({@code eddi.slack.max-concurrent-events} running plus
+     *         {@code eddi.slack.max-queued-events} waiting)
      */
-    public void handleEventAsync(String eventId, Map<String, Object> event, String botUserId, EventOrigin origin) {
+    public Admission handleEventAsync(String eventId, Map<String, Object> event, String botUserId, EventOrigin origin) {
         EventOrigin effectiveOrigin = origin != null ? origin : EventOrigin.UNKNOWN;
         // De-duplicate: Slack retries events up to 3 times. putIfAbsent, not
         // get-then-put:
         // two deliveries racing through the gap were both processed (a double reply).
         // In cluster mode the cache is shared by every node, so a retry that the load
         // balancer sends to another replica is caught too.
-        if (eventDedup.putIfAbsent(eventId, Boolean.TRUE) != null) {
+        //
+        // An event without an event_id is processed without de-duplication. A null
+        // key threw from the node-local cache (so the webhook answered 400 and the
+        // event was never handled), and the shared cache stringified it to "null",
+        // so every id-less event after the first was dropped as a "duplicate".
+        // Slack always sends an event_id on event_callback; a key derived from
+        // channel and ts instead would collapse a message and its app_mention, which
+        // Slack delivers as two events for one ts.
+        boolean deduplicated = eventId != null && !eventId.isBlank();
+        if (deduplicated && eventDedup.putIfAbsent(eventId, Boolean.TRUE) != null) {
             LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
-            return;
+            return Admission.DUPLICATE;
         }
 
-        executorService.submit(() -> {
-            try {
-                handleEvent(event, botUserId, effectiveOrigin);
-            } catch (Exception e) {
-                LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
+        if (!admittedEvents.tryAcquire()) {
+            return refuseOverloaded(eventId, deduplicated);
+        }
+        try {
+            executorService.submit(() -> runAdmitted(eventId, event, botUserId, effectiveOrigin));
+        } catch (RejectedExecutionException e) {
+            // Shutting down: same outcome as a full queue, so Slack retries elsewhere.
+            admittedEvents.release();
+            return refuseOverloaded(eventId, deduplicated);
+        }
+        return Admission.ACCEPTED;
+    }
 
-                // Best-effort error response to user (never leak internal details).
-                // A timeout gets its own notice: the generic line reads as "the agent
-                // broke" when what actually happened is that the turn is still running
-                // and Slack stopped waiting, which is an operator-tunable limit rather
-                // than a fault. Naming the property is the difference between a support
-                // ticket and a one-line config change.
-                String channelId = (String) event.get("channel");
-                String threadTs = getThreadTs(event);
-                if (channelId != null) {
-                    boolean timedOut = hasCause(e, TimeoutException.class);
-                    String notice = timedOut
-                            ? "⏳ That took longer than " + slackConfig.getRequestTimeoutSeconds()
-                                    + " seconds, so I stopped waiting. The agent may still be working — "
-                                    + "ask again in a moment, or raise eddi.slack.request-timeout-seconds."
-                            : "⚠️ Sorry, I encountered an error processing your message. Please try again.";
-                    try {
-                        postMessage(channelId, threadTs, notice, null);
-                    } catch (Exception ignored) {
-                        // Can't post error — nothing more we can do
-                    }
+    /**
+     * Refuses an event for want of capacity. The dedup claim is given back first:
+     * the webhook answers with a retryable status, and the redelivery carries the
+     * same {@code event_id} — left claimed, it would be skipped as a duplicate and
+     * the event lost after all.
+     */
+    private Admission refuseOverloaded(String eventId, boolean deduplicated) {
+        if (deduplicated) {
+            eventDedup.remove(eventId);
+        }
+        long now = System.currentTimeMillis();
+        long last = lastOverloadWarnMillis.get();
+        if (now - last >= OVERLOAD_WARN_INTERVAL_MILLIS && lastOverloadWarnMillis.compareAndSet(last, now)) {
+            LOGGER.warnf("Slack inbound events at capacity (%d running, %d queued) — refusing event %s so Slack redelivers it. "
+                    + "Raise eddi.slack.max-concurrent-events / eddi.slack.max-queued-events if this persists.",
+                    slackConfig.getMaxConcurrentEvents(), slackConfig.getMaxQueuedEvents(), sanitize(eventId));
+        }
+        return Admission.OVERLOADED;
+    }
+
+    /** Runs one admitted event once a processing slot is free. */
+    private void runAdmitted(String eventId, Map<String, Object> event, String botUserId, EventOrigin origin) {
+        try {
+            runningEvents.acquire();
+        } catch (InterruptedException e) {
+            // Only shutdownNow() interrupts a waiting worker, once the shutdown grace
+            // period has passed with every slot still taken. Slack was answered 200
+            // when the event was admitted and will not redeliver it, so the event is
+            // lost — say so rather than dropping it silently.
+            LOGGER.warnf("Shutting down — dropping Slack event %s, which was accepted but was still waiting for a processing slot "
+                    + "(eddi.slack.max-concurrent-events). Slack will not redeliver it.", sanitize(eventId));
+            admittedEvents.release();
+            Thread.currentThread().interrupt();
+            return;
+        }
+        try {
+            handleEventGuarded(eventId, event, botUserId, origin);
+        } finally {
+            runningEvents.release();
+            admittedEvents.release();
+        }
+    }
+
+    private void handleEventGuarded(String eventId, Map<String, Object> event, String botUserId, EventOrigin effectiveOrigin) {
+        try {
+            handleEvent(event, botUserId, effectiveOrigin);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
+
+            // Best-effort error response to user (never leak internal details).
+            // A timeout gets its own notice: the generic line reads as "the agent
+            // broke" when what actually happened is that the turn is still running
+            // and Slack stopped waiting, which is an operator-tunable limit rather
+            // than a fault. Naming the property is the difference between a support
+            // ticket and a one-line config change.
+            String channelId = (String) event.get("channel");
+            String threadTs = getThreadTs(event);
+            if (channelId != null) {
+                boolean timedOut = hasCause(e, TimeoutException.class);
+                String notice = timedOut
+                        ? "⏳ That took longer than " + slackConfig.getRequestTimeoutSeconds()
+                                + " seconds, so I stopped waiting. The agent may still be working — "
+                                + "ask again in a moment, or raise eddi.slack.request-timeout-seconds."
+                        : "⚠️ Sorry, I encountered an error processing your message. Please try again.";
+                try {
+                    postMessage(channelId, threadTs, notice, null);
+                } catch (Exception ignored) {
+                    // Can't post error — nothing more we can do
                 }
             }
-        });
+        }
     }
 
     /**
@@ -600,41 +719,49 @@ public class SlackEventHandler {
         LOGGER.infof("[OBSERVE] Target '%s' answering an unaddressed message in channel %s",
                 sanitize(target.getName()), sanitize(channelId));
 
-        executorService.submit(() -> {
-            String conversationId = null;
-            OptionalDouble costBefore = OptionalDouble.empty();
+        // Inline, on the worker that admitted this event: submitted to the executor,
+        // the turn ran outside eddi.slack.max-concurrent-events — this handler
+        // returned,
+        // released its slot, and the next observed message started another turn while
+        // the first was still running.
+        String conversationId = null;
+        OptionalDouble costBefore = OptionalDouble.empty();
+        try {
+            String intent = threadIntent(channelId, target.getTargetId(), threadTs);
+            ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
+            conversationId = thread.conversationId();
+            costBefore = conversationCost(conversationId);
+            String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
+                    threadTs, message, botToken);
+            if (!deliveredTo.equals(conversationId)) {
+                // The conversation ended between opening and sending and the
+                // thread was given a fresh one. Its spend so far is this turn's,
+                // so it is measured from zero.
+                conversationId = deliveredTo;
+                costBefore = OptionalDouble.of(0.0);
+            }
+            // Locked only now, once the observer has actually spoken. The
+            // lock exists so a human replying under the observer's answer
+            // reaches the observer rather than the channel's DEFAULT target.
+            // Taken before the turn, a failure that posted nothing still left
+            // the thread bound: for the 24h the lock lives, a colleague
+            // replying there with an explicit `architect:` trigger would have
+            // been silently routed to an observer that never said anything.
+            if (threadTs != null) {
+                channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
+                    sanitize(target.getName()), sanitize(channelId));
+        } finally {
+            // Both reads or neither. A baseline that failed and a total that
+            // did not would make the delta the conversation's ENTIRE history
+            // of tool spend, charged to this one turn — which would retire
+            // the observer's daily budget on its first reply.
+            //
+            // Caught here, not left to the caller: the turn now runs inline, and a
+            // failure escaping from here would be logged as a failed selection.
             try {
-                String intent = threadIntent(channelId, target.getTargetId(), threadTs);
-                ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
-                conversationId = thread.conversationId();
-                costBefore = conversationCost(conversationId);
-                String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
-                        threadTs, message, botToken);
-                if (!deliveredTo.equals(conversationId)) {
-                    // The conversation ended between opening and sending and the
-                    // thread was given a fresh one. Its spend so far is this turn's,
-                    // so it is measured from zero.
-                    conversationId = deliveredTo;
-                    costBefore = OptionalDouble.of(0.0);
-                }
-                // Locked only now, once the observer has actually spoken. The
-                // lock exists so a human replying under the observer's answer
-                // reaches the observer rather than the channel's DEFAULT target.
-                // Taken before the turn, a failure that posted nothing still left
-                // the thread bound: for the 24h the lock lives, a colleague
-                // replying there with an explicit `architect:` trigger would have
-                // been silently routed to an observer that never said anything.
-                if (threadTs != null) {
-                    channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
-                }
-            } catch (Exception e) {
-                LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
-                        sanitize(target.getName()), sanitize(channelId));
-            } finally {
-                // Both reads or neither. A baseline that failed and a total that
-                // did not would make the delta the conversation's ENTIRE history
-                // of tool spend, charged to this one turn — which would retire
-                // the observer's daily budget on its first reply.
                 OptionalDouble costAfter = conversationCost(conversationId);
                 if (costBefore.isPresent() && costAfter.isPresent()) {
                     double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
@@ -645,8 +772,11 @@ public class SlackEventHandler {
                     LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
                             sanitize(conversationId));
                 }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "[OBSERVE] Could not record the cost of target '%s' answering in channel %s",
+                        sanitize(target.getName()), sanitize(channelId));
             }
-        });
+        }
         return true;
     }
 
