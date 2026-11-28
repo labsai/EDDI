@@ -248,6 +248,21 @@ public interface ISecretProvider {
     List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
 
     /**
+     * Every tenant this provider holds secrets for — at least the default tenant.
+     * <p>
+     * For sweeps that must reach every grant, such as removing a permanently
+     * deleted agent from them ({@link VaultGrantService#revokeDeletedAgent}). The
+     * default answers the default tenant only, which is all a provider without
+     * tenant bookkeeping can promise.
+     *
+     * @throws SecretProviderException
+     *             if the tenants cannot be read
+     */
+    default List<String> listTenants() throws SecretProviderException {
+        return List.of(SecretReference.DEFAULT_TENANT);
+    }
+
+    /**
      * Whether {@code storedChecksum} — as returned in {@link SecretMetadata} — is
      * the checksum of {@code plaintext} for the given tenant.
      * <p>
