@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * Write-once, append-only contract for the audit ledger.
@@ -52,6 +53,23 @@ public interface IAuditStore {
      *            the entries to persist
      */
     void appendBatch(List<AuditEntry> entries);
+
+    /**
+     * The text this store holds for a string it is given, when that is not always
+     * the string itself; {@code null} (the default) when every string is stored as
+     * given.
+     * <p>
+     * PostgreSQL cannot hold U+0000 or an unpaired surrogate and stores U+FFFD in
+     * their place; MongoDB keeps them. The ledger applies this function to every
+     * identifier and to every string (map keys included) of the normalised payload
+     * <em>before</em> it assigns the chain position and signs: what is signed must
+     * be exactly what is stored, or the row would read back as tampered. It must
+     * therefore be the very function the store's write path applies, and
+     * idempotent.
+     */
+    default UnaryOperator<String> storableText() {
+        return null;
+    }
 
     /**
      * Retrieve audit entries for a conversation, ordered by timestamp descending.

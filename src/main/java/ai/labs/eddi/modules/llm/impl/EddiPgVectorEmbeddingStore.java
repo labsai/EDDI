@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
@@ -49,7 +50,7 @@ final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore {
 
     @Override
     protected Connection getConnection() throws SQLException {
-        Connection connection = super.getConnection();
+        Connection connection = PostgresSanitizingDataSource.wrap(super.getConnection());
         Integer ef = efSearch;
         if (ef != null) {
             try (Statement statement = connection.createStatement()) {

@@ -50,6 +50,7 @@ class PostgresIngestionStateStoreSchemaTest {
 
         // Not marked initialized, so the next call tries again rather than assuming
         // a schema that was never created.
+        PostgresSchema.resetForTests(); // the back-off between two calls is covered by PostgresSchemaTest
         assertThrows(IngestionStateStoreException.class, store::ensureSchema);
         verify(dataSource, times(2)).getConnection();
     }

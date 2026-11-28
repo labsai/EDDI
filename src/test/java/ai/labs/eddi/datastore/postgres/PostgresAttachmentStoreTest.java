@@ -366,4 +366,42 @@ class PostgresAttachmentStoreTest {
         assertThrows(IAttachmentStore.AttachmentAccessDeniedException.class, () -> sut.delete("ref", "conv-other"));
         verify(preparedStatement, never()).executeUpdate();
     }
+
+    // ─── requesters that carry a character PostgreSQL cannot hold ──
+    // The sanitizing data source stores "c\0x" as "c\uFFFDx"; the Java owner and
+    // grant comparisons must use the same text or the owner is refused its own row.
+
+    @Test
+    void load_requesterWithNul_matchesStoredOwner() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn("c\uFFFDx");
+        when(resultSet.getBytes("data")).thenReturn("data".getBytes());
+
+        assertArrayEquals("data".getBytes(), sut.load("ref", "c" + (char) 0 + "x"));
+    }
+
+    @Test
+    void getMetadata_requesterWithNul_matchesStoredOwner() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn("c\uFFFDx");
+
+        assertNotNull(sut.getMetadata("ref", "c" + (char) 0 + "x"));
+    }
+
+    @Test
+    void delete_requesterWithNul_matchesStoredOwner() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn("c\uFFFDx");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(sut.delete("ref", "c" + (char) 0 + "x"));
+    }
+
+    @Test
+    void load_unrelatedRequester_stillRefused() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn("c\uFFFDx");
+
+        assertThrows(IAttachmentStore.AttachmentAccessDeniedException.class, () -> sut.load("ref", "other"));
+    }
 }

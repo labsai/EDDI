@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools.quota;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -14,7 +16,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -84,17 +85,19 @@ public class PostgresToolQuotaStore implements IToolQuotaStore {
 
     @Inject
     public PostgresToolQuotaStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void createSchema() {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            statement.execute(CREATE_SUBJECT_INDEX);
-            statement.execute(CREATE_EXPIRES_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresToolQuotaStore", statement -> {
+                statement.execute(CREATE_TABLE);
+                statement.execute(CREATE_SUBJECT_INDEX);
+                statement.execute(CREATE_EXPIRES_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             // Thrown, not logged: while the database is down every call lands here, and

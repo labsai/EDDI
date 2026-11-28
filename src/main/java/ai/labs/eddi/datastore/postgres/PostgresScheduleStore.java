@@ -61,7 +61,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     private static final String CREATE_SCHEDULES_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedules (
                 id VARCHAR(64) PRIMARY KEY,
-                name VARCHAR(512),
+                name TEXT,
                 agent_id VARCHAR(255),
                 agent_version INTEGER,
                 environment VARCHAR(64),
@@ -206,20 +206,26 @@ public class PostgresScheduleStore implements IScheduleStore {
             """;
 
     /**
-     * Every statement is {@code IF NOT EXISTS}, so this doubles as the idempotent
-     * schema upgrade for indexes added later — {@code idx_fire_logs_started_at} is
-     * one such addition. It backs the retention sweep
-     * ({@code deleteFireLogsOlderThan}), which filters on {@code started_at} alone:
-     * neither compound fire-log index can serve that, because PostgreSQL cannot use
-     * a compound index without its leading column, so the hourly prune was a full
-     * scan of exactly the table it exists to keep bounded.
+     * Every statement is {@code IF NOT EXISTS} or {@code IF EXISTS}, so this
+     * doubles as the idempotent schema upgrade for indexes added later —
+     * {@code idx_fire_logs_started_at} is one such addition. It backs the retention
+     * sweep ({@code deleteFireLogsOlderThan}), which filters on {@code started_at}
+     * alone: neither compound fire-log index can serve that, because PostgreSQL
+     * cannot use a compound index without its leading column, so the hourly prune
+     * was a full scan of exactly the table it exists to keep bounded.
+     * <p>
+     * {@code name} is looked up by equality only, and a caller chooses it: a B-tree
+     * entry is capped near 2.7 KB after compression, so a long, poorly compressible
+     * name failed {@code createSchedule} on the old B-tree index, which is dropped
+     * here and replaced by a hash index that holds a hash of the value.
      */
     private static final String CREATE_INDEXES = """
             CREATE INDEX IF NOT EXISTS idx_schedules_due ON eddi_schedules (enabled, next_fire, fire_status);
             CREATE INDEX IF NOT EXISTS idx_schedules_agent ON eddi_schedules (agent_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON eddi_schedules (tenant_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_user ON eddi_schedules (user_id);
-            CREATE INDEX IF NOT EXISTS idx_schedules_name ON eddi_schedules (name);
+            DROP INDEX IF EXISTS idx_schedules_name;
+            CREATE INDEX IF NOT EXISTS idx_schedules_name_hash ON eddi_schedules USING HASH (name);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_schedule ON eddi_schedule_fire_logs (schedule_id, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_status ON eddi_schedule_fire_logs (status, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_started_at ON eddi_schedule_fire_logs (started_at);
@@ -237,7 +243,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Inject
     public PostgresScheduleStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization,
             @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }
@@ -271,25 +277,30 @@ public class PostgresScheduleStore implements IScheduleStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_SCHEDULES_TABLE);
-            stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
-            stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
-            for (String addColumn : ADD_PAYLOAD_COLUMNS) {
-                stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
-            }
-            warnAboutUnattributableSchedules(stmt);
-            stmt.execute(CREATE_FIRE_LOGS_TABLE);
-            for (String idx : CREATE_INDEXES.split(";")) {
-                String trimmed = idx.trim();
-                if (!trimmed.isEmpty()) {
-                    stmt.execute(trimmed);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresScheduleStore", stmt -> {
+                stmt.execute(CREATE_SCHEDULES_TABLE);
+                // the name is whatever the caller chose; a 600-character one answered 500 here
+                // and 201 on MongoDB
+                PostgresSchema.widenToText(stmt, "eddi_schedules", "name");
+                stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
+                stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+                for (String addColumn : ADD_PAYLOAD_COLUMNS) {
+                    stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
                 }
-            }
+                warnAboutUnattributableSchedules(stmt);
+                stmt.execute(CREATE_FIRE_LOGS_TABLE);
+                for (String idx : CREATE_INDEXES.split(";")) {
+                    String trimmed = idx.trim();
+                    if (!trimmed.isEmpty()) {
+                        stmt.execute(trimmed);
+                    }
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresScheduleStore schema initialized");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize schedule tables", e);
+            throw new IllegalStateException("Failed to initialize schedule tables", e);
         }
     }
 

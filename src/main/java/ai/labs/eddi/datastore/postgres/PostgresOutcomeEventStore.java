@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -67,18 +66,20 @@ public class PostgresOutcomeEventStore implements IOutcomeEventStore {
 
     @Inject
     public PostgresOutcomeEventStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            for (String index : CREATE_INDEXES) {
-                stmt.execute(index);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresOutcomeEventStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                for (String index : CREATE_INDEXES) {
+                    stmt.execute(index);
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresOutcomeEventStore schema initialized");
         } catch (SQLException e) {

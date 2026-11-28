@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.deploy;
 
+import ai.labs.eddi.datastore.DatastoreType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +36,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -2671,15 +2673,23 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("the datastore type is compared as exactly as the Java that reads it")
         void datastoreTypeIsComparedTheWayJavaComparesIt() throws IOException {
+            // EDDI reads the type through DatastoreType: trimmed, case-insensitive,
+            // \"mongodb\", \"postgres\"
+            // and the alias \"postgresql\", anything else refused at startup. The chart may
+            // be stricter
+            // than that (it renders only the two lower-case names) but never looser.
             String producers = read(DATASTORE_PRODUCERS);
-            assertTrue(producers.contains("\"postgres\".equals(datastoreType)"),
-                    DATASTORE_PRODUCERS + " no longer selects the store with an exact equals(). The chart's "
-                            + "guard is written to that comparison — if this became case-insensitive the "
-                            + "guard may relax with it, but the two must be changed together, never one of "
-                            + "them");
-            assertFalse(producers.contains("equalsIgnoreCase"),
-                    DATASTORE_PRODUCERS + " matches the datastore type case-insensitively now; update the "
-                            + "chart guard and this test together");
+            assertTrue(producers.contains("DatastoreType.isPostgres(datastoreType)"),
+                    DATASTORE_PRODUCERS + " no longer selects the store through DatastoreType. The chart's "
+                            + "guard is written to the names that class accepts; change them together");
+            assertFalse(producers.contains("\"postgres\".equals(datastoreType)"),
+                    DATASTORE_PRODUCERS + " compares the raw datastore type again; every reader must go through DatastoreType");
+            String datastoreType = read(DATASTORE_PRODUCERS.resolveSibling("DatastoreType.java"));
+            assertTrue(
+                    datastoreType.contains("case \"mongodb\" -> MONGODB;")
+                            && datastoreType.contains("case \"postgres\", \"postgresql\" -> POSTGRES;"),
+                    "DatastoreType no longer accepts exactly mongodb, postgres and postgresql; the chart renders only "
+                            + "the first two and must stay within what EDDI accepts");
 
             String configmap = stripGoComments(read(HELM_TEMPLATES.resolve("configmap.yaml")));
             assertTrue(configmap.contains("$declaredType := toString (default \"\" .Values.eddi.datastoreType)"),
@@ -2691,6 +2701,20 @@ class DeploymentManifestsTest {
                     "configmap.yaml must refuse every spelling EDDI does not match, not merely the two "
                             + "mismatches. \"Postgres\", \"MONGODB\" and \"mongo\" all render happily, match "
                             + "neither Java branch, and silently fall through to the MongoDB store");
+            // the guard may be stricter than EDDI, never looser: every value it lets
+            // through must be one
+            // DatastoreType accepts (and parses to the store the chart configured it for)
+            var allowed = Pattern.compile("has \\$declaredType \\(list ((?:\"[^\"]+\"\\s*)+)\\)").matcher(configmap);
+            assertTrue(allowed.find(), "the chart no longer lists the datastore types it accepts in the form this test reads");
+            var accepted = Pattern.compile("\"([^\"]+)\"").matcher(allowed.group(1));
+            int checked = 0;
+            while (accepted.find()) {
+                String value = accepted.group(1);
+                assertDoesNotThrow(() -> DatastoreType.parse(value),
+                        "the chart renders \"" + value + "\" into EDDI_DATASTORE_TYPE but DatastoreType refuses it, so EDDI would not start");
+                checked++;
+            }
+            assertEquals(2, checked, "mongodb and postgres are the chart's datastore types");
             assertTrue(configmap.contains("EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}"),
                     "the ConfigMap must render the VALIDATED binding rather than "
                             + ".Values.eddi.datastoreType. Rendering the raw value is how a guarded string "

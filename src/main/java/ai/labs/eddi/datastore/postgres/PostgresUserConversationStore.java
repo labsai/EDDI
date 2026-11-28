@@ -55,19 +55,21 @@ public class PostgresUserConversationStore implements IUserConversationStore {
 
     @Inject
     public PostgresUserConversationStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX_CONVERSATION_ID);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresUserConversationStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX_CONVERSATION_ID);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize user_conversations table", e);
+            throw new IllegalStateException("Failed to initialize user_conversations table", e);
         }
     }
 

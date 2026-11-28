@@ -39,10 +39,10 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                 logger_name VARCHAR(512),
                 timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 environment VARCHAR(64),
-                AGENT_ID VARCHAR(255),
+                AGENT_ID TEXT,
                 AGENT_VERSION INTEGER,
-                conversation_id VARCHAR(255),
-                user_id VARCHAR(255),
+                conversation_id TEXT,
+                user_id TEXT,
                 instance_id VARCHAR(128)
             )
             """;
@@ -55,18 +55,25 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
 
     @Inject
     public PostgresDatabaseLogs(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX_TIMESTAMP);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresDatabaseLogs", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                // ids a client chose: one over-long value used to fail the whole batch of log
+                // entries it was in
+                PostgresSchema.widenToText(stmt, "database_logs", "agent_id");
+                PostgresSchema.widenToText(stmt, "database_logs", "conversation_id");
+                PostgresSchema.widenToText(stmt, "database_logs", "user_id");
+                stmt.execute(CREATE_INDEX_TIMESTAMP);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize database_logs table", e);
+            throw new IllegalStateException("Failed to initialize database_logs table", e);
         }
     }
 

@@ -42,18 +42,20 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
 
     @Inject
     public PostgresAgentTriggerStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresAgentTriggerStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize agent_triggers table", e);
+            throw new IllegalStateException("Failed to initialize agent_triggers table", e);
         }
     }
 

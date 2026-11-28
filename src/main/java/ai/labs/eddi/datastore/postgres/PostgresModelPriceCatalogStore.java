@@ -17,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.Optional;
 
 /**
@@ -54,16 +53,17 @@ public class PostgresModelPriceCatalogStore implements IModelPriceCatalogStore {
 
     @Inject
     public PostgresModelPriceCatalogStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresModelPriceCatalogStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize the model price catalog table", e);

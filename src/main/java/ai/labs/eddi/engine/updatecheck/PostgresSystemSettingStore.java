@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.updatecheck;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -15,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.Optional;
 
 /**
@@ -52,7 +53,7 @@ public class PostgresSystemSettingStore implements ISystemSettingStore {
 
     @Inject
     public PostgresSystemSettingStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {
@@ -63,8 +64,10 @@ public class PostgresSystemSettingStore implements ISystemSettingStore {
             if (schemaInitialized) {
                 return;
             }
-            try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-                statement.execute(CREATE_TABLE);
+            try {
+                PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresSystemSettingStore", statement -> {
+                    statement.execute(CREATE_TABLE);
+                });
                 schemaInitialized = true;
                 LOGGER.info("PostgresSystemSettingStore initialized (table=system_settings)");
             } catch (SQLException e) {

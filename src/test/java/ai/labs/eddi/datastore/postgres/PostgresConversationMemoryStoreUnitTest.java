@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -390,6 +391,25 @@ class PostgresConversationMemoryStoreUnitTest {
     }
 
     @Test
+    void getActiveConversationCount_nullVersion_countsRowsWithoutOneInsteadOfThrowing() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(0L);
+
+        assertEquals(0L, store.getActiveConversationCount("agent-1", null));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("AGENT_VERSION IS NULL") && s.contains("conversation_state NOT IN")));
+        verify(preparedStatement, never()).setInt(anyInt(), anyInt());
+        verify(preparedStatement).setString(1, "agent-1");
+        verify(preparedStatement).setString(2, "ENDED");
+        // the store closes what it opened
+        verify(resultSet).close();
+        verify(preparedStatement, atLeastOnce()).close();
+    }
+
+    @Test
     void getActiveConversationCount_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("error"));
         assertThrows(RuntimeException.class, () -> store.getActiveConversationCount("a", 1));
@@ -541,5 +561,24 @@ class PostgresConversationMemoryStoreUnitTest {
         assertNull(PostgresConversationMemoryStore.parseGeneration("c1", ""));
         assertEquals(3, PostgresConversationMemoryStore.parseGeneration("c1", "3"));
         assertEquals(7, PostgresConversationMemoryStore.parseGeneration("c1", " 7 "));
+    }
+
+    @Test
+    void upgradeCompatibilityGeneration_agentIdWithNul_isComparedAsStored() throws Exception {
+        // The sanitizing data source binds "agent\0x" as "agent\uFFFDx", so the UPDATE
+        // matches nothing when the row is already current; the probe must compare the
+        // same text or it answers WRONG_AGENT instead of ALREADY_CURRENT.
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("AGENT_ID")).thenReturn("agent\uFFFDx");
+        when(resultSet.getString("generation")).thenReturn("3");
+        when(resultSet.getString("conversation_state")).thenReturn("READY");
+
+        var outcome = store.upgradeCompatibilityGeneration("00000000-0000-0000-0000-0000000000a1", "agent" + (char) 0 + "x", 3);
+
+        assertEquals(GenerationUpgradeOutcome.ALREADY_CURRENT, outcome);
+        // the store owns the probe ResultSet (a mock here): it must release it
+        verify(resultSet).close();
     }
 }

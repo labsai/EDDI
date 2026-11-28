@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -58,17 +57,18 @@ public class PostgresSpendControlChangeStore implements ISpendControlChangeStore
 
     @Inject
     public PostgresSpendControlChangeStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresSpendControlChangeStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize the spend-control change table", e);

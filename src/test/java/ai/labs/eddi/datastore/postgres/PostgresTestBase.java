@@ -70,6 +70,14 @@ public abstract class PostgresTestBase {
     }
 
     /**
+     * An {@link Instance} over a data source the test built itself (for example one
+     * pointing at a fresh schema).
+     */
+    public static Instance<DataSource> createDataSourceInstance(DataSource ds) {
+        return new SimpleDataSourceInstance(ds);
+    }
+
+    /**
      * Truncates the given tables to ensure test isolation between methods.
      */
     protected static void truncateTables(DataSource ds, String... tableNames) throws SQLException {

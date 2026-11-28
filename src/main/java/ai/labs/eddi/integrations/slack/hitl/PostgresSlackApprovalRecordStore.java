@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.slack.hitl;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -70,7 +71,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     @Inject
     public PostgresSlackApprovalRecordStore(Instance<DataSource> dataSourceInstance,
             @ConfigProperty(name = "eddi.slack.hitl.approval-record-retention", defaultValue = "30d") Duration retention) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.retention = SlackApprovalRecordRetention.sanitize(retention);
     }
 
@@ -78,13 +79,15 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            statement.execute(ADD_CARD_ID);
-            statement.execute(CREATE_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresSlackApprovalRecordStore", statement -> {
+                statement.execute(CREATE_TABLE);
+                statement.execute(ADD_CARD_ID);
+                statement.execute(CREATE_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to create the slack_hitl_approval_records schema");
+            throw new IllegalStateException("Failed to create the slack_hitl_approval_records schema", e);
         }
     }
 

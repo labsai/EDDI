@@ -122,22 +122,24 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
 
     @Inject
     public PostgresAttachmentStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(ADD_GRANTS_COLUMN);
-            stmt.execute(CREATE_INDEX_CONV);
-            stmt.execute(CREATE_INDEX_TENANT);
-            stmt.execute(ADD_USER_COLUMN);
-            stmt.execute(CREATE_INDEX_USER);
-            stmt.execute(CREATE_GRANTS_TABLE);
-            stmt.execute(CREATE_INDEX_GRANTS_CONV);
-            stmt.execute(CREATE_BACKFILL_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresAttachmentStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(ADD_GRANTS_COLUMN);
+                stmt.execute(CREATE_INDEX_CONV);
+                stmt.execute(CREATE_INDEX_TENANT);
+                stmt.execute(ADD_USER_COLUMN);
+                stmt.execute(CREATE_INDEX_USER);
+                stmt.execute(CREATE_GRANTS_TABLE);
+                stmt.execute(CREATE_INDEX_GRANTS_CONV);
+                stmt.execute(CREATE_BACKFILL_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -422,10 +424,11 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             }
             // A row that records no owner stays deletable, though the read path refuses
             // it: deleting discloses nothing, and refusing would strand personal data.
-            if (owner != null && !owner.equals(requestingConversationId)) {
+            String requester = PostgresText.text(requestingConversationId);
+            if (owner != null && !owner.equals(requester)) {
                 throw new AttachmentAccessDeniedException(
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
-                                .formatted(owner, requestingConversationId));
+                                .formatted(owner, requester));
             }
             // The blob and the grants on it in one transaction: a grant never outlives
             // its blob.
@@ -649,7 +652,10 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         }
     }
 
-    private void authorize(String owner, ResultSet rs, String requester) throws SQLException, AttachmentStoreException {
+    private void authorize(String owner, ResultSet rs, String rawRequester) throws SQLException, AttachmentStoreException {
+        // the row holds what the sanitizing data source stored, so compare the same
+        // text
+        String requester = PostgresText.text(rawRequester);
         if (owner != null && owner.equals(requester)) {
             return;
         }
