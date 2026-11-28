@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { CONNECTION_PRESETS, applyPreset } from "../connection-presets";
-import { emptyConnection, toStoredConnection } from "../api/connections";
+import { emptyConnection, toStoredConnection } from "@eddi/app-kit/lib/api/connections";
 import {
   MAX_THUMBPRINT_CHARS,
   isEntraTokenUrl,
   isThumbprint,
   validateConnection,
-} from "../connection-validation";
+} from "@eddi/app-kit/lib/connection-validation";
 
 const preset = (id: string) => {
   const found = CONNECTION_PRESETS.find((p) => p.id === id);

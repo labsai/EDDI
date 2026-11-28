@@ -39,12 +39,23 @@ public final class JudgeCallPricing {
      */
     public static double cost(String provider, String model, Double inputPricePer1M, Double outputPricePer1M, int inputTokens,
                               int outputTokens) {
+        return ModelPriceResolver.price(PriceOverride.of(inputPricePer1M, outputPricePer1M), usage(provider, model, inputTokens, outputTokens))
+                .usd();
+    }
+
+    /**
+     * The usage map {@link #cost} prices: the two token counts plus the catalog key
+     * {@code provider/model} when both are named. The judge hands this map to
+     * {@code SystemSpendMeter.charge}, so the tenant is charged exactly what
+     * {@link #cost} returns.
+     */
+    public static Map<String, Object> usage(String provider, String model, int inputTokens, int outputTokens) {
         Map<String, Object> usage = new HashMap<>();
         usage.put("inputTokens", inputTokens);
         usage.put("outputTokens", outputTokens);
         if (provider != null && !provider.isBlank() && model != null && !model.isBlank()) {
             usage.put(MeteredTokenUsage.PRICING_MODEL, provider.trim() + "/" + model.trim());
         }
-        return ModelPriceResolver.price(PriceOverride.of(inputPricePer1M, outputPricePer1M), usage).usd();
+        return usage;
     }
 }

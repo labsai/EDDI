@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 import {
   getAgent,
   getAgentDescriptors,
@@ -9,10 +9,10 @@ import {
   type Agent,
   type DeploymentFailure,
   type DeploymentStatus,
-} from "./agents";
-import { getDescriptor } from "./descriptors";
+} from "@eddi/app-kit/lib/api/agents";
+import { getDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 import { hasOperatorMarker, markOperatorDescriptor } from "./operator-marker";
-import { getWorkflow } from "./workflows";
+import { getWorkflow } from "@eddi/app-kit/lib/api/workflows";
 import {
   fetchPlatformSelfUrl,
   gateLooksInstalled,

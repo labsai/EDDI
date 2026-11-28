@@ -10,7 +10,23 @@ import ai.labs.eddi.engine.model.Context;
 import java.net.URI;
 
 public interface IConversationSetup {
-    void createConversationDescriptor(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+    /** A conversation of its own — not a group member's thread. */
+    default void createConversationDescriptor(String agentId, IAgent latestAgent, String userId, String conversationId,
+                                              URI conversationUri)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri, null);
+    }
+
+    /**
+     * Writes the new conversation's descriptor.
+     *
+     * @param groupConversationId
+     *            the group conversation this is a member's thread of, or
+     *            {@code null}; recorded on the descriptor so the owner's own
+     *            listing can leave member threads out
+     */
+    void createConversationDescriptor(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri,
+                                      String groupConversationId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext);

@@ -174,6 +174,9 @@ MCP `fire_schedule_now` tool refuses it) and is never exported with its agent.
 - **Schedules** — the pending continuation is a schedule named `continuation-<conversationId>`,
   with its fire log (status, error, attempt) like any schedule. Spent continuations are pruned as the
   job runs: after a job only the last continuation's row is left, with its fire log.
+- **The owner's event stream** — [`GET /me/events`](user-events.md) sends the conversation's owner
+  `job.finished` when the last turn of a job ran (`state`: `done`, or why it stopped — `limit`,
+  `cost_ceiling`, …) and `job.failed` when a continuation fire failed. Ids only.
 - **Metrics** — `eddi_continuation_scheduled_total`, `eddi_continuation_run_total` and
   `eddi_continuation_refused_total{reason}`; see [Metrics](metrics.md#self-continuation-metrics).
 

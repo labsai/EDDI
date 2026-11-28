@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
 import {
@@ -18,8 +18,8 @@ import {
   useResumeOrStartConversation,
   pickResumableConversation,
   undoRedoFlags,
-} from "@/hooks/use-chat";
-import type { ConversationDescriptor } from "@/lib/api/conversations";
+} from "@eddi/app-kit/hooks/use-chat";
+import type { ConversationDescriptor } from "@eddi/app-kit/lib/api/conversations";
 
 function createWrapper() {
   const queryClient = new QueryClient({

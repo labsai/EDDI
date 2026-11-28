@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   CONNECTIONS_DISABLED,
   CONNECTIONS_FORBIDDEN,
@@ -15,8 +15,8 @@ import {
   parseConnectionResourceUri,
   toStoredConnection,
   type ConnectionConfiguration,
-} from "@/lib/api/connections";
-import { parseResourceUri } from "@/lib/api/agents";
+} from "@eddi/app-kit/lib/api/connections";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 
 describe("parseConnectionResourceUri", () => {
   it("parses an eddi:// resource URI", () => {

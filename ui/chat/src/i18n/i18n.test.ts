@@ -3,9 +3,16 @@ import { join, relative, resolve } from "node:path";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { SUPPORTED_LANGUAGES } from "@eddi/ui";
 import { initLocale, resolveLocale, setLocale, t, getLocale, LOCALE_LOADERS, type MessageKey } from "@/i18n";
+import { CONVERSATION_ENGLISH } from "@eddi/conversation";
 import en from "./locales/en.json";
 
 const LOCALE_DIR = resolve(process.cwd(), "src/i18n/locales");
+
+/** The shared conversation.* strings the widget renders, from @eddi/conversation. */
+function conversationTable(locale: string): Record<string, string> {
+  const dir = resolve(process.cwd(), "../packages/conversation/src/i18n/locales");
+  return JSON.parse(readFileSync(join(dir, `${locale}.json`), "utf8")) as Record<string, string>;
+}
 
 function table(locale: string): Record<string, string> {
   return JSON.parse(readFileSync(join(LOCALE_DIR, `${locale}.json`), "utf8")) as Record<string, string>;
@@ -43,28 +50,28 @@ describe("i18n", () => {
     await initLocale("ar");
     expect(document.documentElement.dir).toBe("rtl");
     expect(document.documentElement.lang).toBe("ar");
-    expect(t("input.label")).toBe(table("ar")["input.label"]);
+    expect(t("conversation.input.label")).toBe(conversationTable("ar")["conversation.input.label"]);
     await initLocale("en");
     expect(document.documentElement.dir).toBe("ltr");
   });
 
   it("fills placeholders and falls back to English for an unknown locale", async () => {
     await setLocale("de");
-    expect(t("attach.removeNth", { file: "a.pdf", n: 1, total: 2 })).toBe("a.pdf entfernen (1 von 2)");
+    expect(t("conversation.attach.removeNth", { file: "a.pdf", n: 1, total: 2 })).toBe("a.pdf entfernen (1 von 2)");
     await setLocale("nope");
     expect(getLocale()).toBe("en");
     expect(t("start.retry")).toBe("Try again");
   });
 
   it("leaves a placeholder literal when no value is supplied for it", () => {
-    expect(t("attach.done", {})).toBe("{{file}} attached.");
-    expect(t("attach.done", { file: "a.pdf" })).toBe("a.pdf attached.");
-    expect(t("attach.maxFiles", { max: 3 })).toContain("3");
+    expect(t("conversation.attach.done", {})).toBe("{{file}} attached.");
+    expect(t("conversation.attach.done", { file: "a.pdf" })).toBe("a.pdf attached.");
+    expect(t("conversation.attach.maxFiles", { max: 3 })).toContain("3");
   });
 
   it("never interpolates a value a second time", () => {
     // A file name is user input: a `{{…}}` or `$t(…)` in it stays literal.
-    expect(t("attach.done", { file: "{{max}} $t(start.retry)" })).toBe("{{max}} $t(start.retry) attached.");
+    expect(t("conversation.attach.done", { file: "{{max}} $t(start.retry)" })).toBe("{{max}} $t(start.retry) attached.");
   });
 
   it("loads only the locale in use", async () => {
@@ -116,13 +123,15 @@ describe("locale files", () => {
         used.set(match[1]!, relative(process.cwd(), file));
       }
     }
-    expect(used.size).toBeGreaterThan(50);
-    const missing = [...used].filter(([key]) => !(key in english)).map(([key, file]) => `${file}: ${key}`);
+    expect(used.size).toBeGreaterThan(25);
+    // The widget renders the shared conversation.* strings too.
+    const known = { ...CONVERSATION_ENGLISH, ...english };
+    const missing = [...used].filter(([key]) => !(key in known)).map(([key, file]) => `${file}: ${key}`);
     expect(missing).toEqual([]);
   });
 
   it("types every key", () => {
-    const key: MessageKey = "input.label";
-    expect(english[key]).toBe("Message");
+    const key: MessageKey = "conversation.input.label";
+    expect(t(key)).toBe("Message");
   });
 });

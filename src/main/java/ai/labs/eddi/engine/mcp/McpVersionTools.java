@@ -15,7 +15,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.io.IOException;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
-import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 
 /**
  * MCP tool answering which build of EDDI is running. Same source as
@@ -44,7 +44,7 @@ public class McpVersionTools {
     @Tool(name = "get_eddi_version", description = "Get the version and git commit of the running EDDI. "
             + "Read live from the process, so it is correct right after an upgrade. commit is 'unknown' if the build recorded none.")
     public String getEddiVersion() {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_eddi_version"));
         try {
             return jsonSerialization.serialize(buildInfo.get());
         } catch (IOException e) {

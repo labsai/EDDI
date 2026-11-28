@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceFilter;
@@ -131,9 +132,11 @@ class RestConversationStoreOwnershipTest {
         }
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true),
                 mock(IConversationDescriptorStore.class));
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     private RestConversationStore asOwner() {
@@ -301,6 +304,7 @@ class RestConversationStoreOwnershipTest {
         var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        store.erasureGuard = TestErasureGuards.withoutWriters();
 
         assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));
         verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
@@ -320,9 +324,11 @@ class RestConversationStoreOwnershipTest {
         lenient().when(identity.isAnonymous()).thenReturn(false);
         lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     private void legacySnapshotOwnedBy(String conversationId, String ownerId) throws Exception {
@@ -581,9 +587,11 @@ class RestConversationStoreOwnershipTest {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(true);
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(false), mock(IConversationDescriptorStore.class));
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     @Test
@@ -676,6 +684,7 @@ class RestConversationStoreOwnershipTest {
         var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        store.erasureGuard = TestErasureGuards.withoutWriters();
         firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", "anonymous-0a1b"), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = store.readConversationDescriptors(0, 20, null, null, null, null, null, null, true);
@@ -684,5 +693,39 @@ class RestConversationStoreOwnershipTest {
         ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
         verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
+    }
+
+    // ─── excludeGroupMembers=true (the Workforce sidebar) ───
+
+    @Test
+    @DisplayName("excludeGroupMembers=true filters member threads in the query and per row")
+    @SuppressWarnings("unchecked")
+    void excludeGroupMembers_dropsMemberThreads() throws Exception {
+        var own = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(own, member);
+
+        List<ConversationDescriptor> result = asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null, true,
+                true);
+
+        assertEquals(1, result.size());
+        assertEquals(own.getResource(), result.getFirst().getResource());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        var memberGroup = captor.getValue().stream()
+                .filter(g -> "groupConversationId".equals(g.getQueryFilters().getFirst().getField()))
+                .findFirst().orElseThrow();
+        assertInstanceOf(IResourceFilter.NotMatching.class, memberGroup.getQueryFilters().getFirst().getFilter());
+    }
+
+    @Test
+    @DisplayName("without excludeGroupMembers member threads are still listed, as before")
+    void withoutExcludeGroupMembers_memberThreadsListed() throws Exception {
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(member);
+
+        assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
     }
 }

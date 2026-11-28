@@ -109,11 +109,11 @@ class GroupConversationServiceTaskForceTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
         taskForceEngine = new TaskForceEngine(null, templatingEngine, jsonSerialization, null,
                 new CallerIdentityContext(null, null), new ConcurrentHashMap<>(), 180, 5);
         memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"),
+                new GroupSigningGuard(null, null, "default"),
                 new GroupContextBuilder(templatingEngine), service, new SimpleMeterRegistry().counter("test"), 180, 2);
     }
 

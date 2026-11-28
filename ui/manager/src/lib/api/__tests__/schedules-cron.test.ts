@@ -14,7 +14,7 @@ import {
   fireLogDurationMs,
   formatDateInZone,
   formatInstantInZone,
-} from "../schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 
 // The backend (Quarkus write-dates-as-timestamps) serializes Instant as
 // FRACTIONAL EPOCH SECONDS. parseInstant must handle that plus ISO / millis.

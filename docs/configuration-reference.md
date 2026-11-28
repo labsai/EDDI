@@ -165,7 +165,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` — **recommended for production** (Helm: `cluster.degradedTurns` in the chart's `eddi:` block; the Kustomize `nats` component sets it) |
-| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — signed-envelope nonces and the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes): `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
+| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes); group-transcript signing does not use NATS: `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
 | `eddi.cluster.readiness.require-first-connect` | `true` | Not ready until the node has connected to NATS once since boot: one that never connected cannot take a lease, so every turn it served ran unfenced. A later outage keeps it ready. `false` serves degraded from boot |
@@ -175,7 +175,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
 | `eddi.cluster.events.resync-jitter` | `5s` | A cache resync every node runs for the same reason (a cluster-wide request, a gap after an outage, a recreated event stream) starts after a random delay up to this, so the nodes do not reload from the database in the same second. An administrator's resync runs at once on the node that asked. `0s` turns it off |
 | `eddi.cluster.deployments.transient-ttl` | `10m` | Lifetime of the cluster record of a deployment made with `autoDeploy=false` (`<prefix>_DEPLOYMENTS` bucket). Nodes serving it rewrite it before it expires, so it lasts while the cluster runs, through rolling restarts, and is forgotten once no node has served it for this long |
-| `eddi.cluster.gdpr-stop-timeout` | `10s` | How long a GDPR erasure waits for every other node to confirm that it stopped the user's in-flight work (the wait ends early once all of them answered) |
+| `eddi.cluster.gdpr-stop-timeout` | `10s` | How long a GDPR erasure waits for every other node to confirm that it stopped the user's in-flight work (the wait ends early once all of them answered). Each node also drains its asynchronous writers before it answers, so the erasure waits this plus `eddi.gdpr.drain-timeout`; a permanent conversation delete's `erasure-drain` scatter waits the same |
 | `eddi.cluster.signing.key` | — | HMAC key that signs node RPCs, their replies and cluster events; at least 32 characters, the same on every node, kept outside NATS (a Kubernetes Secret, not the NATS credentials). Unset: messages are unsigned and a warning is logged at boot. Also seals the user-id hash a GDPR stop sends. See [Clustering](clustering.md#signed-control-plane) |
 | `eddi.cluster.signing.previous-keys` | — | Comma-separated keys still accepted for verification while a key is rotated |
 | `eddi.cluster.signing.required` | `false` | `true` refuses unsigned cluster messages, and a node without a key refuses to start. Leave `false` until every node signs — that is what lets a node of the previous version take part in a rolling upgrade ([order](clustering.md#rolling-upgrades)) |
@@ -232,6 +232,13 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when a `/stream` SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
 | `eddi.streaming.resume-cancel-on-client-disconnect` | `false` | The same for `POST /agents/{id}/resume/stream` only. Off by default: a resume is a deliberate human decision whose approved tool calls may already have run, so a dropped connection must not discard the turn. `true` cancels (and discards) the resumed turn |
 | `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. The same tick ends a stream whose turn has written an event and then none for `systemRuntime.agentTimeoutInSeconds` plus this interval, with an `error` event of code `turn_timeout`: the watchdog gave up on that turn and its pipeline never returned. `0` turns both off |
+| `eddi.user-events.enabled` | `true` | The per-user event stream `GET /me/events` ([User Events](user-events.md)). `false` answers it `404` and raises no events |
+| `eddi.user-events.max-connections-per-user` | `8` | Open `/me/events` streams one principal may hold on one node (one per browser tab); the next is refused `429`, after the user's already-disconnected streams are dropped. With authorization off every caller shares one anonymous bucket, which this cap does not apply to; `max-connections` still does |
+| `eddi.user-events.max-connections` | `10000` | Open `/me/events` streams on one node, all users together; the next is refused `429` |
+| `eddi.user-events.buffer-size` | `64` | Frames a stream may have written but not yet acknowledged; a client further behind is closed as a slow consumer and reconnects |
+| `eddi.user-events.dispatch-queue-size` | `10000` | Events waiting for fan-out on one node; an event that finds the queue full is dropped and counted (`eddi_user_events_dropped_total{reason="dispatch_queue_full"}`) |
+| `eddi.user-events.heartbeat-interval` | `20s` | How often each stream gets a keep-alive comment line — also how soon a vanished client is noticed and its slot freed |
+| `eddi.user-events.max-connection-age` | `1h` | A stream is closed after this long, and at its access token's expiry, so the roles captured when it opened are re-read on reconnect |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream), and one MCP server response to the MCP client. Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
@@ -282,6 +289,20 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
 | `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
+
+---
+
+## Agent Health
+
+Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
+| `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each health row was captured (not written): the conversations of those rows are checked against the conversation store, and the rows of those that no longer exist deleted |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. No cursor is kept, so the excess is not guaranteed a later check and may stay until `eddi.health.facts-retention` |
 
 ---
 
@@ -364,6 +385,7 @@ Full guide: [workspaces.md](workspaces.md).
 | `eddi.workspaces.default-space` | *(empty)* | Where new resources are filed when a request names no space. Empty means the creator's personal space; a Keycloak group name gives a team-first deployment — for that group's members, while everyone else keeps their personal space. **Changeable at runtime** like `legacy-visibility`, and pinned the same way. A request's `X-EDDI-Space` header — the Manager's "Create in" choice — wins over it for that request |
 | `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Records every signed-in user (principal, name, username, email and whether the identity provider verified it, teams) so a share can be addressed by name or **verified** email and resolves to a real account, with autocomplete. Off: shares are taken exactly as typed, as before the directory existed. Unset, it is on exactly when workspaces are enforced. Suggestions start at three characters, and a non-admin is offered only their own teams and their members. Covered by GDPR erasure and export |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share-box suggestions show people's email addresses. Off shows the username instead. Even on, an address is shown only to `eddi-admin` or to somebody who shares a team with that person |
+| `eddi.workspaces.directory.stale-after` | *(unset → never)* | A duration (`90d`, `P90D`). A person whose last recorded sign-in is older than this counts as a member of no team in the user directory: they are no longer suggested to former teammates and their email is no longer shown to them. The entry is hidden, not deleted — the next sign-in restores it — and it still resolves a share typed by exact username or verified email. Grants are unaffected: they are checked against the live token. `eddi-admin`'s search still shows everybody. Positive values under `1h` are raised to `1h` and values over 100 years lowered to 100 years; zero or negative means never. See [stale entries](workspaces.md#stale-entries-stale-after) |
 
 ### Secrets vault
 
@@ -403,7 +425,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds the unversioned one under `agent-signing-key:{agentId}`. Generating a key (`POST /agentstore/agents/{id}/signing-keys`) writes versioned keys only, so audit entries carry no agent signature; see [architecture.md](architecture.md#cryptographic-agent-identity). Each node keeps the vault's answer for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute |
+| `eddi.audit.agent-signing-enabled` | `true` | Let agents sign their own audit entries. An entry is signed with the agent's newest key (`agentSignature` = `v<keyVersion>:<Ed25519 signature>`) only when all of these hold: the ledger has an HMAC key; the agent version that produced it has `security.signInterAgentMessages` on and declares a newest key that is usable at the entry's timestamp (not revoked, inside its validity window); and the vault holds that key's private half, matching the declared public key. Otherwise the entry is written unsigned; `/auditstore/verify` checks it either way. See [audit-ledger.md](audit-ledger.md#agent-signatures). Each node keeps the vault's answer for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
@@ -420,6 +442,9 @@ Full guide: [gdpr-compliance.md](gdpr-compliance.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.gdpr.restriction-cache-ttl-seconds` | `0` | How long an Art. 18 restriction verdict may be reused without re-reading the store. **`0` — the default — switches the cache off**, so every check reads the store. The cache is node-local with no cross-node invalidation, so a cached "not restricted" on one node keeps a restricted user being processed for the length of the TTL after another node applies the restriction, and keeps answering from cache through a store outage instead of failing closed. Raise it only on a single-node deployment or one with conversation affinity |
+| `eddi.gdpr.tombstone-retention` | `400d` | How long the durable erasure tombstones (a keyed hash of an erased user, the id of an erased or permanently deleted conversation) are kept. While one exists, an asynchronous writer (alerts) refuses or removes a row of that user or conversation that was queued before the erasure. Keep it longer than any guarded data can still arrive — at least the longest retention of a guarded store (alert events: `eddi.alerts.event-retention`, 90 days). A value shorter than one day plus twice `eddi.gdpr.drain-timeout` plus `eddi.gdpr.tombstone-clock-skew` fails the start: a tombstone must outlive the erasure that wrote it. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) |
+| `eddi.gdpr.drain-timeout` | `30s` | How long each node waits in total (for all its writers together), during an erasure's stop step and a permanent conversation delete, for its asynchronous writers to finish writing the work queued before the tombstones (alert deliveries are not waited for). A writer that does not drain in time fails the erasure (`asyncWriteDrain`, or `clusterStop` for another node) or the delete — never a silent pass. The cluster stop's wait is `eddi.cluster.gdpr-stop-timeout` plus this |
+| `eddi.gdpr.tombstone-clock-skew` | `5m` | How far after an erasure content of the erased user still counts as captured before it, to absorb clock differences between nodes. The erasure time is the later of the erasing node's clock and the database's write time. **Assumes every node and the database run NTP** and stay within this skew. Content captured later is new activity of a reused id and is stored. Conversation tombstones have no such window: a deleted conversation's rows are refused whenever they were captured |
 
 ---
 
@@ -530,6 +555,10 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
 
+### Documents
+
+Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
+
 ---
 
 ## Backup, export & import
@@ -590,8 +619,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions, and on every text inside a peer tool's parameter schema |
 | `eddi.a2a.tool-schema.max-bytes` | `32768` | As `eddi.mcp.tool-schema.max-bytes`, for A2A peer tools |
 | `eddi.a2a.tool-schema.max-bytes-per-agent` | `524288` (512 KB) | As `eddi.mcp.tool-schema.max-bytes-per-server`, per A2A peer |
-| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | How old the timestamp of a signed group-transcript entry may be when its nonce is registered. Despite the prefix, A2A requests are not signed |
-| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | How far ahead of this node's clock that timestamp may be |
+| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Unused: nothing registers signed-envelope nonces any more. Group-transcript entries are checked for duplicate nonces within their own transcript, and A2A requests are not signed |
+| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Unused, as `eddi.a2a.signing.nonce.max-age-ms` |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
@@ -709,7 +738,9 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.groups.team-budget.admin-only-edits` | `true` | Changing a group's `teamBudget` needs `eddi-admin`; `false` lets editors change it (and so raise their own cap). See [Team Budgets](team-budgets.md#who-may-change-what) |
 | `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget of groups that configure a `teamBudget` (a group without one is never metered or gated). `false` is one global kill switch: no metering, no in-run ceiling, and no admission refusals for any team. A discussion already running when it is switched keeps its team ceiling until its current leg ends; its next leg (a resume, continuation or follow-up) drops it |
 | `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
-| `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
+| `eddi.org.mode` | `single` | Organizations. `single` is one org, `default`, and is today's behaviour. `multi` (several orgs on one cluster, designed in `planning/multi-tenancy-plan.md`) is not available in this release, and startup refuses it |
+| `eddi.org.resolver` | `single` | How a request's org is derived. Only `single` (always `default`) exists in this release; any other value refuses startup |
+| `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none. In single mode it is also the org's quota key, so counters are not re-keyed |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-agents-per-tenant` | `-1` | `-1` = unlimited |

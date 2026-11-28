@@ -25,10 +25,10 @@ import java.time.Duration;
  * forwarding checks it before publishing and again right after
  * ({@link ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator}).
  * The tombstone holds nothing but the conversation id as a key (no personal
- * data) and expires after {@code eddi.cluster.erasure-marker-ttl}: a node must
- * reconnect within that time for the marker to protect its dead letters; after
- * it, the conversation store's own "does it still exist" check has long since
- * become authoritative.
+ * data) and expires after {@code eddi.cluster.erasure-marker-ttl} (default 7
+ * days): a node must reconnect within that time for the marker to protect its
+ * dead letters; after it, the conversation store's own "does it still exist"
+ * check has long since become authoritative.
  *
  * @since 6.6.0
  */

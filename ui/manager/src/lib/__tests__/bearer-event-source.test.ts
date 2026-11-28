@@ -7,11 +7,11 @@ import {
   afterEach,
   type MockInstance,
 } from "vitest";
-import { BearerEventSource } from "@/lib/bearer-event-source";
+import { BearerEventSource } from "@eddi/app-kit/lib/bearer-event-source";
 import {
   SSE_RECONNECT_MAX_ATTEMPTS,
   SSE_RECONNECT_MAX_DELAY_MS,
-} from "@/lib/constants";
+} from "@eddi/app-kit/lib/constants";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

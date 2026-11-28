@@ -3,12 +3,12 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
-import { useChatStore, useLoadConversation, useSendMessage } from "@/hooks/use-chat";
+import { useChatStore, useLoadConversation, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({

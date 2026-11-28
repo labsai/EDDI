@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Bot, RefreshCw, Check, X } from "lucide-react";
 import type { ResourceUsage } from "@/lib/api/resource-usage";
-import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
 
 export interface UpdateUsageDialogProps {
   /** List of workflows/agents using this resource */

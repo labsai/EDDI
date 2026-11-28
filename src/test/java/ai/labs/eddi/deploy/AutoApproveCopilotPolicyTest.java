@@ -159,7 +159,7 @@ class AutoApproveCopilotPolicyTest {
                 "docker-compose.yml", "docker-compose.auth.yml", "ui/manager/docker-compose.integration-keycloak.yml",
                 "install.sh", "install.ps1", "mise.toml", "ui/manager/mise.toml", ".gitleaksignore", ".trivyignore",
                 "ui/manager/package.json", "ui/manager/package-lock.json", "ui/chat/package.json",
-                "ui/chat/package-lock.json", "ui/manager/scripts/check-i18n.mjs",
+                "ui/chat/package-lock.json", "ui/scripts/check-i18n.mjs",
                 "ui/package.json", "ui/package-lock.json", "ui/scripts/check-lockfile-platforms.mjs",
                 "ui/packages/core/package.json", "ui/tsconfig.base.json", "ui/eslint.config.base.js",
                 "ui/bundle-budget.json",
@@ -168,6 +168,11 @@ class AutoApproveCopilotPolicyTest {
                 "ui/packages/core/vitest.config.ts", "ui/packages/core/eslint.config.js", "ui/packages/core/tsconfig.json",
                 "ui/packages/ui/package.json", "ui/packages/ui/vitest.config.ts", "ui/packages/ui/eslint.config.js",
                 "ui/packages/ui/tsconfig.json",
+                "ui/packages/conversation/package.json", "ui/packages/conversation/vitest.config.ts",
+                "ui/packages/conversation/eslint.config.js", "ui/packages/conversation/tsconfig.json",
+                "ui/workforce/package.json", "ui/workforce/vite.config.ts", "ui/workforce/playwright.config.ts",
+                "ui/packages/app-kit/package.json", "ui/packages/app-kit/eslint.config.js",
+                "ui/scripts/vite-backend-proxy.mjs",
                 ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore",
                 // The security-critical code: the guards, the vault, the outbound HTTP
                 // client, stored connections and the shipped defaults.
@@ -206,7 +211,8 @@ class AutoApproveCopilotPolicyTest {
                 "ui/manager/src/lib/utils.ts", "ui/manager/src/pages/index.html.tsx",
                 "scriptsx/run.sh", "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts",
                 "ui/packages/README.md", "ui/packages/core/src/http.ts", "ui/packages/ui/src/index.ts",
-                "ui/packages/ui/src/styles/theme.css");
+                "ui/packages/ui/src/styles/theme.css", "ui/packages/conversation/src/index.ts",
+                "ui/packages/conversation/src/i18n/locales/de.json");
 
         List<String> inputs = new ArrayList<>(protectedPaths);
         inputs.addAll(ordinaryPaths);

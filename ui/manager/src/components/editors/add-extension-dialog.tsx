@@ -9,23 +9,23 @@ import {
   FolderSearch,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useExtensionTypes } from "@/hooks/use-extensions-store";
 import {
   getExtensionIcon,
   getExtensionLabel,
   getResourceSlugForExtension,
   sortExtensionTypes,
-} from "@/lib/api/extensions";
-import type { ExtensionDescriptor } from "@/lib/api/extensions";
+} from "@eddi/app-kit/lib/api/extensions";
+import type { ExtensionDescriptor } from "@eddi/app-kit/lib/api/extensions";
 import {
   getResourceType,
   getResourceDescriptors,
   createResource,
   type ResourceTypeConfig,
-} from "@/lib/api/resources";
-import { parseResourceUri } from "@/lib/api/agents";
-import { updateDescriptor } from "@/lib/api/descriptors";
+} from "@eddi/app-kit/lib/api/resources";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { updateDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 
 /** Build an eddi:// resource URI from resource type, ID, and version */
 function buildEddiUri(rt: ResourceTypeConfig, id: string, version: number): string {

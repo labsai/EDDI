@@ -142,6 +142,7 @@ public class RestAuditStore implements IRestAuditStore {
         int recovered = 0;
         int invalid = 0;
         int unsigned = 0;
+        int agentSignatureUnproven = 0;
         var problems = new ArrayList<EntryProblem>();
         // One budget for the whole sweep — see AuditRecoveryBudget. Spent only on
         // rows whose direct check already failed.
@@ -159,8 +160,12 @@ public class RestAuditStore implements IRestAuditStore {
                 }
                 // Not proven intact, so not valid — but reported by its own status in
                 // the problem list, where an operator can tell a missing key from a
-                // forged row.
-                case INVALID, UNKNOWN_KEY -> invalid++;
+                // forged row, and a forged agent signature from edited content.
+                case INVALID, UNKNOWN_KEY, AGENT_SIGNATURE_INVALID -> invalid++;
+                // The HMAC proved the content; only the agent's vouching for it is
+                // missing. Not tampering (an owner deleting their agent is routine),
+                // but not proven either.
+                case AGENT_SIGNATURE_MISSING, AGENT_KEY_REVOKED, AGENT_KEY_UNAVAILABLE -> agentSignatureUnproven++;
                 case UNSIGNED -> unsigned++;
                 case SIGNING_DISABLED -> {
                     // counted only as a problem — nothing was actually checked
@@ -180,7 +185,8 @@ public class RestAuditStore implements IRestAuditStore {
                 : ChainStatus.NOT_APPLICABLE;
 
         return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered,
-                recoveryBudget.searchesSkipped(), invalid, unsigned, chainStatus, missing, undelivered, duplicates, problems, Instant.now());
+                recoveryBudget.searchesSkipped(), invalid, unsigned, agentSignatureUnproven, chainStatus, missing, undelivered, duplicates, problems,
+                Instant.now());
     }
 
     /**
@@ -227,7 +233,7 @@ public class RestAuditStore implements IRestAuditStore {
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
      * <p>
-     * Two refinements keep the verdict honest in both directions:
+     * These refinements keep the verdict honest in both directions:
      * <ul>
      * <li>When {@code expectRunFromOrigin}, the expected run is anchored at
      * {@link #SEQUENCE_ORIGIN} rather than at the lowest surviving sequence —
@@ -257,14 +263,15 @@ public class RestAuditStore implements IRestAuditStore {
             return ChainStatus.INTACT;
         }
 
-        // A window that mixes sequenced and unsequenced rows cannot be judged at all.
+        // A window that mixes sequenced and unsequenced rows cannot be anchored at the
+        // origin (it is still checked for holes between the sequenced rows).
         // AuditLedgerService seeds a conversation's counter from countByConversation,
         // which COUNTS THE LEGACY ROWS — so after an upgrade the first sequenced entry
         // starts at N, not 0, and the N positions below it were never assigned to
         // anything. Anchoring at the origin would report them as missing and accuse
         // the deployment of deleting audit records it never had. Unsequenced rows also
         // make a genuine deletion undetectable, so the honest answer for a mixed window
-        // is that the chain cannot be established.
+        // is UNAVAILABLE unless a hole or a duplicate breaks the chain.
         boolean mixed = entries.stream().anyMatch(e -> e.sequence() < 0);
         List<Long> sequences = entries.stream().filter(e -> e.sequence() >= 0).filter(e -> !signingEnabled || signsSequence(e))
                 .map(AuditEntry::sequence).sorted().toList();

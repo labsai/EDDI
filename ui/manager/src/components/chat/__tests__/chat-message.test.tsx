@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatMessage } from "@/components/chat/chat-message";
-import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
+import { screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatMessage } from "@eddi/app-kit/components/chat/chat-message";
+import type { ChatMessage as ChatMessageType } from "@eddi/app-kit/lib/api/chat";
 
 const userMessage: ChatMessageType = {
   id: "msg-1", role: "user",
@@ -33,18 +33,24 @@ const agentNoContent: ChatMessageType = {
 };
 
 describe("ChatMessage — untrusted HTML", () => {
-  it("keeps raw HTML in bot output escaped rather than live markup", () => {
+  it("never turns raw HTML in bot output into live frames or images", async () => {
     // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
-    // with full app-origin access (no CSP), so rehypeRaw must stay off.
+    // with full app-origin access (no CSP). The one markdown renderer
+    // (@eddi/conversation) passes HTML only through rehype-sanitize, and turns
+    // every image into a link.
     const { container } = renderWithProviders(
       <ChatMessage
         message={{
           ...agentMessage,
           content:
-            '**hi**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
+            '**hi** <kbd>parsed</kbd>\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
         }}
       />
     );
+    // The raw-HTML parser is a lazy chunk; until it is in, no HTML renders at
+    // all and the negative checks below would pass without testing anything.
+    // An allowed tag appearing is the sign the sanitised HTML is on screen.
+    await waitFor(() => expect(container.querySelector("kbd")).not.toBeNull());
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
   });
@@ -157,7 +163,7 @@ describe("ChatMessage", () => {
     expect(timeSpan?.textContent?.length).toBeGreaterThan(0);
   });
 
-  it("applies animate-pulse class for streaming messages", () => {
+  it("marks a streaming reply busy without pulsing the text being read", () => {
     const streamingWithContent: ChatMessageType = {
       id: "msg-5", role: "agent",
       content: "Typing...",
@@ -167,8 +173,18 @@ describe("ChatMessage", () => {
     const { container } = renderWithProviders(
       <ChatMessage message={streamingWithContent} />
     );
-    const pulseEl = container.querySelector(".animate-pulse");
-    expect(pulseEl).not.toBeNull();
+    const bubble = container.querySelector('[data-streaming="true"]');
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("renders a client notice as a system line, not as the agent speaking", () => {
+    renderWithProviders(
+      <ChatMessage message={{ id: "n1", role: "agent", kind: "notice", content: "Stop came too late.", timestamp: Date.now() }} />
+    );
+    expect(screen.getByTestId("chat-notice")).toHaveTextContent("Stop came too late.");
+    expect(screen.queryByTestId("copy-message")).not.toBeInTheDocument();
   });
 
   it("user message uses primary background", () => {
@@ -259,7 +275,7 @@ describe("ChatMessage", () => {
 });
 
 describe("ChatMessage — guardrail notices", () => {
-  it("shows one quiet line per guardrail that fired, with phase, type and action", () => {
+  it("shows one quiet line per guardrail that fired, in plain words naming the guardrail (T2.7)", () => {
     renderWithProviders(
       <ChatMessage
         message={{
@@ -273,8 +289,8 @@ describe("ChatMessage — guardrail notices", () => {
     );
     const lines = screen.getAllByTestId("guardrail-notice").map((l) => l.textContent);
     expect(lines).toEqual([
-      "Guardrail (input): prompt-injection blocked",
-      "Guardrail (output): pii-redaction redacted",
+      "A safety check stopped your message (prompt-injection).",
+      "A safety check removed part of the answer (pii-redaction).",
     ]);
   });
 
@@ -291,6 +307,38 @@ describe("ChatMessage — guardrail notices", () => {
     renderWithProviders(
       <ChatMessage message={{ ...agentMessage, guardrails: [{ type: "t", phase: "mid", action: "quarantine" }] }} />,
     );
-    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
+    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("A safety check acted on this turn (t: mid, quarantine).");
+  });
+});
+
+describe("ChatMessage — designer images", () => {
+  it("renders image output items as images, without a \"No response\" placeholder", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentNoContent, images: [{ uri: "https://cdn.example/chart.png", alt: "Chart" }] }} />,
+    );
+    const images = within(screen.getByTestId("message-images")).getAllByRole("img");
+    expect(images.map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("message-no-response")).toBeNull();
+  });
+});
+
+describe("ChatMessage — controller notices", () => {
+  it("renders a notice as a system line, not as an agent bubble with a copy button", () => {
+    // makeNotice writes role "agent" + kind "notice": the client talking
+    // ("…was not sent"), which is not something the agent said.
+    const notice: ChatMessageType = {
+      id: "n-1",
+      role: "agent",
+      kind: "notice",
+      content: "**Not** markdown. Your message was not sent.",
+      timestamp: new Date("2024-01-15T10:30:20Z").getTime(),
+    };
+    renderWithProviders(<ChatMessage message={notice} />);
+    const line = screen.getByTestId("chat-notice");
+    expect(line).toHaveAttribute("role", "note");
+    // Plain text: the asterisks stay, no <strong>.
+    expect(line).toHaveTextContent("**Not** markdown. Your message was not sent.");
+    expect(line.querySelector("strong")).toBeNull();
+    expect(screen.queryByTestId("copy-message")).toBeNull();
   });
 });

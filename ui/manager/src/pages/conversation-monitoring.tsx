@@ -15,19 +15,19 @@ import {
   Hand,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
 import {
   useActiveConversations,
   useEndActiveConversations,
   usePurgeEndedConversations,
 } from "@/hooks/use-conversations";
-import { useAgentVersions } from "@/hooks/use-agents";
-import type { ConversationState, ConversationStatus } from "@/lib/api/conversations";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { useAgentVersions } from "@eddi/app-kit/hooks/use-agents";
+import type { ConversationState, ConversationStatus } from "@eddi/app-kit/lib/api/conversations";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 

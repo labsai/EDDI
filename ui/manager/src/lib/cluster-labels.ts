@@ -7,7 +7,7 @@ import type {
   ItemOutcomeCode,
   LeaseFlag,
   NodeState,
-} from "@/lib/api/cluster";
+} from "@eddi/app-kit/lib/api/cluster";
 
 /**
  * Every code the cluster API returns, in words an on-call admin can act on.

@@ -14,6 +14,11 @@ final class ShellTestSupport {
     }
 
     static BrandedShellRenderer renderer() {
-        return new BrandedShellRenderer(new BrandingService(new BrandingTestSupport.MemoryStore(), new BrandingTestSupport.Config()));
+        return new BrandedShellRenderer(branding());
+    }
+
+    /** A branding service over an empty store: the default EDDI brand. */
+    static BrandingService branding() {
+        return new BrandingService(new BrandingTestSupport.MemoryStore(), new BrandingTestSupport.Config());
     }
 }

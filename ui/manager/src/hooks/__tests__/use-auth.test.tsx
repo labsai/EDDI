@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { type ReactNode } from "react";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
-import { useAuth, useHasRole } from "@/hooks/use-auth";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
+import { useAuth, useHasRole } from "@eddi/app-kit/hooks/use-auth";
 
 function createAuthWrapper(value: AuthContextValue) {
   return function Wrapper({ children }: { children: ReactNode }) {

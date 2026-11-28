@@ -8,8 +8,10 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 
 /**
  * A group's standing workspace (I13): the persistent half of a team. A group
@@ -51,6 +53,13 @@ public class GroupWorkspace {
 
     /** Default number of backlog tasks one cadence run pulls. */
     public static final int DEFAULT_MAX_BACKLOG_TASKS_PER_RUN = 5;
+
+    /**
+     * How many cadence runs' feedback a backlog task keeps: with each slice capped
+     * at 500 characters, enough to fill a task description's 4,000-character
+     * ceiling, and the oldest is dropped first.
+     */
+    public static final int MAX_FEEDBACK_PER_TASK = 8;
 
     /** {@link #runningDiscussionId}'s idle value — see the class Javadoc. */
     public static final String NO_RUNNING_DISCUSSION = "";
@@ -102,6 +111,16 @@ public class GroupWorkspace {
      * read back as empty.
      */
     private WorkspaceHandoffs handoffs = new WorkspaceHandoffs();
+    /**
+     * The cross-run retry feedback of the backlog tasks, oldest first: what a
+     * cadence run that did not finish a task left for the next attempt, each item
+     * with who wrote it. Kept apart from the task's description, which a person or
+     * the agent that handed the task off wrote, so the next run can check each item
+     * against its own readers ({@link BacklogFeedback}). Absent in documents
+     * written before it existed, which read back as empty; feedback such a document
+     * already appended to a description stays there as text.
+     */
+    private List<BacklogFeedback> backlogFeedback = new CopyOnWriteArrayList<>();
     private Instant created;
     private Instant lastModified;
     /**
@@ -148,6 +167,41 @@ public class GroupWorkspace {
             if (maxBacklogTasksPerRun <= 0) {
                 maxBacklogTasksPerRun = DEFAULT_MAX_BACKLOG_TASKS_PER_RUN;
             }
+        }
+    }
+
+    /**
+     * One cadence run's retry feedback on a backlog task.
+     *
+     * @param taskId
+     *            the backlog task it belongs to
+     * @param runId
+     *            the cadence discussion that left it
+     * @param text
+     *            the feedback as the group's records counted it when it was written
+     *            (a reviewer's note or the assignee's result, capped)
+     * @param authorAgentId
+     *            the agent whose text it is (the verifier for a note, the assignee
+     *            for a result); {@code null} when no agent wrote it: a HUMAN
+     *            member, an approver's edit or the engine
+     * @param verified
+     *            whether a reader of the group required peer verification when it
+     *            was written, so the text had to verify to be recorded. Feedback
+     *            written while no reader verified was never checked, and a run
+     *            whose readers verify does not quote it as an agent's
+     * @param authorKeyVersion
+     *            the version of the author's signing key that verified the text
+     *            when it was recorded; {@code null} when no agent wrote it, or in a
+     *            document written before this field existed. A run whose readers
+     *            verify quotes agent feedback only while that key is still not
+     *            revoked, so rotating to a new key does not revive text a revoked
+     *            key vouched for. Optional in stored JSON
+     */
+    public record BacklogFeedback(String taskId, String runId, String text, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+
+        /** Feedback with no recorded key version, as older documents hold it. */
+        public BacklogFeedback(String taskId, String runId, String text, String authorAgentId, boolean verified) {
+            this(taskId, runId, text, authorAgentId, verified, null);
         }
     }
 
@@ -350,6 +404,43 @@ public class GroupWorkspace {
 
     public void setHandoffs(WorkspaceHandoffs handoffs) {
         this.handoffs = handoffs != null ? handoffs : new WorkspaceHandoffs();
+    }
+
+    /**
+     * Read-only view: mutation goes through {@link #addBacklogFeedback} and
+     * {@link #retainBacklogFeedback}.
+     */
+    public List<BacklogFeedback> getBacklogFeedback() {
+        return Collections.unmodifiableList(backlogFeedback);
+    }
+
+    public void setBacklogFeedback(List<BacklogFeedback> backlogFeedback) {
+        this.backlogFeedback = backlogFeedback != null ? new CopyOnWriteArrayList<>(backlogFeedback) : new CopyOnWriteArrayList<>();
+    }
+
+    /** The feedback backlog task {@code taskId} holds, oldest first. */
+    public List<BacklogFeedback> feedbackFor(String taskId) {
+        return backlogFeedback.stream().filter(f -> f != null && Objects.equals(taskId, f.taskId())).toList();
+    }
+
+    /**
+     * Adds {@code feedback}, dropping its task's oldest items past
+     * {@link #MAX_FEEDBACK_PER_TASK}.
+     */
+    public void addBacklogFeedback(BacklogFeedback feedback) {
+        if (feedback == null) {
+            return;
+        }
+        backlogFeedback.add(feedback);
+        List<BacklogFeedback> ofTask = feedbackFor(feedback.taskId());
+        for (int i = 0; i < ofTask.size() - MAX_FEEDBACK_PER_TASK; i++) {
+            backlogFeedback.remove(ofTask.get(i));
+        }
+    }
+
+    /** Keeps only the feedback whose task id {@code keep} accepts. */
+    public void retainBacklogFeedback(Predicate<String> keep) {
+        backlogFeedback.removeIf(f -> f == null || !keep.test(f.taskId()));
     }
 
     public Instant getCreated() {

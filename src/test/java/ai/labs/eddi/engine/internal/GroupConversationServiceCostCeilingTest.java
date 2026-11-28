@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -79,8 +78,6 @@ class GroupConversationServiceCostCeilingTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -96,7 +93,7 @@ class GroupConversationServiceCostCeilingTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
+                scheduleStore, null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     private AgentGroupConfiguration buildConfig(List<DiscussionPhase> phases, ProtocolConfig protocol) {
@@ -241,7 +238,9 @@ class GroupConversationServiceCostCeilingTest {
                 new DiscussionPhase("Summary", PhaseType.SYNTHESIS, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
                 new DiscussionPhase("Review", PhaseType.REVISION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true));
         var config = buildConfig(phases,
-                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 2, 0.5, CostPolicy.SYNTHESIZE_NOW));
+                // maxTurns 3, not 2: one turn is kept for the synthesis (K3), so with 2 the
+                // turn cap, not the cost ceiling, would stop Critique.
+                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 3, 0.5, CostPolicy.SYNTHESIZE_NOW));
         doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
         doReturn("gc-synth-resume").when(conversationStore).create(any());

@@ -65,7 +65,7 @@ class GroupHitlCoordinatorPlanHashTest {
         groupStore = mock(IAgentGroupStore.class);
         groupConversationService = mock(GroupConversationService.class);
         coordinator = new GroupHitlCoordinator(groupStore, conversationStore, mock(IScheduleStore.class), mock(AuditLedgerService.class),
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), groupConversationService, new SimpleMeterRegistry().counter("p"),
                 new SimpleMeterRegistry().counter("r"), new SimpleMeterRegistry().counter("f"));
         gc = new GroupConversation();

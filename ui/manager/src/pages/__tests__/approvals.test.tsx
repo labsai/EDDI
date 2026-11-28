@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalsPage } from "@/pages/approvals";
-import type { PendingApprovalSummary } from "@/lib/api/hitl";
+import type { PendingApprovalSummary } from "@eddi/app-kit/lib/api/hitl";
 
 function mockInbox(regular: PendingApprovalSummary[]) {
   server.use(
