@@ -994,6 +994,22 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The target a legacy {@code ChannelConnector} routes this channel to — the one
+     * {@link #resolveTarget} falls back to — or {@code null} when a new-style
+     * integration covers the channel (it wins), the type is not Slack, or no legacy
+     * connector binds the channel.
+     */
+    public ChannelTarget legacyTargetFor(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (!CHANNEL_TYPE_SLACK.equals(normalizedType) || byChannel(normalizedType + ":" + platformChannelId) != null) {
+            return null;
+        }
+        LegacyTarget legacy = legacyMap.get(platformChannelId);
+        return legacy != null ? legacy.toChannelTarget() : null;
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */

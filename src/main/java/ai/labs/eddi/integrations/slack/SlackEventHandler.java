@@ -466,11 +466,15 @@ public class SlackEventHandler {
             }
             if (!isDirectMessage) {
                 // A DM never gets an app_mention, so the mention test only applies in
-                // a channel. It is the observer path's predicate (mentionsThisBot): a
-                // mention of THIS bot anywhere in the text, not any user's mention at
-                // the start. A message and its app_mention therefore yield one turn,
-                // whichever order the two arrive in.
-                if (mentionsThisBot((String) event.get("text"), botUserId)) {
+                // a channel: a mention of THIS bot anywhere in the text, not any user's
+                // mention at the start. A message and its app_mention therefore yield
+                // one turn, whichever order the two arrive in. Only a CONFIRMED mention
+                // steps aside: without the bot's id (an envelope with no authorization)
+                // "thanks <@U0ALICE>" would read as the bot's own mention and be
+                // dropped, though Slack sends no app_mention for it. Such a reply goes
+                // on to the participation check, and the per-message de-duplication
+                // below still makes a real mention of the bot one turn.
+                if (botUserId != null && !botUserId.isBlank() && mentionsThisBot((String) event.get("text"), botUserId)) {
                     LOGGER.debugf("[SLACK] Ignoring a thread reply that mentions the bot (handled by app_mention)");
                     return;
                 }
@@ -509,6 +513,13 @@ public class SlackEventHandler {
         String threadTs = getThreadTs(event);
 
         if (text.isBlank()) {
+            if ("message".equals(eventType) && !isDirectMessage) {
+                // A channel thread reply that was only a mention — possible here only
+                // without the bot's id, where any leading mention is stripped. If it
+                // named the bot, its app_mention answers with the help text; if it
+                // named somebody else, help would be noise.
+                return;
+            }
             postHelp(channelId, threadTs, botTokenFor(channelId, origin));
             return;
         }
@@ -819,8 +830,9 @@ public class SlackEventHandler {
      * miss; the alternative is answering a sentence `app_mention` is answering too,
      * which is the bot replying twice. The anchored {@link #BOT_MENTION_PATTERN}
      * used to serve here and could do neither: being anchored it missed a trailing
-     * mention entirely, and produced exactly that double reply. This is now the one
-     * test for both event paths — the observer's and the thread-reply branch's.
+     * mention entirely, and produced exactly that double reply. The thread-reply
+     * branch uses it only with a known bot id: there the per-message de-duplication
+     * answers a mention once, so the fallback's silence is not needed.
      */
     static boolean mentionsThisBot(String text, String botUserId) {
         if (text == null || text.isBlank()) {
@@ -2098,11 +2110,18 @@ public class SlackEventHandler {
                     + "(channel %s)", MAX_PENDING_LATE_ANSWERS, sanitize(channelId));
             return false;
         }
-        // The notice first: a turn that finishes in the next instant must not post its
-        // answer ahead of the line that says one is coming.
-        postMessage(channelId, threadTs, lateAnswerPendingNotice(slackConfig.getRequestTimeoutSeconds()), botToken);
+        // The window starts now, when the wait gave up — not after the notice, whose
+        // post can spend seconds in rate-limit retries. Armed before the post, the
+        // timeout expires a turn still running when the window ends even while the
+        // notice is in flight; armed after, a turn that finished past the window but
+        // during the post was already complete and was posted as if in time.
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(window);
-        pending.copy().orTimeout(window, TimeUnit.SECONDS).whenComplete((snapshot, error) -> {
+        CompletableFuture<SimpleConversationMemorySnapshot> bounded = pending.copy().orTimeout(window, TimeUnit.SECONDS);
+        // The notice first: a turn that finishes in the next instant must not post its
+        // answer ahead of the line that says one is coming, so the outcome is handled
+        // only once the notice has been attempted.
+        postMessage(channelId, threadTs, lateAnswerPendingNotice(slackConfig.getRequestTimeoutSeconds()), botToken);
+        bounded.whenComplete((snapshot, error) -> {
             // Runs on whichever thread completed the turn (or the delay scheduler):
             // hand the work to a virtual thread at once.
             try {
@@ -2363,14 +2382,15 @@ public class SlackEventHandler {
      * <li>a group discussion's agent message the reply is under, registered on this
      * node (two hours)</li>
      * <li>the replying user's own conversation mappings in this thread — one per
-     * target of the channel's integration, and the follow-up mapping of a reply
-     * under a group discussion's agent message. They live in the database, so they
-     * survive a restart and hold on every node. They are the replying user's own,
-     * so after a restart a thread revives only for people who had already talked to
-     * the bot in it; a colleague who had not must mention the bot once. The lock is
-     * written back when a channel-target mapping is found. A channel-target mapping
-     * still keyed by the raw Slack id (written before ids were namespaced) counts
-     * too, so a legacy-shaped id costs a second read per target.</li>
+     * target of the channel's integration (or the one target of a legacy connector
+     * that alone serves the channel), and the follow-up mapping of a reply under a
+     * group discussion's agent message. They live in the database, so they survive
+     * a restart and hold on every node. They are the replying user's own, so after
+     * a restart a thread revives only for people who had already talked to the bot
+     * in it; a colleague who had not must mention the bot once. The lock is written
+     * back when a channel-target mapping is found. A channel-target mapping still
+     * keyed by the raw Slack id (written before ids were namespaced) counts too, so
+     * a legacy-shaped id costs a second read per target.</li>
      * </ol>
      * A user found to have none is remembered for {@link #NON_PARTICIPATION_TTL},
      * so the second and every further ignored reply of that user in that thread
@@ -2404,8 +2424,19 @@ public class SlackEventHandler {
         }
         boolean complete = true;
         var integration = channelTargetRouter.integrationFor("slack", channelId);
-        if (integration != null && integration.getTargets() != null) {
-            for (ChannelTarget target : integration.getTargets()) {
+        List<ChannelTarget> targets = null;
+        if (integration != null) {
+            targets = integration.getTargets();
+        } else {
+            // A channel only a legacy ChannelConnector serves: its one target, the
+            // route resolveTarget falls back to, keys the mapping the same way.
+            ChannelTarget legacyTarget = channelTargetRouter.legacyTargetFor("slack", channelId);
+            if (legacyTarget != null) {
+                targets = List.of(legacyTarget);
+            }
+        }
+        if (targets != null) {
+            for (ChannelTarget target : targets) {
                 if (target.getTargetId() == null || target.getTargetId().isBlank()) {
                     continue;
                 }

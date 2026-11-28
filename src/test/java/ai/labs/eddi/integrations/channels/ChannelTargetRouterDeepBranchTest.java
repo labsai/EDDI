@@ -290,6 +290,31 @@ class ChannelTargetRouterDeepBranchTest {
 
             assertNull(router.resolveTarget("teams", "C123", "hello"));
         }
+
+        @Test
+        @DisplayName("legacyTargetFor: the legacy connector's effective target, as resolveTarget routes it")
+        void legacyTargetForReturnsTheEffectiveTarget() throws Exception {
+            setField(router, "legacyMap", Map.of("C123", new LegacyTarget("agent1", "token", "secret", null),
+                    "C456", new LegacyTarget("agent1", "token", "secret", "group-g")));
+
+            assertEquals("agent1", router.legacyTargetFor("slack", "C123").getTargetId());
+            assertEquals(ChannelTarget.TargetType.GROUP, router.legacyTargetFor("slack", "C456").getType());
+            assertEquals("group-g", router.legacyTargetFor("slack", "C456").getTargetId());
+            assertNull(router.legacyTargetFor("slack", "C999"));
+            assertNull(router.legacyTargetFor("teams", "C123"));
+        }
+
+        @Test
+        @DisplayName("legacyTargetFor: a new-style integration on the channel wins — no legacy target")
+        void legacyTargetForIsNullWhenAnIntegrationCoversTheChannel() throws Exception {
+            var target = createTarget("default", List.of());
+            target.setTargetId("agent-b");
+            setField(router, "integrationMap",
+                    Map.of("slack:C123", createIntegration("default", List.of(target), Map.of("botToken", "xoxb-b"))));
+            setField(router, "legacyMap", Map.of("C123", new LegacyTarget("agent1", "token", "secret", null)));
+
+            assertNull(router.legacyTargetFor("slack", "C123"));
+        }
     }
 
     // ─── resolveDefaultForDm ────────────────────────────────────────────

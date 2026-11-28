@@ -45,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -416,6 +417,69 @@ class SlackThreadParticipationTest {
 
         verify(router, after(700).never()).resolveTarget(any(), any(), any());
         verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("without the bot's id, another user's mention in a bot thread is still answered — Slack sends no app_mention for it")
+    void otherUsersMention_withoutBotId_inABotThread_isProcessed() throws Exception {
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "Thanks <@U0CAROL>, can you check this?"), null,
+                origin());
+
+        verify(conversationService, timeout(2000)).startConversation(any(), eq(AGENT), anyString(), any());
+        verify(slackApi, timeout(2000)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
+    }
+
+    @Test
+    @DisplayName("without the bot's id, a reply that is only another user's mention gets no help text")
+    void bareOtherUsersMention_withoutBotId_postsNothing() throws Exception {
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
+        // A token the help text could be posted with, so "nothing posted" is the
+        // guard's doing.
+        when(router.getBotToken("slack", CHANNEL)).thenReturn("xoxb-a");
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "<@U0CAROL>"), null, origin());
+
+        verify(router, timeout(2000)).resolveThreadTarget("slack", CHANNEL, "100.1");
+        verify(slackApi, after(700).never()).postMessage(anyString(), anyString(), any(), anyString());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("without the bot's id, a mention of the bot sent as message and app_mention is still one turn")
+    void botMention_withoutBotId_messageAndAppMention_oneTurn() throws Exception {
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
+        when(router.resolveTarget(any(), any(), any())).thenReturn(locked());
+        String text = "thanks <@UBOT> can you check";
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", text), null, origin());
+        handler.handleEventAsync(id(), mentionEvent("100.1", "100.5", text), null, origin());
+
+        verify(conversationService, timeout(2000)).startConversation(any(), eq(AGENT), anyString(), any());
+        verify(conversationService, after(700).times(1)).startConversation(any(), any(), any(), any());
+        verify(slackApi, times(1)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
+    }
+
+    // ─── A channel only a legacy connector serves ───
+
+    @Test
+    @DisplayName("a legacy-only channel: the user's mapping for the legacy agent's thread intent counts as taking part")
+    void legacyOnlyChannel_mappingCounts() throws Exception {
+        when(router.integrationFor("slack", CHANNEL)).thenReturn(null);
+        when(router.legacyTargetFor("slack", CHANNEL)).thenReturn(target());
+        var legacyRoute = new ResolvedTarget(target(), null, null, "xoxb-legacy", SECRET);
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(null, legacyRoute);
+        String intent = "channel:slack:" + CHANNEL + ":" + AGENT + ":100.1";
+        when(userConversationStore.readUserConversation(intent, "slack:T1:U0ALICE"))
+                .thenReturn(new UserConversation(intent, "slack:T1:U0ALICE", Deployment.Environment.production, AGENT,
+                        "conv-1"));
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "continuing"), BOT, origin());
+
+        verify(slackApi, timeout(2000)).postMessage(eq("Bearer xoxb-legacy"), eq(CHANNEL), eq("100.1"), anyString());
+        verify(router, atLeastOnce()).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"), any(ChannelTarget.class));
+        assertEquals(0.0, meters.counter("eddi.slack.thread.replies.ignored").count());
     }
 
     @Test

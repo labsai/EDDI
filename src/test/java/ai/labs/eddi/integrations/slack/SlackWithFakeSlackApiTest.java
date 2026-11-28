@@ -388,6 +388,27 @@ class SlackWithFakeSlackApiTest {
         }
 
         @Test
+        @DisplayName("the window starts when the wait gives up: a slow notice post does not extend it")
+        void slowNoticeDoesNotExtendTheWindow() throws Exception {
+            build(config(1, 3, 1));
+            holdsTheTurn();
+            // The pending notice is rate-limited for 2 s — longer than the 1 s window.
+            slack.nextRateLimited(2);
+
+            mention("slow question behind a slow notice");
+            waitFor(() -> postedTexts().size() >= 2);
+            assertTrue(postedTexts().get(1).contains("I'll post the answer"), postedTexts().get(1));
+            // The turn completes only once the notice is through, past the window.
+            waitFor(() -> pendingTurn.get() != null);
+            pendingTurn.get().onComplete(answer("an answer after the window"));
+            waitFor(() -> late("expired") == 1.0);
+
+            Thread.sleep(300);
+            assertFalse(postedTexts().contains("an answer after the window"), postedTexts().toString());
+            assertEquals(0.0, late("posted"));
+        }
+
+        @Test
         @DisplayName("with the window at 0 the old behaviour stays: 'ask again', and nothing is posted later")
         void windowZeroKeepsTheOldBehaviour() throws Exception {
             build(config(1, 1, 0));

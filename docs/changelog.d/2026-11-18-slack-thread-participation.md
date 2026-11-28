@@ -168,3 +168,19 @@ and a reply that opened with another person's mention was dropped.
   do not; the cluster affinity paragraph matches "When the bot answers".
 - Tests: `FakeSlackApi.Call` records when each request arrived, so the Retry-After test measures the gap
   between the two requests; the fresh-ts test compares the two returned timestamps.
+
+### Review follow-ups (CodeRabbit, 2026-11-28 review)
+
+- **No bot id, no silent drop**: a thread reply steps aside for `app_mention` only when it mentions this
+  bot's confirmed id. Without the id in the envelope, "thanks @alice" in a thread the bot takes part in
+  is answered again (Slack sends no `app_mention` for it); a real mention of the bot is still one turn
+  through the per-message de-duplication.
+- **The late-answer window starts when the wait gives up**: the expiry is armed before the pending
+  notice is posted, so a notice held up by rate-limit retries no longer stretches the window, and a turn
+  that finished after it is counted `expired`. The answer is still handled only after the notice.
+- **Legacy-only channels revive their threads**: `ChannelTargetRouter.legacyTargetFor` names the target a
+  legacy `ChannelConnector` routes a channel to (when no new-style integration covers it), and the
+  participation check reads the replying user's mapping for it, as it does for an integration's targets.
+- Not changed, answered on the PR: registering a group discussion's agent messages for follow-ups while
+  the discussion still runs, and telling an observer's silent (timed-out) turn apart from one that spoke
+  when its mapping is found after the lock has gone.
