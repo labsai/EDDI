@@ -72,10 +72,27 @@ public final class ChildJvm {
             command.add(mainClass.getName());
             command.addAll(args);
             Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            try {
+                if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor(10, TimeUnit.SECONDS);
+                    return new Result(-1, Files.readString(output, StandardCharsets.UTF_8), true);
+                }
+            } catch (InterruptedException e) {
+                // Discarding the Process does not end the child: kill it, then let the
+                // interruption propagate.
                 process.destroyForcibly();
-                process.waitFor(10, TimeUnit.SECONDS);
-                return new Result(-1, Files.readString(output, StandardCharsets.UTF_8), true);
+                // Wait for it to be gone (it holds the output file open, which Windows
+                // would not delete), with the interrupt flag cleared for that wait and
+                // restored after it.
+                Thread.interrupted();
+                try {
+                    process.waitFor(10, TimeUnit.SECONDS);
+                } catch (InterruptedException again) {
+                    e.addSuppressed(again);
+                }
+                Thread.currentThread().interrupt();
+                throw e;
             }
             return new Result(process.exitValue(), Files.readString(output, StandardCharsets.UTF_8), false);
         } finally {

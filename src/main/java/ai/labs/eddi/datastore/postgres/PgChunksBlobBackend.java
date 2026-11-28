@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -132,7 +133,9 @@ public class PgChunksBlobBackend implements BlobBackend {
         ensureSchema();
         long expected = declaredLength >= 0 ? declaredLength : maxBytes;
         byte[] buffer = new byte[(int) Math.max(1, Math.min(chunkBytes, expected))];
-        boolean wroteFirstChunk = false;
+        // Set the moment the first row is inserted, inside insertChunk: closing the
+        // statement or connection can still throw after auto-commit has kept the row.
+        boolean[] wroteFirstChunk = {false};
         try {
             int seq = 0;
             while (true) {
@@ -142,12 +145,12 @@ public class PgChunksBlobBackend implements BlobBackend {
                 }
                 byte[] data = n == buffer.length ? buffer : Arrays.copyOf(buffer, n);
                 if (seq == 0) {
-                    if (insertChunk(INSERT_FIRST, key, seq, data) == 0) {
+                    if (insertChunk(INSERT_FIRST, key, seq, data, rows -> wroteFirstChunk[0] = rows > 0) == 0) {
                         throw new FileAlreadyExistsException("A blob with this key already exists");
                     }
-                    wroteFirstChunk = true;
                 } else {
-                    insertChunk(INSERT_NEXT, key, seq, data);
+                    insertChunk(INSERT_NEXT, key, seq, data, rows -> {
+                    });
                 }
                 seq++;
                 if (n < buffer.length) {
@@ -156,7 +159,7 @@ public class PgChunksBlobBackend implements BlobBackend {
             }
         } catch (IOException | SQLException | RuntimeException e) {
             IOException failure = asIOException(e);
-            if (wroteFirstChunk) {
+            if (wroteFirstChunk[0]) {
                 removePartial(key, failure);
             }
             throw failure;
@@ -385,13 +388,20 @@ public class PgChunksBlobBackend implements BlobBackend {
      * Inserts one chunk on a connection borrowed for that insert alone, so a slow
      * uploader never holds a pooled connection while the next chunk arrives.
      */
-    private int insertChunk(String sql, String key, int seq, byte[] data) throws SQLException {
+    /**
+     * @param inserted
+     *            told the row count as soon as the INSERT returns, before closing
+     *            the statement or connection can throw
+     */
+    private int insertChunk(String sql, String key, int seq, byte[] data, IntConsumer inserted) throws SQLException {
         try (Connection conn = connection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             conn.setAutoCommit(true);
             ps.setString(1, key);
             ps.setInt(2, seq);
             ps.setBytes(3, data);
-            return ps.executeUpdate();
+            int rows = ps.executeUpdate();
+            inserted.accept(rows);
+            return rows;
         }
     }
 

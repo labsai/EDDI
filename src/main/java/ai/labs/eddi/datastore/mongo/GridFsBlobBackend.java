@@ -119,12 +119,18 @@ public class GridFsBlobBackend implements BlobBackend {
         } catch (MongoException e) {
             throw asIOException(e);
         }
+        // Bytes handed to the upload stream. GridFS buffers a chunk and inserts it once
+        // full, so below one chunk — and before close — nothing of ours is stored.
+        long written = 0;
+        boolean closing = false;
         try {
             byte[] buffer = new byte[COPY_BUFFER_BYTES];
             int n;
             while ((n = source.read(buffer)) != -1) {
                 upload.write(buffer, 0, n);
+                written += n;
             }
+            closing = true;
             upload.close();
         } catch (IOException | RuntimeException e) {
             if (isDuplicateKey(e)) {
@@ -135,7 +141,15 @@ public class GridFsBlobBackend implements BlobBackend {
                 throw new FileAlreadyExistsException("A blob with this key already exists");
             }
             IOException failure = asIOException(e);
-            removePartial(upload, key, failure);
+            if (closing || written >= chunkBytes) {
+                // Our chunk 0 may be stored. The unique (files_id, n) index makes chunk 0
+                // the claim on the key: had another put held it, our insert would have
+                // been refused as a duplicate (above), so what is there is ours.
+                removePartial(upload, key, failure);
+            }
+            // Otherwise this upload stored nothing. Purging now would delete an object
+            // a competing put of the same key completed meanwhile, and abort() would
+            // delete its chunks too.
             throw failure;
         }
     }
@@ -155,7 +169,7 @@ public class GridFsBlobBackend implements BlobBackend {
     public InputStream getRange(String key, long offset, long length) throws IOException {
         BlobKeys.requireValidKey(key);
         BlobStreams.requireValidRange(offset, length);
-        Opened opened = open(key);
+        Opened opened = open(key, offset, length);
         InputStream stream = opened.stream();
         if (length == 0 || offset >= opened.length()) {
             stream.close();
@@ -237,11 +251,21 @@ public class GridFsBlobBackend implements BlobBackend {
     }
 
     private Opened open(String key) throws IOException {
+        return open(key, 0, -1);
+    }
+
+    /**
+     * @param length
+     *            {@code -1} for the whole object; else the range read, whose batch
+     *            holds no more chunks than the range covers
+     */
+    private Opened open(String key, long offset, long length) throws IOException {
         try {
             GridFSDownloadStream download = bucket.openDownloadStream(new BsonString(key));
+            GridFSFile file = download.getGridFSFile();
             // Unbounded, the server fills a batch up to 16 MB, decoded into documents on
             // the heap.
-            download.batchSize(Math.max(1, READ_BATCH_BYTES / Math.max(1, download.getGridFSFile().getChunkSize())));
+            download.batchSize(readBatchSize(file.getChunkSize(), file.getLength(), offset, length));
             return new Opened(new MongoErrorTranslatingInputStream(download), download.getGridFSFile().getLength());
         } catch (MongoGridFSException e) {
             // Thrown on open only when there is no files document for the id.
@@ -249,6 +273,25 @@ public class GridFsBlobBackend implements BlobBackend {
         } catch (MongoException e) {
             throw asIOException(e);
         }
+    }
+
+    /**
+     * Chunks per read batch: about {@link #READ_BATCH_BYTES} of them, and for a
+     * range no more than the chunks it covers — the download cursor has no upper
+     * bound on the chunk index, so a larger batch reads chunks the range never
+     * uses.
+     */
+    static int readBatchSize(int chunkSize, long objectLength, long offset, long length) {
+        int whole = Math.max(1, READ_BATCH_BYTES / Math.max(1, chunkSize));
+        if (length < 0 || chunkSize < 1) {
+            return whole;
+        }
+        long end = length >= objectLength - offset ? objectLength : offset + length; // exclusive, no overflow
+        if (length == 0 || offset >= end) {
+            return 1;
+        }
+        long covered = (end - 1) / chunkSize - offset / chunkSize + 1;
+        return (int) Math.max(1, Math.min(whole, covered));
     }
 
     private boolean exists(String key) {

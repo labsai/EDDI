@@ -14,15 +14,25 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link GridFsBlobBackend} against a real MongoDB (Testcontainers): the shared
@@ -94,6 +104,51 @@ class GridFsBlobBackendIT extends MongoTestBase implements BlobBackendContract {
         backend.delete(key);
 
         assertEquals(0, storedRecordCount());
+    }
+
+    /**
+     * Two puts of one absent key both pass the existence check. A blocks in its
+     * source before writing a chunk, B completes, then A's source fails: A stored
+     * nothing, so it must not purge B's object.
+     */
+    @Test
+    void aFailedPutDoesNotRemoveTheObjectACompetingPutCompleted() throws Exception {
+        String key = BlobKeys.random();
+        CountDownLatch inRead = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        InputStream blocked = new InputStream() {
+            @Override
+            public int read() throws IOException {
+                inRead.countDown();
+                try {
+                    release.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                throw new IOException("the source broke");
+            }
+        };
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> first = executor.submit(() -> {
+                backend.put(key, blocked, 10, 10);
+                return null;
+            });
+            assertTrue(inRead.await(30, TimeUnit.SECONDS), "the first put reached its source");
+
+            byte[] winner = {4, 5, 6};
+            backend.put(key, new ByteArrayInputStream(winner), winner.length, winner.length);
+            release.countDown();
+
+            ExecutionException failed = assertThrows(ExecutionException.class, () -> first.get(30, TimeUnit.SECONDS));
+            assertInstanceOf(IOException.class, failed.getCause());
+            try (InputStream in = backend.get(key)) {
+                assertArrayEquals(winner, in.readAllBytes(), "the completed object survives the failed put");
+            }
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
