@@ -28,6 +28,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,6 +52,7 @@ class ConnectionResolverGrantTest {
     private static final String AGENT_B = "bbbbbbbbbbbbbbbbbbbbbbbb";
     private static final URI GRAPH = URI.create("https://graph.microsoft.com/v1.0/me");
 
+    private SecretResolver secrets;
     private ConnectionRegistry registry;
     private AccessTokenSupplier tokens;
     private ISecretProvider provider;
@@ -64,12 +66,14 @@ class ConnectionResolverGrantTest {
         when(tokens.accessToken(any(), any())).thenReturn("cached-access-token");
         provider = mock(ISecretProvider.class);
         when(provider.isAvailable()).thenReturn(true);
+        when(provider.getMetadata(new SecretReference("default", "rotated-secret")))
+                .thenReturn(new SecretMetadata("default", "rotated-secret", Instant.now(), null, null, "c", null, List.of(AGENT_B)));
         for (String key : List.of("client-secret", "token", "signing-key")) {
             var ref = new SecretReference("default", key);
             when(provider.resolve(ref)).thenReturn("plain-" + key);
             when(provider.getMetadata(ref)).thenReturn(new SecretMetadata("default", key, Instant.now(), null, null, "c", null, List.of(AGENT_A)));
         }
-        var secrets = new SecretResolver(provider, new SimpleMeterRegistry(), 5, 100, "enforce");
+        secrets = new SecretResolver(provider, new SimpleMeterRegistry(), 5, 100, "enforce");
         secrets.init();
         GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
         when(variables.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -178,5 +182,42 @@ class ConnectionResolverGrantTest {
         assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
         assertDoesNotThrow(() -> resolver.requireGranted("${connection:exo}", SecretAccess.agent(AGENT_A)));
         verify(provider, never()).resolve(any());
+    }
+
+    @Test
+    @DisplayName("a token minted after the credential variable was repointed is not released to an agent the new secret leaves out")
+    void credentialRepointedDuringTheMintIsCheckedAgain() {
+        var connection = oauthService();
+        connection.getOauth().setClientSecret("${vars:exo-secret}");
+        register(connection);
+        var pointsAt = new AtomicReference<>("${vault:client-secret}");
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveValue(anyString())).thenAnswer(inv -> {
+            String value = inv.getArgument(0);
+            return value.equals("${vars:exo-secret}") ? pointsAt.get() : value;
+        });
+        var repointing = new ConnectionResolver(registry, new CredentialReferenceResolver(secrets, variables), mock(CallerIdentityContext.class),
+                new SimpleMeterRegistry(), tokens, true);
+        repointing.resolutionPrincipalContext = principals;
+        // The administrator repoints the variable while the token is being minted:
+        // the check before the lookup read the old secret, the mint the new one.
+        when(tokens.accessToken(any(), any())).thenAnswer(inv -> {
+            pointsAt.set("${vault:rotated-secret}");
+            return "minted-with-rotated-secret";
+        });
+
+        var header = assertThrows(ConnectionException.class,
+                () -> repointing.resolve("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_A)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, header.getReason());
+        assertTrue(header.getMessage().contains("rotated-secret"), header.getMessage());
+
+        pointsAt.set("${vault:client-secret}");
+        var bare = assertThrows(ConnectionException.class,
+                () -> repointing.resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_A)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, bare.getReason());
+
+        // The agent the new secret admits gets the token.
+        assertEquals("Bearer minted-with-rotated-secret",
+                repointing.resolve("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_B)).headerValue());
     }
 }

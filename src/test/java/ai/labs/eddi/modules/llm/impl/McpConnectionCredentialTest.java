@@ -24,8 +24,12 @@ import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager.McpFailureKind;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.invocation.InvocationContext;
+import dev.langchain4j.invocation.InvocationParameters;
 import dev.langchain4j.mcp.client.McpCallContext;
+import dev.langchain4j.service.tool.ToolExecutionResult;
+import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,8 +43,10 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -502,6 +508,67 @@ class McpConnectionCredentialTest {
             first.initCause(second);
 
             assertFalse(McpToolProviderManager.isAuthenticationChallenge(first));
+        }
+    }
+
+    @Nested
+    @DisplayName("the calling agent's grant on the request itself (#1179)")
+    class CallerGrantOnTheRequest {
+
+        private static final String GRANTED = "aaaaaaaaaaaaaaaaaaaaaaaa";
+        private static final String LEFT_OUT = "bbbbbbbbbbbbbbbbbbbbbbbb";
+
+        /** A tool call as {@code grantChecked} sends it: the agent rides along. */
+        private McpCallContext toolCallFor(String agentId) {
+            InvocationContext invocation = InvocationContext.builder().chatMemoryId("m")
+                    .invocationParameters(InvocationParameters.from(McpToolProviderManager.SECRET_ACCESS_PARAMETER, SecretAccess.agent(agentId)))
+                    .build();
+            return new McpCallContext(invocation, null);
+        }
+
+        @Test
+        @DisplayName("the header lookup reads the agent's grant on the connection it resolves, so an edit after the per-call check is refused")
+        void headerLookupChecksTheCallingAgent() {
+            // The connection as the request finds it: its secret's grant leaves this
+            // agent out, whatever the per-call check read a moment earlier.
+            register(serviceConnection());
+            doThrow(new SecretResolver.SecretNotGrantedException("vault secret 'mcp-token' is not granted to the agent")).when(secretResolver)
+                    .requireGranted(any(Iterable.class), eq(SecretAccess.agent(LEFT_OUT)), anyString());
+
+            var e = assertThrows(ConnectionException.class, () -> headerFor(config("${connection:crm}"), toolCallFor(LEFT_OUT)));
+            assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
+
+            assertEquals(Map.of("Authorization", "Bearer live-token"), headerFor(config("${connection:crm}"), toolCallFor(GRANTED)));
+            // A request that carries no agent (the resource bridge) keeps the session's
+            // access; the per-call check is what covers it.
+            assertEquals(Map.of("Authorization", "Bearer live-token"), headerFor(config("${connection:crm}"), toolCall()));
+        }
+
+        @Test
+        @DisplayName("grantChecked hands the shared executor the agent it checked")
+        void grantCheckedCarriesTheAgent() {
+            register(serviceConnection());
+            var seen = new AtomicReference<InvocationContext>();
+            ToolExecutor shared = new ToolExecutor() {
+                @Override
+                public String execute(ToolExecutionRequest request, Object memoryId) {
+                    throw new AssertionError("the context-free overload drops the agent");
+                }
+
+                @Override
+                public ToolExecutionResult executeWithContext(ToolExecutionRequest request, InvocationContext context) {
+                    seen.set(context);
+                    return ToolExecutionResult.builder().resultText("ok").build();
+                }
+            };
+            var request = ToolExecutionRequest.builder().name("lookup").arguments("{}").build();
+
+            String result = manager().grantChecked(Map.of("lookup", shared), config("${connection:crm}"), SecretAccess.agent(GRANTED))
+                    .get("lookup").execute(request, "memory-1");
+
+            assertEquals("ok", result);
+            assertEquals("memory-1", seen.get().chatMemoryId());
+            assertEquals(SecretAccess.agent(GRANTED), McpToolProviderManager.callerAccess(new McpCallContext(seen.get(), null)));
         }
     }
 }

@@ -209,6 +209,7 @@ public class ConnectionResolver {
             requireTargetAllowed(connection, targetUrl);
             requireCredentialsGranted(connection, access);
             ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl, access);
+            requireMintingCredentialStillGranted(connection, access);
             record(connection, "success", sample);
             return credential;
         } catch (ConnectionException e) {
@@ -268,6 +269,7 @@ public class ConnectionResolver {
             requireTargetAllowed(connection, targetUrl);
             requireCredentialsGranted(connection, access);
             String accessToken = accessTokenSupplier.accessToken(connection, resolvePrincipal(connection, principalOverride));
+            requireMintingCredentialStillGranted(connection, access);
             if (accessToken == null || accessToken.isBlank()) {
                 // The supplier contract says never null — but a blank token handed to
                 // XOAUTH2 fails as an authentication error at the mail server, with
@@ -650,6 +652,27 @@ public class ConnectionResolver {
             credentialReferenceResolver.requireGranted(connection.getOauth().clientCredentialReference(authType), access, connection.getName(),
                     connection.getOauth().clientCredentialDescription(authType));
         }
+    }
+
+    /**
+     * Reads the grant of the credential that mints an OAuth token again, after the
+     * token supplier returned and before the token leaves this class.
+     * <p>
+     * The check before the lookup reads the client credential's {@code ${vars:…}}
+     * expansion as it was then; a mint resolves it again, outside agent grants,
+     * since one mint is shared by every agent asking at once. A variable repointed
+     * in between would otherwise hand the asking agent a token minted from a secret
+     * its grant leaves out. Read after the supplier, the expansion is the one the
+     * mint used or a later one, so the token is released only for a credential the
+     * agent is granted (#1179). A no-op for a connection without OAuth.
+     */
+    private void requireMintingCredentialStillGranted(ConnectionConfiguration connection, SecretAccess access) {
+        if (connection.getOauth() == null || access == null || !access.checksGrant()) {
+            return;
+        }
+        AuthType authType = connection.getAuthType();
+        credentialReferenceResolver.requireGranted(connection.getOauth().clientCredentialReference(authType), access, connection.getName(),
+                connection.getOauth().clientCredentialDescription(authType));
     }
 
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride, URI targetUrl,

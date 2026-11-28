@@ -38,6 +38,7 @@ import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
+import dev.langchain4j.invocation.InvocationParameters;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
@@ -1139,7 +1140,12 @@ public class McpToolProviderManager {
                 LOGGER.warnf("MCP tool '%s' of server '%s' refused: %s", sanitize(name), sanitize(serverName), sanitize(e.getMessage()));
                 return "Error: the MCP server '" + serverName + "' cannot be used by this agent: " + e.getMessage();
             }
-            return executor.execute(request, memoryId);
+            // The agent travels with the call, so the request's own credential lookup
+            // checks it on the connection document it resolves: an edit landing
+            // between the check above and that lookup is refused there.
+            InvocationContext context = InvocationContext.builder().chatMemoryId(memoryId)
+                    .invocationParameters(InvocationParameters.from(SECRET_ACCESS_PARAMETER, access)).build();
+            return executor.executeWithContext(request, context).resultText();
         }));
         return Map.copyOf(checked);
     }
@@ -1176,6 +1182,28 @@ public class McpToolProviderManager {
      * handed out.
      */
     static final SecretAccess MCP_SESSION = SecretAccess.outsideAgentGrants("MCP client session (agent grant checked at tool assembly)");
+
+    /**
+     * The {@link InvocationParameters} key under which {@link #grantChecked} hands
+     * the calling agent's {@link SecretAccess} to the transport, per call. The
+     * client is shared, so the agent cannot be a property of it; the invocation is
+     * the one thing the header supplier sees that belongs to a single call.
+     */
+    static final String SECRET_ACCESS_PARAMETER = "eddi.mcp.secretAccess";
+
+    /**
+     * The agent a tool call runs for, as {@link #grantChecked} attached it, or
+     * {@link #MCP_SESSION} for a request that carries none (discovery, the resource
+     * bridge, an executor not wrapped because no grant applies).
+     */
+    static SecretAccess callerAccess(McpCallContext callContext) {
+        if (callContext == null || callContext.invocationContext() == null
+                || callContext.invocationContext().invocationParameters() == null) {
+            return MCP_SESSION;
+        }
+        Object access = callContext.invocationContext().invocationParameters().get(SECRET_ACCESS_PARAMETER);
+        return access instanceof SecretAccess secretAccess ? secretAccess : MCP_SESSION;
+    }
 
     private void requireSecretsAllowedAt(String apiKey, McpServerConfig config) {
         if (vaultHostAllowlist == null || apiKey == null) {
@@ -1571,8 +1599,9 @@ public class McpToolProviderManager {
                 return Map.of(discovery.get().headerName(), discovery.get().headerValue());
             }
             // No principal offered: the resolver reads the turn's bound one, which is
-            // the only place a per-user decision can be taken from here.
-            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null, MCP_SESSION);
+            // the only place a per-user decision can be taken from here. The agent's
+            // grant is read on the very document resolved (#1179).
+            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null, callerAccess(callContext));
             return Map.of(credential.headerName(), credential.headerValue());
         }
         if (!callerBound) {
