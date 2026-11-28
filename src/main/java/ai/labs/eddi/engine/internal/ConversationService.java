@@ -1309,8 +1309,15 @@ public class ConversationService implements IConversationService, UserErasurePar
             // A keyed turn (a scheduled fire's) is admitted exactly as the conversation-id
             // overload admits one: without it, a retry that loaded the conversation after
             // the first attempt's turn committed ran that turn a second time.
+            ConversationMemorySnapshot snapshot = requireSnapshot(conversationId);
+            // The agent check admitTurn makes, before any key is admitted: a stored
+            // answer of this conversation's agent must not be served as another's.
+            if (agentId != null && !agentId.equals(snapshot.getAgentId())) {
+                throw new AgentMismatchException(
+                        String.format("Supplied agentId (%s) is incompatible with conversationId (%s)", agentId, conversationId));
+            }
             sayKeyed(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
-                    responseHandler, requireSnapshot(conversationId), () -> say(environment, agentId, conversationId, returnDetailed,
+                    responseHandler, snapshot, () -> say(environment, agentId, conversationId, returnDetailed,
                             returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler));
             return;
         }

@@ -36,6 +36,12 @@ Findings L1-L6 and the confirmed parts of L8 of the November 2026 code review (s
 
 **Files:** [`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java), [`ScheduleFireExecutor.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java), [`SchedulePollerService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/SchedulePollerService.java), [`IScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/IScheduleStore.java), [`ScheduleConfiguration.java`](../../src/main/java/ai/labs/eddi/engine/schedule/model/ScheduleConfiguration.java), [`MongoScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/mongo/MongoScheduleStore.java), [`PostgresScheduleStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresScheduleStore.java), [`CronParser.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/CronParser.java), [`AlertMaintenanceSchedule.java`](../../src/main/java/ai/labs/eddi/engine/alerts/AlertMaintenanceSchedule.java), [`scheduling.md`](../scheduling.md)
 
+### Third review follow-up (same branch, 2026-11-28)
+
+- **A persistent fire's retry stays in the conversation that holds its turn.** `resolveOrCreatePersistent` checks the occurrence's key before the ENDED branch and the rollover: a timed-out attempt whose committed turn ended the conversation, or took it to `persistentConversationMaxSteps`, no longer sends the retry into a new conversation (where the input ran a second time), and the old one is not ended for it.
+- **A keyed `say` checks the agent before admission.** The environment-qualified overload refuses a mismatched `agentId` with `AgentMismatchException` before `admitOrServe`, so a stored answer of this conversation's agent is never served to a caller naming another one.
+- The Full Metrics panel "Dead-lettered fires" is now "Dead-lettered fires and schedules without a next fire", with both series labelled and the legend shown.
+
 ### Design decisions
 
 - Test conversations are excluded at the two turn hooks, not by adding an environment to alert rules (the finding's alternative); rules keep no notion of environment.

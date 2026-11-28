@@ -1391,6 +1391,12 @@ public class ScheduleFireExecutor {
                 // check it explicitly. Nothing of that conversation is carried over.
                 LOGGER.warnf("[SCHEDULE] Persistent conversation %s is owned by another user than schedule %s — "
                         + "ignoring it and creating a fresh conversation", conversationId, schedule.getId());
+            } else if (existing != null && turnIdempotency != null && turnIdempotency.isRecordedIn(existing, idempotencyKeyOf(runId))) {
+                // A retry of an occurrence whose keyed turn is already stored here — the
+                // turn that ended the conversation, or that took it to the rollover limit.
+                // Kept, neither replaced nor rolled over: admission answers the retry with
+                // that turn, where a new conversation would run the input a second time.
+                return new ResolvedConversation(conversationId, false, false);
             } else if (existing != null) {
                 if (existing.getConversationState() == ConversationState.ENDED) {
                     // Every fire into an ended conversation was refused with "conversation

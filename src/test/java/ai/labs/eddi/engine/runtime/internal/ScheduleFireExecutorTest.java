@@ -1214,6 +1214,48 @@ class ScheduleFireExecutorTest {
         verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
     }
 
+    /**
+     * A timed-out attempt committed its keyed turn and that turn ended the
+     * conversation: the retry stays in it (admission answers with the stored turn)
+     * rather than running the input again in a new one.
+     */
+    @Test
+    void fire_persistentStrategy_keepsAnEndedConversationThatHoldsTheOccurrencesTurn() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeHeartbeatSchedule("hb-ended-keyed", "persistent");
+        schedule.setPersistentConversationId("ended-keyed");
+        storedConversation("ended-keyed", ConversationState.ENDED, 2);
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(true);
+        sayCompletes("ended-keyed");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals("ended-keyed", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    /**
+     * The same when the committed turn took the conversation to the rollover limit.
+     */
+    @Test
+    void fire_persistentStrategy_doesNotRollOverForARetryWhoseTurnIsStored() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeHeartbeatSchedule("hb-full-keyed", "persistent");
+        schedule.setPersistentConversationId("full-keyed");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("full-keyed", ConversationState.READY, 5);
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(true);
+        sayCompletes("full-keyed");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals("full-keyed", result.conversationId());
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
     @Test
     void fire_persistentStrategy_keepsAConversationBelowTheStepLimit() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-keep", "persistent");

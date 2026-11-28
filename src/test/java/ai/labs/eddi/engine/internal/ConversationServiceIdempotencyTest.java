@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
@@ -430,6 +431,24 @@ class ConversationServiceIdempotencyTest {
 
         sayQualified("schedule:s@3", mock(ConversationResponseHandler.class));
         verify(conversationCoordinator, times(1)).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    @Test
+    @DisplayName("qualified say: a stored key is not served to a caller naming another agent; it is refused as a new key would be")
+    void qualifiedSay_aStoredKeyIsNotServedToAnotherAgent() throws Exception {
+        sayQualified("schedule:s@4", mock(ConversationResponseHandler.class));
+        runQueuedTurns(1);
+        ConversationMemorySnapshot persisted = persistedSnapshot();
+        assertTrue(hasStoredKey(persisted, "schedule:s@4"));
+        doReturn(persisted).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+        ConversationResponseHandler other = mock(ConversationResponseHandler.class);
+        var input = new InputData("hello", new HashMap<>());
+        input.setIdempotencyKey("schedule:s@4");
+        assertThrows(IConversationService.AgentMismatchException.class,
+                () -> conversationService.say(ENV, "another-agent", CONVERSATION_ID, false, true, List.of(), input, false, other));
+        verify(other, never()).onComplete(any());
+        verify(other, never()).onSkipped(any());
     }
 
     private void sayQualified(String key, ConversationResponseHandler handler) throws Exception {
