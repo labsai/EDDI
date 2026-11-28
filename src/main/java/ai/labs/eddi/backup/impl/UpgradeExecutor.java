@@ -18,6 +18,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -383,7 +384,7 @@ public class UpgradeExecutor {
             int failuresBeforeAgent = outcome.failures.size();
             URI writtenAgentUri = agentMayChange
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, removedWorkflowIds,
-                            agentSettings, workflowOrder, compatible, outcome)
+                            agentSettings, agentSettings != null ? agentDiff.targetVersion() : null, workflowOrder, compatible, outcome)
                     : null;
             boolean agentUpdated = writtenAgentUri != null;
             URI agentUri = agentUpdated ? writtenAgentUri : currentAgentUri(targetAgentId);
@@ -1675,6 +1676,10 @@ public class UpgradeExecutor {
      * @param adoptedSettings
      *            the source agent as the preview rewrote it onto this target, or
      *            null to keep the target's own settings
+     * @param adoptedFromVersion
+     *            the target version the preview compared against and rewrote
+     *            {@code adoptedSettings} onto; when the agent is at another version
+     *            by the time it is written, nothing is written and the run fails
      * @return the agent's new URI, or null when the result is what the agent
      *         already is — nothing is written and no version is burned
      */
@@ -1683,6 +1688,7 @@ public class UpgradeExecutor {
                                   List<URI> newWorkflowUris,
                                   Set<String> removedWorkflowIds,
                                   String adoptedSettings,
+                                  Integer adoptedFromVersion,
                                   List<String> workflowOrder,
                                   boolean compatible,
                                   Outcome outcome) {
@@ -1697,7 +1703,33 @@ public class UpgradeExecutor {
                         + " could not be established from its descriptor, so it was not written");
             }
             int currentVersion = resolved;
-            AgentConfiguration current = agentStore.readAgent(agentId, currentVersion);
+            if (adoptedSettings != null && adoptedFromVersion != null && adoptedFromVersion != currentVersion) {
+                // The adopted settings are the preview's: the source rewritten onto the
+                // target as it stood at version adoptedFromVersion, the target's own
+                // credentials restored into it. Written against a newer version they
+                // would silently undo whatever changed here since — a rotated key comes
+                // back as the old one, with no conflict anywhere, because the version
+                // passed to the store is the one resolved just now.
+                //
+                // The message deliberately does not promise that a re-run recovers.
+                // The workflow and extension versions written above stay in their
+                // stores while the agent keeps its old references, so a new preview
+                // names those old versions as its targets. The next upgrade then
+                // finds each store at a newer version that it did not write itself:
+                // an extension fails as changed since the preview (updateExtension),
+                // a workflow as a refused write.
+                outcome.failed(agentId, "agent", null, "the agent changed on this instance (v" + adoptedFromVersion + " → v"
+                        + currentVersion + ") after the upgrade compared against it, so its settings were not overwritten."
+                        + " The workflow and extension versions this run wrote stay in their stores, but the agent still"
+                        + " references the earlier ones, so none of them is deployed. Upgrading again does not clear this:"
+                        + " a new preview still targets the earlier versions, and the next upgrade's writes of the"
+                        + " resources this run wrote are refused because each store now holds a newer version. Review the"
+                        + " agent and those resources here before syncing again");
+                return null;
+            }
+            // Unredacted: this document is written back, and an editor's redacted copy
+            // carries the marker in place of the agent's stored credentials.
+            AgentConfiguration current = RestAgentStore.readUnredacted(agentStore, agentId, currentVersion);
 
             // Replace workflow URIs with updated versions, and take off the ones the
             // source no longer has
