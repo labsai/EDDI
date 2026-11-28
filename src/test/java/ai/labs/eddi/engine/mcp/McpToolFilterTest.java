@@ -92,11 +92,12 @@ class McpToolFilterTest {
     // --- Edge cases ---
 
     @Test
-    void test_nullToolName_throwsNpe() {
+    void test_nullToolName_isHidden() {
+        // MCP_TOOLS is the key set of McpToolTiers.TIERS, which answers false for a
+        // null name (Set.of(...) used to throw). Either way the tool is not exposed.
         var toolInfo = mock(ToolInfo.class);
         when(toolInfo.name()).thenReturn(null);
-        assertThrows(NullPointerException.class,
-                () -> filter.test(toolInfo, (FilterContext) null));
+        assertFalse(filter.test(toolInfo, (FilterContext) null));
     }
 
     @Test
@@ -124,11 +125,11 @@ class McpToolFilterTest {
      * <p>
      * This is the guard that prevents the class of bug where a new
      * {@code Mcp*Tools} class (or a new method on an existing one) ships with a
-     * {@code @Tool} annotation but is never added to {@code MCP_TOOLS} — making the
-     * tool invisible to MCP clients despite being implemented. Because a
-     * quarkus-MCP {@code @Tool} has <em>no other</em> invocation path, a
-     * non-whitelisted one is unreachable dead code: it must be either whitelisted
-     * (usable) or removed.
+     * {@code @Tool} annotation but never gets a tier in {@code McpToolTiers} (whose
+     * key set is {@code MCP_TOOLS}) — making the tool invisible to MCP clients
+     * despite being implemented. Because a quarkus-MCP {@code @Tool} has <em>no
+     * other</em> invocation path, a non-whitelisted one is unreachable dead code:
+     * it must be either whitelisted (usable) or removed.
      * <p>
      * Discovery is intentionally reflection/filesystem-based (not a hardcoded class
      * list) so that adding a brand-new MCP tool class is automatically covered
@@ -187,7 +188,7 @@ class McpToolFilterTest {
 
         assertTrue(missing.isEmpty(),
                 "The following quarkus-MCP @Tool methods are NOT whitelisted in McpToolFilter. A non-whitelisted "
-                        + "MCP tool is unreachable dead code — either add it to the MCP_TOOLS set (to make it usable) "
+                        + "MCP tool is unreachable dead code — either give it a tier in McpToolTiers (to make it usable) "
                         + "or remove the tool. Missing {toolName=class}: " + missing);
     }
 

@@ -204,6 +204,32 @@ class RestAgentEngineToolPauseDetailsTest {
         }
 
         @Test
+        @DisplayName("a mandatory call shows why it is asked and whose decision it needs; a pattern-gated call shows none of it")
+        void mandatoryCallShowsReasonAndApprover() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+            var mandatory = toolCall("call-1", "sendToPeer", "a2a", RAW_SECRET, "{}", false, "mandatory:file-egress");
+            mandatory.setMandatoryReasonCode("file-egress");
+            mandatory.setMandatoryApprover("CONVERSATION_USER");
+            mandatory.setMandatorySummary("Sends 1 file out of this deployment");
+            var plain = toolCall("call-2", "sendEmail", "mcp", RAW_SECRET, "{}", false, "mcp:*");
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setCalls(List.of(mandatory, plain));
+            snapshot.setHitlPendingToolCalls(batch);
+            doReturn(Optional.empty()).when(hitlToolJournalStore).find(anyString(), anyString(), anyString());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
+            var calls = (List<Map<String, Object>>) pauseDetails.get("calls");
+            assertEquals("file-egress", calls.get(0).get("mandatoryReasonCode"));
+            assertEquals("CONVERSATION_USER", calls.get(0).get("mandatoryApprover"));
+            assertEquals("Sends 1 file out of this deployment", calls.get(0).get("mandatorySummary"));
+            assertFalse(calls.get(1).containsKey("mandatoryReasonCode"));
+        }
+
+        @Test
         @DisplayName("an unpinned call (every non-http tool) has no preview, honestly, rather than a fabricated one")
         void unpinnedCallHasNoPreview() throws Exception {
             var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
