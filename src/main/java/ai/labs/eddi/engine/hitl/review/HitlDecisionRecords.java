@@ -67,6 +67,14 @@ public final class HitlDecisionRecords {
                 .reasonCode(decision.getReasonCode())
                 .note(decision.getNote())
                 .plan(decision.getCommittedPlanHash(), decision.getPlanBinding());
+        if (decision.getMandatoryApproval() != null) {
+            // A mandatory approval (MandatoryApproverCheck): who approved, in what
+            // capacity and — for an administrator — on whose behalf.
+            var mandatory = decision.getMandatoryApproval();
+            record.legacy("actingAs", mandatory.actingAs().name())
+                    .legacy("approvedBy", mandatory.approvedBy())
+                    .legacy("onBehalfOf", mandatory.onBehalfOf());
+        }
         if (toolCallPause) {
             record.legacy("pauseType", "TOOL_CALL").legacy("toolDecisions", legacyToolDecisions);
             addToolCallUnits(record, decision, batch);

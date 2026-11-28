@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import java.util.Collection;
 import java.util.concurrent.Callable;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
@@ -62,6 +67,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.ParameterizedTest;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -70,6 +76,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -119,6 +126,7 @@ class RestConversationStoreTest {
                 documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                 30, 90, attachmentStorageInstance);
+        restConversationStore.erasureGuard = TestErasureGuards.withoutWriters();
     }
 
     private static ConversationActivitySummary activity(String id, int agentVersion, ConversationState state) {
@@ -516,6 +524,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             store.deleteConversationLog("conv-1", true);
 
@@ -535,6 +544,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             // The delete fails and keeps the conversation findable, so it can be retried —
             // it used to delete the memory anyway and leave the attachments orphaned.
@@ -825,6 +835,75 @@ class RestConversationStoreTest {
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
         }
 
+        @Test
+        @DisplayName("the sweep erases the async-written rows of what it deletes first, with one barrier, and keeps a conversation it could not")
+        void sweepGivesTheErasureGuarantee() throws Exception {
+            // An async writer whose rows of conv-stuck cannot be erased right now.
+            Map<String, String> rows = new HashMap<>(Map.of("r1", "conv-a", "r2", "conv-stuck", "r3", "conv-b"));
+            AtomicInteger drains = new AtomicInteger();
+            AsyncErasureWriter writer = new AsyncErasureWriter() {
+                @Override
+                public String name() {
+                    return "fake";
+                }
+
+                @Override
+                public boolean awaitDrained(Duration timeout) {
+                    drains.incrementAndGet();
+                    return true;
+                }
+
+                @Override
+                public void removeRow(String rowId) {
+                    rows.remove(rowId);
+                }
+
+                @Override
+                public long eraseConversation(String conversationId) {
+                    return "conv-stuck".equals(conversationId) ? 0 : rows.values().removeIf(conversationId::equals) ? 1 : 0;
+                }
+
+                @Override
+                public long countForConversation(String conversationId) {
+                    return rows.values().stream().filter(conversationId::equals).count();
+                }
+            };
+            restConversationStore.erasureGuard = new ErasureGuard(new InMemoryErasureTombstoneStore(), List.of(writer),
+                    new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400), Duration.ofSeconds(1), Duration.ofMinutes(5),
+                    Clock.systemUTC());
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-a", "conv-stuck", "conv-b"));
+            var old = new DocumentDescriptor();
+            old.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor(anyString(), eq(0))).thenReturn(old);
+            doAnswer(inv -> {
+                assertFalse(rows.containsValue(inv.getArgument(0)), "the guarded erasure ran before the snapshot delete");
+                return null;
+            }).when(conversationMemoryStore).deleteConversationMemorySnapshot(anyString());
+
+            Integer deleted = restConversationStore.permanentlyDeleteEndedConversationLogs(30);
+
+            assertEquals(2, deleted);
+            assertEquals(1, drains.get(), "one drain barrier for the whole sweep");
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-a");
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-b");
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-stuck");
+            verify(documentDescriptorStore, never()).deleteAllDescriptor("conv-stuck");
+            assertEquals(Map.of("r2", "conv-stuck"), rows, "kept, with its rows, for the next run");
+        }
+
+        @Test
+        @DisplayName("without an erasure guard the sweep deletes nothing")
+        void sweepWithoutAGuardDeletesNothing() throws Exception {
+            restConversationStore.erasureGuard = null;
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-old"));
+            var old = new DocumentDescriptor();
+            old.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(old);
+
+            assertEquals(0, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        }
+
         @SuppressWarnings("unchecked")
         private IConversationCheckpointStore givenCheckpointStore() {
             IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
@@ -837,6 +916,7 @@ class RestConversationStoreTest {
             when(vault.isResolvable()).thenReturn(false);
             restConversationStore.conversationPurgeService = new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore,
                     conversationService, vault, attachmentStorageInstance, checkpointInstance, journalInstance);
+            restConversationStore.conversationPurgeService.useErasureGuard(TestErasureGuards.withoutWriters());
             return checkpoints;
         }
 
@@ -1378,6 +1458,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 0, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             // Should not throw
             store.cleanupOldUserMemories();
@@ -1392,6 +1473,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, null, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             store.cleanupOldUserMemories();
 
@@ -1405,6 +1487,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             store.cleanupOldUserMemories();
 
@@ -1553,6 +1636,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     0, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             store.deleteEndedConversationsOlderThanXDays();
 
@@ -1922,6 +2006,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             when(conversationMemoryStore.getEndedConversationIds())
                     .thenReturn(List.of("conv-old"));
@@ -2210,6 +2295,7 @@ class RestConversationStoreTest {
                     documentDescriptorStore, conversationDescriptorStore,
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
+            store.erasureGuard = TestErasureGuards.withoutWriters();
 
             store.deleteConversationLog("conv-1", false);
 

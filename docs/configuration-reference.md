@@ -175,7 +175,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
 | `eddi.cluster.events.resync-jitter` | `5s` | A cache resync every node runs for the same reason (a cluster-wide request, a gap after an outage, a recreated event stream) starts after a random delay up to this, so the nodes do not reload from the database in the same second. An administrator's resync runs at once on the node that asked. `0s` turns it off |
 | `eddi.cluster.deployments.transient-ttl` | `10m` | Lifetime of the cluster record of a deployment made with `autoDeploy=false` (`<prefix>_DEPLOYMENTS` bucket). Nodes serving it rewrite it before it expires, so it lasts while the cluster runs, through rolling restarts, and is forgotten once no node has served it for this long |
-| `eddi.cluster.gdpr-stop-timeout` | `10s` | How long a GDPR erasure waits for every other node to confirm that it stopped the user's in-flight work (the wait ends early once all of them answered) |
+| `eddi.cluster.gdpr-stop-timeout` | `10s` | How long a GDPR erasure waits for every other node to confirm that it stopped the user's in-flight work (the wait ends early once all of them answered). Each node also drains its asynchronous writers before it answers, so the erasure waits this plus `eddi.gdpr.drain-timeout`; a permanent conversation delete's `erasure-drain` scatter waits the same |
 | `eddi.cluster.signing.key` | — | HMAC key that signs node RPCs, their replies and cluster events; at least 32 characters, the same on every node, kept outside NATS (a Kubernetes Secret, not the NATS credentials). Unset: messages are unsigned and a warning is logged at boot. Also seals the user-id hash a GDPR stop sends. See [Clustering](clustering.md#signed-control-plane) |
 | `eddi.cluster.signing.previous-keys` | — | Comma-separated keys still accepted for verification while a key is rotated |
 | `eddi.cluster.signing.required` | `false` | `true` refuses unsigned cluster messages, and a node without a key refuses to start. Leave `false` until every node signs — that is what lets a node of the previous version take part in a rolling upgrade ([order](clustering.md#rolling-upgrades)) |
@@ -289,6 +289,20 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
 | `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
+
+---
+
+## Agent Health
+
+Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
+| `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each health row was captured (not written): the conversations of those rows are checked against the conversation store, and the rows of those that no longer exist deleted |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. No cursor is kept, so the excess is not guaranteed a later check and may stay until `eddi.health.facts-retention` |
 
 ---
 
@@ -428,6 +442,9 @@ Full guide: [gdpr-compliance.md](gdpr-compliance.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.gdpr.restriction-cache-ttl-seconds` | `0` | How long an Art. 18 restriction verdict may be reused without re-reading the store. **`0` — the default — switches the cache off**, so every check reads the store. The cache is node-local with no cross-node invalidation, so a cached "not restricted" on one node keeps a restricted user being processed for the length of the TTL after another node applies the restriction, and keeps answering from cache through a store outage instead of failing closed. Raise it only on a single-node deployment or one with conversation affinity |
+| `eddi.gdpr.tombstone-retention` | `400d` | How long the durable erasure tombstones (a keyed hash of an erased user, the id of an erased or permanently deleted conversation) are kept. While one exists, an asynchronous writer (alerts) refuses or removes a row of that user or conversation that was queued before the erasure. Keep it longer than any guarded data can still arrive — at least the longest retention of a guarded store (alert events: `eddi.alerts.event-retention`, 90 days). A value shorter than one day plus twice `eddi.gdpr.drain-timeout` plus `eddi.gdpr.tombstone-clock-skew` fails the start: a tombstone must outlive the erasure that wrote it. See [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data) |
+| `eddi.gdpr.drain-timeout` | `30s` | How long each node waits in total (for all its writers together), during an erasure's stop step and a permanent conversation delete, for its asynchronous writers to finish writing the work queued before the tombstones (alert deliveries are not waited for). A writer that does not drain in time fails the erasure (`asyncWriteDrain`, or `clusterStop` for another node) or the delete — never a silent pass. The cluster stop's wait is `eddi.cluster.gdpr-stop-timeout` plus this |
+| `eddi.gdpr.tombstone-clock-skew` | `5m` | How far after an erasure content of the erased user still counts as captured before it, to absorb clock differences between nodes. The erasure time is the later of the erasing node's clock and the database's write time. **Assumes every node and the database run NTP** and stay within this skew. Content captured later is new activity of a reused id and is stored. Conversation tombstones have no such window: a deleted conversation's rows are refused whenever they were captured |
 
 ---
 
@@ -537,6 +554,10 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
+
+### Documents
+
+Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
 
 ---
 
