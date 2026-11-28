@@ -778,6 +778,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             var conversationMemory = conversation.getConversationMemory();
             conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
+            ConversationContinuations.recordBookingCaller(conversationMemory, startCaller);
             // Settle point of the CONVERSATION_START turn, which runs inline and never
             // reaches admitTurn's completion callback (an LLM greeting costs too).
             meterTurnCost(conversationMemory);
@@ -1266,6 +1267,19 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
+     * Records, while the turn's caller is still bound, whether an administrator
+     * acting in their own conversation drove it — what a continuation this turn
+     * arms carries as {@code bookedByAdmin}. Runs inside the identity-bound
+     * execution: the arm itself runs from the completion callback, where the
+     * binding has already been restored. Never throws.
+     */
+    void recordBookingCaller(IConversationMemory memory) {
+        if (callerIdentityContext != null) {
+            ConversationContinuations.recordBookingCaller(memory, callerIdentityContext.current());
+        }
+    }
+
+    /**
      * After the turn was committed: arms the continuation
      * {@link #decideContinuation} recorded. Never throws.
      */
@@ -1718,6 +1732,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                         try {
                             contextLogger.setLoggingContext(loggingContext);
                             conversation.rerun(inputData.getContext());
+                            recordBookingCaller(memory);
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
                             listener.pipelineFailed(e);
@@ -1729,6 +1744,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                         try {
                             contextLogger.setLoggingContext(loggingContext);
                             conversation.say(inputData.getInput(), inputData.getContext());
+                            recordBookingCaller(memory);
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
                             listener.pipelineFailed(e);

@@ -109,6 +109,33 @@ public class ToolApprovalsConfig {
      */
     private List<ApprovalRule> rules;
     /**
+     * Who may decide a tool-call pause of this agent. Null means
+     * {@link Deciders#OWNER_OR_ROLE}, the behaviour before this field existed.
+     *
+     * @since 6.7.0
+     */
+    private Deciders deciders;
+    /**
+     * Whether a decider may approve a gated call with different arguments
+     * ({@code toolDecisions[].amendedArguments}). Null means {@code true}, the
+     * behaviour before this field existed; {@code false} refuses an amendment with
+     * 400 and leaves only approve-as-shown or reject. Mirrors
+     * {@code HitlReviewConfig.allowAnswerEdits} for RULE pauses.
+     *
+     * @since 6.7.0
+     */
+    private Boolean allowArgumentAmendments;
+    /**
+     * Whether a human decision on a tool-call pause must name the pause it was made
+     * for ({@code pauseId}). Null means {@code false}. A decision without one lands
+     * on whatever pause is current — which, after a resume and re-pause, is a
+     * request the decider never saw. Also switched on deployment-wide by
+     * {@code eddi.hitl.require-pause-id}.
+     *
+     * @since 6.7.0
+     */
+    private Boolean requirePauseId;
+    /**
      * Runtime-only: patterns of earned-autonomy categories that are currently
      * suspended. The gate gates an allowed call matching one with
      * {@code suspended:<pattern>}. Set on a copy by {@code AutonomyOverlayService},
@@ -119,6 +146,62 @@ public class ToolApprovalsConfig {
      */
     @JsonIgnore
     private transient List<String> suspendedPatterns;
+
+    /** Who may decide a tool-call pause. */
+    public enum Deciders {
+        /**
+         * The conversation's owner, an {@code eddi-admin} or an {@code eddi-approver}
+         * (and the Slack / email approver lists). The default.
+         */
+        OWNER_OR_ROLE,
+        /**
+         * Only an {@code eddi-admin} or {@code eddi-approver} (and the Slack / email
+         * approver lists). The owner still sees that a decision is pending, but a
+         * decision from them is refused with 403 — the user whose turn a
+         * prompt-injected model drove cannot approve its own gated call. Recommended
+         * for tools with real-world side effects.
+         */
+        ROLE_ONLY
+    }
+
+    public Deciders getDeciders() {
+        return deciders;
+    }
+
+    public void setDeciders(Deciders deciders) {
+        this.deciders = deciders;
+    }
+
+    public Boolean getAllowArgumentAmendments() {
+        return allowArgumentAmendments;
+    }
+
+    public void setAllowArgumentAmendments(Boolean allowArgumentAmendments) {
+        this.allowArgumentAmendments = allowArgumentAmendments;
+    }
+
+    public Boolean getRequirePauseId() {
+        return requirePauseId;
+    }
+
+    public void setRequirePauseId(Boolean requirePauseId) {
+        this.requirePauseId = requirePauseId;
+    }
+
+    /** Whether only an administrator or approver may decide (null-safe). */
+    public static boolean roleOnly(ToolApprovalsConfig config) {
+        return config != null && config.getDeciders() == Deciders.ROLE_ONLY;
+    }
+
+    /** Whether argument amendments are allowed (null-safe; default true). */
+    public static boolean amendmentsAllowed(ToolApprovalsConfig config) {
+        return config == null || !Boolean.FALSE.equals(config.getAllowArgumentAmendments());
+    }
+
+    /** Whether a decision must name its pause (null-safe; default false). */
+    public static boolean pauseIdRequired(ToolApprovalsConfig config) {
+        return config != null && Boolean.TRUE.equals(config.getRequirePauseId());
+    }
 
     @JsonIgnore
     public List<String> getSuspendedPatterns() {

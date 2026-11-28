@@ -59,7 +59,10 @@ public interface IRestAutonomy {
     @Operation(summary = "Read one category", description = "Its state and its evidence evaluated now against the newest agent version.")
     AutonomyService.CategoryView readCategory(@PathParam("agentId") String agentId, @QueryParam("category") String category);
 
+    // apply, dismiss and lift remove a gate: never eddi-approver alone
+    // (OversightAccess#requireEditor).
     @POST
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Path("/{agentId}/apply")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
@@ -69,6 +72,7 @@ public interface IRestAutonomy {
     AutonomyService.CategoryView apply(@PathParam("agentId") String agentId, @QueryParam("category") String category, ApplyRequest request);
 
     @POST
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Path("/{agentId}/dismiss")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
@@ -85,6 +89,7 @@ public interface IRestAutonomy {
                                          NoteRequest request);
 
     @POST
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Path("/{agentId}/lift")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)

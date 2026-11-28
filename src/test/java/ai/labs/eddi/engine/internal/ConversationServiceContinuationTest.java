@@ -40,6 +40,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -58,6 +59,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -190,6 +192,33 @@ class ConversationServiceContinuationTest {
             assertEquals("go on", armed.getMessage());
             assertEquals(1, armed.getMetadata().get(ConversationContinuations.METADATA_NUMBER_KEY));
             assertEquals(USER_ID, armed.getUserId());
+        }
+
+        @Test
+        @DisplayName("an administrator in their own conversation: bookedByAdmin is recorded although the arm runs after the binding ended")
+        void adminBookingSurvivesTheCompletionCallback() throws Exception {
+            var callers = new CallerIdentityContext(null, null);
+            // The request thread's caller: captured by say(), bound around the pipeline
+            // run,
+            // and gone again by the time the completion callback arms the continuation.
+            callers.bind(new CallerIdentity(null, USER_ID, null, Map.of(), true));
+            try {
+                say(new InputData("start the job", new HashMap<>()));
+            } finally {
+                callers.clear();
+            }
+            runQueuedTurns(1);
+
+            assertEquals(Boolean.TRUE, armedSchedule().getMetadata().get(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY));
+        }
+
+        @Test
+        @DisplayName("an ordinary booking records bookedByAdmin false")
+        void ordinaryBookingRecordsFalse() throws Exception {
+            say(new InputData("start the job", new HashMap<>()));
+            runQueuedTurns(1);
+
+            assertEquals(Boolean.FALSE, armedSchedule().getMetadata().get(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY));
         }
 
         @Test

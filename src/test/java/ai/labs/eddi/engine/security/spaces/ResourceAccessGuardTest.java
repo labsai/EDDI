@@ -114,6 +114,29 @@ class ResourceAccessGuardTest {
         private final WorkspaceSettings settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
 
         @Test
+        @DisplayName("someTeamMayUse: a team space or a team grant of USE or more could admit; a personal resource could not")
+        void someTeamMayUse() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            var g = guard(identity("alice"), settings, store);
+
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
+            assertFalse(g.someTeamMayUse(RESOURCE_ID));
+
+            DocumentDescriptor teamSpace = ownedBy("alice");
+            teamSpace.setSpaceId(Subjects.teamSpace("ops"));
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(teamSpace);
+            assertTrue(g.someTeamMayUse(RESOURCE_ID));
+
+            DocumentDescriptor teamGrant = ownedBy("alice");
+            teamGrant.setGrants(List.of(new ResourceGrant(Subjects.team("ops"), AccessLevel.USE.name(), "alice", new Date(0))));
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(teamGrant);
+            assertTrue(g.someTeamMayUse(RESOURCE_ID));
+
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+            assertThrows(IllegalStateException.class, () -> g.someTeamMayUse(RESOURCE_ID), "an outage is not \"no team\"");
+        }
+
+        @Test
         @DisplayName("the owner is admitted and a stranger is refused")
         void ownerVersusStranger() throws Exception {
             var store = mock(IDocumentDescriptorStore.class);

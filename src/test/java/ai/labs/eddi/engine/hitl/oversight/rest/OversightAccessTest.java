@@ -8,14 +8,19 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,6 +55,7 @@ class OversightAccessTest {
     @Test
     @DisplayName("an editor must name an agent (400 AGENT_ID_REQUIRED) and hold EDIT on it (403)")
     void editorScoped() {
+        when(identity.hasRole("eddi-editor")).thenReturn(true);
         assertEquals("AGENT_ID_REQUIRED", code(assertThrows(WebApplicationException.class, () -> access.requireReadScope(" "))));
         doThrow(new ForbiddenException()).when(guard).requireAccess(eq("other"), eq(AccessLevel.EDIT), any());
         assertThrows(ForbiddenException.class, () -> access.requireReadScope("other"));
@@ -71,8 +77,38 @@ class OversightAccessTest {
     @DisplayName("an administrator sees and changes everything")
     void admin() {
         when(guard.seesEverything()).thenReturn(true);
+        when(guard.isAdmin()).thenReturn(true);
         assertNull(access.requireReadScope(null));
         assertDoesNotThrow(() -> access.requireEditor("any"));
+    }
+
+    @Test
+    @DisplayName("workspaces off: an approver still may not apply, dismiss or lift — seesEverything is no editor right")
+    void approverWithWorkspacesOff() {
+        when(guard.seesEverything()).thenReturn(true); // not enforcing: true for every caller
+        when(identity.hasRole("eddi-approver")).thenReturn(true);
+
+        assertDoesNotThrow(() -> access.requireReviewer("any"));
+        assertEquals("NOT_PERMITTED", code(assertThrows(WebApplicationException.class, () -> access.requireEditor("any"))));
+    }
+
+    @Test
+    @DisplayName("workspaces off: an editor changes autonomy on any agent, as before")
+    void editorWithWorkspacesOff() {
+        when(guard.seesEverything()).thenReturn(true);
+        when(identity.hasRole("eddi-editor")).thenReturn(true);
+
+        assertDoesNotThrow(() -> access.requireEditor("any"));
+        verify(guard, never()).requireAccess(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("apply, dismiss and lift are annotated for administrators and editors only")
+    void writeEndpointsExcludeTheApproverRole() throws Exception {
+        for (String name : List.of("apply", "dismiss", "lift")) {
+            Method method = Arrays.stream(IRestAutonomy.class.getMethods()).filter(m -> m.getName().equals(name)).findFirst().orElseThrow();
+            assertEquals(Set.of("eddi-admin", "eddi-editor"), Set.of(method.getAnnotation(RolesAllowed.class).value()), name);
+        }
     }
 
     @Test

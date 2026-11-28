@@ -19,9 +19,10 @@ import jakarta.inject.Inject;
  * sample</b>: administrators and {@code eddi-approver}s for any agent
  * (approvers already see every pending approval); anyone else must name an
  * agent they hold {@code EDIT} on.</li>
- * <li><b>Change autonomy</b> (apply, dismiss, lift): administrators, or
- * {@code EDIT} on the agent — the same right that edits its configuration.
- * Suspending is allowed to reviewers too: it only adds a gate.</li>
+ * <li><b>Change autonomy</b> (apply, dismiss, lift): administrators, or an
+ * {@code eddi-editor} with {@code EDIT} on the agent — the same right that
+ * edits its configuration. Never {@code eddi-approver} alone, workspaces on or
+ * off. Suspending is allowed to reviewers too: it only adds a gate.</li>
  * </ul>
  *
  * @since 6.7.0
@@ -30,6 +31,7 @@ import jakarta.inject.Inject;
 public class OversightAccess {
 
     static final String APPROVER_ROLE = "eddi-approver";
+    static final String EDITOR_ROLE = "eddi-editor";
     static final String ANONYMOUS = "anonymous";
 
     private final ResourceAccessGuard accessGuard;
@@ -77,8 +79,21 @@ public class OversightAccess {
         requireEditor(agentId);
     }
 
-    /** May change this agent's earned autonomy. */
+    /**
+     * May change this agent's earned autonomy: an administrator, or an
+     * {@code eddi-editor} who (under workspace enforcement) holds {@code EDIT} on
+     * the agent.
+     * <p>
+     * The role is checked <em>before</em> the {@code seesEverything()} shortcut.
+     * That shortcut is true for every caller while workspaces are not enforced —
+     * the default — and the resource also admits {@code eddi-approver}, so without
+     * the role check an approver could lift a suspension or apply a recommendation
+     * on any agent, i.e. remove gates it is only meant to decide.
+     */
     public void requireEditor(String agentId) {
+        if (!accessGuard.isAdmin() && !hasRole(EDITOR_ROLE)) {
+            throw OversightErrors.forbidden(OversightErrors.NOT_PERMITTED, "Access denied");
+        }
         if (accessGuard.seesEverything()) {
             return;
         }
@@ -94,7 +109,11 @@ public class OversightAccess {
     }
 
     private boolean isApprover() {
-        return identity != null && !identity.isAnonymous() && identity.hasRole(APPROVER_ROLE);
+        return hasRole(APPROVER_ROLE);
+    }
+
+    private boolean hasRole(String role) {
+        return identity != null && !identity.isAnonymous() && identity.hasRole(role);
     }
 
     static String blankToNull(String value) {
