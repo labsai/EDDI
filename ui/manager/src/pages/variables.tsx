@@ -1,4 +1,5 @@
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -362,8 +363,8 @@ export function VariablesPage() {
                         </button>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-end">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="px-4 py-3 text-end w-px whitespace-nowrap">
+                      <RowActions className="flex-nowrap">
                         <button
                           onClick={() => openEdit(v)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
@@ -388,7 +389,7 @@ export function VariablesPage() {
                           <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                           {t("common.delete", "Delete")}
                         </button>
-                      </div>
+                      </RowActions>
                     </td>
                   </tr>
                 ))}

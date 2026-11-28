@@ -49,6 +49,7 @@ import {
   type DeployWithGrantsOutcome,
 } from "@eddi/app-kit/hooks/use-deploy-with-grants";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { carryOverVaultGrants } from "@/lib/operator/carry-grants";
 import { assessOperatorTrust, type OperatorTrust } from "@/lib/operator/operator-trust";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
 import {
@@ -437,6 +438,22 @@ export function useActivateOperator() {
       }
       const keptAgent: KeptOperatorAgent = { agentId, version, fingerprint };
 
+      // A replacement (upgrade, reconfigure) is the same operator under a new id:
+      // it inherits the vault grants its predecessor held, before its first
+      // deploy, so the grant dialog below does not interrupt every upgrade — and
+      // never offers "allow every agent" as the way out. Only for a predecessor
+      // that passed the trust checks: `platform.operator` is editor-writable, and
+      // copying the grants of whatever agent an editor names would hand them out.
+      if (config.agentId && config.agentId !== agentId && retirePredecessor) {
+        onStage?.("deploying");
+        await carryOverVaultGrants({
+          fromAgentId: config.agentId,
+          toAgentId: agentId,
+          version,
+          environment: effectiveConfig.environment,
+        });
+      }
+
       // Deploy through the grant flow: preflight, and — when the model key is
       // restricted — the grant dialog for THIS agent, then a waited deploy.
       onStage?.("deploying");
@@ -447,6 +464,9 @@ export function useActivateOperator() {
           version,
           environment: effectiveConfig.environment,
           agentName,
+          // The operator's key is meant for the operator. Widening it to every
+          // agent to get past this dialog is never the right fix here.
+          offerAllowAll: false,
         });
       } catch (deployError) {
         await removeAgentQuietly({ ...effectiveConfig, agentId, version });
@@ -619,7 +639,17 @@ export function useActivateOperator() {
       onStage?.("done");
       return { config: next, gate, policyVerified, spec, supersededWarning };
     },
-    onSuccess: () => {
+    onSuccess: (outcome) => {
+      // Point every reader at the new agent NOW, before the refetch below. The
+      // invalidation alone left the cache naming the predecessor until the
+      // config read came back, and the predecessor's status and presence — just
+      // undeployed and deleted by this very activation — were refetched in
+      // parallel: whichever answered first decided what the page showed, and it
+      // was often "switched on, but its agent is not deployed" (or "no longer
+      // exists") about an operator that had been replaced on purpose, until a
+      // reload. The written config IS what the server holds; the refetch only
+      // confirms it.
+      qc.setQueryData(operatorKeys.config, outcome.config);
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
     // A failed activation mutates server state as surely as a successful one:

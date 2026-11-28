@@ -46,7 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ThirdPartyImagePinsTest {
 
     private static final Pattern MONGO_IMAGE = Pattern.compile("(?<![\\w./-])mongo:([\\w.\\-]+)");
-    private static final Pattern KEYCLOAK_IMAGE = Pattern.compile("quay\\.io/keycloak/keycloak:([\\w.\\-]+)");
+    /**
+     * The whole reference after the repository, up to whitespace or a quote, as for
+     * NATS.
+     */
+    private static final Pattern KEYCLOAK_IMAGE = Pattern.compile("quay\\.io/keycloak/keycloak:(\\w[^\\s\"'#]*)");
+    private static final Pattern KEYCLOAK_PINNED = Pattern.compile("\\d+\\.\\d+\\.\\d+@sha256:[0-9a-f]{64}");
     private static final Pattern PATCH_VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+");
     /**
      * The whole image reference after {@code nats:}, up to whitespace or a quote —
@@ -68,14 +73,26 @@ class ThirdPartyImagePinsTest {
         assertSinglePatchVersion("MongoDB", versions);
     }
 
+    /**
+     * Keycloak decodes attacker-controlled Base64 before any login, and its image
+     * tags are rebuilt in place (26.8.2 was, on 2026-11-19, for the Java4Shell JDK
+     * fix), so a tag alone can resolve to a different build on each node. It is
+     * pinned like NATS: one full patch version and its digest, on every path.
+     */
     @Test
-    @DisplayName("Keycloak is one full patch version on every delivery path")
-    void keycloakIsPinnedOnce() throws IOException {
-        TreeMap<String, TreeSet<String>> versions = collect(KEYCLOAK_IMAGE, false);
+    @DisplayName("Keycloak is one full patch version, pinned by digest, on every delivery path")
+    void keycloakIsPinnedOnceByDigest() throws IOException {
+        TreeMap<String, TreeSet<String>> references = collect(KEYCLOAK_IMAGE, false);
         JsonNode helm = helmValues().path("keycloak").path("image");
         assertEquals("quay.io/keycloak/keycloak", helm.path("repository").asText(), "helm keycloak.image.repository");
-        versions.computeIfAbsent(helm.path("tag").asText(), v -> new TreeSet<>()).add("helm/eddi/values.yaml");
-        assertSinglePatchVersion("Keycloak", versions);
+        references.computeIfAbsent(helm.path("tag").asText() + "@" + helm.path("digest").asText(), v -> new TreeSet<>())
+                .add("helm/eddi/values.yaml");
+        assertTrue(references.values().stream().anyMatch(files -> files.stream().anyMatch(f -> f.startsWith("k8s/"))),
+                "the Kustomize Keycloak overlay must be part of the sweep: " + references);
+        assertEquals(1, references.size(), "Keycloak is pinned to more than one reference: " + references);
+        String reference = references.firstKey();
+        assertTrue(KEYCLOAK_PINNED.matcher(reference).matches(), "Keycloak is referenced as `" + reference + "` in "
+                + references.get(reference) + " — pin a full MAJOR.MINOR.PATCH tag AND its @sha256 digest");
     }
 
     /**
