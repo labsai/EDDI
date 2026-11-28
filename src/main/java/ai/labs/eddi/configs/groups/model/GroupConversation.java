@@ -1848,9 +1848,23 @@ public class GroupConversation {
      * keeps its slot (and is cleaned up) even if that turn never completes.
      */
     public void commitAgentCreation(String agentId) {
+        commitAgentCreation(agentId, false);
+    }
+
+    /**
+     * {@link #commitAgentCreation(String)} for an agent its creator asked to keep:
+     * the retention goes on {@link #retainedAgentIds} in the same critical section,
+     * and before the id is published, so terminal cleanup never sees the created id
+     * without its retention. Waiting for the creating member's turn to merge it
+     * meant a discussion that ended first deleted an agent the model had retained.
+     */
+    public void commitAgentCreation(String agentId, boolean retain) {
         synchronized (dynamicTrackingMutex) {
             pendingAgentCreations = Math.max(0, pendingAgentCreations - 1);
             if (agentId != null && !tornDownAgentIds.contains(agentId) && !createdAgentIds.contains(agentId)) {
+                if (retain) {
+                    retainedAgentIds.add(agentId);
+                }
                 createdAgentIds.add(agentId);
             }
         }

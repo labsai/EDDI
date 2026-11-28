@@ -243,6 +243,27 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("a retained creation reaches the live discussion together with its id, before the member turn merges")
+        void createSubAgent_retainReachesTheLiveDiscussionWithTheId() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-7");
+            var memberTool = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-1", "gc-7", gc);
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(new SetupResult("created", "sub-1", "p/x", "anthropic", "claude-sonnet-4-6", true, "ready", null, null,
+                            null, null, null, null))
+                    .thenReturn(new SetupResult("created", "sub-2", "p/y", "anthropic", "claude-sonnet-4-6", true, "ready", null, null,
+                            null, null, null, null));
+
+            memberTool.createSubAgent("Keeper", "You help", "anthropic", "claude-sonnet-4-6", null, true);
+            memberTool.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, false);
+
+            // No propagateDynamicAgentTracking has run: what cleanup would read now.
+            assertEquals(List.of("sub-1", "sub-2"), gc.getCreatedAgentIds());
+            assertEquals(Set.of("sub-1"), Set.copyOf(gc.getRetainedAgentIds()));
+        }
+
+        @Test
         @DisplayName("a failed creation gives its reserved slot back")
         void createSubAgent_failedCreationReleasesTheSlot() throws Exception {
             config.setMaxCreatedAgentsPerDiscussion(1);

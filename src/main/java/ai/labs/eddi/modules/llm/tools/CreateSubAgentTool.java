@@ -375,7 +375,7 @@ public class CreateSubAgentTool {
             }
             String agentId = result.agentId();
             if (liveDiscussion != null) {
-                liveDiscussion.commitAgentCreation(agentId);
+                liveDiscussion.commitAgentCreation(agentId, Boolean.TRUE.equals(retain));
             }
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {

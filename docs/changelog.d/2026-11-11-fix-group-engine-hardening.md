@@ -183,6 +183,13 @@ docs: [`group-conversations.md`](../group-conversations.md).
 [`VoteTallyEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/VoteTallyEngine.java);
 docs: [`group-conversations.md`](../group-conversations.md).
 
+## 🐛 fix(groups): retention lands with the created id; signing test reads fenced results (2026-11-28)
+
+**Repo:** EDDI (`fix/group-engine-hardening`, PR #1395)
+
+- **Retained sub-agents:** `CreateSubAgentTool` committed a new agent's id to the live discussion at once but its `retain` flag only when the member turn's tracking merged, so a discussion that ended in between could have `cleanupEphemeralAgents` delete an agent the model asked to keep. `GroupConversation.commitAgentCreation(agentId, retain)` now records the retention under `dynamicTrackingMutex`, before the id is published.
+- **`GroupSigningEveryPromptTest`** (from #1367, merged in from `main`) read dependency and task results from the template data as raw text; this branch quotes them between fences, so the test now checks the fence and compares the text inside it.
+
 ```decision-log
 | 2026-11-12 | A `LAST_SYNTHESIS` vote with option labels out of sequence does not run | A skipped option line shifted every later label onto another option's text | Carrying a label-to-text map through ballot resolution: the options are a plain list in every consumer (prompt, tally, tie-break), so a map would touch all of them |
 | 2026-11-11 | `taskListConfig.onUnparseableVerdict` defaults to PASS, FAIL recommended | VERIFY auto-verified every task when the verdict was unreadable | Defaulting to FAIL: the fail-open was documented behaviour, so flipping it would break existing groups silently |

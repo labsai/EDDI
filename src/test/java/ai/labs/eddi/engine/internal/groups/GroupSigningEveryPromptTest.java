@@ -504,7 +504,7 @@ class GroupSigningEveryPromptTest {
 
         @SuppressWarnings("unchecked")
         var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
-                .map(dependency -> dependency.get("result")).toList();
+                .map(dependency -> dependency.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of("unsigned quotes result"), results);
     }
 
@@ -531,7 +531,7 @@ class GroupSigningEveryPromptTest {
 
         @SuppressWarnings("unchecked")
         var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
-                .map(dependency -> dependency.get("result")).toList();
+                .map(dependency -> dependency.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of(TaskRecordView.WITHHELD, "signed references result", TaskRecordView.WITHHELD), results);
     }
 
@@ -567,11 +567,11 @@ class GroupSigningEveryPromptTest {
 
         @SuppressWarnings("unchecked")
         var signers = ((List<Map<String, Object>>) data.captured().getAllValues().get(0).get("dependencyResults")).stream()
-                .map(dependency -> dependency.get("result")).toList();
+                .map(dependency -> dependency.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of("signed references result", TaskRecordView.WITHHELD), signers);
         @SuppressWarnings("unchecked")
         var stricts = ((List<Map<String, Object>>) data.captured().getAllValues().get(1).get("dependencyResults")).stream()
-                .map(dependency -> dependency.get("result")).toList();
+                .map(dependency -> dependency.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of("quotes as answered"), stricts, "a member that does not sign is shown its own result");
     }
 
@@ -601,7 +601,7 @@ class GroupSigningEveryPromptTest {
 
         @SuppressWarnings("unchecked")
         var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
-                .map(dependency -> dependency.get("result")).toList();
+                .map(dependency -> dependency.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of("references checked, both positive"), results);
     }
 
@@ -620,7 +620,7 @@ class GroupSigningEveryPromptTest {
 
         @SuppressWarnings("unchecked")
         var shown = ((List<Map<String, Object>>) data.captured().getAllValues().get(0).get("completedTasks")).stream()
-                .map(task -> task.get("result")).toList();
+                .map(task -> task.get("result")).map(GroupSigningEveryPromptTest::unfenced).toList();
         assertEquals(List.of("signed references result"), shown, "a task whose result it cannot verify is not put to it");
     }
 
@@ -1651,5 +1651,16 @@ class GroupSigningEveryPromptTest {
                 return version;
             }
         };
+    }
+
+    /**
+     * A quoted result as the engine prompts carry it: between {@code ```} fences
+     * (PeerContentGuard.fenced). Asserts the fence and returns the text inside, so
+     * the checks below stay about which text a reader is shown.
+     */
+    private static Object unfenced(Object value) {
+        String text = String.valueOf(value);
+        assertTrue(text.startsWith("```\n") && text.endsWith("\n```"), "a quoted result is fenced: " + text);
+        return text.substring(4, text.length() - 4);
     }
 }
