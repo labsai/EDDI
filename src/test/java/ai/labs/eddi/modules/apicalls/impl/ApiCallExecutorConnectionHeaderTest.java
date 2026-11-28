@@ -91,7 +91,7 @@ class ApiCallExecutorConnectionHeaderTest {
         // references, so every earlier resolution stage must hand the value on
         // untouched — otherwise a failure could not be attributed to the connection
         // branch under test.
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -167,7 +167,7 @@ class ApiCallExecutorConnectionHeaderTest {
 
             executor.execute(callWithHeaders(Map.of("Authorization", JIRA_REF)), memory, templateData("alice"), SERVER);
 
-            verify(connectionResolver).resolve(eq(JIRA_REF), eq(TARGET), eq("alice"));
+            verify(connectionResolver).resolve(eq(JIRA_REF), eq(TARGET), eq("alice"), any());
         }
 
         @Test
@@ -209,7 +209,7 @@ class ApiCallExecutorConnectionHeaderTest {
                     "the message must say that surrounding literal text is the problem — the 'second reference' wording "
                             + "would misdescribe this config; was: " + failure.getMessage());
             verify(mockRequest, never()).send();
-            verify(connectionResolver, never()).resolve(anyString(), any(), any());
+            verify(connectionResolver, never()).resolve(anyString(), any(), any(), any());
         }
 
         @Test
@@ -224,7 +224,7 @@ class ApiCallExecutorConnectionHeaderTest {
             assertTrue(failure.getMessage().contains("Header 'Authorization'") && failure.getMessage().contains("a second ${connection:"),
                     "the message must name the header and say a second reference is present; was: " + failure.getMessage());
             verify(mockRequest, never()).send();
-            verify(connectionResolver, never()).resolve(anyString(), any(), any());
+            verify(connectionResolver, never()).resolve(anyString(), any(), any(), any());
         }
     }
 
@@ -377,7 +377,7 @@ class ApiCallExecutorConnectionHeaderTest {
                     "the message must name where the reference was found so the author knows what to move; was: "
                             + failure.getMessage());
             verify(mockRequest, never()).send();
-            verify(connectionResolver, never()).resolve(anyString(), any(), any());
+            verify(connectionResolver, never()).resolve(anyString(), any(), any(), any());
         }
     }
 
@@ -400,7 +400,7 @@ class ApiCallExecutorConnectionHeaderTest {
         void connectionsResolveToUnremarkableLookingValues() {
             doAnswer(inv -> inv.<String>getArgument(0).contains("amplitude")
                     ? new ResolvedCredential("X-Custom-Id", AMP_VALUE)
-                    : new ResolvedCredential("X-Acme-Key", ACME_VALUE)).when(connectionResolver).resolve(anyString(), any(), any());
+                    : new ResolvedCredential("X-Acme-Key", ACME_VALUE)).when(connectionResolver).resolve(anyString(), any(), any(), any());
             // The request map has to reflect what was actually written to the request,
             // or "the stored map is redacted" would be asserting on an empty map.
             var written = new LinkedHashMap<String, String>();
@@ -520,7 +520,7 @@ class ApiCallExecutorConnectionHeaderTest {
      * other mocks.
      */
     private void givenConnectionResolvesToJiraCredential() {
-        doReturn(JIRA_CREDENTIAL).when(connectionResolver).resolve(anyString(), any(), any());
+        doReturn(JIRA_CREDENTIAL).when(connectionResolver).resolve(anyString(), any(), any(), any());
     }
 
     private static ApiCall callWithHeaders(Map<String, String> headers) {

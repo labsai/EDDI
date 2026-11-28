@@ -149,7 +149,7 @@ class LlmTaskAuditLedgerTest {
         lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
 
         // PR #604 made AgentOrchestrator an injected collaborator, so it is passed
         // straight to the constructor — the reflective field write this test used

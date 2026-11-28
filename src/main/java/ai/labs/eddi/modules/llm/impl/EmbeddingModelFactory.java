@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.EndpointParameters;
@@ -146,24 +147,84 @@ public class EmbeddingModelFactory {
      *            {@link EmbeddingInputType#DOCUMENT} when ingesting,
      *            {@link EmbeddingInputType#QUERY} when retrieving
      *
+     * @param access
+     *            the agent (or other caller) the model is for. Checked against
+     *            every vault secret the embedding parameters name BEFORE the cache,
+     *            which is keyed on the configuration and so shared by every agent
+     *            using it (#1179)
      * @return a model for that role; for the providers that do not accept an input
      *         type this is the provider's model unchanged
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
      *
      * @see InputTypedEmbeddingModel
      */
-    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType) {
+    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType, SecretAccess access) {
+        Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
+        // One expansion for the grant check, the cache key and the build: a variable
+        // repointed to another secret is another key, so a model built with the old
+        // secret is never handed to an agent checked against the new one (#1179).
+        Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        secretResolver.requireGranted(params, access, "embedding model '" + config.getEmbeddingProvider() + "'");
         // The role is part of the key: to an asymmetric provider the two roles are
         // two different models, and sharing one entry is precisely the defect.
         // A structural key, not a concatenated TreeMap.toString(): that rendering has
         // no unambiguous entry boundaries ({a='x, b=y'} looks like {a='x', b='y'}), so
         // two configurations could share one client — and its endpoint.
-        var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), config.getEmbeddingParameters(), inputType);
-        return cache.get(cacheKey, k -> build(config, inputType));
+        var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), params, inputType);
+        return cache.get(cacheKey, k -> build(config, params, inputType, access));
     }
 
-    private EmbeddingModel build(RagConfiguration config, EmbeddingInputType inputType) {
+    /**
+     * The grant check of {@link #getOrCreate}, without building or looking up a
+     * model: for a caller that holds a model across many calls (an ingestion run)
+     * and must notice a grant narrowed meanwhile.
+     *
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
+     */
+    public void requireGranted(RagConfiguration config, SecretAccess access) {
+        requireGranted(config, credentialBinding(config), access);
+    }
+
+    /**
+     * The embedding parameters with their global variables expanded: what a model
+     * is built from and cached under. See
+     * {@link EmbeddingStoreFactory#credentialBinding}.
+     */
+    public Map<String, String> credentialBinding(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
-        Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        Map<String, String> expanded = globalVariableResolver.resolveAll(rawParams);
+        return expanded != null ? expanded : rawParams;
+    }
+
+    /**
+     * The binding {@code model} was built with, read from the key of the cache
+     * entry that holds it; {@code null} when this factory does not hold it. See
+     * {@link EmbeddingStoreFactory#bindingOf}.
+     */
+    public Map<String, String> bindingOf(EmbeddingModel model) {
+        for (var entry : cache.asMap().entrySet()) {
+            if (entry.getValue() == model) {
+                return entry.getKey().parameters();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The grant check against a binding recorded earlier; see
+     * {@link #credentialBinding}.
+     */
+    public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
+        // No recorded binding (the cache entry was invalidated before it could be read
+        // back) is never "nothing to check": the current expansion is checked instead.
+        secretResolver.requireGranted(binding != null ? binding : credentialBinding(config), access,
+                "embedding model '" + config.getEmbeddingProvider() + "'");
+    }
+
+    private EmbeddingModel build(RagConfiguration config, Map<String, String> expandedParams, EmbeddingInputType inputType, SecretAccess access) {
+        Map<String, String> params = expandedParams;
         ConnectionParameterGuard.rejectConnectionReferences(params);
         // Trimmed, as RagConfiguration validates it: " openai" must not save and then
         // fail here as an unsupported provider.
@@ -193,7 +254,7 @@ public class EmbeddingModelFactory {
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
-        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params, access), "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
             LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,

@@ -170,7 +170,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("two 400s open the circuit; the third turn fails fast with the class, without calling the model")
     void badRequestsOpenThenFailFast() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(400)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(false);
         task.setCircuitBreaker(enabled());
 
@@ -213,7 +213,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("onError=fallback serves the fallback when the circuit is open, and the model is not called")
     void openCircuitTakesTheFallbackPath() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(404)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(false);
         task.setCircuitBreaker(enabled());
         var v = new ResponseValidation();
@@ -239,7 +239,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("a model that keeps answering non-JSON opens the circuit although no responseValidation is configured")
     void invalidJsonCountsWithoutValidationConfig() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(true);
         task.setCircuitBreaker(enabled());
 
@@ -255,7 +255,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("valid replies keep it closed and a probe after the cool-down closes it again")
     void probeAfterCoolDownCloses() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(401), Step.text(VALID)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(true);
         task.setCircuitBreaker(enabled());
 
@@ -274,7 +274,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("disabled by default: failures never open anything and every turn still reaches the model")
     void disabledByDefault() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(401)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(false);
 
         for (int i = 0; i < 4; i++) {
@@ -289,7 +289,7 @@ class LlmTaskCircuitBreakerTest {
     @DisplayName("transient failures (503) do not count, so the circuit stays closed")
     void transientFailuresDoNotCount() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(503)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(false);
         task.setCircuitBreaker(enabled());
 

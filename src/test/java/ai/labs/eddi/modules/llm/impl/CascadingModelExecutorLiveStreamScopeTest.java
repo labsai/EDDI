@@ -135,26 +135,26 @@ class CascadingModelExecutorLiveStreamScopeTest {
         when(cheapBuffered.chat(anyList())).thenThrow(new RuntimeException("cheap provider died mid-answer"));
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapBuffered);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheapBuffered);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(mock(ChatModel.class));
         // Deliberately available: the point is that step 0 must not ASK for it.
         // streamingModelEmitting() stubs its own mock, so it must be evaluated before
         // the outer when(...) opens — a nested stubbing inside an unfinished one is
         // an UnfinishedStubbing error, not a compile error.
         StreamingChatModel cheapStreaming = streamingModelEmitting(CHEAP_FRAGMENT);
         StreamingChatModel expensiveStreaming = streamingModelEmitting(FINAL_ANSWER);
-        when(registry.getOrCreateStreaming(eq("cheap"), anyMap())).thenReturn(cheapStreaming);
-        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStreaming);
+        when(registry.getOrCreateStreaming(eq("cheap"), anyMap(), any())).thenReturn(cheapStreaming);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap(), any())).thenReturn(expensiveStreaming);
 
         var result = executor(registry).execute(twoStepCascade(), messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
 
-        verify(registry, never()).getOrCreateStreaming(eq("cheap"), anyMap());
+        verify(registry, never()).getOrCreateStreaming(eq("cheap"), anyMap(), any());
         verify(sink, never()).onToken(CHEAP_FRAGMENT);
 
         // The last step still streams live — the fix narrows the scope, it does not
         // disable live streaming.
-        verify(registry).getOrCreateStreaming(eq("expensive"), anyMap());
+        verify(registry).getOrCreateStreaming(eq("expensive"), anyMap(), any());
         verify(sink).onToken(FINAL_ANSWER);
         assertEquals(FINAL_ANSWER, result.response());
         assertEquals(1, result.stepUsed());
@@ -170,15 +170,15 @@ class CascadingModelExecutorLiveStreamScopeTest {
         when(cheapBuffered.chat(anyList())).thenThrow(new RuntimeException("cheap provider died mid-answer"));
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapBuffered);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheapBuffered);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(mock(ChatModel.class));
         // streamingModelEmitting() stubs its own mock, so it must be evaluated before
         // the outer when(...) opens — a nested stubbing inside an unfinished one is
         // an UnfinishedStubbing error, not a compile error.
         StreamingChatModel cheapStreaming = streamingModelEmitting(CHEAP_FRAGMENT);
         StreamingChatModel expensiveStreaming = streamingModelEmitting(FINAL_ANSWER);
-        when(registry.getOrCreateStreaming(eq("cheap"), anyMap())).thenReturn(cheapStreaming);
-        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStreaming);
+        when(registry.getOrCreateStreaming(eq("cheap"), anyMap(), any())).thenReturn(cheapStreaming);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap(), any())).thenReturn(expensiveStreaming);
 
         executor(registry).execute(twoStepCascade(), messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);

@@ -162,7 +162,7 @@ class McpCallsTaskBranchCoverageTest {
             call.setToolName("myTool");
             config.setMcpCalls(List.of(call));
 
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(null);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(null);
 
             task.execute(memory, config);
             verifyNoInteractions(memoryItemConverter);
@@ -184,7 +184,7 @@ class McpCallsTaskBranchCoverageTest {
             config.setMcpCalls(List.of(call));
 
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(), Map.of());
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
 
             task.execute(memory, config);
             verifyNoInteractions(memoryItemConverter);
@@ -215,7 +215,7 @@ class McpCallsTaskBranchCoverageTest {
             var toolSpec = ToolSpecification.builder().name("myTool").build();
             var executor = mock(ToolExecutor.class);
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -243,7 +243,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("result");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -268,7 +268,7 @@ class McpCallsTaskBranchCoverageTest {
             var toolSpec = ToolSpecification.builder().name("myTool").build();
             var executor = mock(ToolExecutor.class);
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -294,7 +294,7 @@ class McpCallsTaskBranchCoverageTest {
             var toolSpec = ToolSpecification.builder().name("blockedTool").build();
             var executor = mock(ToolExecutor.class);
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("blockedTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -320,7 +320,7 @@ class McpCallsTaskBranchCoverageTest {
             var toolSpec = ToolSpecification.builder().name("myTool").build();
             var executor = mock(ToolExecutor.class);
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -345,7 +345,7 @@ class McpCallsTaskBranchCoverageTest {
             var toolSpec = ToolSpecification.builder().name("nonexistent").build();
             // Executor map does NOT contain "nonexistent"
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of());
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             // Should not throw
@@ -381,7 +381,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("{\"data\":\"value\"}");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
             when(jsonSerialization.deserialize(anyString(), eq(Object.class))).thenReturn(Map.of("data", "value"));
 
@@ -413,7 +413,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("{\"data\":\"" + "x".repeat(100) + "\"}");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -445,7 +445,7 @@ class McpCallsTaskBranchCoverageTest {
             // "abc" + an emoji (two UTF-16 chars): the cap of 4 falls between its halves.
             when(executor.execute(any(), any())).thenReturn("abc" + new String(Character.toChars(0x1F600)) + "def");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -475,7 +475,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("raw text");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("tool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
             when(jsonSerialization.deserialize(anyString(), eq(Object.class))).thenThrow(new IOException("not json"));
 
@@ -504,7 +504,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("result");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("tool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             task.execute(memory, config);
@@ -539,7 +539,7 @@ class McpCallsTaskBranchCoverageTest {
             var executor = mock(ToolExecutor.class);
             when(executor.execute(any(), any())).thenReturn("result");
             var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("tool", executor));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(mcpResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
             when(prePostUtils.templateValues(eq("{{value}}"), anyMap())).thenReturn("resolved");
             when(jsonSerialization.serialize(anyMap())).thenReturn("{\"param1\":\"resolved\",\"param2\":42}");

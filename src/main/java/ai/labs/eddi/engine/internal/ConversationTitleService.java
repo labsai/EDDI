@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
 import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
 import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.pricing.PricedSpend;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -206,7 +207,7 @@ public class ConversationTitleService {
                     ? generation.getInstructions()
                     : DEFAULT_INSTRUCTIONS;
             SummarizationService.SummarizationResult result = summarizationService.summarizeWithUsage(request.exchange(), instructions,
-                    generation.getLlmProvider(), generation.getLlmModel(), generation.getParameters());
+                    generation.getLlmProvider(), generation.getLlmModel(), generation.getParameters(), SecretAccess.agent(request.agentId()));
             // Charged whatever the answer: the tokens were spent.
             charge(request, prices, result);
             String title = ConversationTitles.deriveTitle(stripQuotes(result.summary()),

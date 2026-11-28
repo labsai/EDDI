@@ -77,6 +77,56 @@ class GlobalVariableResolverTest {
         }
     }
 
+    @Nested
+    @DisplayName("expandFully")
+    class ExpandFully {
+
+        @Test
+        @DisplayName("a variable that multiplies itself stops at the length budget, still holding a reference")
+        void expansionBombIsCapped() {
+            // Four copies of itself per pass: 4^8 times the length after eight passes.
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("b", "${vars:b}${vars:b}${vars:b}${vars:b}"));
+
+            String expanded = GlobalVariableResolver.expandFully(resolver, "${vars:b}");
+
+            assertTrue(expanded.length() <= GlobalVariableResolver.MAX_EXPANDED_LENGTH, "length " + expanded.length());
+            assertTrue(expanded.contains("${vars:b}"), "an unfinished expansion keeps its reference, so callers refuse it");
+        }
+
+        @Test
+        @DisplayName("a single pass stops building at the budget, before the result is allocated")
+        void singlePassStopsAtTheBudget() {
+            // One pass: 100 references to a 1,000-character variable would build 100,000.
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("long", "x".repeat(1000)));
+            String manyReferences = "${vars:long}".repeat(100);
+
+            assertNull(resolver.resolveValueWithin(manyReferences, 10_000));
+            assertEquals(100_000, resolver.resolveValue(manyReferences).length(), "the unbudgeted call is unchanged");
+            assertEquals(manyReferences, GlobalVariableResolver.expandFully(resolver, manyReferences),
+                    "expandFully keeps the reference rather than the over-long expansion");
+        }
+
+        @Test
+        @DisplayName("budget boundaries: literal text counts, a result exactly at the budget is built (pins behaviour)")
+        void budgetCountsLiteralText() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("k", "x"));
+
+            assertNull(resolver.resolveValueWithin("p".repeat(2000) + "${vars:k}", 1000), "a long literal prefix counts");
+            assertNull(resolver.resolveValueWithin("${vars:k}" + "t".repeat(2000), 1000), "so does the tail");
+            assertEquals("abx", resolver.resolveValueWithin("ab${vars:k}", 3));
+            assertEquals("ab${vars:missing}", resolver.resolveValueWithin("ab${vars:missing}", 17), "a missing variable stays as written");
+            assertNull(resolver.resolveValueWithin("ab${vars:missing}", 16));
+        }
+
+        @Test
+        @DisplayName("nested variables expand to the final value")
+        void nestedVariablesExpand() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("outer", "${vars:inner}", "inner", "sk-final"));
+
+            assertEquals("sk-final", GlobalVariableResolver.expandFully(resolver, "${vars:outer}"));
+        }
+    }
+
     // ====================== Short Form (default tenant) ======================
 
     @Nested

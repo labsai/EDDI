@@ -18,6 +18,8 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.llm.impl.SummaryCitations;
+import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
@@ -150,8 +152,9 @@ public class DreamService {
     /**
      * The deploy-time vault-grant gate, re-run here because a Dream cycle is not a
      * deployment: it reads any stored agent version — a pinned, never-deployed one
-     * included — and hands {@code dream.parameters} straight to the model registry,
-     * which resolves {@code ${vault:…}} without a grant check. Field-injected and
+     * included. The model registry checks the grant again for the agent when it
+     * resolves {@code dream.parameters}; this earlier check rejects the whole cycle
+     * with the deploy gate's message before any memory is read. Field-injected and
      * null-checked so tests constructing the service directly need not provide it.
      */
     @Inject
@@ -684,7 +687,7 @@ public class DreamService {
                 llmResult = summarizationService.summarizeWithUsage(
                         content, instructions,
                         config.getLlmProvider(), config.getLlmModel(),
-                        config.getParameters());
+                        config.getParameters(), SecretAccess.agent(agentId));
             } catch (Exception e) {
                 summarizationFailedCounter.increment();
                 if (isTransientLlmFailure(e)) {
@@ -752,7 +755,7 @@ public class DreamService {
                             && !tenantBudgetSpent(userId)) {
                         try {
                             var second = summarizationService.summarizeWithUsage(content, instructions + citationRetryFeedback(check),
-                                    config.getLlmProvider(), config.getLlmModel(), config.getParameters());
+                                    config.getLlmProvider(), config.getLlmModel(), config.getParameters(), SecretAccess.agent(agentId));
                             llmCallsMade++;
                             estimatedCostAccumulated += estimateCost(second, content.length(), config.getInputPricePer1M(),
                                     config.getOutputPricePer1M());
@@ -764,9 +767,19 @@ public class DreamService {
                                 outcome = SummaryCitations.OUTCOME_RETRIED;
                             }
                         } catch (Exception e) {
-                            // The first call of this group succeeded, so this is no configuration
-                            // fault to abort the phase over: the group is skipped, as on any failure.
                             summarizationFailedCounter.increment();
+                            if (isGrantRefusal(e)) {
+                                // The grant was narrowed after the first call: permanent, so the
+                                // phase fails. The groups already consolidated stay done (#1179).
+                                LOGGER.errorf("[DREAM] Citation retry for user='%s', group='%s' was refused a vault secret; "
+                                        + "consolidation is ABORTED for this cycle", LogSanitizer.sanitize(userId),
+                                        LogSanitizer.sanitize(group.getKey()));
+                                return new SummarizationOutcome(totalConsolidated, estimatedCostAccumulated,
+                                        "Memory consolidation citation retry was refused a vault secret (" + config.getLlmProvider() + "/"
+                                                + config.getLlmModel() + "): " + e.getMessage());
+                            }
+                            // Otherwise the first call of this group succeeded, so this is no
+                            // configuration fault to abort the phase over: the group is skipped.
                             LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed (%s). Original entries are preserved.",
                                     LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getClass().getSimpleName());
                         }
@@ -1019,6 +1032,23 @@ public class DreamService {
             Pattern.CASE_INSENSITIVE);
 
     /**
+     * Whether a vault grant refusal is anywhere in {@code throwable}'s cause chain
+     * (bounded, as in {@link #isTransientLlmFailure}).
+     */
+    static boolean isGrantRefusal(Throwable throwable) {
+        Throwable current = throwable;
+        for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
+            if (current instanceof SecretResolver.SecretNotGrantedException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether an LLM failure is transient (retry later succeeds) rather than a
      * permanent configuration fault (bad credentials, wrong endpoint, unknown
      * model). Only the latter should fail the schedule fire, because a FAILED fire
@@ -1037,6 +1067,12 @@ public class DreamService {
      * like.
      */
     static boolean isTransientLlmFailure(Throwable throwable) {
+        if (isGrantRefusal(throwable)) {
+            // A vault grant refusal is configuration, never a blip — even when the
+            // secret's name, quoted by a wrapping exception's message, contains "429"
+            // or "timeout". So the whole chain is checked before any message (#1179).
+            return false;
+        }
         Throwable current = throwable;
         // Bounded walk — a self-referential cause chain must not spin forever.
         for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {

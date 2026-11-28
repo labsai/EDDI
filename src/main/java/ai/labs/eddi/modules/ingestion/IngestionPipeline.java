@@ -33,6 +33,8 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
+import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -53,6 +55,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -402,7 +405,7 @@ public class IngestionPipeline {
             // store the run writes to. A later lookup could return a newer, empty store
             // if the knowledge base were dropped or remodelled meanwhile, and every
             // document would then pass as "unchanged" against the old store's state.
-            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+            collector.acquireStore();
             current = EmbeddingStoreFactory.fingerprintOf(collector.store);
         } else {
             current = embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);
@@ -441,6 +444,14 @@ public class IngestionPipeline {
         if (mode != Mode.INGEST) {
             return 0;
         }
+        if (collector.grantRefused) {
+            // A document this run could not process for want of a grant is still in the
+            // source; counted as missed it would be tombstoned after enough refused runs.
+            collector.tombstoningSkipped = true;
+            LOGGER.infof("Not reconciling deletions for source '%s': the run was refused a vault grant",
+                    LogSanitizer.sanitize(source.getName()));
+            return 0;
+        }
         if (sourceRun.coverage() == Coverage.INCREMENTAL) {
             // A change feed reports deletions as DELETE items, already applied.
             // Absence from it means nothing.
@@ -464,7 +475,6 @@ public class IngestionPipeline {
         // store that refuses the delete leaves a document flagged gone with its
         // chunks still retrievable, and a tombstoned document is never reported
         // again — so nothing would ever come back for them.
-        EmbeddingStore<TextSegment> store = collector.store();
         List<String> removedIds = new ArrayList<>();
         boolean sweptOrphans = false;
         for (DocumentState document : gone) {
@@ -473,6 +483,8 @@ public class IngestionPipeline {
                 continue;
             }
             try {
+                // Per document: the store's grant is read again before each delete.
+                EmbeddingStore<TextSegment> store = collector.store();
                 store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId())
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
                 removedIds.add(document.documentId());
@@ -481,6 +493,10 @@ public class IngestionPipeline {
                 // honest about what the source contains — and report it.
                 collector.replaceUnsupported = true;
                 removedIds.add(document.documentId());
+            } catch (SecretResolver.SecretNotGrantedException e) {
+                // Stop deleting; what was removed so far is tombstoned below.
+                collector.recordGrantRefusal(e);
+                break;
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'; it stays live "
                         + "and the next run tries again", LogSanitizer.sanitize(source.getName()));
@@ -571,6 +587,10 @@ public class IngestionPipeline {
         } catch (UnsupportedFeatureException e) {
             collector.replaceUnsupported = true;
             return true;
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // Not swept, and the run fails with the refusal rather than reporting success.
+            collector.recordGrantRefusal(e);
+            return false;
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not remove chunks that source '%s' no longer has from before its state was "
                     + "cleared; they stay retrievable and the next complete run tries again",
@@ -623,12 +643,16 @@ public class IngestionPipeline {
                                         IngestionSource source, String documentId) {
 
         String sourceKey = stateKey(ragConfigId, source);
+        // A key the vault grant withholds from knowledge-base work is not an outage:
+        // thrown before the state changes, so nothing is tombstoned and the caller
+        // reports the refusal instead of asking for a retry that cannot succeed.
+        embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
         // The state row goes first. If the removal below fails, a tombstoned row
         // means the next run re-ingests the document rather than reporting it
         // unchanged over vectors that were never deleted.
         stateStore.markTombstoned(sourceKey, List.of(documentId));
         try {
-            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION)
                     .removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                             .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             return ForgetOutcome.REMOVED;
@@ -676,9 +700,26 @@ public class IngestionPipeline {
      *         are still there
      */
     public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        return forgetSourceChecked(ragConfigId, knowledgeBase, source);
+    }
+
+    /**
+     * Throws when the vault grant withholds the knowledge base's store key from
+     * knowledge-base work, so the caller can refuse a change whose cleanup could
+     * not run: {@link #forgetSource} would fail, and the content would stay
+     * retrievable with nothing left to list it (#1179).
+     */
+    public void requireCanForget(RagConfiguration knowledgeBase) {
+        embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+    }
+
+    private boolean forgetSourceChecked(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = stateKey(ragConfigId, source);
+        // Thrown, not swallowed: the caller must not delete the source's files when its
+        // chunks could not be removed for want of a grant (#1179).
+        embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
         try {
-            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION)
                     .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey));
             stateStore.purgeSource(sourceKey);
             return true;
@@ -688,6 +729,10 @@ public class IngestionPipeline {
                     LogSanitizer.sanitize(source.getName()));
             stateStore.purgeSource(sourceKey);
             return false;
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // From the store lookup's own check (the grant changed after the one above):
+            // thrown, so the caller keeps the files rather than reading "false" as done.
+            throw e;
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Could not remove the chunks of source '%s' from knowledge base '%s'; they stay "
                     + "retrievable and nothing lists them any more",
@@ -1040,6 +1085,20 @@ public class IngestionPipeline {
          * there rather than failing every remaining document the same way.
          */
         private String storeRefused;
+        /**
+         * Whether {@link #storeRefused} is a vault grant refusal (#1179). Such a run
+         * stops without reconciling deletions: a document it could not process is still
+         * in the source, and counting it as missed would tombstone it.
+         */
+        private boolean grantRefused;
+        /**
+         * The store and model parameters, variables expanded, that the clients this run
+         * holds were built from. Their grants are re-read against these, not against a
+         * fresh expansion: a variable repointed mid-run must not let the check pass for
+         * a secret the held client does not use.
+         */
+        private Map<String, String> storeBinding;
+        private Map<String, String> modelBinding;
         private ExtractionLimits extractionLimits;
         private Instant nextOwnershipCheck = Instant.MIN;
         private final IngestionRun.Trigger trigger;
@@ -1063,18 +1122,46 @@ public class IngestionPipeline {
 
         EmbeddingStore<TextSegment> store() {
             if (store == null) {
-                // For writing: an in-memory store built under another embedding
-                // configuration is replaced rather than mixed with this run's vectors.
-                store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+                acquireStore();
+            } else {
+                // The same store for the whole run, but its grant read again on each use:
+                // a run can take hours, and a grant narrowed meanwhile must stop it (#1179).
+                embeddingStoreFactory.requireGranted(knowledgeBase, storeBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return store;
+        }
+
+        /**
+         * For writing: an in-memory store built under another embedding configuration
+         * is replaced rather than mixed with this run's vectors. The binding is taken
+         * first, so the store is built from, and later re-checked against, one
+         * expansion.
+         */
+        void acquireStore() {
+            EmbeddingStore<TextSegment> acquired = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase,
+                    RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+            // What the store was built with, read from the factory's own cache key: a
+            // second expansion could differ from the one the store's credential came from.
+            // Both fields are set only once the binding is known, so a refused acquisition
+            // never leaves a held store without its binding.
+            Map<String, String> binding = requireBinding(embeddingStoreFactory.bindingOf(acquired),
+                    embeddingStoreFactory.credentialBinding(knowledgeBase), "vector store");
+            storeBinding = binding;
+            store = acquired;
         }
 
         private EmbeddingModel model() {
             if (model == null) {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
-                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT);
+                EmbeddingModel acquired = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT,
+                        RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+                Map<String, String> binding = requireBinding(embeddingModelFactory.bindingOf(acquired),
+                        embeddingModelFactory.credentialBinding(knowledgeBase), "embedding model");
+                modelBinding = binding;
+                model = acquired;
+            } else {
+                embeddingModelFactory.requireGranted(knowledgeBase, modelBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return model;
         }
@@ -1281,6 +1368,9 @@ public class IngestionPipeline {
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             } catch (UnsupportedFeatureException e) {
                 replaceUnsupported = true;
+            } catch (SecretResolver.SecretNotGrantedException e) {
+                recordGrantRefusal(e);
+                return;
             } catch (RuntimeException e) {
                 failed++;
                 inconclusive++;
@@ -1425,6 +1515,13 @@ public class IngestionPipeline {
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             } catch (UnsupportedFeatureException e) {
                 replaceUnsupported = true;
+            } catch (SecretResolver.SecretNotGrantedException e) {
+                // Left as it was, as below, and the run ends with the refusal. The
+                // document's failure is already counted above.
+                inconclusive++;
+                stateStore.recordUnreachable(sourceKey, documentId, runId);
+                stopForGrantRefusal(e);
+                return;
             } catch (RuntimeException e) {
                 // Left as it was — still live, and counted as looked-at rather than
                 // missing — so the next run tries again.
@@ -1438,9 +1535,58 @@ public class IngestionPipeline {
             tombstoned++;
         }
 
+        /**
+         * The binding a held client was built with, or a refusal when it cannot be
+         * known. The factory's cache entry can be invalidated between the lookup and
+         * the read-back; a fresh expansion is then no substitute, since a variable
+         * repointed meanwhile would name another secret than the client uses. A client
+         * whose parameters name nothing (an in-memory store, a model without
+         * credentials) has nothing to check, so an empty current expansion is accepted.
+         * Any non-empty one is refused, secret or not: the read-back fails only in a
+         * race with a cache invalidation, and the next run starts clean.
+         */
+        private Map<String, String> requireBinding(Map<String, String> builtWith, Map<String, String> current, String what) {
+            if (builtWith != null) {
+                return builtWith;
+            }
+            if (current == null || current.isEmpty()) {
+                return Map.of();
+            }
+            throw new SecretResolver.SecretNotGrantedException("The credential the " + what + " of knowledge base '"
+                    + LogSanitizer.sanitize(knowledgeBase.getName()) + "' was built with could not be verified (its cache entry "
+                    + "changed while the run started). The run stops; the next run starts with a fresh one.");
+        }
+
+        /** A vault grant refusal outside a document's processing: ends the run. */
+        void recordGrantRefusal(SecretResolver.SecretNotGrantedException e) {
+            stopForGrantRefusal(e);
+            failed++;
+            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+        }
+
+        /**
+         * Ends the run on a vault grant refusal without counting a failure, for a path
+         * that has already counted the document it was handling.
+         */
+        private void stopForGrantRefusal(SecretResolver.SecretNotGrantedException e) {
+            grantRefused = true;
+            if (storeRefused == null) {
+                storeRefused = e.getMessage();
+                LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
+                        LogSanitizer.sanitize(storeRefused));
+            }
+        }
+
         private void recordDocumentFailure(RuntimeException e) {
-            // Either refusal ends the run: no later document could be stored either.
-            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
+            // Each refusal ends the run: no later document could be stored either. A
+            // vault grant that withholds the embedding or store key from knowledge-base
+            // work (#1179) is one of them: the run fails with the grant's message, and,
+            // stopped short, it tombstones nothing.
+            if (e instanceof SecretResolver.SecretNotGrantedException) {
+                grantRefused = true;
+            }
+            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException
+                    || e instanceof SecretResolver.SecretNotGrantedException) && storeRefused == null) {
                 storeRefused = e.getMessage();
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
                         LogSanitizer.sanitize(storeRefused));
@@ -1650,16 +1796,30 @@ public class IngestionPipeline {
             if (!stillOwnsRun(true)) {
                 return -1;
             }
-            embeddingStore.addAll(embeddings, textSegments);
-
             try {
-                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
-                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
-                        .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
-            } catch (UnsupportedFeatureException e) {
-                // Surfaced in the report rather than swallowed: on a store that cannot
-                // delete, re-ingestion accumulates, and the operator has to know.
-                replaceUnsupported = true;
+                // The store's grant again, after the embedding call: it can take long
+                // enough for a grant to be narrowed meanwhile (#1179).
+                embeddingStore = store();
+                embeddingStore.addAll(embeddings, textSegments);
+
+                try {
+                    // And again before the delete: a large addAll takes time too.
+                    embeddingStore = store();
+                    embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
+                            .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
+                            .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
+                } catch (UnsupportedFeatureException e) {
+                    // Surfaced in the report rather than swallowed: on a store that cannot
+                    // delete, re-ingestion accumulates, and the operator has to know.
+                    replaceUnsupported = true;
+                }
+            } catch (RuntimeException e) {
+                // A grant refusal or a store failure after the provider embedded these
+                // segments: they are paid for and count against the budget and the cost,
+                // as a discarded embedding does. The caller counts nothing for a document
+                // that throws, so this is once.
+                discardedSegments += textSegments.size();
+                throw e;
             }
             return textSegments.size();
         }

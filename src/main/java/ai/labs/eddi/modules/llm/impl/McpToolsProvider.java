@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.spi.ProviderFailure;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
@@ -186,7 +187,8 @@ class McpToolsProvider implements ToolSourceProvider {
                 var group = new ToolGroup(groupId(mcpCallsConfig), null);
 
                 // Discover tools from this MCP server
-                McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+                McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig),
+                        SecretAccess.agent(memory.getAgentId()));
                 failures.addAll(result.failures());
 
                 // Apply whitelist/blacklist filtering
@@ -235,7 +237,7 @@ class McpToolsProvider implements ToolSourceProvider {
                 // the loop above: first writer keeps the name, loudly.
                 if (Boolean.TRUE.equals(mcpCallsConfig.getExposeResources())) {
                     try {
-                        var bridge = mcpToolProviderManager.resourceBridgeTools(serverConfig);
+                        var bridge = mcpToolProviderManager.resourceBridgeTools(serverConfig, SecretAccess.agent(memory.getAgentId()));
                         for (ToolSpecification spec : bridge.toolSpecs()) {
                             ToolExecutor executor = bridge.executors().get(spec.name());
                             if (executor == null || executors.containsKey(spec.name())) {

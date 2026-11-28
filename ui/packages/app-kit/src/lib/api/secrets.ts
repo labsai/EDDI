@@ -40,6 +40,12 @@ export interface SecretStoreResponse {
   reference: string;
   tenantId: string;
   keyName: string;
+  /**
+   * Set when a create stored a secret whose grant leaves out deployed agents that
+   * already reference it (or the check could not see every deployment). The
+   * secret IS stored; under enforce those agents are refused it at resolution.
+   */
+  warning?: string;
 }
 
 /** Why an `allowedHosts` entry was refused before it was sent. */
@@ -163,9 +169,11 @@ export function grantsAllAgents(allowedAgents?: string[] | null): boolean {
 
 /**
  * A deployed agent that references a secret and would not be on its new grant
- * list. It keeps running — the grant is checked when an agent is deployed, not
- * when a secret is resolved — but its next deployment is refused while
- * `eddi.vault.grant-enforcement=enforce`.
+ * list. While `eddi.vault.grant-enforcement=enforce` it is refused the secret
+ * (the grant is checked whenever a secret is resolved): from its next
+ * resolution on, on the node that stored the change, and on every other node
+ * once that node has received the change's invalidation event, which is
+ * asynchronous. Its next deployment is refused too.
  */
 export interface AffectedAgent {
   agentId: string;

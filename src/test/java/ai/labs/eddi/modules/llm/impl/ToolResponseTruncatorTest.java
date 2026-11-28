@@ -62,7 +62,7 @@ class ToolResponseTruncatorTest {
         ChatModel summarizer = mock(ChatModel.class);
         when(summarizer.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("short summary")).build());
-        when(chatModelRegistry.getOrCreate(eq("openai"), anyMap())).thenReturn(summarizer);
+        when(chatModelRegistry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(summarizer);
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(100);
         limits.setTruncationStrategy("summarize");
@@ -72,7 +72,7 @@ class ToolResponseTruncatorTest {
 
         assertTrue(result.startsWith("[SUMMARY"), result);
         assertTrue(result.endsWith("short summary"), result);
-        verify(chatModelRegistry).getOrCreate(eq("openai"), anyMap());
+        verify(chatModelRegistry).getOrCreate(eq("openai"), anyMap(), any());
     }
 
     @Test

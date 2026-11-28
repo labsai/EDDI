@@ -121,7 +121,7 @@ class ServiceConvergenceJudgeTest {
     }
 
     private void judgeReplies(String reply, int in, int out) {
-        when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any())).thenReturn(
+        when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any())).thenReturn(
                 new SummarizationResult(reply, in, out));
     }
 
@@ -151,14 +151,14 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(null), 1, null);
 
             assertFalse(outcome.isContinue());
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "fallback_moderator").timers().size());
         }
 
         @Test
         @DisplayName("a judge that throws never ends the phase, and its error text stays out of the transcript")
         void failureIsNotConverged() {
-            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
+            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
                     .thenThrow(new IllegalStateException("401 for key sk-should-not-leak"));
 
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
@@ -215,7 +215,7 @@ class ServiceConvergenceJudgeTest {
             check(serviceConvergence(SERVICE), 1, null);
 
             var retry = ArgumentCaptor.forClass(RetryConfiguration.class);
-            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), retry.capture());
+            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), retry.capture(), any());
             assertEquals(1, retry.getValue().getMaxAttempts());
         }
 
@@ -223,7 +223,7 @@ class ServiceConvergenceJudgeTest {
         @DisplayName("a call that outlasts timeoutMs, model setup included, is abandoned as not converged")
         void overrunIsAbandoned() {
             var release = new CountDownLatch(1);
-            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any())).thenAnswer(inv -> {
+            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any())).thenAnswer(inv -> {
                 release.await();
                 return new SummarizationResult("{\"agreementScore\":0.9,\"converged\":true}", 1, 1);
             });
@@ -255,7 +255,7 @@ class ServiceConvergenceJudgeTest {
 
             assertTrue(verdict.isPresent());
             assertFalse(verdict.get().converged());
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
             assertTrue(gc.getMemberCosts() == null || gc.getMemberCosts().isEmpty());
         }
@@ -272,7 +272,7 @@ class ServiceConvergenceJudgeTest {
             judge.judge(gc, phase(convergence), 0, 1, convergence, "MEMBER {text}", out -> ConvergenceDetector.parseJudgeVerdict(out, 0.8),
                     null);
 
-            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
         }
 
         @Test
@@ -319,7 +319,7 @@ class ServiceConvergenceJudgeTest {
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Map<String, String>> params = ArgumentCaptor.forClass(Map.class);
             verify(summarizer).summarizeWithUsage(eq("MEMBER {text}"), eq(ServiceConvergenceJudge.JUDGE_INSTRUCTIONS), eq("openai"),
-                    eq("gpt-4o-mini"), params.capture(), any(RetryConfiguration.class));
+                    eq("gpt-4o-mini"), params.capture(), any(RetryConfiguration.class), any());
             assertEquals("5000", params.getValue().get("timeout"), "the judge's own bound wins over the parameter map");
             assertEquals("0", params.getValue().get("temperature"));
         }
@@ -453,7 +453,7 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
 
             assertTrue(outcome.isContinue(), "a refused judge is not converged");
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             verify(quota, never()).recordCost(anyString(), anyDouble());
             assertTrue(gc.getMemberCosts().isEmpty());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
@@ -468,7 +468,7 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
 
             assertTrue(outcome.isContinue());
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
         }
 

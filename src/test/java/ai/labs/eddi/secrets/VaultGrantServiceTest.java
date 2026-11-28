@@ -123,6 +123,20 @@ class VaultGrantServiceTest {
     }
 
     @Test
+    @DisplayName("a written append evicts the resolver's cached grant, so the new agent resolves at once (#1179); a dry run evicts nothing")
+    void appendInvalidatesTheResolverCache() throws Exception {
+        SecretResolver resolver = mock(SecretResolver.class);
+        service.secretResolver = resolver;
+
+        service.grantAgent(SECRET, NEW_AGENT, "admin", "rest", true);
+        verify(resolver, never()).invalidateGrant(any());
+
+        service.grantAgent(SECRET, NEW_AGENT, "admin", "rest", false);
+        verify(resolver).invalidateGrant(SECRET);
+        verify(resolver, never()).invalidateCache(any());
+    }
+
+    @Test
     @DisplayName("idempotent: an agent already granted is not written again, nor audited")
     void idempotent() throws Exception {
         service.grantAgent(SECRET, NEW_AGENT, "admin", "rest", false);

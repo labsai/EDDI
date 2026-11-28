@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -40,14 +41,15 @@ class SummarizationServiceTest {
     void summarize_success_returnsSummaryText() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(eq("anthropic"), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(eq("anthropic"), any(), any())).thenReturn(chatModel);
 
         var aiMessage = AiMessage.from("Concise summary of the conversation");
         var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
 
         // When
-        String result = service.summarize("Long conversation text", "Summarize this", "anthropic", "claude-sonnet-4-6");
+        String result = service.summarize("Long conversation text", "Summarize this", "anthropic", "claude-sonnet-4-6",
+                SecretAccess.outsideAgentGrants("test"));
 
         // Then
         assertEquals("Concise summary of the conversation", result);
@@ -61,14 +63,14 @@ class SummarizationServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
-        when(chatModelRegistry.getOrCreate(eq("openai"), paramsCaptor.capture())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(eq("openai"), paramsCaptor.capture(), any())).thenReturn(chatModel);
 
         var aiMessage = AiMessage.from("summary");
         var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
 
         // When
-        service.summarize("text", "instructions", "openai", "gpt-4o-mini");
+        service.summarize("text", "instructions", "openai", "gpt-4o-mini", SecretAccess.outsideAgentGrants("test"));
 
         // Then
         Map<String, String> params = paramsCaptor.getValue();
@@ -79,7 +81,7 @@ class SummarizationServiceTest {
     void summarize_passesSystemAndUserMessages() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(any(), any(), any())).thenReturn(chatModel);
 
         ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
         var aiMessage = AiMessage.from("summary");
@@ -87,7 +89,7 @@ class SummarizationServiceTest {
         when(chatModel.chat(requestCaptor.capture())).thenReturn(chatResponse);
 
         // When
-        service.summarize("conversation content", "System instructions here", "anthropic", "model");
+        service.summarize("conversation content", "System instructions here", "anthropic", "model", SecretAccess.outsideAgentGrants("test"));
 
         // Then
         ChatRequest request = requestCaptor.getValue();
@@ -103,11 +105,11 @@ class SummarizationServiceTest {
     void summarize_llmError_returnsEmptyString() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(any(), any(), any())).thenReturn(chatModel);
         when(chatModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("LLM API error"));
 
         // When
-        String result = service.summarize("text", "instructions", "anthropic", "model");
+        String result = service.summarize("text", "instructions", "anthropic", "model", SecretAccess.outsideAgentGrants("test"));
 
         // Then
         assertEquals("", result);
@@ -119,14 +121,14 @@ class SummarizationServiceTest {
     void summarize_emptyResponse_returnsEmptyString() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(any(), any(), any())).thenReturn(chatModel);
 
         var aiMessage = AiMessage.from("  ");
         var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
 
         // When
-        String result = service.summarize("text", "instructions", "anthropic", "model");
+        String result = service.summarize("text", "instructions", "anthropic", "model", SecretAccess.outsideAgentGrants("test"));
 
         // Then — blank/whitespace-only responses should be treated as empty
         assertTrue(result.isBlank());
@@ -135,12 +137,12 @@ class SummarizationServiceTest {
     void summarizeWithUsage_llmError_propagatesException() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(any(), any(), any())).thenReturn(chatModel);
         when(chatModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("LLM API error"));
 
         // When/Then — summarizeWithUsage should propagate, not swallow
         assertThrows(RuntimeException.class,
-                () -> service.summarizeWithUsage("text", "instructions", "anthropic", "model"));
+                () -> service.summarizeWithUsage("text", "instructions", "anthropic", "model", SecretAccess.outsideAgentGrants("test")));
 
         // Metrics should still record the error and duration
         assertEquals(1.0, meterRegistry.counter("eddi.summarization.errors").count());
@@ -151,7 +153,7 @@ class SummarizationServiceTest {
     void summarizeWithUsage_returnsTokenCounts() throws Exception {
         // Given
         var chatModel = mock(ChatModel.class);
-        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(any(), any(), any())).thenReturn(chatModel);
 
         var aiMessage = AiMessage.from("summary text");
         var chatResponse = ChatResponse.builder()
@@ -161,7 +163,7 @@ class SummarizationServiceTest {
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
 
         // When
-        var result = service.summarizeWithUsage("input text", "instructions", "anthropic", "model");
+        var result = service.summarizeWithUsage("input text", "instructions", "anthropic", "model", SecretAccess.outsideAgentGrants("test"));
 
         // Then
         assertEquals("summary text", result.summary());
@@ -173,12 +175,12 @@ class SummarizationServiceTest {
     @Test
     void summarizeWithUsage_checkedExceptionWrappedInRuntime() throws Exception {
         // Given — getOrCreate throws a checked UnsupportedLlmTaskException
-        when(chatModelRegistry.getOrCreate(any(), any()))
+        when(chatModelRegistry.getOrCreate(any(), any(), any()))
                 .thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("unknown provider"));
 
         // When/Then — checked exception should be wrapped in RuntimeException
         var ex = assertThrows(RuntimeException.class,
-                () -> service.summarizeWithUsage("text", "instructions", "bad-provider", "model"));
+                () -> service.summarizeWithUsage("text", "instructions", "bad-provider", "model", SecretAccess.outsideAgentGrants("test")));
 
         // The cause should be the original checked exception
         assertInstanceOf(ChatModelRegistry.UnsupportedLlmTaskException.class, ex.getCause());

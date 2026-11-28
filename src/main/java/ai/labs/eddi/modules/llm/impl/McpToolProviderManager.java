@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -37,7 +38,9 @@ import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
+import dev.langchain4j.invocation.InvocationParameters;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -59,6 +62,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -374,9 +378,14 @@ public class McpToolProviderManager {
      *
      * @param mcpServers
      *            list of MCP server configurations
+     * @param access
+     *            the agent (or other caller) the tools are assembled for. Every
+     *            vault secret behind a server's apiKey must be granted to it; this
+     *            is checked before the tool and client caches, which are shared by
+     *            every agent using the same server configuration
      * @return combined tools from all reachable servers, plus per-server failures
      */
-    public McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
+    public McpToolsResult discoverTools(List<McpServerConfig> mcpServers, SecretAccess access) {
         if (mcpServers == null || mcpServers.isEmpty()) {
             return new McpToolsResult(List.of(), Map.of());
         }
@@ -385,7 +394,22 @@ public class McpToolProviderManager {
         Map<String, ToolExecutor> allExecutors = new HashMap<>();
         List<McpServerFailure> failures = new ArrayList<>();
 
-        for (McpServerConfig serverConfig : mcpServers) {
+        for (McpServerConfig configured : mcpServers) {
+            // Validated, grant-checked, cached and connected with ONE expansion of a
+            // ${vars:…} apiKey: a variable repointed to another secret is another
+            // cache key, never a hit on a session built with the old secret (#1179).
+            McpServerConfig serverConfig;
+            try {
+                serverConfig = bindCredential(configured);
+            } catch (IllegalArgumentException e) {
+                // A variable assembling a reference: this server's configuration fault,
+                // reported as one, never the end of the other servers' discovery.
+                String name = configured.getName() != null ? configured.getName() : configured.getUrl();
+                LOGGER.errorf("MCP server '%s' was NOT contacted because its apiKey could not be expanded: %s", sanitize(name),
+                        sanitize(e.getMessage()));
+                failures.add(new McpServerFailure(name, configured.getUrl(), McpFailureKind.INVALID_CONFIGURATION, e.getMessage()));
+                continue;
+            }
             String url = serverConfig.getUrl();
             String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
 
@@ -424,6 +448,7 @@ public class McpToolProviderManager {
                 validateCallerBoundKey(serverConfig);
                 validateConnectionBoundKey(serverConfig);
                 validateSecretDestination(serverConfig);
+                validateSecretGrant(serverConfig, access);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -443,7 +468,8 @@ public class McpToolProviderManager {
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
-                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
+                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), grantChecked(cached.executors(), serverConfig, access),
+                        serverName);
                 continue;
             }
 
@@ -495,7 +521,7 @@ public class McpToolProviderManager {
 
                 toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
                         System.currentTimeMillis()));
-                mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
+                mergeServerTools(allSpecs, allExecutors, serverSpecs, grantChecked(serverExecutors, serverConfig, access), serverName);
 
                 // Success — clear failure history for this server
                 recordSuccess(circuitKey);
@@ -619,7 +645,10 @@ public class McpToolProviderManager {
      * <p>
      * The context carries no per-user state and is deliberately shared: it is a
      * discriminator ("this is a tool call"), not an identity. The identity comes
-     * from the thread-bound caller, exactly as it does for a normal tool call.
+     * from the thread-bound caller, exactly as it does for a normal tool call. It
+     * is the fallback for a call made without a context: one that
+     * {@link #grantChecked} wraps carries the calling agent in its own context, and
+     * the bridged tools pass that one on instead.
      */
     private static final InvocationContext RESOURCE_BRIDGE_INVOCATION = InvocationContext.builder()
             .interfaceName(McpToolProviderManager.class.getName()).methodName("mcpResourceBridge").build();
@@ -653,7 +682,8 @@ public class McpToolProviderManager {
      *             static-configuration rejections {@link #discoverTools} applies,
      *             so the caller reports them identically
      */
-    public McpResourceBridge resourceBridgeTools(McpServerConfig serverConfig) {
+    public McpResourceBridge resourceBridgeTools(McpServerConfig configured, SecretAccess access) {
+        McpServerConfig serverConfig = bindCredential(configured);
         String url = serverConfig.getUrl();
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");
@@ -663,6 +693,7 @@ public class McpToolProviderManager {
         validateCallerBoundKey(serverConfig);
         validateConnectionBoundKey(serverConfig);
         validateSecretDestination(serverConfig);
+        validateSecretGrant(serverConfig, access);
 
         String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
         String prefix = toolNamePrefix(serverName, url);
@@ -684,29 +715,52 @@ public class McpToolProviderManager {
                         .required("uri").build())
                 .build();
 
-        ToolExecutor listExecutor = (request, memoryId) -> {
+        ToolExecutor listExecutor = bridgeExecutor((request, invocation) -> {
             try {
-                return renderResourceList(getOrCreateClient(serverConfig), serverName);
+                return renderResourceList(getOrCreateClient(serverConfig), serverName, invocation);
             } catch (Exception e) {
                 LOGGER.warnf("MCP list_resources failed for '%s': %s", sanitize(serverName), e.getMessage());
                 return "Error listing resources from MCP server '" + serverName + "': " + e.getMessage();
             }
-        };
-        ToolExecutor readExecutor = (request, memoryId) -> {
+        });
+        ToolExecutor readExecutor = bridgeExecutor((request, invocation) -> {
             String uri = resourceUriArgument(request);
             if (isNullOrEmpty(uri)) {
                 return "Error: the 'uri' argument is required - call " + listName + " for the available uris.";
             }
             try {
-                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, RESOURCE_BRIDGE_INVOCATION), uri, serverName);
+                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, invocation), uri, serverName);
             } catch (Exception e) {
                 LOGGER.warnf("MCP read_resource failed for '%s' uri '%s': %s", sanitize(serverName), sanitize(uri), e.getMessage());
                 return "Error reading resource '" + uri + "' from MCP server '" + serverName + "': " + e.getMessage();
             }
-        };
+        });
 
         return new McpResourceBridge(List.of(listSpec, readSpec),
-                Map.of(listName, listExecutor, readName, readExecutor));
+                grantChecked(Map.of(listName, listExecutor, readName, readExecutor), serverConfig, access));
+    }
+
+    /**
+     * A bridged tool's executor that hands the request the invocation it is called
+     * with: {@link #grantChecked} attaches the calling agent there, and the
+     * credential lookup of a list or read checks that agent, as a tool call's does
+     * (#1179). Called without one (the context-free overload), the request is still
+     * a tool call, never the discovery handshake:
+     * {@link #RESOURCE_BRIDGE_INVOCATION}.
+     */
+    private static ToolExecutor bridgeExecutor(BiFunction<ToolExecutionRequest, InvocationContext, String> body) {
+        return new ToolExecutor() {
+            @Override
+            public String execute(ToolExecutionRequest request, Object memoryId) {
+                return body.apply(request, RESOURCE_BRIDGE_INVOCATION);
+            }
+
+            @Override
+            public ToolExecutionResult executeWithContext(ToolExecutionRequest request, InvocationContext context) {
+                return ToolExecutionResult.builder().resultText(body.apply(request, context != null ? context : RESOURCE_BRIDGE_INVOCATION))
+                        .build();
+            }
+        };
     }
 
     /** The {@code uri} argument of a read_resource call, or null. */
@@ -752,9 +806,9 @@ public class McpToolProviderManager {
      * the aggregate cap is an actual ceiling rather than a threshold noticed one
      * append too late.
      */
-    private static String renderResourceList(McpClient client, String serverName) {
+    private static String renderResourceList(McpClient client, String serverName, InvocationContext invocation) {
         var sb = new StringBuilder(remoteContentHeader(serverName));
-        List<McpResource> resources = client.listResources(RESOURCE_BRIDGE_INVOCATION);
+        List<McpResource> resources = client.listResources(invocation);
         if (resources == null || resources.isEmpty()) {
             sb.append("No resources.\n");
         } else {
@@ -767,7 +821,7 @@ public class McpToolProviderManager {
         }
         // Templates are parameterised uris (e.g. eddi://docs/{name}) - listed so
         // the model knows the shape, even though only concrete uris can be read.
-        List<McpResourceTemplate> templates = safeListTemplates(client);
+        List<McpResourceTemplate> templates = safeListTemplates(client, invocation);
         if (templates != null && !templates.isEmpty()) {
             sb.append("Resource templates (").append(templates.size()).append("):\n");
             for (McpResourceTemplate template : templates) {
@@ -818,9 +872,9 @@ public class McpToolProviderManager {
      * Templates are optional in the protocol and some servers reject the call
      * outright - that must not fail a listing whose resources half succeeded.
      */
-    private static List<McpResourceTemplate> safeListTemplates(McpClient client) {
+    private static List<McpResourceTemplate> safeListTemplates(McpClient client, InvocationContext invocation) {
         try {
-            return client.listResourceTemplates(RESOURCE_BRIDGE_INVOCATION);
+            return client.listResourceTemplates(invocation);
         } catch (Exception e) {
             return List.of();
         }
@@ -1046,6 +1100,140 @@ public class McpToolProviderManager {
         }
     }
 
+    /**
+     * Refuses a server whose apiKey names a vault secret, directly, through a
+     * {@code ${vars:…}} or behind a {@code ${connection:…}}, that is not granted to
+     * {@code access}.
+     * <p>
+     * Before the caches, like the URL check above: the tool cache and the client
+     * cache are keyed on the server configuration, not on the agent, so a client
+     * one agent built with its secret would otherwise serve every other agent whose
+     * configuration names the same server (#1179). Reported as a configuration
+     * error ({@code INVALID_CONFIGURATION}) and kept away from the circuit breaker,
+     * which would otherwise suppress the server for the agents that ARE granted.
+     * The session that follows resolves under {@link #MCP_SESSION}.
+     *
+     * @throws IllegalArgumentException
+     *             when refused
+     */
+    void validateSecretGrant(McpServerConfig config, SecretAccess access) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || CallerIdentityResolver.containsReference(apiKey)) {
+            return;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        try {
+            if (ConnectionResolver.containsReference(apiKey)) {
+                if (connectionResolver != null) {
+                    connectionResolver.requireGranted(apiKey, access);
+                }
+                return;
+            }
+            // The bound apiKey (see bindCredential) is the final credential; one that still
+            // holds a variable — deleted, cyclic, nested past the limit — is refused as it
+            // stands, never expanded again, since a second expansion could name another
+            // secret than the cached session uses.
+            if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(apiKey)) {
+                // A variable that does not resolve (deleted, nested past the limit, a
+                // cycle) names no secret: a grant check over it would pass vacuously while
+                // a session cached for the credential it used to name is still served.
+                throw new IllegalArgumentException("The apiKey of MCP server '" + serverName + "' names a global variable that does not "
+                        + "resolve to a value, so its vault grant cannot be checked. Restore the variable or use a ${vault:…} reference.");
+            }
+            secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "MCP server '" + serverName + "'");
+        } catch (SecretResolver.SecretNotGrantedException | ConnectionException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The executors handed to one agent, each reading that agent's grant again when
+     * it is called. The executors themselves are cached and shared by every agent
+     * naming the server, and their session resolves the credential under
+     * {@link #MCP_SESSION}; without this a grant narrowed between tool assembly and
+     * the call, or a connection repointed to a secret the agent is not granted,
+     * would still let the call carry the credential (#1179). The check reads the
+     * grant cache, so it costs no store round trip.
+     */
+    Map<String, ToolExecutor> grantChecked(Map<String, ToolExecutor> executors, McpServerConfig config, SecretAccess access) {
+        if (executors.isEmpty() || isNullOrEmpty(config.getApiKey()) || access == null || !access.checksGrant()) {
+            return executors;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        Map<String, ToolExecutor> checked = new HashMap<>();
+        executors.forEach((name, executor) -> checked.put(name, (request, memoryId) -> {
+            try {
+                validateSecretGrant(config, access);
+            } catch (IllegalArgumentException e) {
+                LOGGER.warnf("MCP tool '%s' of server '%s' refused: %s", sanitize(name), sanitize(serverName), sanitize(e.getMessage()));
+                return "Error: the MCP server '" + serverName + "' cannot be used by this agent: " + e.getMessage();
+            }
+            // The agent travels with the call, so the request's own credential lookup
+            // checks it on the connection document it resolves: an edit landing
+            // between the check above and that lookup is refused there.
+            InvocationContext context = InvocationContext.builder().chatMemoryId(memoryId)
+                    .invocationParameters(InvocationParameters.from(SECRET_ACCESS_PARAMETER, access)).build();
+            return executor.executeWithContext(request, context).resultText();
+        }));
+        return Map.copyOf(checked);
+    }
+
+    /**
+     * {@code config} with a {@code ${vars:…}} apiKey replaced by its expansion, or
+     * {@code config} itself when there is nothing to expand. Everything downstream
+     * (validation, the grant check, the tool and client cache keys, the transport)
+     * then reads the same credential binding.
+     */
+    McpServerConfig bindCredential(McpServerConfig config) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
+            return config;
+        }
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+        if (expanded == null || expanded.equals(apiKey)) {
+            return config;
+        }
+        var bound = new McpServerConfig();
+        bound.setUrl(config.getUrl());
+        bound.setName(config.getName());
+        bound.setTransport(config.getTransport());
+        bound.setTimeoutMs(config.getTimeoutMs());
+        bound.setApiKey(expanded);
+        return bound;
+    }
+
+    /**
+     * What a cached MCP session resolves its own credential as. The session is
+     * shared by every agent whose configuration names the server, so it has no
+     * agent of its own; the agent grant is read for the asking agent in
+     * {@link #validateSecretGrant}, on every tool assembly, before the session is
+     * handed out.
+     */
+    static final SecretAccess MCP_SESSION = SecretAccess.outsideAgentGrants("MCP client session (agent grant checked at tool assembly)");
+
+    /**
+     * The {@link InvocationParameters} key under which {@link #grantChecked} hands
+     * the calling agent's {@link SecretAccess} to the transport, per call. The
+     * client is shared, so the agent cannot be a property of it; the invocation is
+     * the one thing the header supplier sees that belongs to a single call.
+     */
+    static final String SECRET_ACCESS_PARAMETER = "eddi.mcp.secretAccess";
+
+    /**
+     * The agent a tool call runs for, as {@link #grantChecked} attached it, or
+     * {@link #MCP_SESSION} for a request that carries none (discovery, a
+     * resource-bridge call made without a context, an executor not wrapped because
+     * no grant applies).
+     */
+    static SecretAccess callerAccess(McpCallContext callContext) {
+        if (callContext == null || callContext.invocationContext() == null
+                || callContext.invocationContext().invocationParameters() == null) {
+            return MCP_SESSION;
+        }
+        Object access = callContext.invocationContext().invocationParameters().get(SECRET_ACCESS_PARAMETER);
+        return access instanceof SecretAccess secretAccess ? secretAccess : MCP_SESSION;
+    }
+
     private void requireSecretsAllowedAt(String apiKey, McpServerConfig config) {
         if (vaultHostAllowlist == null || apiKey == null) {
             return;
@@ -1241,7 +1429,7 @@ public class McpToolProviderManager {
             // Checked again here, immediately before resolution, because a transport
             // is also built for a tool call on a client the discovery pass never saw.
             requireSecretsAllowedAt(apiKey, config);
-            apiKey = secretResolver.resolveValue(apiKey);
+            apiKey = secretResolver.resolveValue(apiKey, MCP_SESSION);
         }
 
         // StreamableHttpMcpTransport (recommended, replaces deprecated
@@ -1426,7 +1614,7 @@ public class McpToolProviderManager {
                 // Discovery. A PER_USER connection has nothing a shared, cached session
                 // may carry; a SERVICE one is the same credential for everybody, so
                 // withholding it only produced a 401 and an agent with no tools at all.
-                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()));
+                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()), MCP_SESSION);
                 if (discovery.isEmpty()) {
                     // The ACTUAL binding, not an assumed PER_USER: CALLER_SUPPLIED is
                     // withheld for the same reason, and a warning that names the wrong
@@ -1440,8 +1628,9 @@ public class McpToolProviderManager {
                 return Map.of(discovery.get().headerName(), discovery.get().headerValue());
             }
             // No principal offered: the resolver reads the turn's bound one, which is
-            // the only place a per-user decision can be taken from here.
-            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null);
+            // the only place a per-user decision can be taken from here. The agent's
+            // grant is read on the very document resolved (#1179).
+            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null, callerAccess(callContext));
             return Map.of(credential.headerName(), credential.headerValue());
         }
         if (!callerBound) {

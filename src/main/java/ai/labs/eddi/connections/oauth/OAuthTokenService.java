@@ -17,6 +17,7 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -650,6 +651,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     /**
+     * The client credential is resolved for the connection's token endpoint, not
+     * for an agent: the token it mints is shared by every caller of the connection
+     * and cached in the grant store. The agent grant is therefore read where an
+     * agent asks for the connection, before this service is reached, by
+     * {@code ConnectionResolver#requireCredentialsGranted}, on every request,
+     * whether the token is cached or not.
+     */
+    private static final SecretAccess TOKEN_ENDPOINT = SecretAccess.outsideAgentGrants("OAuth token endpoint of a connection");
+
+    /**
      * A fresh token for a service account: {@code client_credentials}, or the RFC
      * 7523 JWT bearer grant signed with the connection's private key.
      */
@@ -669,7 +680,8 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private String resolveClientCredential(ConnectionConfiguration connection) {
         AuthType authType = connection.getAuthType();
         return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().clientCredentialReference(authType),
-                connection.getOauth().getTokenUrl(), connection.getName(), connection.getOauth().clientCredentialDescription(authType));
+                connection.getOauth().getTokenUrl(), connection.getName(), connection.getOauth().clientCredentialDescription(authType),
+                TOKEN_ENDPOINT);
     }
 
     private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,

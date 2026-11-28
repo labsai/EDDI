@@ -75,7 +75,7 @@ class OAuthTokenServiceJwtBearerTest {
         lenient().when(secretProvider.unseal(anyString(), any(), anyString()))
                 .thenAnswer(i -> ((ISecretProvider.SealedValue) i.getArgument(1)).ciphertext().substring("sealed:".length()));
         secretResolver = mock(SecretResolver.class);
-        lenient().when(secretResolver.resolveValue(anyString())).thenReturn(KEY_MATERIAL);
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenReturn(KEY_MATERIAL);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         service = new OAuthTokenService(grantStore, tokenClient, secretProvider,
@@ -99,7 +99,7 @@ class OAuthTokenServiceJwtBearerTest {
         assertEquals("ya29.first", service.accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL));
 
         verify(tokenClient, times(1)).jwtBearer(any(), eq(KEY_MATERIAL));
-        verify(secretResolver).resolveValue("${vault:google-sa-key}");
+        verify(secretResolver).resolveValue(eq("${vault:google-sa-key}"), any());
         verify(tokenClient, never()).clientCredentials(any(), anyString());
     }
 
@@ -155,7 +155,7 @@ class OAuthTokenServiceJwtBearerTest {
         assertEquals(AuthType.OAUTH2_CLIENT_CREDENTIALS, connection.getAuthType());
 
         assertEquals("eyJ.entra", service.accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL));
-        verify(secretResolver).resolveValue("${vault:entra-key}");
+        verify(secretResolver).resolveValue(eq("${vault:entra-key}"), any());
         verify(tokenClient).clientCredentials(any(), eq(KEY_MATERIAL));
     }
 }

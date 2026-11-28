@@ -110,6 +110,42 @@ public class GlobalVariableResolver {
         return value != null && value.contains("${vars:");
     }
 
+    /** How many nested {@code ${vars:…}} levels {@link #expandFully} follows. */
+    static final int MAX_NESTING = 8;
+
+    /**
+     * The longest expansion {@link #expandFully} builds. Each pass can multiply the
+     * length (a variable holding its own reference several times), so the nesting
+     * cap alone still lets eight passes grow a short value exponentially. A
+     * credential never comes near this.
+     */
+    static final int MAX_EXPANDED_LENGTH = 64 * 1024;
+
+    /**
+     * {@code value} with its {@code ${vars:…}} references expanded until none is
+     * left, or until a pass changes nothing (a missing variable, a cycle),
+     * {@link #MAX_NESTING} passes have run, or a pass would grow it past
+     * {@link #MAX_EXPANDED_LENGTH} — then the last expansion within the budget,
+     * which still holds a reference, is returned. The budget is enforced while a
+     * pass is built ({@link #resolveValueWithin}), not after it, so no pass
+     * allocates more than it. {@link #resolveValue} makes one pass, so a variable
+     * holding {@code ${vars:inner}} would otherwise reach a caller with a reference
+     * still in it — and a caller that binds a cache entry or a grant check to the
+     * expansion must see the final credential, not an intermediate one (#1179). The
+     * result may still contain a reference; such a caller refuses it.
+     */
+    public static String expandFully(GlobalVariableResolver resolver, String value) {
+        String current = value;
+        for (int pass = 0; pass < MAX_NESTING && containsReference(current); pass++) {
+            String next = resolver.resolveValueWithin(current, MAX_EXPANDED_LENGTH);
+            if (next == null || next.equals(current)) {
+                break;
+            }
+            current = next;
+        }
+        return current;
+    }
+
     /**
      * The full-form references ({@code ${vars:tenantId/key}}) in {@code value}: the
      * ones that select a workspace other than the caller's context.
@@ -163,8 +199,22 @@ public class GlobalVariableResolver {
      * @return the value with references replaced by stored values
      */
     public String resolveValue(String value, String tenantId) {
+        return resolve(value, tenantId, Integer.MAX_VALUE);
+    }
+
+    /**
+     * {@link #resolveValue(String)} with a length budget: {@code null} as soon as
+     * the result being built would exceed {@code maxLength}, before it is allocated
+     * further. For {@link #expandFully}, where one pass over many references to a
+     * long variable could otherwise exhaust the heap.
+     */
+    public String resolveValueWithin(String value, int maxLength) {
+        return resolve(value, GlobalVariable.DEFAULT_TENANT, maxLength);
+    }
+
+    private String resolve(String value, String tenantId, int maxLength) {
         if (!containsReference(value)) {
-            return value;
+            return value == null || value.length() <= maxLength ? value : null;
         }
         if (tenantId == null) {
             tenantId = GlobalVariable.DEFAULT_TENANT;
@@ -173,6 +223,7 @@ public class GlobalVariableResolver {
         Matcher matcher = VARS_PATTERN.matcher(value);
         StringBuilder result = new StringBuilder();
         List<String> substituted = new ArrayList<>();
+        int copied = 0;
 
         while (matcher.find()) {
             String explicitTenant = matcher.group(1);
@@ -184,17 +235,26 @@ public class GlobalVariableResolver {
 
             Map<String, String> variables = loadVariables(effectiveTenant);
             String resolved = variables.get(key);
+            // A missing variable leaves its reference as written.
+            String replacement = resolved != null ? resolved : matcher.group(0);
+            // Counted before anything is appended: the text since the last reference,
+            // then the replacement. A result exactly at the budget is still built.
+            if ((long) result.length() + (matcher.start() - copied) + replacement.length() > maxLength) {
+                return null;
+            }
+            result.append(value, copied, matcher.start()).append(replacement);
+            copied = matcher.end();
             if (resolved != null) {
                 substituted.add(resolved);
-                matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
             } else {
-                // Leave the original reference — variable not found
-                matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(0)));
                 LOGGER.debugf("Global variable not found: %s/%s — passing through unchanged",
                         effectiveTenant, key);
             }
         }
-        matcher.appendTail(result);
+        if ((long) result.length() + (value.length() - copied) > maxLength) {
+            return null;
+        }
+        result.append(value, copied, value.length());
         String out = result.toString();
         refuseAssembledReferences(value, substituted, out);
         return out;

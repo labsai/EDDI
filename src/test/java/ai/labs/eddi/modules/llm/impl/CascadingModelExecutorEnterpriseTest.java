@@ -108,8 +108,8 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel judgeModel = modelReturning("{\"confidence\": 0.93}");
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(stepModel);
-        when(registry.getOrCreate(eq("judgeProvider"), anyMap())).thenReturn(judgeModel);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(stepModel);
+        when(registry.getOrCreate(eq("judgeProvider"), anyMap(), any())).thenReturn(judgeModel);
 
         var result = run(registry, cascade, null);
 
@@ -133,8 +133,8 @@ class CascadingModelExecutorEnterpriseTest {
 
         ChatModel stepModel = modelReturning("A full and confident answer with plenty of detail here.");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(stepModel);
-        when(registry.getOrCreate(eq("brokenJudge"), anyMap())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("no such judge"));
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(stepModel);
+        when(registry.getOrCreate(eq("brokenJudge"), anyMap(), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("no such judge"));
 
         var result = run(registry, cascade, null);
         // Heuristic on a decent-length answer with no red flags → default 0.8.
@@ -163,8 +163,8 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel cheap = modelReturning("A thorough, confident, well-structured answer to the question.");
         ChatModel expensive = modelReturning("I'm not sure, I don't know.");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensive);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(expensive);
 
         var result = run(registry, cascade, null);
         assertEquals(0, result.stepUsed(), "earlier step (higher confidence) should be returned");
@@ -188,8 +188,8 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel cheap = modelReturning("A thorough, confident, well-structured answer to the question.");
         ChatModel expensive = modelReturning("I'm not sure, I don't know.");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensive);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(expensive);
 
         var result = run(registry, cascade, null);
         assertEquals(1, result.stepUsed(), "last step should be accepted by default");
@@ -211,7 +211,7 @@ class CascadingModelExecutorEnterpriseTest {
 
         ChatModel model = modelReturning("ok");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         run(registry, cascade, meterRegistry);
 
@@ -240,8 +240,8 @@ class CascadingModelExecutorEnterpriseTest {
         when(failing.chat(anyList())).thenThrow(failure);
         ChatModel recovered = modelReturning("recovered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(failing);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(recovered);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(failing);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(recovered);
         return run(registry, cascade, meterRegistry);
     }
 
@@ -291,7 +291,7 @@ class CascadingModelExecutorEnterpriseTest {
 
         ChatModel model = modelReturning("answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         var result = run(registry, cascade, null);
         var entry = result.trace().get(0);
@@ -387,9 +387,9 @@ class CascadingModelExecutorEnterpriseTest {
 
         ChatModel expensiveBuffered = modelReturning("unused-buffered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensiveBuffered);
-        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(expensiveBuffered);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap(), any())).thenReturn(expensiveStream);
 
         // A non-null event sink makes allowLiveStreaming meaningful.
         var sink = mock(ConversationEventSink.class);
@@ -436,9 +436,9 @@ class CascadingModelExecutorEnterpriseTest {
 
         ChatModel expensiveBuffered = modelReturning("unused-buffered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensiveBuffered);
-        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(expensiveBuffered);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap(), any())).thenReturn(expensiveStream);
 
         var sink = mock(ConversationEventSink.class);
         IConversationMemory memory = mock(IConversationMemory.class);
@@ -481,7 +481,7 @@ class CascadingModelExecutorEnterpriseTest {
                 .build());
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
 
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -537,9 +537,9 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel strongModel = modelReturning("The answer is 42. This is definitely correct and complete.", 30, 3, 33);
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapModel);
-        when(registry.getOrCreate(eq("mid"), anyMap())).thenReturn(midModel);
-        when(registry.getOrCreate(eq("strong"), anyMap())).thenReturn(strongModel);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheapModel);
+        when(registry.getOrCreate(eq("mid"), anyMap(), any())).thenReturn(midModel);
+        when(registry.getOrCreate(eq("strong"), anyMap(), any())).thenReturn(strongModel);
 
         var result = run(registry, cascade, new SimpleMeterRegistry());
 
@@ -569,8 +569,8 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel strongModel = modelReturning("The answer is 42. This is definitely correct and complete.");
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapModel);
-        when(registry.getOrCreate(eq("strong"), anyMap())).thenReturn(strongModel);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheapModel);
+        when(registry.getOrCreate(eq("strong"), anyMap(), any())).thenReturn(strongModel);
 
         var result = run(registry, cascade, new SimpleMeterRegistry());
 

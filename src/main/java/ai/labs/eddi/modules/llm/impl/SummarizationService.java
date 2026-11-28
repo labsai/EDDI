@@ -7,9 +7,11 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -23,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Shared LLM summarization infrastructure.
@@ -117,10 +120,13 @@ public class SummarizationService {
      *            LLM provider type (e.g., "openai", "anthropic")
      * @param llmModel
      *            model name (e.g., "gpt-4o-mini", "claude-sonnet-4-6")
+     * @param access
+     *            on whose behalf the model's vault references are resolved; see
+     *            {@link SecretAccess}
      * @return the generated summary text, or empty string on failure
      */
-    public String summarize(String content, String instructions, String llmProvider, String llmModel) {
-        return summarize(content, instructions, llmProvider, llmModel, null);
+    public String summarize(String content, String instructions, String llmProvider, String llmModel, SecretAccess access) {
+        return summarize(content, instructions, llmProvider, llmModel, null, access);
     }
 
     /**
@@ -149,9 +155,9 @@ public class SummarizationService {
      *            name is passed
      */
     public String summarize(String content, String instructions, String llmProvider, String llmModel,
-                            Map<String, String> inheritedParameters) {
+                            Map<String, String> inheritedParameters, SecretAccess access) {
         try {
-            return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters).summary();
+            return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters, access).summary();
         } catch (Exception e) {
             return "";
         }
@@ -165,11 +171,11 @@ public class SummarizationService {
      * @return a {@link SummarizationResult} with summary text and token counts
      * @throws RuntimeException
      *             if the LLM call fails
-     * @see #summarize(String, String, String, String)
+     * @see #summarize(String, String, String, String, SecretAccess)
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
-                                                  String llmProvider, String llmModel) {
-        return summarizeWithUsage(content, instructions, llmProvider, llmModel, null);
+                                                  String llmProvider, String llmModel, SecretAccess access) {
+        return summarizeWithUsage(content, instructions, llmProvider, llmModel, null, access);
     }
 
     /**
@@ -195,15 +201,15 @@ public class SummarizationService {
     }
 
     /**
-     * As {@link #summarizeWithUsage(String, String, String, String)}, but
-     * inheriting the calling task's model parameters so the summarizer can actually
-     * authenticate (finding F13).
+     * As {@link #summarizeWithUsage(String, String, String, String, SecretAccess)},
+     * but inheriting the calling task's model parameters so the summarizer can
+     * actually authenticate (finding F13).
      *
      * @param inheritedParameters
      *            the calling task's resolved parameters, which must belong to
      *            {@code llmProvider} (see
-     *            {@link #summarize(String, String, String, String, Map)}); the
-     *            provider's model key (see {@link #modelParameterKey}) is
+     *            {@link #summarize(String, String, String, String, Map, SecretAccess)});
+     *            the provider's model key (see {@link #modelParameterKey}) is
      *            overridden with {@code llmModel} when one is given — together with
      *            any other model key the inherited parameters carry, see
      *            {@link ModelParameterKeys#withModel} — and {@code responseFormat}
@@ -211,8 +217,8 @@ public class SummarizationService {
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
-                                                  Map<String, String> inheritedParameters) {
-        return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters, null);
+                                                  Map<String, String> inheritedParameters, SecretAccess access) {
+        return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters, null, access);
     }
 
     /**
@@ -222,7 +228,7 @@ public class SummarizationService {
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
-                                                  Map<String, String> inheritedParameters, RetryConfiguration retry) {
+                                                  Map<String, String> inheritedParameters, RetryConfiguration retry, SecretAccess access) {
         long start = System.nanoTime();
         try {
             // An inherited model is kept when no summarizer model is given; otherwise
@@ -233,12 +239,18 @@ public class SummarizationService {
                     : inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
             params.remove("responseFormat");
 
-            var model = chatModelRegistry.getOrCreate(llmProvider, params);
+            var model = chatModelRegistry.getOrCreate(llmProvider, params, access);
 
             List<ChatMessage> messages = List.of(SystemMessage.from(instructions), UserMessage.from(content));
 
-            var response = RetryConfiguration.executeWithRetryUnwrapped(() -> model.chat(ChatRequest.builder().messages(messages).build()),
-                    retry, "Summarization");
+            // A retry asks for the model again, so the grant is read again too: a retry
+            // after a backoff must not send the content with a credential whose grant
+            // was narrowed meanwhile (#1179). A hit on the registry's cache.
+            var attempts = new AtomicInteger();
+            var response = RetryConfiguration.executeWithRetryUnwrapped(() -> {
+                ChatModel attemptModel = attempts.getAndIncrement() == 0 ? model : chatModelRegistry.getOrCreate(llmProvider, params, access);
+                return attemptModel.chat(ChatRequest.builder().messages(messages).build());
+            }, retry, "Summarization");
 
             callCounter.increment();
 

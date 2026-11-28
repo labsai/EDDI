@@ -197,14 +197,14 @@ class RagDocumentLeaseIT {
             }
         };
         EmbeddingModelFactory models = mock(EmbeddingModelFactory.class);
-        when(models.getOrCreate(any(), any())).thenReturn(model);
+        when(models.getOrCreate(any(), any(), any())).thenReturn(model);
         return models;
     }
 
     private EmbeddingStoreFactory stores() {
         EmbeddingStoreFactory stores = mock(EmbeddingStoreFactory.class);
-        when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(sharedStore);
-        when(stores.getOrCreate(anyString(), any())).thenReturn(sharedStore);
+        when(stores.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(sharedStore);
+        when(stores.getOrCreate(anyString(), any(), any())).thenReturn(sharedStore);
         return stores;
     }
 

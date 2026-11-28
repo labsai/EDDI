@@ -184,7 +184,7 @@ class LlmTaskCoverageTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -199,7 +199,7 @@ class LlmTaskCoverageTest {
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
         when(memory.getHitlPendingToolCalls()).thenReturn(b);
         when(memory.getHitlResumeDecision()).thenReturn(d);
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -469,7 +469,7 @@ class LlmTaskCoverageTest {
         agentReturnsNull();
         var eventSink = mock(ConversationEventSink.class);
         when(memory.getEventSink()).thenReturn(eventSink);
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(null);
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(null);
         when(chatModel.chat(anyList())).thenReturn(chatResponse("legacy answer"));
 
         var t = task("taskA", List.of("action1"), Map.of("addToOutput", "true"));
@@ -500,7 +500,7 @@ class LlmTaskCoverageTest {
         agentReturnsNull();
         var eventSink = mock(ConversationEventSink.class);
         when(memory.getEventSink()).thenReturn(eventSink);
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(null);
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(null);
         when(chatModel.chat(anyList())).thenReturn(chatResponse("legacy answer"));
 
         var t = task("taskA", List.of("action1"), Map.of("addToOutput", "false"));

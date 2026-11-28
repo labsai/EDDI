@@ -91,19 +91,23 @@ class RestSecretStoreGrantOnCreateTest {
         }
 
         @Test
-        @DisplayName("a create whose grant leaves out a deployed agent already referencing the secret is a 409, and writes nothing")
-        void createLeavingOutAReferencingAgentRefused() throws Exception {
+        @DisplayName("a create whose grant leaves out a deployed agent already referencing the secret succeeds with a warning naming it")
+        void createLeavingOutAReferencingAgentWarns() throws Exception {
             noSuchSecret();
             List<String> grant = List.of("agentOne");
-            when(grantImpactAnalyzer.refusalToCreate(new SecretReference("default", "k"), grant, VaultGrantGate.Mode.ENFORCE))
+            when(grantImpactAnalyzer.warningOnCreate(new SecretReference("default", "k"), grant, VaultGrantGate.Mode.ENFORCE))
                     .thenReturn("Deployed agent(s) agentTwo already reference ${eddivault:default/k}");
 
             Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
                     new IRestSecretStore.SecretRequest("v", null, grant, List.of("api.example.com")));
 
-            assertEquals(409, resp.getStatus());
-            assertTrue(String.valueOf(entityOf(resp).get("error")).contains("agentTwo"));
-            verify(secretProvider, never()).store(any(), any(), any(), any(), any());
+            // Advisory since #1179: the resolver refuses agentTwo at resolution, so the
+            // create no longer has to stand in for that check.
+            assertEquals(201, resp.getStatus());
+            assertTrue(String.valueOf(entityOf(resp).get("warning")).contains("agentTwo"));
+            // The warning is safe to return only because the write keeps both lists it
+            // was computed from.
+            verify(secretProvider).store(new SecretReference("default", "k"), "v", null, grant, List.of("api.example.com"));
         }
 
         @Test
@@ -115,7 +119,7 @@ class RestSecretStoreGrantOnCreateTest {
                     new IRestSecretStore.SecretRequest("v", null, List.of("agentOne")));
 
             assertEquals(200, resp.getStatus());
-            verify(grantImpactAnalyzer, never()).refusalToCreate(any(), any(), any());
+            verify(grantImpactAnalyzer, never()).warningOnCreate(any(), any(), any());
         }
 
         @Test
@@ -323,6 +327,9 @@ class RestSecretStoreGrantOnCreateTest {
                     new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
             assertEquals(200, resp.getStatus());
             verify(secretProvider, never()).updateAllowedHosts(any(), any());
+            // The grant evicted once (#1179), and nothing else: no host list was written,
+            // so the clients built from the secret stay.
+            verify(secretResolver).invalidateGrant(any());
             verify(secretResolver, never()).invalidateCache(any());
             assertEquals(List.of("api.openai.com"), entityOf(resp).get("allowedHosts"));
 

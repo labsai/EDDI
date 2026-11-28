@@ -86,7 +86,7 @@ class CascadingModelExecutorPartialExchangeTest {
     void setUp() throws Exception {
         model = mock(ChatModel.class);
         registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
         memory = mock(IConversationMemory.class);
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         orchestrator = new LoopBackedOrchestrator(toolLoopRunner(), toolSetup());
@@ -136,7 +136,8 @@ class CascadingModelExecutorPartialExchangeTest {
                         any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
         return new ToolLoopRunner(toolExecutionService, truncator, null, null, new ToolApprovalGate(), null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
     }

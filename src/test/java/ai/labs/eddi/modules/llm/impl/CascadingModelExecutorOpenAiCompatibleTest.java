@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -51,7 +52,7 @@ class CascadingModelExecutorOpenAiCompatibleTest {
             throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"a\":\"b\"}")).repeatLast();
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        doReturn(model).when(registry).getOrCreate(eq("openai-compatible"), anyMap());
+        doReturn(model).when(registry).getOrCreate(eq("openai-compatible"), anyMap(), any());
 
         var step = new CascadeStep();
         step.setType("openai-compatible");

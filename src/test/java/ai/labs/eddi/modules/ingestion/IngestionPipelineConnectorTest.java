@@ -4,6 +4,13 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -73,10 +80,10 @@ class IngestionPipelineConnectorTest {
         storeFactory = mock(EmbeddingStoreFactory.class);
         modelFactory = mock(EmbeddingModelFactory.class);
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
-        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class)))
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
+        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any()))
                 .thenReturn(embeddingStore);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any()))
                 .thenReturn(embeddingModel);
         when(embeddingModel.embedAll(any())).thenAnswer(invocation -> {
             List<TextSegment> segments = invocation.getArgument(0);
@@ -184,6 +191,89 @@ class IngestionPipelineConnectorTest {
         assertEquals(0, second.documentsIngested());
         assertEquals(1, second.documentsUnchanged());
         assertTrue(connector.fetched.isEmpty(), "a prefetched document is never fetched");
+    }
+
+    @Test
+    @DisplayName("a vault grant refused for the embedding key fails the run with its message and tombstones nothing, run after run (#1179)")
+    void grantRefusalFailsTheRunAndTombstonesNothing() {
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+        assertEquals(1, run(connector).documentsIngested());
+
+        // The text changes, so it must be embedded again; the key is no longer granted.
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body, revised"), context.partition()));
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any()))
+                .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:embed-key} is not resolved for no agent"));
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            IngestionReport refused = run(connector);
+            assertTrue(String.valueOf(refused.message()).contains("is not resolved for"), refused.message());
+            assertEquals(0, refused.documentsTombstoned(), "a document the run could not process is not missing");
+        }
+        assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "the chunks of the last good run stay");
+        assertFalse(stateStore.lookup(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), "a").orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("a held model is re-checked against the binding it was built with, not a fresh expansion (#1179)")
+    void heldModelRecheckedAgainstItsOwnBinding() {
+        Map<String, String> builtWith = Map.of("apiKey", "${vault:key-a}");
+        when(modelFactory.bindingOf(any())).thenReturn(builtWith);
+        doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:key-a} is not resolved for no agent"))
+                .when(modelFactory).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        var connector = new Scripted();
+        connector.discovery = context -> {
+            context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+            context.accept(WorkItem.prefetched(text("b", "Beta body"), context.partition()));
+        };
+
+        IngestionReport report = run(connector);
+
+        // The first document acquires the model; the second re-checks it, against
+        // key-a.
+        assertEquals(1, report.documentsIngested());
+        assertTrue(String.valueOf(report.message()).contains("key-a"), report.message());
+    }
+
+    @Test
+    @DisplayName("a held store whose binding cannot be read back stops the run: a fresh expansion could name another secret")
+    void missingBindingFailsClosed() {
+        when(storeFactory.bindingOf(any())).thenReturn(null);
+        when(storeFactory.credentialBinding(any())).thenReturn(Map.of("password", "${vault:store-key}"));
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+
+        IngestionReport report = run(connector);
+
+        assertEquals(0, report.documentsIngested());
+        assertTrue(String.valueOf(report.message()).contains("could not be verified"), report.message());
+        // Never re-checked against the fresh expansion in its place.
+        // any() matches a null binding too, the fallback this test exists to rule out.
+        verify(storeFactory, never()).requireGranted(any(RagConfiguration.class), any(), any());
+    }
+
+    @Test
+    @DisplayName("a grant narrowed while addAll runs stops the delete that follows it")
+    void refusalAfterAddAllStopsTheDelete() {
+        Map<String, String> builtWith = Map.of("password", "${vault:store-key}");
+        when(storeFactory.bindingOf(any())).thenReturn(builtWith);
+        // The re-checks before embedding and before addAll pass; the one before
+        // removeAll, after the vectors were added, refuses.
+        doNothing().doNothing().doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                .when(storeFactory).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+        var source = source();
+        source.settings().setCostPerThousandSegments(1000.0);
+
+        IngestionReport report = pipeline(connector).run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+        assertTrue(String.valueOf(report.message()).contains("store-key"), report.message());
+        assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "addAll ran before the refusal");
+        assertTrue(embeddingStore.removeFilters().isEmpty(), "no removeAll after the refusal");
+        verify(storeFactory, times(3)).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        assertEquals(embeddingStore.segmentsOf("a").size() * 1.0, report.costUsd(), 1e-9,
+                "the embeddings the provider computed are paid for, refusal or not");
     }
 
     @Test

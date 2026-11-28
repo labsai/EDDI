@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -106,7 +107,7 @@ class PgVectorScaleLayoutIT {
         GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
         SecretResolver secrets = mock(SecretResolver.class);
         when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(secrets.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secrets.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingStoreFactory(variables, secrets);
     }
 
@@ -136,7 +137,8 @@ class PgVectorScaleLayoutIT {
     @Test
     @DisplayName("a new knowledge base gets a jsonb table with HNSW and metadata indexes, and its queries use them")
     void newTableIsIndexedAndUsed() throws Exception {
-        EmbeddingStore<TextSegment> store = factory.getOrCreate(KB_ID, kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
+        EmbeddingStore<TextSegment> store = factory.getOrCreate(KB_ID, kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")),
+                SecretAccess.outsideAgentGrants("test"));
         var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, store);
 
         assertEquals("jsonb", metadataType(TABLE));
@@ -208,7 +210,8 @@ class PgVectorScaleLayoutIT {
                 new Metadata(new HashMap<>(Map.of("documentId", "old-doc", "sourceKey", "old-src", "kbId", "legacy")))));
         Set<String> indexesBefore = new HashSet<>(indexes(legacyTable).keySet());
 
-        EmbeddingStore<TextSegment> store = factory.getOrCreate("65f0aa11bb22cc33dd44ee88", kb(null, "legacy", Map.of()));
+        EmbeddingStore<TextSegment> store = factory.getOrCreate("65f0aa11bb22cc33dd44ee88", kb(null, "legacy", Map.of()),
+                SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("json", metadataType(legacyTable));
         assertEquals(indexesBefore, indexes(legacyTable).keySet(), "no index is added to an existing table");
@@ -224,7 +227,8 @@ class PgVectorScaleLayoutIT {
         assertEquals(1, count(legacyTable));
 
         var refused = assertThrows(IllegalArgumentException.class,
-                () -> factory.getOrCreate("65f0aa11bb22cc33dd44ee88", kb(null, "legacy", Map.of("layout", "v2"))));
+                () -> factory.getOrCreate("65f0aa11bb22cc33dd44ee88", kb(null, "legacy", Map.of("layout", "v2")),
+                        SecretAccess.outsideAgentGrants("test")));
         assertTrue(refused.getMessage().contains("never converted"), refused.getMessage());
         assertEquals("json", metadataType(legacyTable));
     }
@@ -233,7 +237,7 @@ class PgVectorScaleLayoutIT {
     @DisplayName("layout v1 still creates a new table the old way")
     void explicitV1() throws Exception {
         String id = "65f0aa11bb22cc33dd44ee99";
-        factory.getOrCreate(id, kb("id", "v1", Map.of("layout", "v1")));
+        factory.getOrCreate(id, kb("id", "v1", Map.of("layout", "v1")), SecretAccess.outsideAgentGrants("test"));
         String table = "eddi_kbid_" + id;
         assertEquals("json", metadataType(table));
         assertEquals(Set.of(table + "_pkey"), indexes(table).keySet());
@@ -243,8 +247,8 @@ class PgVectorScaleLayoutIT {
     @DisplayName("knowledge bases on one server share one connection pool")
     void poolIsShared() {
         factory.clearCache();
-        factory.getOrCreate("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()));
-        factory.getOrCreate("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()));
+        factory.getOrCreate("65f0aa11bb22cc33dd44eeaa", kb("id", "a", Map.of()), SecretAccess.outsideAgentGrants("test"));
+        factory.getOrCreate("65f0aa11bb22cc33dd44eebb", kb("id", "b", Map.of()), SecretAccess.outsideAgentGrants("test"));
         assertEquals(1, factory.pgVectorPoolCount());
     }
 
@@ -257,7 +261,8 @@ class PgVectorScaleLayoutIT {
         String qualifiedId = "65f0aa11bb22cc33dd44ef02";
 
         String firstBuild = ddlLoggedDuring(() -> {
-            EmbeddingStore<TextSegment> store = factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
+            EmbeddingStore<TextSegment> store = factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()),
+                    SecretAccess.outsideAgentGrants("test"));
             store.add(Embedding.from(new float[]{1f, 0f, 0f}), segment("written through docs"));
         });
 
@@ -272,7 +277,8 @@ class PgVectorScaleLayoutIT {
         assertEquals(publicIndexes, indexes("public", "docs").keySet());
 
         String qualifiedBuild = ddlLoggedDuring(() -> {
-            EmbeddingStore<TextSegment> store = factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()));
+            EmbeddingStore<TextSegment> store = factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()),
+                    SecretAccess.outsideAgentGrants("test"));
             var found = store.search(EmbeddingSearchRequest.builder().queryEmbedding(Embedding.from(new float[]{0f, 1f, 0f})).maxResults(3).build());
             assertEquals(1, found.matches().size());
             assertEquals("written before the upgrade", found.matches().get(0).embedded().text());
@@ -289,8 +295,8 @@ class PgVectorScaleLayoutIT {
         // A second build of both finds every index where it is and creates none.
         factory.clearCache();
         String rebuild = ddlLoggedDuring(() -> {
-            factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
-            factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()));
+            factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()), SecretAccess.outsideAgentGrants("test"));
+            factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()), SecretAccess.outsideAgentGrants("test"));
         });
         assertEquals(0, createIndexStatements(rebuild), rebuild);
         assertEquals("json", metadataType("public.docs"));
@@ -305,7 +311,7 @@ class PgVectorScaleLayoutIT {
             assertEquals("json", PgVectorSchema.inspect(c, "public.docs_v2").metadataType());
         }
 
-        factory.getOrCreate("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
+        factory.getOrCreate("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs_v2"));
         assertEquals(4, indexes(SCOPED_SCHEMA, "docs_v2").size());
@@ -320,7 +326,8 @@ class PgVectorScaleLayoutIT {
         Set<String> expected = Set.of("shared_pkey", "shared_hnsw_idx", "shared_doc_src_idx", "shared_src_run_idx");
 
         // A table outside current_schema(), named with its schema.
-        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of())));
+        String qualifiedBuild = ddlLoggedDuring(
+                () -> factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of()), SecretAccess.outsideAgentGrants("test")));
         assertEquals("jsonb", metadataType("public.shared"));
         assertEquals(expected, indexes("public", "shared").keySet());
         assertEquals(3, createIndexStatements(qualifiedBuild), qualifiedBuild);
@@ -328,7 +335,8 @@ class PgVectorScaleLayoutIT {
         // The same name unqualified is myschema.shared. public.shared's indexes are on
         // the search_path under the very names this table's indexes get, and must not
         // be mistaken for them.
-        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of())));
+        String unqualifiedBuild = ddlLoggedDuring(
+                () -> factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of()), SecretAccess.outsideAgentGrants("test")));
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".shared"));
         assertEquals(expected, indexes(SCOPED_SCHEMA, "shared").keySet());
         assertEquals(3, createIndexStatements(unqualifiedBuild), unqualifiedBuild);
@@ -342,8 +350,8 @@ class PgVectorScaleLayoutIT {
 
         factory.clearCache();
         String rebuild = ddlLoggedDuring(() -> {
-            factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of()));
-            factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of()));
+            factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of()), SecretAccess.outsideAgentGrants("test"));
+            factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of()), SecretAccess.outsideAgentGrants("test"));
         });
         assertEquals(0, createIndexStatements(rebuild), rebuild);
     }

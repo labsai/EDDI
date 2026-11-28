@@ -65,7 +65,7 @@ class ChannelTargetRouterChannelTypeTest {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(anyString()))
+        when(secretResolver.resolveValue(anyString(), any()))
                 .thenAnswer(inv -> "resolved-" + inv.getArgument(0, String.class).replace("${vault:", "").replace("}", ""));
         agentAdmin = mock(IDeploymentStatusReader.class);
         when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(List.of());
@@ -122,7 +122,7 @@ class ChannelTargetRouterChannelTypeTest {
         assertFalse(platformConfig.containsKey("botToken"), "a key outside the allow-list is dropped");
         assertFalse(platformConfig.containsKey("signingSecret"));
         assertEquals("bot", platformConfig.get("connection"));
-        verify(secretResolver, never()).resolveValue(anyString());
+        verify(secretResolver, never()).resolveValue(anyString(), any());
     }
 
     @Test

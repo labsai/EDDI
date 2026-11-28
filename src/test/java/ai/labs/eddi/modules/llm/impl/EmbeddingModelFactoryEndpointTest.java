@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
@@ -74,7 +75,7 @@ class EmbeddingModelFactoryEndpointTest {
 
         var secretResolver = mock(SecretResolver.class);
         var globalVariableResolver = mock(GlobalVariableResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingModelFactory(globalVariableResolver, secretResolver);
     }
@@ -112,7 +113,8 @@ class EmbeddingModelFactoryEndpointTest {
     @DisplayName("vertex: an endpoint that is the cloud metadata service is refused, as for every other endpoint")
     void vertexEndpointIsHeldToTheMetadataGuard() {
         var params = Map.of("project", "p", "endpoint", "169.254.169.254:443");
-        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config("vertex", params), EmbeddingInputType.DOCUMENT));
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config("vertex", params), EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(e.getMessage().contains("metadata"), e.getMessage());
     }
 
@@ -120,7 +122,7 @@ class EmbeddingModelFactoryEndpointTest {
     @DisplayName("openai: baseUrl receives the embedding request, with the vault-resolved key and the modelName alias")
     void openAiSendsToTheConfiguredBaseUrl() {
         var model = factory.getOrCreate(config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "${vault:private-key}",
-                "modelName", "private-embed", "timeout", "5000")), EmbeddingInputType.DOCUMENT);
+                "modelName", "private-embed", "timeout", "5000")), EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         var embedding = model.embed("hello").content();
 
@@ -136,7 +138,7 @@ class EmbeddingModelFactoryEndpointTest {
     @DisplayName("mistral: baseUrl receives the embedding request")
     void mistralSendsToTheConfiguredBaseUrl() {
         var model = factory.getOrCreate(config("mistral", Map.of("baseUrl", baseUrl(), "apiKey", "k")),
-                EmbeddingInputType.DOCUMENT);
+                EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         model.embed("hello");
 
@@ -149,11 +151,13 @@ class EmbeddingModelFactoryEndpointTest {
     void endpointTheProviderCannotHonourIsRefused() {
         var bedrock = config("bedrock", Map.of("baseUrl", baseUrl()));
 
-        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(bedrock, EmbeddingInputType.DOCUMENT));
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(bedrock, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(e.getMessage().contains("baseUrl"), e.getMessage());
 
         var azureWithBaseUrl = config("azure-openai", Map.of("baseUrl", baseUrl(), "apiKey", "k"));
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(azureWithBaseUrl, EmbeddingInputType.DOCUMENT));
+        assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(azureWithBaseUrl, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(requests.isEmpty(), requests.toString());
     }
 
@@ -172,7 +176,8 @@ class EmbeddingModelFactoryEndpointTest {
         var config = config("openai", Map.of("model", "a", "modelName", "b", "apiKey", "k"));
 
         assertThrows(IllegalArgumentException.class, config::validate);
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -180,7 +185,8 @@ class EmbeddingModelFactoryEndpointTest {
     void badTimeoutIsRefused() {
         var config = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "timeout", "soon"));
 
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -189,15 +195,18 @@ class EmbeddingModelFactoryEndpointTest {
         // The error reaches RAG search responses and ingestion status: quoting the
         // resolved value would hand an editor the plaintext the vault API withholds.
         var timeout = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "timeout", "${vault:victim}"));
-        var e1 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(timeout, EmbeddingInputType.DOCUMENT));
+        var e1 = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(timeout, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertNoPlaintext(e1);
 
         var dimensions = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "dimensions", "${vault:victim}"));
-        var e2 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(dimensions, EmbeddingInputType.DOCUMENT));
+        var e2 = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(dimensions, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertNoPlaintext(e2);
 
         var model = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "model", "${vault:victim}", "modelName", "x"));
-        var e3 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(model, EmbeddingInputType.DOCUMENT));
+        var e3 = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(model, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertNoPlaintext(e3);
     }
 
@@ -224,12 +233,12 @@ class EmbeddingModelFactoryEndpointTest {
         }).when(policy).validateUrl(anyString());
         var secretResolver = mock(SecretResolver.class);
         var globalVariableResolver = mock(GlobalVariableResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         var guarded = new EmbeddingModelFactory(globalVariableResolver, secretResolver, policy);
 
         var model = guarded.getOrCreate(config(provider, Map.of("baseUrl", baseUrl(), "apiKey", "k", "maxRetries", "0")),
-                EmbeddingInputType.DOCUMENT);
+                EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertThrows(RuntimeException.class, () -> model.embed("hello"));
         assertTrue(checks.get() > 1, "the transport checked the request URL");

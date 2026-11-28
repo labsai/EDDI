@@ -182,7 +182,7 @@ class AgentOrchestratorCoverageTest {
         lenient().when(memory.getAgentId()).thenReturn(null);
         lenient().when(memory.getAgentVersion()).thenReturn(null);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
@@ -1820,7 +1820,7 @@ class AgentOrchestratorCoverageTest {
         assertNotNull(setup);
         // calculate + getCurrentDateTime specs present; no http/mcp discovery invoked.
         assertTrue(setup.toolSpecs().stream().anyMatch(s -> "calculate".equals(s.name())));
-        verify(mcpToolProviderManager, never()).discoverTools(any());
+        verify(mcpToolProviderManager, never()).discoverTools(any(), any());
     }
 
     @Test

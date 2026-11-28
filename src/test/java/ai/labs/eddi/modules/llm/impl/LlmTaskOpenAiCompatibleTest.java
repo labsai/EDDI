@@ -181,7 +181,7 @@ class LlmTaskOpenAiCompatibleTest {
 
     private FaultInjectingChatModel liveModel() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"a\":\"b\"}")).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         return model;
     }
 
@@ -235,7 +235,7 @@ class LlmTaskOpenAiCompatibleTest {
         decision.setVerdict(HitlVerdict.APPROVED);
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(mock(ChatModel.class));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(mock(ChatModel.class));
         when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("{\"a\":\"b\"}", new ArrayList<>()));
 
@@ -565,7 +565,7 @@ class LlmTaskOpenAiCompatibleTest {
             return response.build();
         });
         var classifierRegistry = mock(ChatModelRegistry.class);
-        when(classifierRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
+        when(classifierRegistry.getOrCreate(eq("ollama"), any(), any())).thenReturn(classifierModel);
         llmTask.guardrailService = new GuardrailService(
                 List.of(new ClassifierGuardrail(classifierRegistry, new TemplatingEngine(Engine.builder().addDefaults().build()),
                         new SimpleMeterRegistry())),

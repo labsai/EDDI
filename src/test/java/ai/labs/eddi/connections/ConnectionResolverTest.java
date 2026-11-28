@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -73,7 +74,7 @@ class ConnectionResolverTest {
         resolutionPrincipalContext = new ResolutionPrincipalContext();
 
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString()))
+        lenient().when(secretResolver.resolveValue(anyString(), any()))
                 .thenAnswer(i -> i.<String>getArgument(0).replace("${vault:jira-token}", "live-token").replace("${vault:jira-password}", "hunter2"));
     }
 
@@ -133,10 +134,11 @@ class ConnectionResolverTest {
                 accessTokenSupplier, true);
 
         var error = assertThrows(ConnectionException.class,
-                () -> resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null));
+                () -> resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null,
+                        SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
-        verify(secretResolver, never()).resolveValue(anyString());
+        verify(secretResolver, never()).resolveValue(anyString(), any());
     }
 
     @Test
@@ -155,7 +157,8 @@ class ConnectionResolverTest {
         var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
                 accessTokenSupplier, true);
 
-        var credential = resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null);
+        var credential = resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null,
+                SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("Basic " + Base64.getEncoder().encodeToString("svc-eddi:hunter2".getBytes(StandardCharsets.UTF_8)),
                 credential.headerValue());
@@ -189,7 +192,7 @@ class ConnectionResolverTest {
             register(acmeConnection());
             callerSupplies(Map.of("acme", "key-id:secret"));
 
-            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null);
+            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("x-api-key", credential.headerName());
             assertEquals("key-id:secret", credential.headerValue());
@@ -201,7 +204,8 @@ class ConnectionResolverTest {
             register(acmeConnection());
             callerSupplies(Map.of());
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
             assertTrue(error.getMessage().contains("acme"), error.getMessage());
@@ -219,7 +223,8 @@ class ConnectionResolverTest {
             register(acmeConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:acme}", ACME_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
             assertTrue(error.getMessage().contains("authorization.enabled=false"),
@@ -235,7 +240,8 @@ class ConnectionResolverTest {
             register(acmeConnection());
             callerSupplies(Map.of("some-other-system", "not-for-acme"));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
         }
@@ -246,7 +252,8 @@ class ConnectionResolverTest {
             register(acmeConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
         }
@@ -275,7 +282,8 @@ class ConnectionResolverTest {
                 callerSupplies(Map.of("acme", "key-id:secret"));
 
                 var error = assertThrows(ConnectionException.class,
-                        () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null), entry.getKey());
+                        () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test")),
+                        entry.getKey());
 
                 assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
                 assertTrue(error.getMessage().contains("headerName"), entry.getKey() + ": " + error.getMessage());
@@ -295,7 +303,8 @@ class ConnectionResolverTest {
             callerSupplies(Map.of("acme", "key-id:secret"));
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver(true).resolve("${connection:acme}", URI.create("https://evil.example.com/collect"), null));
+                    () -> resolver(true).resolve("${connection:acme}", URI.create("https://evil.example.com/collect"), null,
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
         }
@@ -306,7 +315,7 @@ class ConnectionResolverTest {
             register(acmeConnection());
             callerSupplies(Map.of("acme", "key-id:secret"));
 
-            assertTrue(resolver(true).resolveForDiscovery("${connection:acme}", ACME_TARGET).isEmpty());
+            assertTrue(resolver(true).resolveForDiscovery("${connection:acme}", ACME_TARGET, SecretAccess.outsideAgentGrants("test")).isEmpty());
         }
 
         @Test
@@ -321,7 +330,7 @@ class ConnectionResolverTest {
             boundPrincipal("end-user-42", ResolutionPrincipal.Provenance.SELF_ASSERTED);
             callerSupplies(Map.of("acme", "key-id:secret"));
 
-            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null);
+            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("key-id:secret", credential.headerValue());
         }
@@ -336,7 +345,7 @@ class ConnectionResolverTest {
         void resolvesStaticHeader() {
             register(staticConnection());
 
-            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("Authorization", credential.headerName());
             assertEquals("Bearer live-token", credential.headerValue());
@@ -351,7 +360,7 @@ class ConnectionResolverTest {
             connection.getStaticAuth().setPasswordRef("${vault:jira-password}");
             register(connection);
 
-            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("Basic " + Base64.getEncoder().encodeToString("svc-eddi:hunter2".getBytes(StandardCharsets.UTF_8)),
                     credential.headerValue());
@@ -379,7 +388,8 @@ class ConnectionResolverTest {
                 register(connection);
 
                 var error = assertThrows(ConnectionException.class,
-                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")),
+                        entry.getKey());
 
                 assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
                 assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
@@ -407,12 +417,13 @@ class ConnectionResolverTest {
                 register(connection);
 
                 var error = assertThrows(ConnectionException.class,
-                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")),
+                        entry.getKey());
 
                 assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
                 assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
             }
-            verify(secretResolver, never()).resolveValue(anyString());
+            verify(secretResolver, never()).resolveValue(anyString(), any());
         }
 
         @Test
@@ -425,7 +436,8 @@ class ConnectionResolverTest {
             connection.getStaticAuth().setValueTemplate("Bearer ${vars:jira-token}");
             register(connection);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
             assertTrue(error.getMessage().contains("did not resolve"), error.getMessage());
@@ -438,7 +450,8 @@ class ConnectionResolverTest {
             connection.getStaticAuth().setValueTemplate("Bearer ${vault:missing-key}");
             register(connection);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
             assertTrue(error.getMessage().contains("did not resolve"), error.getMessage());
@@ -455,7 +468,8 @@ class ConnectionResolverTest {
             register(staticConnection());
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver(false).resolve("${connection:jira}", URI.create("https://evil.example.com/collect"), null));
+                    () -> resolver(false).resolve("${connection:jira}", URI.create("https://evil.example.com/collect"), null,
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
         }
@@ -469,7 +483,8 @@ class ConnectionResolverTest {
 
             // A case-sensitive comparison here produces an allowlist that looks
             // configured and blocks everything.
-            assertEquals("Bearer live-token", resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null).headerValue());
+            assertEquals("Bearer live-token",
+                    resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")).headerValue());
         }
 
         @Test
@@ -481,7 +496,8 @@ class ConnectionResolverTest {
             connection.setBaseUrlAllowlist(List.of("api.atlassian.com"));
             register(connection);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
         }
@@ -491,7 +507,8 @@ class ConnectionResolverTest {
         void refusesMissingTarget() {
             register(staticConnection());
 
-            assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", null, null));
+            assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", null, null, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -502,11 +519,12 @@ class ConnectionResolverTest {
             register(connection);
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver(false).resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null));
+                    () -> resolver(false).resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null,
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
             assertTrue(error.getMessage().contains("eddi.connections.allow-plaintext-remote-origins"), error.getMessage());
-            verify(secretResolver, never()).resolveValue(anyString());
+            verify(secretResolver, never()).resolveValue(anyString(), any());
         }
 
         @Test
@@ -519,7 +537,8 @@ class ConnectionResolverTest {
             resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", true);
 
             assertEquals("Bearer live-token",
-                    resolver.resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null).headerValue());
+                    resolver.resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null,
+                            SecretAccess.outsideAgentGrants("test")).headerValue());
         }
 
         @Test
@@ -532,7 +551,8 @@ class ConnectionResolverTest {
             resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", false);
 
             assertEquals("Bearer live-token",
-                    resolver.resolve("${connection:jira}", URI.create("http://localhost:8080/issue/1"), null).headerValue());
+                    resolver.resolve("${connection:jira}", URI.create("http://localhost:8080/issue/1"), null, SecretAccess.outsideAgentGrants("test"))
+                            .headerValue());
         }
     }
 
@@ -565,7 +585,8 @@ class ConnectionResolverTest {
             register(perUserConnection());
             boundPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice"));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice", SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -583,7 +604,8 @@ class ConnectionResolverTest {
             boundPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED);
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
-            assertEquals("Bearer ya29.token", resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice").headerValue());
+            assertEquals("Bearer ya29.token",
+                    resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice", SecretAccess.outsideAgentGrants("test")).headerValue());
             verify(accessTokenSupplier).accessToken(any(), eq("alice"));
         }
 
@@ -595,7 +617,8 @@ class ConnectionResolverTest {
             register(perUserConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
             assertFalse(error.getMessage().contains("__service__"), "falling back to the service grant is the failure mode, not the fix");
@@ -608,7 +631,7 @@ class ConnectionResolverTest {
             boundPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
-            var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null);
+            var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("Bearer ya29.token", credential.headerValue());
             verify(accessTokenSupplier).accessToken(any(), eq("alice"));
@@ -627,7 +650,7 @@ class ConnectionResolverTest {
             when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "approver-admin", "https://eddi.example"));
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
-            resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice");
+            resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice", SecretAccess.outsideAgentGrants("test"));
 
             verify(accessTokenSupplier).accessToken(any(), eq("alice"));
             verify(accessTokenSupplier, never()).accessToken(any(), eq("approver-admin"));
@@ -642,7 +665,8 @@ class ConnectionResolverTest {
             register(perUserConnection());
             boundPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "bob"));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "bob", SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -653,7 +677,7 @@ class ConnectionResolverTest {
         void perUserDiscoveryIsWithheld() {
             register(perUserConnection());
 
-            assertTrue(resolver(true).resolveForDiscovery("${connection:drive}", ALLOWED_TARGET).isEmpty());
+            assertTrue(resolver(true).resolveForDiscovery("${connection:drive}", ALLOWED_TARGET, SecretAccess.outsideAgentGrants("test")).isEmpty());
         }
 
         @Test
@@ -667,7 +691,8 @@ class ConnectionResolverTest {
             register(connection);
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("service-token");
 
-            assertEquals("Bearer service-token", resolver(false).resolve("${connection:drive}", ALLOWED_TARGET, null).headerValue());
+            assertEquals("Bearer service-token",
+                    resolver(false).resolve("${connection:drive}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")).headerValue());
         }
     }
 
@@ -676,7 +701,7 @@ class ConnectionResolverTest {
     void resolvedCredentialIsNotPrintable() {
         register(staticConnection());
 
-        var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+        var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test"));
 
         assertFalse(credential.toString().contains("live-token"),
                 "this record travels through debug logs and exception messages: " + credential);
@@ -692,7 +717,8 @@ class ConnectionResolverTest {
                 callerIdentityContext, meterRegistry,
                 accessTokenSupplier, false);
 
-        assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:gone}", ALLOWED_TARGET, null));
+        assertThrows(ConnectionException.class,
+                () -> resolver.resolve("${connection:gone}", ALLOWED_TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
         var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter();
         assertTrue(counter != null && counter.count() == 1,
@@ -710,7 +736,7 @@ class ConnectionResolverTest {
         // leak.
         register(staticConnection());
 
-        var credential = resolver(false).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET);
+        var credential = resolver(false).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET, SecretAccess.outsideAgentGrants("test"));
 
         assertTrue(credential.isPresent(), "withholding this is what left the tool list empty");
         assertEquals("Bearer live-token", credential.get().headerValue());
@@ -729,7 +755,8 @@ class ConnectionResolverTest {
         var resolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
                 callerIdentityContext, meterRegistry, accessTokenSupplier, false);
 
-        assertThrows(ConnectionException.class, () -> resolver.resolveForDiscovery("${connection:jira}", ALLOWED_TARGET));
+        assertThrows(ConnectionException.class,
+                () -> resolver.resolveForDiscovery("${connection:jira}", ALLOWED_TARGET, SecretAccess.outsideAgentGrants("test")));
 
         var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter();
         assertTrue(counter != null && counter.count() == 1, "a discovery lookup failure must reach the same counter a tool-call lookup failure does");
@@ -745,7 +772,7 @@ class ConnectionResolverTest {
 
         assertEquals(Optional.of(Binding.CALLER_SUPPLIED), resolver(true).bindingOf("${connection:jira}"),
                 "a warning that assumes PER_USER for a CALLER_SUPPLIED connection sends the operator looking for an OAuth grant");
-        assertTrue(resolver(true).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET).isEmpty());
+        assertTrue(resolver(true).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET, SecretAccess.outsideAgentGrants("test")).isEmpty());
     }
 
     @Test
@@ -757,7 +784,8 @@ class ConnectionResolverTest {
 
         // Swallowing this would reintroduce the empty-tool-list-with-no-explanation
         // failure by a different route.
-        assertThrows(ConnectionException.class, () -> resolver(false).resolveForDiscovery("${connection:gone}", ALLOWED_TARGET));
+        assertThrows(ConnectionException.class,
+                () -> resolver(false).resolveForDiscovery("${connection:gone}", ALLOWED_TARGET, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test

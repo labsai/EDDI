@@ -18,8 +18,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Name → connection lookup, cached.
@@ -92,9 +94,57 @@ public class ConnectionRegistry {
 
     /** The local half of {@link #invalidate}, for a change made on another node. */
     public void invalidateLocal() {
-        cache.invalidateAll();
-        LOGGER.debug("Connection registry cache invalidated");
+        // The listeners are told when the invalidation starts, before the documents are
+        // dropped, and when it has finished, after. A listener's cache treats the whole
+        // interval as in progress: what it fetched before the start, or during the
+        // interval (when this cache may still hand out the old document), is never
+        // served after it (#1179).
+        // One snapshot for both halves: a listener registered in between must not be
+        // told it finished an invalidation it was never told had started.
+        List<InvalidationListener> listeners = List.copyOf(invalidationListeners);
+        for (InvalidationListener listener : listeners) {
+            notify(listener::started);
+        }
+        try {
+            cache.invalidateAll();
+            LOGGER.debug("Connection registry cache invalidated");
+        } finally {
+            for (InvalidationListener listener : listeners) {
+                notify(listener::finished);
+            }
+        }
     }
+
+    private static void notify(Runnable call) {
+        try {
+            call.run();
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "A connection invalidation listener failed");
+        }
+    }
+
+    /**
+     * Told when an invalidation starts, before this registry drops its documents,
+     * and when it has finished, after; see {@link #onInvalidation}.
+     */
+    public interface InvalidationListener {
+        void started();
+
+        void finished();
+    }
+
+    /**
+     * Tells {@code listener} of every invalidation, local or announced by another
+     * node, when it starts (before this registry drops its documents) and when it
+     * has finished: for a cache outside this registry that holds something fetched
+     * with a connection's credential, which must not outlive the binding it was
+     * fetched with (#1179).
+     */
+    public void onInvalidation(InvalidationListener listener) {
+        invalidationListeners.add(listener);
+    }
+
+    private final List<InvalidationListener> invalidationListeners = new CopyOnWriteArrayList<>();
 
     /**
      * Cluster mode: announces connection writes to the other nodes. Field-injected

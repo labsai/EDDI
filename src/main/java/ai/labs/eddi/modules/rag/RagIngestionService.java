@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.cluster.lease.LocalLeaseManager;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
@@ -35,6 +36,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -58,6 +60,16 @@ import java.util.function.Function;
  */
 @ApplicationScoped
 public class RagIngestionService {
+
+    /**
+     * Ingestion runs for a knowledge base, not for an agent, whether it is started
+     * from REST, a schedule or a file upload. There is no agent to check a grant
+     * against, so only a secret granted to every agent may embed or store here: the
+     * rule {@code ServiceJudgeVaultGrants} applies to group-level models. Otherwise
+     * an editor could put a key granted to one agent behind an embedding endpoint
+     * of their choosing and ingest (#1179).
+     */
+    public static final SecretAccess KNOWLEDGE_BASE_INGESTION = SecretAccess.withoutAgent("knowledge base ingestion");
 
     private static final Logger LOGGER = Logger.getLogger(RagIngestionService.class);
 
@@ -236,24 +248,30 @@ public class RagIngestionService {
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
-            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT, KNOWLEDGE_BASE_INGESTION);
             if (replace) {
+                Map<String, String> modelBinding = embeddingModelFactory.bindingOf(model);
                 // The lease is held from before embedding until the cleanup is done, so
                 // a delete arriving meanwhile — on any instance — waits and then removes
                 // these chunks too, instead of answering "deleted" and being undone by
                 // them a moment later.
                 underDocumentLease(kbId, documentName, replaceLeaseWait, lease -> {
+                    // The model was taken before the wait for the lease: a grant narrowed
+                    // meanwhile must stop the run before the document reaches the provider
+                    // (and before an in-memory store is replaced below).
+                    embeddingModelFactory.requireGranted(ragConfig, modelBinding, KNOWLEDGE_BASE_INGESTION);
                     // Looked up only once the lease is held: for an in-memory store built
                     // under another embedding configuration this replaces it, which a
                     // replacement that is then refused the lease must not have done.
-                    EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
+                    EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig,
+                            KNOWLEDGE_BASE_INGESTION);
                     storeAndReplace(splitter, model, document, store, ragConfigId, kbId, documentName, ingestionId, lease);
                     return null;
                 });
             } else {
                 // For writing: an in-memory store built under another embedding
                 // configuration is replaced rather than mixed with these vectors.
-                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
+                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig, KNOWLEDGE_BASE_INGESTION);
                 storeAndReplace(splitter, model, document, store, ragConfigId, kbId, documentName, ingestionId, null);
             }
 
@@ -529,7 +547,7 @@ public class RagIngestionService {
                     // Not getOrCreateForIngestion: for an in-memory knowledge base that would
                     // replace a store built under another embedding configuration, and a
                     // delete has no say in which vectors are current.
-                    EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
+                    EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig, KNOWLEDGE_BASE_INGESTION);
                     // After the lookup, which can open a connection: a lease lost meanwhile
                     // means another node may have replaced the document by now.
                     if (lease.isLost()) {

@@ -19,6 +19,7 @@ import ai.labs.eddi.integrations.channels.HmacSignatures;
 import ai.labs.eddi.integrations.slack.SlackDeliveryException;
 import ai.labs.eddi.integrations.slack.SlackWebApiClient;
 import ai.labs.eddi.integrations.webhook.WebhookSignatureVerifier;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -50,6 +51,12 @@ public class AlertSenders {
     private final SlackWebApiClient slackApi;
     private final OutboundHttp http;
     private final SecretResolver secretResolver;
+
+    /**
+     * Alert rules are not agents, and the agent grant has never governed their
+     * webhook URL or signing secret (see {@link SecretAccess}).
+     */
+    private static final SecretAccess ALERT_DELIVERY = SecretAccess.outsideAgentGrants("alert delivery");
     private final AlertSettings settings;
     private final Clock clock;
 
@@ -105,7 +112,7 @@ public class AlertSenders {
     }
 
     void sendWebhook(AlertEvent event, DeliveryTarget target) throws AlertDeliveryException {
-        String secret = target.signingSecret() == null ? null : secretResolver.resolveValue(target.signingSecret());
+        String secret = target.signingSecret() == null ? null : secretResolver.resolveValue(target.signingSecret(), ALERT_DELIVERY);
         if (secret == null || secret.isBlank() || SecretReference.isVaultReference(secret)) {
             throw new AlertDeliveryException("The webhook signing secret could not be resolved from the vault");
         }
@@ -120,7 +127,7 @@ public class AlertSenders {
         if (target.urlIsVaultReference()) {
             // Resolved only now, never stored or shown resolved; the same rule as the
             // signing secret: unresolvable means no delivery.
-            url = secretResolver.resolveValue(url.strip());
+            url = secretResolver.resolveValue(url.strip(), ALERT_DELIVERY);
             if (url == null || url.isBlank() || SecretReference.isVaultReference(url)) {
                 throw new AlertDeliveryException("The webhook URL could not be resolved from the vault");
             }

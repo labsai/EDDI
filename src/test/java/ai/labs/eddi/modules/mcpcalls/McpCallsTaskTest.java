@@ -129,11 +129,11 @@ class McpCallsTaskTest {
         void execute_noToolsDiscovered_returnsEarly() throws LifecycleException {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("trigger"));
             McpCallsConfiguration config = createConfigWithCall("trigger", "myTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(null);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(null);
 
             task.execute(ctx.memory(), config);
 
-            verify(mcpToolProviderManager).discoverTools(anyList());
+            verify(mcpToolProviderManager).discoverTools(anyList(), any());
             verifyNoInteractions(memoryItemConverter);
         }
 
@@ -143,7 +143,7 @@ class McpCallsTaskTest {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("unrelated_action"));
             McpCallsConfiguration config = createConfigWithCall("specific_action", "myTool");
             McpToolsResult toolsResult = createToolsResult("myTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
 
             task.execute(ctx.memory(), config);
@@ -158,7 +158,7 @@ class McpCallsTaskTest {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("trigger"));
             McpCallsConfiguration config = createConfigWithCall("trigger", "myTool");
             McpToolsResult toolsResult = createToolsResult("myTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
             when(jsonSerialization.serialize(anyMap())).thenReturn("{}");
             when(toolsResult.executors().get("myTool").execute(any(), any())).thenReturn("result");
@@ -174,7 +174,7 @@ class McpCallsTaskTest {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("any_action"));
             McpCallsConfiguration config = createConfigWithCall("*", "myTool");
             McpToolsResult toolsResult = createToolsResult("myTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
             when(jsonSerialization.serialize(anyMap())).thenReturn("{}");
             when(toolsResult.executors().get("myTool").execute(any(), any())).thenReturn("done");
@@ -191,7 +191,7 @@ class McpCallsTaskTest {
             McpCallsConfiguration config = createConfigWithCall("trigger", "blockedTool");
             config.setToolsWhitelist(List.of("allowedTool")); // blockedTool not in whitelist
             McpToolsResult toolsResult = createToolsResult("blockedTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
 
             task.execute(ctx.memory(), config);
@@ -206,7 +206,7 @@ class McpCallsTaskTest {
             McpCallsConfiguration config = createConfigWithCall("trigger", "blockedTool");
             config.setToolsBlacklist(List.of("blockedTool"));
             McpToolsResult toolsResult = createToolsResult("blockedTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
 
             task.execute(ctx.memory(), config);
@@ -226,7 +226,7 @@ class McpCallsTaskTest {
             config.setMcpCalls(List.of(call));
 
             McpToolsResult toolsResult = createToolsResult("myTool");
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(ctx.memory())).thenReturn(new HashMap<>());
 
             task.execute(ctx.memory(), config);

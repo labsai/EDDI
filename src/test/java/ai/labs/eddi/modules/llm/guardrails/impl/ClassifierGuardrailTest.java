@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
 import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
@@ -103,7 +104,7 @@ class ClassifierGuardrailTest {
     }
 
     private StubModel install(StubModel model) throws Exception {
-        when(registry.getOrCreate(eq("ollama"), any())).thenReturn(model);
+        when(registry.getOrCreate(eq("ollama"), any(), any())).thenReturn(model);
         return model;
     }
 
@@ -316,6 +317,16 @@ class ClassifierGuardrailTest {
         assertEquals(0.002, ex.costUsd(), 1e-12);
     }
 
+    @Test
+    @DisplayName("a model key the vault grant withholds from the agent is undecided, recorded as a refusal rather than an unreachable model (#1179)")
+    void grantRefusal_undecided() throws Exception {
+        when(registry.getOrCreate(eq("ollama"), any(), any())).thenThrow(new SecretResolver.SecretNotGrantedException("not granted"));
+        var ex = assertThrows(GuardrailUndecidedException.class, () -> classifier.evaluate("hello", input(params())));
+        assertEquals(ClassifierGuardrail.REASON_UNAVAILABLE, ex.reason());
+        assertEquals(1, meterRegistry.find(ClassifierGuardrail.METRIC_DURATION).tag("provider", "secret_refused").timers().size(),
+                "the refusal is told apart from a model that could not be reached");
+    }
+
     // === transport ===
 
     @Test
@@ -327,7 +338,7 @@ class ClassifierGuardrailTest {
 
         @SuppressWarnings("unchecked")
         var captor = ArgumentCaptor.forClass(Map.class);
-        verify(registry).getOrCreate(eq("ollama"), captor.capture());
+        verify(registry).getOrCreate(eq("ollama"), captor.capture(), any());
         Map<String, String> sent = captor.getValue();
         assertEquals("shieldgemma:2b", sent.get("model"));
         assertEquals("http://classifier.guardrails.svc:11434", sent.get("baseUrl"));
@@ -377,7 +388,7 @@ class ClassifierGuardrailTest {
     @Test
     @DisplayName("an unsupported provider is unavailable")
     void unsupportedProvider() throws Exception {
-        when(registry.getOrCreate(eq("nope"), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
+        when(registry.getOrCreate(eq("nope"), any(), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
         var ex = assertThrows(GuardrailUndecidedException.class, () -> classifier.evaluate("x", input(params("provider", "nope"))));
         assertEquals(ClassifierGuardrail.REASON_UNAVAILABLE, ex.reason());
     }

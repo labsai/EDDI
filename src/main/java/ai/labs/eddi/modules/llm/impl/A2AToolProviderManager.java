@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
@@ -21,6 +22,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -43,6 +45,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -110,7 +113,30 @@ public class A2AToolProviderManager {
      */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
 
-    record CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
+    /**
+     * Bumped by every connection change before the cards are cleared, so a fetch in
+     * flight across one does not put back a card fetched with the old binding.
+     */
+    private final AtomicLong cardInvalidations = new AtomicLong();
+
+    /**
+     * The evictions of {@link #cardInvalidations} that have finished. While the two
+     * differ an eviction is in progress, and no card is published or read: a
+     * connection's registry may still hand out the old binding until it finishes.
+     */
+    private final AtomicLong cardInvalidationsFinished = new AtomicLong();
+
+    /**
+     * A cached card and the eviction generation it was published under. A reader
+     * uses it only while that generation is current: {@code get} takes no lock, so
+     * a card that slipped in between an eviction's counter bump and its clear could
+     * otherwise be read in that window.
+     */
+    record CachedAgentInfo(Map<String, Object> agentCard, long timestamp, long generation) {
+
+        CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
+            this(agentCard, timestamp, 0);
+        }
     }
 
     /** Circuit breaker state — tracks consecutive failures per agent URL. */
@@ -198,6 +224,41 @@ public class A2AToolProviderManager {
         this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
         this.maxSchemaBytesPerAgent = maxSchemaBytesPerAgent > 0 ? maxSchemaBytesPerAgent : DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT;
         this.connectionResolver = connectionResolver;
+        if (connectionResolver != null) {
+            // A card fetched with a ${connection:…} apiKey is keyed on the reference, not
+            // on the secret the connection names; a rebound connection would otherwise
+            // keep serving the card fetched with the old secret for its TTL (#1179).
+            // Connection writes are rare, so every card goes.
+            connectionResolver.onConnectionChange(new ConnectionRegistry.InvalidationListener() {
+                @Override
+                public void started() {
+                    startEviction();
+                }
+
+                @Override
+                public void finished() {
+                    finishEviction();
+                }
+            });
+        }
+        if (secretResolver != null) {
+            // Likewise a card fetched with a ${vault:…} apiKey whose value was replaced:
+            // the key digests the reference, not the value. The interval opens before the
+            // vault's caches are evicted, so a card fetched with the new value while the
+            // old grant may still be cached is never published or read. Grant-only
+            // writes report no interval, so they keep the cards.
+            secretResolver.registerInvalidationInterval(new SecretResolver.InvalidationInterval() {
+                @Override
+                public void started() {
+                    startEviction();
+                }
+
+                @Override
+                public void finished() {
+                    finishEviction();
+                }
+            });
+        }
     }
 
     /**
@@ -260,7 +321,7 @@ public class A2AToolProviderManager {
     /**
      * Discover tools from configured A2A agents.
      */
-    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents) {
+    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents, SecretAccess access) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, ToolRequestResolver> requestResolvers = new HashMap<>();
@@ -269,7 +330,18 @@ public class A2AToolProviderManager {
             return new A2AToolsResult(toolSpecs, executors, requestResolvers);
         }
 
-        for (A2AAgentConfig config : a2aAgents) {
+        for (A2AAgentConfig configured : a2aAgents) {
+            // Grant-checked, card-cached and called with ONE expansion of a ${vars:…}
+            // apiKey: a variable repointed to another secret is another card-cache key,
+            // never a hit on a card fetched with the old secret (#1179).
+            A2AAgentConfig config;
+            try {
+                config = bindCredential(configured);
+            } catch (IllegalArgumentException e) {
+                // A variable assembling a reference: this peer is skipped, the others are not.
+                LOGGER.warnf("A2A agent at %s skipped: %s", sanitizeForLog(configured.getUrl()), sanitizeForLog(e.getMessage()));
+                continue;
+            }
             if (isNullOrEmpty(config.getUrl())) {
                 LOGGER.warnf("Skipping A2A agent config with empty URL");
                 continue;
@@ -282,7 +354,40 @@ public class A2AToolProviderManager {
                     continue;
                 }
 
-                discoverAgentTools(config, toolSpecs, executors, requestResolvers);
+                // Before the agent-card cache, which is keyed on the peer and shared by
+                // every agent naming it (#1179).
+                // Settled, or -1 while an eviction runs: a grant read then may be the old
+                // binding's while the card comes from the new one.
+                long generation = cardGeneration();
+                // The binding the grant is checked for, to compare with the one in force
+                // once the card is in hand: a connection whose registry entry expired in
+                // between reloads another binding without any eviction (#1179).
+                String bindingChecked = cardKeyMaterial(config.getApiKey());
+                requireSecretGranted(config, access);
+                int specsBefore = toolSpecs.size();
+                Set<String> executorsBefore = new HashSet<>(executors.keySet());
+                Set<String> resolversBefore = new HashSet<>(requestResolvers.keySet());
+                try {
+                    discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
+                    if (generation < 0 || cardGeneration() != generation
+                            || !Objects.equals(bindingChecked, cardKeyMaterial(config.getApiKey()))) {
+                        // A credential changed while the card was looked up or fetched, so it
+                        // may be the new credential's: the grant is read again, for what is
+                        // current now, before its tools are handed out (#1179). One
+                        // re-check: a grant keyed on the reference covers every value the
+                        // card could have been fetched with; a chain of changes during one
+                        // discovery is checked at its end.
+                        requireSecretGranted(config, access);
+                    }
+                } catch (Exception e) {
+                    // Nothing of a peer that did not finish is handed out: a card that failed
+                    // half-way through conversion, or one the re-check refused, would
+                    // otherwise leave the tools added before the failure in place.
+                    toolSpecs.subList(specsBefore, toolSpecs.size()).clear();
+                    executors.keySet().retainAll(executorsBefore);
+                    requestResolvers.keySet().retainAll(resolversBefore);
+                    throw e;
+                }
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
             } catch (ConnectionException | IllegalArgumentException | IllegalStateException e) {
@@ -304,6 +409,68 @@ public class A2AToolProviderManager {
         return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
 
+    /**
+     * Refuses {@code access} a peer whose apiKey names a vault secret, directly,
+     * through a {@code ${vars:…}} or behind a {@code ${connection:…}}, that is not
+     * granted to it. The calls that follow resolve under {@link #A2A_SESSION}.
+     *
+     * @throws IllegalStateException
+     *             (a {@link SecretResolver.SecretNotGrantedException}) or a
+     *             {@link ConnectionException}, both kept away from the circuit
+     *             breaker by the caller
+     */
+    void requireSecretGranted(A2AAgentConfig config, SecretAccess access) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey)) {
+            return;
+        }
+        if (ConnectionResolver.containsReference(apiKey)) {
+            if (connectionResolver != null) {
+                connectionResolver.requireGranted(apiKey, access);
+            }
+            return;
+        }
+        // The bound apiKey is the final credential: one that still holds a variable is
+        // refused as it stands, never expanded again (see the MCP manager).
+        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(apiKey)) {
+            // A variable that does not resolve names no secret: refused rather than
+            // checked vacuously while a card fetched with its old value is cached.
+            throw new IllegalArgumentException("The apiKey of the A2A agent at " + config.getUrl() + " names a global variable that does "
+                    + "not resolve to a value, or expands past the length limit, so its vault grant cannot be checked.");
+        }
+        secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "A2A agent at " + config.getUrl());
+    }
+
+    /**
+     * {@code config} with a {@code ${vars:…}} apiKey replaced by its expansion, or
+     * {@code config} itself when there is nothing to expand.
+     */
+    A2AAgentConfig bindCredential(A2AAgentConfig config) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
+            return config;
+        }
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+        if (expanded == null || expanded.equals(apiKey)) {
+            return config;
+        }
+        var bound = new A2AAgentConfig();
+        bound.setUrl(config.getUrl());
+        bound.setName(config.getName());
+        bound.setSkillsFilter(config.getSkillsFilter());
+        bound.setTimeoutMs(config.getTimeoutMs());
+        bound.setApiKey(expanded);
+        return bound;
+    }
+
+    /**
+     * What a cached peer's own credential resolves as: the tools are shared by
+     * every agent naming the peer, so the agent grant is read for the asking agent
+     * in {@link #requireSecretGranted}, on every tool assembly, before they are
+     * handed out.
+     */
+    static final SecretAccess A2A_SESSION = SecretAccess.outsideAgentGrants("A2A peer session (agent grant checked at tool assembly)");
+
     /** Number of Agent Cards currently cached (one per peer URL, 5 minute TTL). */
     public int getActiveConnectionCount() {
         return agentCache.size();
@@ -318,7 +485,7 @@ public class A2AToolProviderManager {
 
     @SuppressWarnings("unchecked")
     private void discoverAgentTools(A2AAgentConfig config, List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors,
-                                    Map<String, ToolRequestResolver> requestResolvers)
+                                    Map<String, ToolRequestResolver> requestResolvers, SecretAccess access)
             throws Exception {
 
         // Warn once at discovery time if raw key is used
@@ -367,7 +534,7 @@ public class A2AToolProviderManager {
                 return;
             }
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config, access));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
             return;
         }
@@ -429,7 +596,7 @@ public class A2AToolProviderManager {
             }
 
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config, access));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
             admitted++;
         }
@@ -611,9 +778,10 @@ public class A2AToolProviderManager {
     private Map<String, Object> fetchAgentCard(String agentUrl, A2AAgentConfig config) throws Exception {
 
         // Check cache (5 min TTL)
-        String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
-        CachedAgentInfo cached = agentCache.get(cacheKey);
-        if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < 300_000) {
+        String cacheKey = cardCacheKey(agentUrl, cardKeyMaterial(config.getApiKey()));
+        long generation = cardGeneration();
+        CachedAgentInfo cached = cachedCard(cacheKey);
+        if (cached != null) {
             return cached.agentCard();
         }
 
@@ -628,8 +796,92 @@ public class A2AToolProviderManager {
             return null;
         }
 
-        agentCache.put(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()));
+        publishCard(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()), generation);
         return card;
+    }
+
+    /**
+     * Caches a card fetched while the eviction counter stood at {@code generation},
+     * unless an eviction ran since: the card may then be the old binding's, and is
+     * used for the call that fetched it but never published to another. The check
+     * and the insertion are one atomic step on the map, which a concurrent
+     * {@link #evictCards} clear waits for, so no caller can read the card in
+     * between.
+     *
+     * @return whether the card was cached
+     */
+    boolean publishCard(String cacheKey, CachedAgentInfo card, long generation) {
+        if (generation < 0) {
+            return false;
+        }
+        var tagged = new CachedAgentInfo(card.agentCard(), card.timestamp(), generation);
+        CachedAgentInfo stored = agentCache.compute(cacheKey,
+                (key, previous) -> cardInvalidations.get() == generation ? tagged : previous);
+        return stored == tagged;
+    }
+
+    /**
+     * The cached card for {@code cacheKey} when it is within its five-minute TTL
+     * and was published under the current eviction generation; otherwise null. The
+     * generation is read after the entry, so an eviction that started before this
+     * read always rejects a card published before it.
+     */
+    CachedAgentInfo cachedCard(String cacheKey) {
+        CachedAgentInfo cached = agentCache.get(cacheKey);
+        if (cached == null || cached.generation() != cardGeneration()
+                || System.currentTimeMillis() - cached.timestamp() >= 300_000) {
+            return null;
+        }
+        return cached;
+    }
+
+    /**
+     * Test seam: runs inside {@link #evictCards}, between the counter bump and the
+     * clear. Never set in production.
+     */
+    volatile Runnable evictionStartedHook;
+
+    /**
+     * The current eviction generation, for {@link #publishCard} and
+     * {@link #cachedCard}, or {@code -1} while an eviction is in progress, when no
+     * card may be published or read.
+     */
+    long cardGeneration() {
+        long generation = cardInvalidations.get();
+        return cardInvalidationsFinished.get() == generation ? generation : -1;
+    }
+
+    /** Drops every cached card; see {@link #cardInvalidations}. */
+    void evictCards() {
+        startEviction();
+        finishEviction();
+    }
+
+    private void startEviction() {
+        cardInvalidations.incrementAndGet();
+        Runnable hook = evictionStartedHook;
+        if (hook != null) {
+            hook.run();
+        }
+        agentCache.clear();
+    }
+
+    private void finishEviction() {
+        cardInvalidationsFinished.incrementAndGet();
+    }
+
+    /**
+     * What a card's cache key binds it to: the apiKey as configured, plus, for a
+     * {@code ${connection:…}} one, the credential references that connection names
+     * now. A connection rebound to another secret is then another key, also on a
+     * node that missed the change's event and reloaded the connection only when its
+     * registry entry expired (#1179).
+     */
+    String cardKeyMaterial(String apiKey) {
+        if (isNullOrEmpty(apiKey) || connectionResolver == null || !ConnectionResolver.containsReference(apiKey)) {
+            return apiKey;
+        }
+        return apiKey + "|" + connectionResolver.bindingFingerprint(apiKey);
     }
 
     /**
@@ -645,7 +897,7 @@ public class A2AToolProviderManager {
      * configs naming one vault reference share a card, and a literal key never
      * becomes a map key. An unauthenticated fetch keeps the bare URL as its key.
      */
-    private static String cardCacheKey(String agentUrl, String apiKey) {
+    static String cardCacheKey(String agentUrl, String apiKey) {
         if (isNullOrEmpty(apiKey)) {
             return agentUrl;
         }
@@ -798,10 +1050,10 @@ public class A2AToolProviderManager {
         return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
-    private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config) {
+    private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config, SecretAccess access) {
         return (request, memoryId) -> {
             try {
-                return executeA2ATask(endpoint, config, request);
+                return executeA2ATask(endpoint, config, request, access);
             } catch (Exception e) {
                 LOGGER.errorf("A2A tool execution failed for %s: %s", endpoint.url(), e.getMessage());
                 // The operator gets the detail, in the log above. The MODEL gets a
@@ -849,7 +1101,8 @@ public class A2AToolProviderManager {
     }
 
     @SuppressWarnings("unchecked")
-    private String executeA2ATask(RemoteEndpoint endpoint, A2AAgentConfig config, ToolExecutionRequest request) throws Exception {
+    private String executeA2ATask(RemoteEndpoint endpoint, A2AAgentConfig config, ToolExecutionRequest request, SecretAccess access)
+            throws Exception {
 
         Map<String, Object> args = MAPPER.readValue(request.arguments(), Map.class);
         String message = (String) args.getOrDefault("message", "");
@@ -870,7 +1123,9 @@ public class A2AToolProviderManager {
             requestBuilder.header("A2A-Version", "1.0");
         }
 
-        applyCredential(requestBuilder, config, agentUrl);
+        // For the agent the tools were assembled for, checked again at the call: a
+        // grant narrowed after assembly must not let this call carry the credential.
+        applyCredential(requestBuilder, config, agentUrl, false, access);
 
         // Bounded read: the body is capped as it arrives rather than buffered whole
         // and measured afterwards. A body cut short is rejected outright.
@@ -1042,6 +1297,10 @@ public class A2AToolProviderManager {
         applyCredential(requestBuilder, config, agentUrl, false);
     }
 
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
+        applyCredential(requestBuilder, config, agentUrl, discovery, A2A_SESSION);
+    }
+
     /**
      * The same credential rule, told whether it is serving discovery.
      *
@@ -1063,7 +1322,14 @@ public class A2AToolProviderManager {
      *            CALLER is deliberately not consulted, since on a HITL resume that
      *            is the approver rather than the user whose call was approved.
      */
-    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
+    /**
+     * As above, resolving the credential for {@code access}: {@link #A2A_SESSION}
+     * for the shared agent-card fetch, the calling agent for a task call, so the
+     * agent's grant is read again when the call is made (#1179).
+     */
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery,
+                         SecretAccess access) {
+        SecretAccess asking = discovery || access == null ? A2A_SESSION : access;
         String apiKey = config.getApiKey();
         if (isNullOrEmpty(apiKey)) {
             return;
@@ -1078,7 +1344,7 @@ public class A2AToolProviderManager {
             }
             ConnectionReference.requireSole(apiKey, "The apiKey of the A2A agent at " + agentUrl);
             if (discovery) {
-                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl));
+                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl), A2A_SESSION);
                 if (credential.isEmpty()) {
                     // Same rule and same warning as the MCP handshake: the agent card is
                     // fetched once and reused, so a per-caller credential must not pin one
@@ -1094,7 +1360,7 @@ public class A2AToolProviderManager {
                 requestBuilder.header(credential.get().headerName(), credential.get().headerValue());
                 return;
             }
-            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
+            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null, asking);
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
@@ -1105,7 +1371,7 @@ public class A2AToolProviderManager {
         if (vaultHostAllowlist != null) {
             vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
         }
-        String resolved = secretResolver.resolveValue(withVariables);
+        String resolved = secretResolver.resolveValue(withVariables, asking);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

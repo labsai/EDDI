@@ -238,7 +238,7 @@ class ChannelConnectionCredentialsTest {
             assertSame(cred, credentials.resolve(integration, target));
             assertSame(cred, credentials.resolve(integration, target));
             verify(resolver, times(2)).resolveService(eq("${connection:bot}"), eq(target), eq(Set.of(AuthType.OAUTH2_CLIENT_CREDENTIALS)));
-            verify(resolver, never()).resolve(any(), any(), any());
+            verify(resolver, never()).resolve(any(), any(), any(), any());
         }
 
         @Test

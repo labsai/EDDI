@@ -145,7 +145,7 @@ class AgentOrchestratorToolPauseTest {
         when(memory.getAgentVersion()).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
         // toolResponseTruncator is transparent by default
-        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         // tenant quota always allows
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");

@@ -83,7 +83,8 @@ class ToolLoopRunnerToolResultWiringTest {
         lenient().when(tracker.isWithinBudget(anyString(), anyDouble())).thenReturn(true);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(tracker);
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
         sink = mock(ConversationEventSink.class);
 
         task = new LlmConfiguration.Task();

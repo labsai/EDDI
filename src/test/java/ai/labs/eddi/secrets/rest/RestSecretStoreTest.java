@@ -344,16 +344,31 @@ class RestSecretStoreTest {
     }
 
     @Test
-    void updateGrant_doesNotInvalidateTheSecretCache() throws Exception {
-        // storeSecret has to invalidate because the plaintext may have changed. Here
-        // it cannot have, and the cache plays no part in the grant decision — so
-        // invalidating would only force a needless decrypt for every agent using the
-        // key.
+    void updateGrant_invalidatesTheSecretCache() throws Exception {
+        // The resolver checks the grant at every resolution against a cached copy
+        // (#1179): a grant change must evict it, on every node, or a narrowed grant
+        // keeps admitting the removed agent until the TTL. The grant only: the value
+        // and the clients built from it are unchanged, and a full invalidation would
+        // close every other agent's MCP sessions.
         givenSecretGrantedTo(List.of("agentOne"));
 
         rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo"), null));
 
+        verify(secretResolver).invalidateGrant(new SecretReference("default", "llm-api-key"));
         verify(secretResolver, never()).invalidateCache(any());
+        verify(secretResolver, never()).invalidateAll();
+    }
+
+    @Test
+    void updateGrant_dryRunInvalidatesNothing() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response response = rest.updateGrant("default", "llm-api-key", true,
+                new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo"), null));
+
+        assertEquals(200, response.getStatus());
+        verify(secretResolver, never()).invalidateCache(any());
+        verify(secretResolver, never()).invalidateGrant(any());
         verify(secretResolver, never()).invalidateAll();
     }
 

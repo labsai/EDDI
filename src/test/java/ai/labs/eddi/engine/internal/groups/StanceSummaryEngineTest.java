@@ -73,7 +73,7 @@ class StanceSummaryEngineTest {
 
     private static SummarizationService summarizerReturning(String summary, int inTokens, int outTokens) {
         var service = mock(SummarizationService.class);
-        when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationResult(summary, inTokens, outTokens));
         return service;
     }
@@ -250,7 +250,7 @@ class StanceSummaryEngineTest {
             var gc = conversation();
             gc.getTranscript().add(entry(AGENT_A, "We should adopt pgvector. It is cheaper.", TranscriptEntryType.OPINION));
             var service = mock(SummarizationService.class);
-            when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenThrow(new RuntimeException("model unavailable"));
 
             var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
@@ -281,7 +281,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "First position.", TranscriptEntryType.OPINION));
             gc.getTranscript().add(entry(AGENT_B, "Second position.", TranscriptEntryType.OPINION));
             var service = mock(SummarizationService.class);
-            when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenThrow(new RuntimeException("boom"))
                     .thenReturn(new SummarizationResult("Opposes the migration.", 10, 5));
 
@@ -306,7 +306,7 @@ class StanceSummaryEngineTest {
             StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
             var second = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
-            verify(service, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+            verify(service, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
             assertTrue(second.isEmpty(), "no change means no stance_updated frame");
         }
 
@@ -355,7 +355,7 @@ class StanceSummaryEngineTest {
             StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             // Twice total: once for A, once for B — never a second time for A.
-            verify(service, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+            verify(service, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
         }
 
         @Test

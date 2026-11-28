@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
@@ -110,7 +111,7 @@ class A2ATaskCredentialWiringTest {
         sent.clear();
         transportFailure.set(null);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
     }
 
     private A2AToolProviderManager manager() {
@@ -146,7 +147,8 @@ class A2ATaskCredentialWiringTest {
                     A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver,
                     TestOutbound.facade(engine, new TracePropagation(true)));
             try (Scope ignored = span.makeCurrent()) {
-                var executor = manager.discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+                var executor = manager.discoverTools(List.of(config("sk-static")), SecretAccess.outsideAgentGrants("test")).executors()
+                        .get("peer_lookup");
                 executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
             } finally {
                 span.end();
@@ -165,7 +167,8 @@ class A2ATaskCredentialWiringTest {
         @Test
         @DisplayName("a facade without propagation adds nothing")
         void nothingWithoutPropagator() {
-            var executor = manager().discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+            var executor = manager().discoverTools(List.of(config("sk-static")), SecretAccess.outsideAgentGrants("test")).executors()
+                    .get("peer_lookup");
             executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
 
             assertNull(header(sent.get(1), "traceparent"));
@@ -182,12 +185,12 @@ class A2ATaskCredentialWiringTest {
             // Two DIFFERENT tokens on purpose. Identical ones would let a task call
             // that simply reused the cached discovery header pass, and would let a
             // task call that re-resolved through the wrong entry point pass too.
-            when(connectionResolver.resolveForDiscovery(eq("${connection:sf}"), any(URI.class)))
+            when(connectionResolver.resolveForDiscovery(eq("${connection:sf}"), any(URI.class), any()))
                     .thenReturn(Optional.of(new ResolvedCredential("Authorization", "Bearer discovery-token")));
-            when(connectionResolver.resolve(eq("${connection:sf}"), any(URI.class), eq(null)))
+            when(connectionResolver.resolve(eq("${connection:sf}"), any(URI.class), eq(null), any()))
                     .thenReturn(new ResolvedCredential("Authorization", "Bearer task-token"));
 
-            var executors = manager().discoverTools(List.of(config("${connection:sf}"))).executors();
+            var executors = manager().discoverTools(List.of(config("${connection:sf}")), SecretAccess.outsideAgentGrants("test")).executors();
             var executor = executors.get("peer_lookup");
             assertNotNull(executor, () -> "discovery produced no tool to call: " + executors.keySet());
 
@@ -207,12 +210,13 @@ class A2ATaskCredentialWiringTest {
         @Test
         @DisplayName("a connection may name its own header on the task call too")
         void taskCallHonoursTheConnectionsHeaderName() {
-            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class)))
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class), any()))
                     .thenReturn(Optional.of(new ResolvedCredential("X-Api-Key", "discovery-key")));
-            when(connectionResolver.resolve(anyString(), any(URI.class), eq(null)))
+            when(connectionResolver.resolve(anyString(), any(URI.class), eq(null), any()))
                     .thenReturn(new ResolvedCredential("X-Api-Key", "task-key"));
 
-            var executor = manager().discoverTools(List.of(config("${connection:sf}"))).executors().get("peer_lookup");
+            var executor = manager().discoverTools(List.of(config("${connection:sf}")), SecretAccess.outsideAgentGrants("test")).executors()
+                    .get("peer_lookup");
             executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
 
             Hop taskRequest = sent.get(1);
@@ -232,15 +236,15 @@ class A2ATaskCredentialWiringTest {
             // The card is CACHED for five minutes and served to every conversation
             // after, so resolving it as an ordinary per-call credential would pin the
             // first caller's authority onto everybody behind them.
-            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class)))
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class), any()))
                     .thenReturn(Optional.of(new ResolvedCredential("Authorization", "Bearer discovery-token")));
 
-            manager().discoverTools(List.of(config("${connection:sf}")));
+            manager().discoverTools(List.of(config("${connection:sf}")), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, sent.size());
             assertEquals("Bearer discovery-token", header(sent.get(0), "Authorization"));
-            verify(connectionResolver).resolveForDiscovery(eq("${connection:sf}"), any(URI.class));
-            verify(connectionResolver, never()).resolve(anyString(), any(URI.class), any());
+            verify(connectionResolver).resolveForDiscovery(eq("${connection:sf}"), any(URI.class), any());
+            verify(connectionResolver, never()).resolve(anyString(), any(URI.class), any(), any());
         }
 
         @Test
@@ -248,9 +252,9 @@ class A2ATaskCredentialWiringTest {
         void withheldCredentialStillFetchesTheCard() {
             // resolveForDiscovery returning empty means "let the peer decide", not
             // "give up": a peer whose card is public must still be discoverable.
-            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class))).thenReturn(Optional.empty());
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class), any())).thenReturn(Optional.empty());
 
-            var result = manager().discoverTools(List.of(config("${connection:sf}")));
+            var result = manager().discoverTools(List.of(config("${connection:sf}")), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, sent.size(), "the request must still go out");
             assertNull(header(sent.get(0), "Authorization"),
@@ -266,7 +270,7 @@ class A2ATaskCredentialWiringTest {
         @Test
         @DisplayName("a peer's redirect is never followed, so its credential never reaches the Location")
         void redirectIsNotFollowed() {
-            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class)))
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class), any()))
                     .thenReturn(Optional.of(new ResolvedCredential("Authorization", "Bearer discovery-token")));
             OutboundEngine redirecting = hop -> {
                 sent.add(hop);
@@ -277,7 +281,7 @@ class A2ATaskCredentialWiringTest {
                     A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
                     A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver, TestOutbound.facade(redirecting));
 
-            assertTrue(manager.discoverTools(List.of(config("${connection:sf}"))).executors().isEmpty());
+            assertTrue(manager.discoverTools(List.of(config("${connection:sf}")), SecretAccess.outsideAgentGrants("test")).executors().isEmpty());
 
             assertTrue(sent.stream().noneMatch(hop -> "203.0.113.50".equals(hop.uri().getHost())),
                     "the Location must never be requested: " + sent.stream().map(Hop::uri).toList());
@@ -294,19 +298,19 @@ class A2ATaskCredentialWiringTest {
             // Opening it here suppresses discovery for EVERY user because one of them
             // has no grant, and tells the operator the peer is unreachable when it is
             // perfectly healthy. Nothing about a missing grant is healed by waiting.
-            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class)))
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class), any()))
                     .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "alice has not connected 'sf' yet"));
             var manager = manager();
             var config = config("${connection:sf}");
 
             for (int turn = 1; turn <= 4; turn++) {
-                assertTrue(manager.discoverTools(List.of(config)).executors().isEmpty(), "turn " + turn);
+                assertTrue(manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")).executors().isEmpty(), "turn " + turn);
             }
 
             // The circuit state is private; the observable consequence of an open
             // circuit is that the fourth turn is skipped before resolution is even
             // attempted. Four attempts means the circuit stayed closed.
-            verify(connectionResolver, times(4)).resolveForDiscovery(anyString(), any(URI.class));
+            verify(connectionResolver, times(4)).resolveForDiscovery(anyString(), any(URI.class), any());
             assertTrue(sent.isEmpty(), "nothing may be sent when the credential cannot be resolved");
         }
 
@@ -320,7 +324,7 @@ class A2ATaskCredentialWiringTest {
             var config = config(null);
 
             for (int turn = 1; turn <= 4; turn++) {
-                assertTrue(manager.discoverTools(List.of(config)).executors().isEmpty(), "turn " + turn);
+                assertTrue(manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")).executors().isEmpty(), "turn " + turn);
             }
 
             assertEquals(3, sent.size(), "three failed turns open the circuit; the fourth is skipped");

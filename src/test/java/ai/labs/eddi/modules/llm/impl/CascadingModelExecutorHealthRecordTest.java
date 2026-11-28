@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -97,8 +98,8 @@ class CascadingModelExecutorHealthRecordTest {
 
     private static CascadingModelExecutor.CascadeResult run(ChatModel first, ChatModel second, ConversationMemory memory) throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(first);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(second);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(first);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(second);
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(),

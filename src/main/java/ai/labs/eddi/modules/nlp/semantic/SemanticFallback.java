@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.nlp.semantic;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -14,6 +16,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -72,7 +75,13 @@ public class SemanticFallback {
     public record Match(Example example, double score) {
     }
 
-    private final Supplier<EmbeddingModel> model;
+    /**
+     * The model for the agent a turn runs for. The factory behind it checks that
+     * agent's vault grant before its cache (#1179), so the model is asked for on
+     * every classification rather than held: a parser can be shared by several
+     * agents, and one that is not granted the provider key must not embed with it.
+     */
+    private final Function<SecretAccess, EmbeddingModel> model;
     private final List<Example> examples;
     private final double minScore;
     private final LongSupplier clock;
@@ -86,14 +95,26 @@ public class SemanticFallback {
     private volatile long retryNotBefore;
 
     public SemanticFallback(Supplier<EmbeddingModel> model, List<Example> examples, double minScore) {
-        this(model, examples, minScore, System::nanoTime);
+        this(access -> model.get(), examples, minScore, System::nanoTime);
     }
 
     SemanticFallback(Supplier<EmbeddingModel> model, List<Example> examples, double minScore, LongSupplier clock) {
+        this(access -> model.get(), examples, minScore, clock);
+    }
+
+    private SemanticFallback(Function<SecretAccess, EmbeddingModel> model, List<Example> examples, double minScore, LongSupplier clock) {
         this.model = model;
         this.examples = List.copyOf(examples);
         this.minScore = minScore;
         this.clock = clock;
+    }
+
+    /**
+     * A fallback whose model is built for the agent of each turn, see
+     * {@link #classify(String, String, SecretAccess)}.
+     */
+    public static SemanticFallback perAgent(Function<SecretAccess, EmbeddingModel> model, List<Example> examples, double minScore) {
+        return new SemanticFallback(model, examples, minScore, System::nanoTime);
     }
 
     public double getMinScore() {
@@ -113,11 +134,39 @@ public class SemanticFallback {
      *         the provider failed or the thread was interrupted
      */
     public Optional<Match> classify(String input, String userLanguage) {
+        return classify(input, userLanguage, SecretAccess.agent(null));
+    }
+
+    /**
+     * As {@link #classify(String, String)}, with the model built for
+     * {@code access}. A model refused for want of a vault grant gives no match and
+     * leaves the embedded examples alone, so an agent outside the grant neither
+     * uses the key nor disturbs the agents inside it.
+     */
+    public Optional<Match> classify(String input, String userLanguage, SecretAccess access) {
         if (isNullOrEmpty(input) || examples.isEmpty() || Thread.currentThread().isInterrupted()) {
             return Optional.empty();
         }
+        // Nothing embedded yet and a failed build still backing off: do not ask the
+        // factory again on every turn.
+        if (exampleEmbeddings == null && backingOff && clock.getAsLong() - retryNotBefore < 0) {
+            return Optional.empty();
+        }
+        // The model is asked for once per classification, for this agent, and that
+        // one answer is used below: a refusal is handled here, before anything shared
+        // is touched, so it can neither clear the vectors nor start the back-off that
+        // the agents still granted would then sit out.
+        EmbeddingModel current;
+        try {
+            current = model.apply(access);
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            LOGGER.warnf("Semantic parser fallback skipped: %s", e.getMessage());
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            current = null; // the provider's failure, handled (and backed off) below
+        }
 
-        EmbeddedExamples embedded = exampleEmbeddings();
+        EmbeddedExamples embedded = exampleEmbeddings(current);
         if (embedded == null) {
             return Optional.empty();
         }
@@ -169,14 +218,14 @@ public class SemanticFallback {
      * when the model changes; {@code null} while unavailable. Synchronized so that
      * concurrent turns embed the examples once.
      */
-    private EmbeddedExamples exampleEmbeddings() {
+    private EmbeddedExamples exampleEmbeddings(EmbeddingModel current) {
         EmbeddedExamples embedded = exampleEmbeddings;
-        if (embedded != null && isCurrent(embedded)) {
+        if (embedded != null && current != null && embedded.model() == current) {
             return embedded;
         }
         synchronized (this) {
             embedded = exampleEmbeddings;
-            if (embedded != null && isCurrent(embedded)) {
+            if (embedded != null && current != null && embedded.model() == current) {
                 return embedded;
             }
             // nanoTime has an arbitrary origin: compare differences, and only once a
@@ -185,7 +234,10 @@ public class SemanticFallback {
                 return null;
             }
             try {
-                EmbeddingModel embeddingModel = model.get();
+                if (current == null) {
+                    throw new IllegalStateException("the embedding model could not be obtained");
+                }
+                EmbeddingModel embeddingModel = current;
                 List<Embedding> built = new ArrayList<>(examples.size());
                 for (int from = 0; from < examples.size(); from += EMBEDDING_BATCH_SIZE) {
                     if (Thread.currentThread().isInterrupted()) {
@@ -212,18 +264,6 @@ public class SemanticFallback {
                         RETRY_AFTER_FAILURE.toSeconds(), e.getMessage());
                 return null;
             }
-        }
-    }
-
-    /**
-     * Whether the supplier still hands out the model that embedded the examples. A
-     * supplier failure counts as a change: the rebuild then fails and backs off.
-     */
-    private boolean isCurrent(EmbeddedExamples embedded) {
-        try {
-            return model.get() == embedded.model();
-        } catch (RuntimeException e) {
-            return false;
         }
     }
 }

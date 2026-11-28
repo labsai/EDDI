@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -112,7 +113,7 @@ class McpToolProviderManagerCircuitBreakerTest {
             config.setUrl("http://failing.local");
             config.setName("failing-server");
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty(),
@@ -130,7 +131,7 @@ class McpToolProviderManagerCircuitBreakerTest {
             config.setTimeoutMs(1000L);
 
             // Will fail to connect but should at least attempt it
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(result);
             // We don't assert on toolSpecs size — the connection will fail but
@@ -148,7 +149,7 @@ class McpToolProviderManagerCircuitBreakerTest {
 
             // Each discoverTools call will fail and record a failure
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // After 3 failures, the circuit should be open

@@ -347,6 +347,7 @@
     "valuePlaceholder": "ป้อนค่า Secret…",
     "store": "บันทึก Secret",
     "storeSuccess": "บันทึก Secret \"{{key}}\" แล้ว",
+    "storeGrantWarning": "บันทึกความลับ \"{{key}}\" แล้ว — โปรดตรวจสอบสิทธิ์ของมัน",
     "descriptionLabel": "คำอธิบาย (ไม่จำเป็น)",
     "allowedHosts": "ปลายทางที่อนุญาต",
     "allowedHostsAdd": "เพิ่มโฮสต์ที่อนุญาต",

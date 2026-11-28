@@ -20,6 +20,8 @@ import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import ai.labs.eddi.modules.rag.evaluation.RetrievalMetrics;
+import ai.labs.eddi.engine.exception.SecretNotGrantedExceptionMapper;
+import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -216,6 +218,8 @@ public class RestRagIngestion implements IRestRagIngestion {
             outcome = ragIngestionService.delete(ragConfigId, documentName, knowledgeBase);
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            return secretRefused(e);
         } catch (RuntimeException e) {
             // pgvector wraps its SQLException in a RuntimeException; a store that is
             // down is the client's cue to retry, not a client error.
@@ -474,6 +478,8 @@ public class RestRagIngestion implements IRestRagIngestion {
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            return secretRefused(e);
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -515,6 +521,8 @@ public class RestRagIngestion implements IRestRagIngestion {
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            return secretRefused(e);
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -588,6 +596,8 @@ public class RestRagIngestion implements IRestRagIngestion {
                 hits = inspector.search(ragConfigId, knowledgeBase, resolved.source(), golden.query(), k, minScore);
             } catch (UnsupportedOperationException e) {
                 return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            } catch (SecretResolver.SecretNotGrantedException e) {
+                return secretRefused(e);
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Evaluating knowledge base %s failed at query %d", sanitize(ragConfigId), i);
                 return Response.status(Response.Status.BAD_GATEWAY)
@@ -767,6 +777,16 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     /**
+     * A knowledge base's embedding or store key that the vault grant withholds from
+     * knowledge-base work (which runs for no agent, so only a key granted to every
+     * agent may be used), or that does not exist. Not the provider's failure: a 502
+     * would send the operator to the provider, while the fix is the grant.
+     */
+    private static Response secretRefused(SecretResolver.SecretNotGrantedException e) {
+        return Response.status(SecretNotGrantedExceptionMapper.statusOf(e)).entity(Map.of("error", e.getMessage())).build();
+    }
+
+    /**
      * An embedding provider or vector store that failed. Said as a 502 with the
      * cause, because the cause -- a bad API key, an unreachable store -- is exactly
      * what the operator opened this view to find out.
@@ -890,7 +910,12 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
 
-        var outcome = ingestedFileService.delete(ragConfigId, resolved.knowledgeBase(), resolved.source(), fileId);
+        IngestedFileService.DeleteOutcome outcome;
+        try {
+            outcome = ingestedFileService.delete(ragConfigId, resolved.knowledgeBase(), resolved.source(), fileId);
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            return secretRefused(e);
+        }
         return switch (outcome) {
             case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "No file '" + fileId + "' on this source")).build();

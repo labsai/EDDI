@@ -72,7 +72,8 @@ class ToolLoopRunnerBudgetAccountingTest {
         lenient().when(tracker.isWithinBudget(anyString(), anyDouble())).thenReturn(true);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(tracker);
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
 
         task = new LlmConfiguration.Task();
         task.setId("budget-task");
@@ -150,7 +151,7 @@ class ToolLoopRunnerBudgetAccountingTest {
         trackCostPassed();
 
         var spend = ArgumentCaptor.forClass(ToolResponseTruncator.SummarizerSpend.class);
-        verify(truncator).truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), spend.capture());
+        verify(truncator).truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), spend.capture(), any());
         spend.getValue().charge(Map.of("inputTokens", 10, "outputTokens", 5));
 
         verify(tracker).trackToolCall(any(ToolInvocation.class), eq(CONVERSATION_ID));

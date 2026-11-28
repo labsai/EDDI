@@ -131,7 +131,7 @@ class LlmTaskSummaryCredentialIsolationTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(mock(ChatModel.class));
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(mock(ChatModel.class));
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         var props = mock(IConversationMemory.IConversationProperties.class);

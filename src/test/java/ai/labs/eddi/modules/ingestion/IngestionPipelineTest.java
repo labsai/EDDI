@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -43,6 +44,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,9 +96,9 @@ class IngestionPipelineTest {
         modelFactory = mock(EmbeddingModelFactory.class);
         embeddingModel = mock(EmbeddingModel.class);
 
-        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
-        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
+        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any()))
                 .thenReturn(embeddingModel);
         when(embeddingModel.embedAll(any())).thenAnswer(invocation -> {
             List<TextSegment> segments = invocation.getArgument(0);
@@ -187,7 +189,7 @@ class IngestionPipelineTest {
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
             ArgumentCaptor<String> kbId = ArgumentCaptor.forClass(String.class);
-            verify(storeFactory).getOrCreateForIngestion(kbId.capture(), any(RagConfiguration.class));
+            verify(storeFactory).getOrCreateForIngestion(kbId.capture(), any(RagConfiguration.class), any());
             assertEquals(KB_RESOURCE_ID, kbId.getValue(),
                     "the store must be keyed by the knowledge base's id, not by " + SOURCE_NAME + " nor by a name another knowledge base can share");
         }
@@ -251,7 +253,7 @@ class IngestionPipelineTest {
 
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
-            verify(modelFactory).getOrCreate(any(RagConfiguration.class), eq(EmbeddingInputType.DOCUMENT));
+            verify(modelFactory).getOrCreate(any(RagConfiguration.class), eq(EmbeddingInputType.DOCUMENT), any());
         }
     }
 
@@ -313,8 +315,8 @@ class IngestionPipelineTest {
         @DisplayName("a store that cannot delete is reported, not silently duplicated into")
         void unsupportedRemovalIsReported() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
-            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
-            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
             FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
 
             IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
@@ -604,7 +606,7 @@ class IngestionPipelineTest {
             var site = new FakeSite().page(SITE + "/", pageWith("Here."));
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
-            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class)))
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any()))
                     .thenReturn(new RecordingEmbeddingStore().withFailingRemoval());
 
             var gone = new FakeSite().status(SITE + "/", 404);
@@ -1193,6 +1195,35 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a sweep the vault grant refuses fails the run and keeps the chunks (#1179)")
+        void aRefusedSweepFailsTheRun() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .page(SITE + "/gone", pageWith("Will vanish."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."));
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+
+            // Nothing changed, so the sweep's delete is the run's first store use since
+            // it acquired the store: the re-check there refuses.
+            doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                    .when(storeFactory).requireGranted(any(RagConfiguration.class), any(Map.class), any());
+
+            IngestionReport report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+
+            assertTrue(String.valueOf(report.message()).contains("is not resolved for"), report.message());
+            // Pins the path: nothing was re-embedded, so the refusal came from the sweep.
+            assertEquals(0, report.documentsIngested());
+            assertFalse(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(), "not swept without the grant");
+        }
+
+        @Test
         @DisplayName("a page only briefly absent after a purge keeps its content")
         void aBrieflyAbsentPageSurvives() {
             // The sweep used to run on the first run after a purge, so a page that
@@ -1733,6 +1764,26 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("an unreadable replacement whose cleanup is refused a vault grant is one failed document, not two")
+        void aRefusedCleanupOfAnUnreadableFileCountsOnce() {
+            var ingested = fileStore.store(SOURCE_KEY, "report.pdf", "text/plain",
+                    "Quarterly results".getBytes(StandardCharsets.UTF_8));
+            var source = uploadSource();
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            fileStore.store(SOURCE_KEY, "report.pdf", "application/pdf",
+                    "not really a pdf".getBytes(StandardCharsets.UTF_8));
+            doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                    .when(storeFactory).requireGranted(any(RagConfiguration.class), any(Map.class), any());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            assertTrue(String.valueOf(report.message()).contains("is not resolved for"), report.message());
+            assertEquals(1, report.documentsFailed());
+            assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty(), "not removed without the grant");
+        }
+
+        @Test
         @DisplayName("a stored file with no text — a scan — is reported, and retires what it replaced")
         void aFileWithNoTextIsAFailure() {
             // Skipped as blank on every run before, silently: it stayed "not indexed"
@@ -1853,11 +1904,22 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("forgetting a source rethrows a refusal from the store lookup's own check, so the caller keeps the files (#1179)")
+        void forgetSourceRethrowsTheLookupsRefusal() {
+            // The grant-only pre-check passes; the lookup's check, a moment later, refuses.
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any()))
+                    .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"));
+
+            assertThrows(SecretResolver.SecretNotGrantedException.class,
+                    () -> uploadPipeline().forgetSource(KB_RESOURCE_ID, knowledgeBase(), uploadSource()));
+        }
+
+        @Test
         @DisplayName("a document forgotten while the store could not delete says so")
         void forgetDocumentReportsAnUndeletableStore() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
-            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
-            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any())).thenReturn(embeddingStore);
 
             var removed = uploadPipeline()
                     .forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), "secret.md");
@@ -1916,7 +1978,7 @@ class IngestionPipelineTest {
         }
 
         private int segmentsIn(EmbeddingStoreFactory factory) {
-            return factory.getOrCreate(KB_RESOURCE_ID, knowledgeBase())
+            return factory.getOrCreate(KB_RESOURCE_ID, knowledgeBase(), SecretAccess.outsideAgentGrants("test"))
                     .search(EmbeddingSearchRequest.builder()
                             .queryEmbedding(Embedding.from(new float[]{0.1f, 0.2f}))
                             .maxResults(100)

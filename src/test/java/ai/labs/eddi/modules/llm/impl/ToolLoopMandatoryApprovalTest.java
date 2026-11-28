@@ -180,7 +180,7 @@ class ToolLoopMandatoryApprovalTest {
         when(memory.getConversationId()).thenReturn("64b7f0c2a1d3e4f5a6b7c8a1");
         when(memory.getUserId()).thenReturn(USER_ID);
         when(memory.getCurrentStep()).thenReturn(currentStep);
-        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);

@@ -63,7 +63,7 @@ class LlmTaskCascadeRepromptPolicyTest {
         var globals = mock(GlobalVariableResolver.class);
         when(globals.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         var registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), any())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(anyString(), any(), any())).thenReturn(mock(ChatModel.class));
         var llmTask = new LlmTask(mock(IResourceClientLibrary.class), mock(IDataFactory.class), mock(IMemoryItemConverter.class),
                 mock(ITemplatingEngine.class), mock(IJsonSerialization.class), mock(PrePostUtils.class), registry, mock(IApiCallExecutor.class),
                 mock(IAgentStore.class), mock(IWorkflowStore.class), mock(RagContextProvider.class), new TokenCounterFactory(),

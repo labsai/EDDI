@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -110,13 +111,13 @@ class ChromaReplacementIT {
         GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
         SecretResolver secrets = mock(SecretResolver.class);
         when(variables.resolveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(secrets.resolveSecrets(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(secrets.resolveSecrets(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
         // Permissive target policy: the container is on loopback, which the
         // production SSRF policy would (rightly) refuse.
         storeFactory = new EmbeddingStoreFactory(variables, secrets, 50_000);
 
         modelFactory = mock(EmbeddingModelFactory.class);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class))).thenReturn(embeddingModel);
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any())).thenReturn(embeddingModel);
     }
 
     @Test
@@ -201,7 +202,7 @@ class ChromaReplacementIT {
     }
 
     private EmbeddingStore<TextSegment> store() {
-        return storeFactory.getOrCreate(ragConfigId, knowledgeBase());
+        return storeFactory.getOrCreate(ragConfigId, knowledgeBase(), SecretAccess.outsideAgentGrants("test"));
     }
 
     /**

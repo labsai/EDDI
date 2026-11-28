@@ -110,7 +110,7 @@ class ApiCallExecutorForEachTest {
         secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -412,7 +412,8 @@ class ApiCallExecutorForEachTest {
 
         @BeforeEach
         void echoingServer() {
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> ((String) inv.getArgument(0)).replace("${vault:api-key}", SUBSTITUTED));
+            when(secretResolver.resolveValue(anyString(), any()))
+                    .thenAnswer(inv -> ((String) inv.getArgument(0)).replace("${vault:api-key}", SUBSTITUTED));
             responder = request -> json(401, errorBody);
         }
 

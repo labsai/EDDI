@@ -94,7 +94,7 @@ class ConversationSummarizerCitationTest {
     }
 
     private void answer(String... summaries) {
-        var stub = when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()));
+        var stub = when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()));
         for (String summary : summaries) {
             stub = stub.thenReturn(new SummarizationService.SummarizationResult(summary, 100, 20));
         }
@@ -120,7 +120,7 @@ class ConversationSummarizerCitationTest {
         run(memory, config(false, "fallback_to_previous"), null);
 
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any(), any());
         assertFalse(instructions.getValue().contains("Cite your sources"));
         // stored although it would fail the check — the check never ran
         assertEquals(BAD, ConversationSummarizer.readSummary(memory));
@@ -216,7 +216,7 @@ class ConversationSummarizerCitationTest {
 
         var contents = ArgumentCaptor.forClass(String.class);
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService, times(2)).summarizeWithUsage(contents.capture(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(contents.capture(), instructions.capture(), anyString(), anyString(), any(), any());
         assertEquals(contents.getAllValues().get(0), contents.getAllValues().get(1), "the retry sends the same, already screened content");
         assertTrue(instructions.getAllValues().get(1).contains("number 1.000"), "the retry is told what failed");
     }
@@ -238,7 +238,7 @@ class ConversationSummarizerCitationTest {
         answer(BAD, GOOD);
         int[] admissions = {0};
         run(memory, config(true, "retry_once"), p -> ++admissions[0] == 1);
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         assertNull(ConversationSummarizer.readSummary(memory));
         assertEquals(1, count("fallback"));
     }
@@ -246,7 +246,7 @@ class ConversationSummarizerCitationTest {
     @Test
     void retryOnce_secondCallThrows_fallsBack() {
         var memory = memory();
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(new SummarizationService.SummarizationResult(BAD, 100, 20)).thenThrow(new RuntimeException("boom"));
         var usage = run(memory, config(true, "retry_once"), null);
         assertNull(ConversationSummarizer.readSummary(memory));
@@ -262,7 +262,7 @@ class ConversationSummarizerCitationTest {
         answer(GOOD);
         summarizer.updateIfNeeded(memory, config(true, "fallback_to_previous"), null, null, input -> input.replace("1,000", "[redacted]"),
                 null);
-        verify(summarizationService).summarizeWithUsage(contains("[redacted]"), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(contains("[redacted]"), anyString(), anyString(), anyString(), any(), any());
         assertNull(ConversationSummarizer.readSummary(memory));
         assertEquals(1, count("fallback"));
     }
@@ -283,7 +283,7 @@ class ConversationSummarizerCitationTest {
         // 15 + "hello" + newline + "Turn 0 — Agent: " (16) = 37; one more is the
         // output's first character
         assertEquals("hello\nh", ConversationSummarizer.stepTexts(outputs, 0, 1, 38).get(0));
-        verify(summarizationService, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
     }
 
     /**
@@ -313,7 +313,7 @@ class ConversationSummarizerCitationTest {
         run(memory, cutConfig(), null);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any(), any());
         assertTrue(content.getValue().length() <= 1000, content.getValue());
         assertFalse(content.getValue().contains("4,250"), "premise: the number lies past the part of the turn that was sent");
         assertNull(ConversationSummarizer.readSummary(memory), "a number the summarizer never saw fails the check");
@@ -356,7 +356,7 @@ class ConversationSummarizerCitationTest {
         var usage = run(memory, config(true, "retry_once"), null);
 
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any(), any());
         assertTrue(instructions.getAllValues().get(1).contains("the summary is empty"), "the retry is told what failed");
         assertEquals(GOOD, ConversationSummarizer.readSummary(memory));
         assertEquals(240, ((Number) usage.get("totalTokens")).intValue(), "both calls are reported");
@@ -371,7 +371,7 @@ class ConversationSummarizerCitationTest {
 
         run(memory, config(true, "retry_once"), null);
 
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         assertPreviousSummaryKept(memory);
         assertEquals(1, count("fallback"));
         assertEquals(0, count("retried"));
@@ -384,7 +384,7 @@ class ConversationSummarizerCitationTest {
 
         var usage = run(memory, config(true, "fallback_to_previous"), null);
 
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         assertPreviousSummaryKept(memory);
         assertEquals(120, ((Number) usage.get("totalTokens")).intValue());
         assertEquals(1, count("fallback"));
@@ -397,7 +397,7 @@ class ConversationSummarizerCitationTest {
 
         run(memory, config(true, "keep"), null);
 
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         assertPreviousSummaryKept(memory);
         assertEquals(1, count("fallback"));
         assertEquals(0, count("kept"));
@@ -410,7 +410,7 @@ class ConversationSummarizerCitationTest {
 
         var usage = run(memory, config(false, "retry_once"), null);
 
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         assertPreviousSummaryKept(memory);
         assertEquals(120, ((Number) usage.get("totalTokens")).intValue());
         assertTrue(registry.find("eddi.summary.citation.checks").counters().isEmpty());

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -40,7 +41,7 @@ class EmbeddingModelFactoryTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingModelFactory(globalVariableResolver, secretResolver);
     }
@@ -65,7 +66,8 @@ class EmbeddingModelFactoryTest {
     void unresolvedVaultReferenceFailsClosed() {
         var config = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "${vault:no-such-key}"));
 
-        var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
 
         assertTrue(e.getMessage().contains("'apiKey'"), e.getMessage());
         assertTrue(e.getMessage().contains("embedding model 'openai'"), e.getMessage());
@@ -75,8 +77,8 @@ class EmbeddingModelFactoryTest {
     void sameConfig_shouldReturnCachedInstance() {
         var config = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "test-key"));
 
-        EmbeddingModel model1 = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
-        EmbeddingModel model2 = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model1 = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
+        EmbeddingModel model2 = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertSame(model1, model2, "Same config should return cached instance");
     }
@@ -86,8 +88,8 @@ class EmbeddingModelFactoryTest {
         var config1 = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "key1"));
         var config2 = createConfig("openai", Map.of("model", "text-embedding-3-large", "apiKey", "key2"));
 
-        EmbeddingModel model1 = factory.getOrCreate(config1, EmbeddingInputType.DOCUMENT);
-        EmbeddingModel model2 = factory.getOrCreate(config2, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model1 = factory.getOrCreate(config1, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
+        EmbeddingModel model2 = factory.getOrCreate(config2, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertNotSame(model1, model2, "Different params should return different instances");
     }
@@ -99,8 +101,8 @@ class EmbeddingModelFactoryTest {
         var config1 = createConfig("openai", Map.of("apiKey", "k, model=m"));
         var config2 = createConfig("openai", Map.of("apiKey", "k", "model", "m"));
 
-        EmbeddingModel model1 = factory.getOrCreate(config1, EmbeddingInputType.DOCUMENT);
-        EmbeddingModel model2 = factory.getOrCreate(config2, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model1 = factory.getOrCreate(config1, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
+        EmbeddingModel model2 = factory.getOrCreate(config2, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertNotSame(model1, model2);
     }
@@ -108,10 +110,10 @@ class EmbeddingModelFactoryTest {
     @Test
     void clearCache_shouldEvictEntries() {
         var config = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "test-key"));
-        EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         factory.clearCache();
-        EmbeddingModel after = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel after = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertNotSame(before, after, "After clearing cache, a new instance should be created");
     }
@@ -134,13 +136,13 @@ class EmbeddingModelFactoryTest {
             verify(secretResolver).registerInvalidationListener(secretListener.capture());
 
             var config = createConfig("openai", Map.of("apiKey", "${vault:openai-key}"));
-            EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
             @SuppressWarnings("unchecked")
             Consumer<SecretReference> listener = secretListener.getValue();
             listener.accept(new SecretReference("default", "openai-key"));
 
-            assertNotSame(before, factory.getOrCreate(config, EmbeddingInputType.DOCUMENT),
+            assertNotSame(before, factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")),
                     "after the key rotated the model must be rebuilt, not served from the cache");
         }
 
@@ -151,11 +153,11 @@ class EmbeddingModelFactoryTest {
             verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
 
             var config = createConfig("openai", Map.of("apiKey", "test-key"));
-            EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
             variableListener.getValue().run();
 
-            assertNotSame(before, factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertNotSame(before, factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -163,7 +165,8 @@ class EmbeddingModelFactoryTest {
     void unsupportedProvider_shouldThrow() {
         var config = createConfig("unsupported_provider", Map.of());
 
-        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
     }
 
@@ -178,7 +181,8 @@ class EmbeddingModelFactoryTest {
     void nullProvider_shouldThrowNamingTheMissingConfiguration() {
         var config = createConfig(null, Map.of());
 
-        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
     }
 
@@ -187,7 +191,8 @@ class EmbeddingModelFactoryTest {
     void blankProvider_shouldThrowNamingTheMissingConfiguration() {
         var config = createConfig("   ", Map.of());
 
-        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
     }
 
@@ -195,7 +200,7 @@ class EmbeddingModelFactoryTest {
     void openaiProvider_shouldCreateModel() {
         var config = createConfig("openai", Map.of("apiKey", "test-key"));
 
-        EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
         assertNotNull(model);
     }
@@ -206,7 +211,7 @@ class EmbeddingModelFactoryTest {
         config.setEmbeddingProvider("openai");
         config.setEmbeddingParameters(null);
 
-        EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
         assertNotNull(model);
     }
 
@@ -218,7 +223,7 @@ class EmbeddingModelFactoryTest {
         @DisplayName("Mistral provider should create model")
         void mistralProvider_shouldCreateModel() {
             var config = createConfig("mistral", Map.of("apiKey", "test-key"));
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
         }
 
@@ -226,7 +231,8 @@ class EmbeddingModelFactoryTest {
         @DisplayName("Vertex provider without project should throw")
         void vertexProvider_noProject_shouldThrow() {
             var config = createConfig("vertex", Map.of());
-            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("project"), "Error should mention missing project");
         }
 
@@ -234,7 +240,7 @@ class EmbeddingModelFactoryTest {
         @DisplayName("Cohere provider should create model")
         void cohereProvider_shouldCreateModel() {
             var config = createConfig("cohere", Map.of("apiKey", "test-key"));
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
         }
 
@@ -242,7 +248,7 @@ class EmbeddingModelFactoryTest {
         @DisplayName("Gemini provider should create model with default task type")
         void geminiProvider_shouldCreateModel() {
             var config = createConfig("gemini", Map.of("apiKey", "test-key"));
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
         }
 
@@ -252,7 +258,7 @@ class EmbeddingModelFactoryTest {
             var config = createConfig("gemini", Map.of(
                     "apiKey", "test-key",
                     "taskType", "RETRIEVAL_QUERY"));
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
         }
 
@@ -262,7 +268,8 @@ class EmbeddingModelFactoryTest {
             var config = createConfig("gemini", Map.of(
                     "apiKey", "test-key",
                     "taskType", "INVALID_TASK"));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -271,7 +278,7 @@ class EmbeddingModelFactoryTest {
             var config = createConfig("gemini", Map.of(
                     "apiKey", "test-key",
                     "model", "gemini-embedding-002"));
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
         }
     }
@@ -361,7 +368,7 @@ class EmbeddingModelFactoryTest {
                     "model", "gemini-embedding-001",
                     "taskType", "SEMANTIC_SIMILARITY"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
             assertFalse(model instanceof InputTypedEmbeddingModel,
                     "a pinned SEMANTIC_SIMILARITY must reach the provider, so no role may be attached");
@@ -375,7 +382,7 @@ class EmbeddingModelFactoryTest {
                     "model", "gemini-embedding-001",
                     "taskType", "CLASSIFICATION"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY, SecretAccess.outsideAgentGrants("test"));
 
             assertFalse(model instanceof InputTypedEmbeddingModel,
                     "pinning must apply to both roles, or the two sides embed with different task types");
@@ -389,7 +396,7 @@ class EmbeddingModelFactoryTest {
                     "model", "gemini-embedding-001",
                     "taskType", "RETRIEVAL_DOCUMENT"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY, SecretAccess.outsideAgentGrants("test"));
 
             var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
                     "writing the default out by hand must not opt back into embedding queries as documents");
@@ -404,7 +411,7 @@ class EmbeddingModelFactoryTest {
                     "model", "gemini-embedding-2",
                     "taskType", "SEMANTIC_SIMILARITY"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY, SecretAccess.outsideAgentGrants("test"));
 
             var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
                     "langchain4j sends no task_type for an embedding-2 model and uses a role instruction instead");
@@ -418,7 +425,7 @@ class EmbeddingModelFactoryTest {
                     "apiKey", "test-key",
                     "model", "gemini-embedding-001"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test"));
 
             var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model);
             assertEquals(EmbeddingInputType.DOCUMENT, typed.inputType());
@@ -431,7 +438,7 @@ class EmbeddingModelFactoryTest {
                     "apiKey", "test-key",
                     "taskType", "SEMANTIC_SIMILARITY"));
 
-            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY, SecretAccess.outsideAgentGrants("test"));
 
             var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
                     "taskType is a Gemini parameter; it must not disable the role anywhere else");

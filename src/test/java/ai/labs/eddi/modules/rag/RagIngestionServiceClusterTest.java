@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.rag.RagIngestionService.DeleteOutcome;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -100,9 +101,9 @@ class RagIngestionServiceClusterTest {
                 return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{1f, 0f})).toList());
             }
         };
-        when(models.getOrCreate(any(), any())).thenReturn(model);
-        when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(store);
-        when(stores.getOrCreate(anyString(), any())).thenReturn(store);
+        when(models.getOrCreate(any(), any(), any())).thenReturn(model);
+        when(stores.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(store);
+        when(stores.getOrCreate(anyString(), any(), any())).thenReturn(store);
         instanceA = new RagIngestionService(models, stores, sharedCaches, cluster);
         instanceB = new RagIngestionService(models, stores, sharedCaches, cluster);
         config = new RagConfiguration();
@@ -144,7 +145,7 @@ class RagIngestionServiceClusterTest {
             assertTrue(embedding.await(5, TimeUnit.SECONDS));
 
             assertEquals(DeleteOutcome.BUSY, instanceB.delete(RAG_ID, DOC, config));
-            verify(stores, never()).getOrCreate(anyString(), any());
+            verify(stores, never()).getOrCreate(anyString(), any(), any());
         } finally {
             embeddingGate.countDown();
         }
@@ -221,7 +222,7 @@ class RagIngestionServiceClusterTest {
     @DisplayName("a lease lost between store and cleanup skips the cleanup and says both versions may remain")
     void leaseLostBeforeTheCleanupSkipsIt() {
         var spied = spy(store);
-        when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(spied);
+        when(stores.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(spied);
         doAnswer(call -> {
             call.callRealMethod();
             cluster.loseEveryLease.set(true);
@@ -240,11 +241,24 @@ class RagIngestionServiceClusterTest {
     }
 
     @Test
+    @DisplayName("a grant narrowed while the replacement waited for its lease stops it before embedding or touching the store")
+    void grantNarrowedDuringTheLeaseWaitStopsTheReplacement() {
+        doThrow(new SecretResolver.SecretNotGrantedException("narrowed")).when(models).requireGranted(any(), any(), any());
+
+        String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
+
+        assertTrue(status.startsWith("failed") && status.contains("narrowed"), status);
+        assertEquals(1, embedding.getCount(), "nothing was sent to the provider");
+        verify(stores, never()).getOrCreateForIngestion(anyString(), any(), any());
+        assertEquals(1, cluster.released.get());
+    }
+
+    @Test
     @DisplayName("the lease is released when the replacement fails")
     void leaseIsReleasedWhenTheReplacementFails() {
         var failing = spy(store);
         doThrow(new RuntimeException("connection reset")).when(failing).removeAll(any(Filter.class));
-        when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(failing);
+        when(stores.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(failing);
 
         String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
 
@@ -264,7 +278,7 @@ class RagIngestionServiceClusterTest {
 
         assertTrue(status.startsWith("failed") && status.contains("NATS"), status);
         assertEquals(List.of(), storedTexts());
-        verify(stores, never()).getOrCreateForIngestion(anyString(), any());
+        verify(stores, never()).getOrCreateForIngestion(anyString(), any(), any());
     }
 
     @Test
@@ -328,7 +342,7 @@ class RagIngestionServiceClusterTest {
     void statusIsReadableOnTheOtherInstance() {
         var unsupported = spy(store);
         doThrow(new UnsupportedOperationException("no")).when(unsupported).removeAll(any(Filter.class));
-        when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(unsupported);
+        when(stores.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(unsupported);
 
         String id = instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
 

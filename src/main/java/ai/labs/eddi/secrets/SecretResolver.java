@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -20,10 +21,14 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 /**
@@ -35,16 +40,30 @@ import java.util.function.Consumer;
  * workflow. It is called <b>after</b> Qute template processing and
  * <b>before</b> the final API call (late-binding resolution).
  * <p>
- * <b>Access model:</b> the resolver does NOT check agent permissions; it
- * resolves any valid reference that exists in the vault. Which agents may use a
- * secret is governed by {@code SecretMetadata.allowedAgents} and checked when
- * the agent is deployed, by {@link VaultGrantGate}.
+ * <b>Access model:</b> every resolution names a {@link SecretAccess}, on whose
+ * behalf the value is handed out, and the secret's agent grant
+ * ({@code SecretMetadata.allowedAgents}) is checked against it here, on every
+ * resolution, before the cache is consulted. The deploy-time gate
+ * ({@link VaultGrantGate}) still runs and still reports a misconfiguration
+ * before an agent serves traffic; this check is what makes the grant hold on a
+ * cluster, where a deployment can pass the gate on one node after a grant was
+ * written on another, or be made with {@code autoDeploy=false} where no shared
+ * record names it (#1179). Follows {@code eddi.vault.grant-enforcement}:
+ * {@code enforce} refuses, {@code warn} logs once per secret and asker and
+ * resolves, {@code off} does not read the grant.
  * <p>
- * Includes a Caffeine cache with configurable TTL to avoid repeated
- * decryption/vault calls. Cache is invalidated on secret rotation via
- * {@link #invalidateCache(SecretReference)}. Failed resolutions (not-found,
- * provider errors) are <b>never cached</b> so that newly created secrets
- * resolve immediately.
+ * Includes two Caffeine caches with the same TTL: the plaintext, and the grant.
+ * Both are keyed on the secret alone. The grant is checked for the asking
+ * access on every resolution, so a value cached for one agent is never handed
+ * to another the grant leaves out. Both are invalidated by
+ * {@link #invalidateCache(SecretReference)}, which every value and grant write
+ * calls and which reaches the other nodes of a cluster. Failed resolutions
+ * (not-found, provider errors) are <b>never cached</b> so that newly created
+ * secrets resolve immediately.
+ * <p>
+ * Callers that keep a client built from resolved values in a cache of their own
+ * (models, embedding stores, MCP and A2A clients, connection credentials) call
+ * {@link #requireGranted} before their own lookup, for the same reason.
  *
  * @author ginccc
  * @since 6.0.0
@@ -65,13 +84,145 @@ public class SecretResolver {
     private final int cacheTtlMinutes;
     private final int cacheMaxSize;
 
+    private final VaultGrantGate.Mode grantEnforcement;
+
     private Cache<String, String> cache;
+
+    /**
+     * The grant of each secret, canonicalised ({@code ["*"]} for open). Separate
+     * from the plaintext so {@link #requireGranted} can answer a caller whose own
+     * cache holds the built client, without decrypting anything.
+     */
+    private Cache<String, List<String>> grantCache;
+
+    /**
+     * The {@code warn}-mode log lines already written, one per secret and asker, so
+     * a turn loop does not repeat the same line on every resolution.
+     */
+    private Cache<String, Boolean> grantWarnings;
 
     /**
      * Bumped by every invalidation, so a resolution that was in flight across one
      * can tell that the value it read may be stale; see {@code resolveReference}.
      */
     private final AtomicLong invalidations = new AtomicLong();
+
+    /**
+     * Per-secret generations for binding a grant check to the value it releases
+     * (see {@code resolveReference}): bumped by an invalidation of a secret that
+     * hashes to the stripe, and all of them at once (through
+     * {@link #allInvalidations}) by a full invalidation. Striped rather than per
+     * key, so it is bounded; a collision costs only a retry. The global
+     * {@link #invalidations} would make every resolution retry during a bulk grant
+     * edit of unrelated secrets.
+     */
+    private final AtomicLongArray keyInvalidations = new AtomicLongArray(64);
+
+    /**
+     * The invalidations of {@link #keyInvalidations} that have finished evicting.
+     * An invalidation bumps its started count before it evicts and its finished
+     * count after, so while the two differ the caches are part-way through it: the
+     * value may be gone while the old grant is still cached. A resolution waits
+     * that out rather than pair the old grant with the new value.
+     */
+    private final AtomicLongArray keyInvalidationsFinished = new AtomicLongArray(64);
+
+    /** Bumped by {@link #invalidateAllLocal}; see {@link #keyInvalidations}. */
+    private final AtomicLong allInvalidations = new AtomicLong();
+
+    /** The finished half of {@link #allInvalidations}. */
+    private final AtomicLong allInvalidationsFinished = new AtomicLong();
+
+    /**
+     * The generation of {@code cacheKey}: changes whenever an invalidation covering
+     * it starts.
+     */
+    private long generationOf(String cacheKey) {
+        return allInvalidations.get() + keyInvalidations.get(stripeOf(cacheKey));
+    }
+
+    /**
+     * Whether every invalidation covering {@code cacheKey} that started up to
+     * {@code generation} has finished evicting. Started counts never trail finished
+     * ones, so the sums are equal exactly when both pairs are.
+     */
+    private boolean settled(String cacheKey, long generation) {
+        return allInvalidationsFinished.get() + keyInvalidationsFinished.get(stripeOf(cacheKey)) == generation;
+    }
+
+    /**
+     * How long a resolution waits for an invalidation in progress to finish
+     * evicting.
+     */
+    static final long INVALIDATION_WAIT_NANOS = 1_000_000_000L;
+
+    /**
+     * The generation of {@code cacheKey} once no invalidation of it is part-way
+     * through, or {@code -1} when one is still evicting after
+     * {@link #INVALIDATION_WAIT_NANOS}. The window is two cache evictions long.
+     */
+    private long settledGenerationOf(String cacheKey) {
+        long deadline = System.nanoTime() + INVALIDATION_WAIT_NANOS;
+        while (true) {
+            long generation = generationOf(cacheKey);
+            Runnable sampled = generationSampledHook;
+            if (sampled != null) {
+                sampled.run();
+            }
+            if (settled(cacheKey, generation)) {
+                return generation;
+            }
+            Runnable hook = awaitingInvalidationHook;
+            if (hook != null) {
+                hook.run();
+            }
+            if (System.nanoTime() - deadline > 0) {
+                return -1;
+            }
+            LockSupport.parkNanos(50_000);
+        }
+    }
+
+    private void startInvalidationOf(String cacheKey) {
+        keyInvalidations.incrementAndGet(stripeOf(cacheKey));
+    }
+
+    private void finishInvalidationOf(String cacheKey) {
+        keyInvalidationsFinished.incrementAndGet(stripeOf(cacheKey));
+    }
+
+    /**
+     * Test seam: runs inside an invalidation, after its start and (for a value
+     * invalidation) after the value's eviction but before the grant's, so a test
+     * can resolve while the caches are part-way through it. Never set in
+     * production.
+     */
+    volatile Runnable invalidationStartedHook;
+
+    /**
+     * Test seam: runs each time a resolution finds an invalidation of its secret in
+     * progress and waits for it, so a test can prove the overlap. Never set in
+     * production.
+     */
+    volatile Runnable awaitingInvalidationHook;
+
+    /**
+     * Test seam: runs between sampling a secret's generation and comparing it with
+     * the finished count, so a test can start an invalidation exactly there. Never
+     * set in production.
+     */
+    volatile Runnable generationSampledHook;
+
+    private void invalidationStarted() {
+        Runnable hook = invalidationStartedHook;
+        if (hook != null) {
+            hook.run();
+        }
+    }
+
+    private int stripeOf(String cacheKey) {
+        return Math.floorMod(cacheKey.hashCode(), keyInvalidations.length());
+    }
 
     /**
      * Listeners notified when cached secrets are invalidated. Used by downstream
@@ -95,25 +246,42 @@ public class SecretResolver {
     private Counter cacheHitCounter;
     private Counter cacheMissCounter;
     private Counter resolveErrorCounter;
+    private Counter grantRefusalCounter;
     private Timer resolveTimer;
 
     @Inject
     public SecretResolver(ISecretProvider secretProvider, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.vault.cache-ttl-minutes", defaultValue = "5") int cacheTtlMinutes,
-            @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize) {
+            @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize,
+            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME) String grantEnforcement) {
         this.secretProvider = secretProvider;
         this.meterRegistry = meterRegistry;
         this.cacheTtlMinutes = cacheTtlMinutes;
         this.cacheMaxSize = cacheMaxSize;
+        // Parsed here, strictly, as the deploy gate does: a typo must fail startup,
+        // not quietly turn the check off.
+        this.grantEnforcement = VaultGrantGate.Mode.parseStrict(grantEnforcement);
     }
 
+    /** With the shipped grant enforcement ({@code enforce}). */
+    public SecretResolver(ISecretProvider secretProvider, MeterRegistry meterRegistry, int cacheTtlMinutes, int cacheMaxSize) {
+        this(secretProvider, meterRegistry, cacheTtlMinutes, cacheMaxSize, VaultGrantGate.DEFAULT_MODE_NAME);
+    }
+
+    /**
+     * Builds the caches and metrics. Public so that the tests of a collaborator can
+     * build a real resolver, grant checks included, with {@code new}.
+     */
     @PostConstruct
-    void init() {
+    public void init() {
         this.cache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
+        this.grantCache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
+        this.grantWarnings = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(cacheMaxSize).build();
 
         this.cacheHitCounter = meterRegistry.counter("eddi.vault.cache.hits");
         this.cacheMissCounter = meterRegistry.counter("eddi.vault.cache.misses");
         this.resolveErrorCounter = meterRegistry.counter("eddi.vault.resolve.errors");
+        this.grantRefusalCounter = meterRegistry.counter("eddi.vault.grant.refusals");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.time");
 
         if (clusterEvents != null) {
@@ -121,7 +289,12 @@ public class SecretResolver {
                 if (Boolean.TRUE.equals(event.get("all"))) {
                     invalidateAllLocal();
                 } else if (event.getString("tenantId") != null && event.getString("keyName") != null) {
-                    invalidateLocal(new SecretReference(event.getString("tenantId"), event.getString("keyName")));
+                    var reference = new SecretReference(event.getString("tenantId"), event.getString("keyName"));
+                    if (Boolean.TRUE.equals(event.get(GRANT_ONLY))) {
+                        invalidateGrantLocal(reference);
+                    } else {
+                        invalidateLocal(reference);
+                    }
                 }
             });
             clusterEvents.onResync(this::invalidateAllLocal);
@@ -143,9 +316,14 @@ public class SecretResolver {
      *
      * @param params
      *            the parameter map (may contain ${vault:...} values)
+     * @param access
+     *            on whose behalf the values are resolved; see {@link SecretAccess}
      * @return a new map with vault references replaced by plaintext values
+     * @throws SecretNotGrantedException
+     *             when a referenced secret's grant does not admit {@code access}
+     *             (under {@code eddi.vault.grant-enforcement=enforce})
      */
-    public Map<String, String> resolveSecrets(Map<String, String> params) {
+    public Map<String, String> resolveSecrets(Map<String, String> params, SecretAccess access) {
         if (params == null || params.isEmpty()) {
             return params;
         }
@@ -155,7 +333,7 @@ public class SecretResolver {
         }
 
         var resolved = new HashMap<>(params);
-        resolved.replaceAll((key, value) -> resolveValue(value));
+        resolved.replaceAll((key, value) -> resolveValue(value, access));
         return resolved;
     }
 
@@ -328,9 +506,18 @@ public class SecretResolver {
      *
      * @param value
      *            the value that may contain ${vault:...} references
+     * @param access
+     *            on whose behalf the value is resolved; see {@link SecretAccess}.
+     *            {@code null} is read as an agent whose id is unknown, which fails
+     *            closed
      * @return the value with vault references replaced by plaintext
+     * @throws SecretNotGrantedException
+     *             when a referenced secret's grant does not admit {@code access}
+     *             (under {@code eddi.vault.grant-enforcement=enforce});
+     *             {@link SecretChangingException} when the secret kept changing
+     *             while its grant was to be bound to the value read (transient)
      */
-    public String resolveValue(String value) {
+    public String resolveValue(String value, SecretAccess access) {
         if (value == null || !SecretReference.isVaultReference(value)) {
             return value;
         }
@@ -339,14 +526,15 @@ public class SecretResolver {
             return value; // Passthrough
         }
 
-        return VAULT_REFERENCES.replaceAll(value, this::resolveReference);
+        SecretAccess asking = access != null ? access : SecretAccess.agent(null);
+        return VAULT_REFERENCES.replaceAll(value, match -> resolveReference(match, asking));
     }
 
     /**
      * The plaintext for one reference found by {@link #resolveValue}, or the
      * reference itself when it may not or cannot be resolved.
      */
-    private String resolveReference(ReferenceScanner.Match match) {
+    private String resolveReference(ReferenceScanner.Match match, SecretAccess access) {
         String fullMatch = match.text();
         SecretReference ref = SecretReference.of(match);
 
@@ -363,7 +551,74 @@ public class SecretResolver {
             return fullMatch;
         }
 
-        String cacheKey = ref.tenantId() + "/" + ref.keyName();
+        // The grant and the value are bound to one state of the vault: the generation
+        // is sampled before the grant is checked, and a value read after an
+        // invalidation moved it is not returned on the strength of that check — the
+        // grant may have changed in between and admit only the new value's readers
+        // (#1179). The resolution is retried against the new state; a vault that
+        // keeps changing under it is refused rather than raced. Only an invalidation
+        // of this secret counts; a resolution that reads no grant has none to bind.
+        if (grantEnforcement == VaultGrantGate.Mode.OFF || !access.checksGrant()) {
+            return resolveOnce(ref, fullMatch, access);
+        }
+        String key = cacheKey(ref);
+        for (int attempt = 0; attempt < GRANT_BINDING_ATTEMPTS; attempt++) {
+            // Not while an invalidation of this secret is part-way through: its value
+            // may already be evicted while its old grant is still cached, and the two
+            // would be read as one state.
+            long generation = settledGenerationOf(key);
+            if (generation < 0) {
+                continue;
+            }
+            String resolved;
+            try {
+                resolved = resolveOnce(ref, fullMatch, access);
+            } catch (SecretNotGrantedException refused) {
+                // As in requireGranted: a refusal read from a grant that changed
+                // meanwhile is no answer; only one bound to a settled state is final.
+                if (generationOf(key) == generation) {
+                    throw refused;
+                }
+                continue;
+            }
+            if (generationOf(key) == generation) {
+                return resolved;
+            }
+        }
+        LOGGER.warnf("Vault reference %s not resolved: the vault changed during each of %d attempts, so its grant could not be "
+                + "bound to the value read", SecretReference.describe(fullMatch), GRANT_BINDING_ATTEMPTS);
+        resolveErrorCounter.increment();
+        if (grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
+            // Transient, not a missing secret: a retry once the change settles succeeds,
+            // so a caller answers 503 rather than reporting a broken configuration.
+            throw new SecretChangingException(SecretReference.describe(fullMatch)
+                    + " is being changed, so its grant cannot be bound to the value read. Retry shortly.");
+        }
+        return fullMatch;
+    }
+
+    /**
+     * Attempts {@link #resolveReference} makes to bind a grant check to the value
+     * it releases.
+     */
+    static final int GRANT_BINDING_ATTEMPTS = 3;
+
+    /**
+     * One grant check and one read, cache or provider; see
+     * {@link #resolveReference}.
+     */
+    private String resolveOnce(SecretReference ref, String fullMatch, SecretAccess access) {
+        // The grant BEFORE the cache: the cache is keyed on the secret, not on who
+        // asks, so a value one agent put there must not reach another that the
+        // grant leaves out (#1179).
+        if (!grantAdmits(ref, access, null)) {
+            // Absent secret: left in place exactly as a failed resolution is.
+            LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
+            resolveErrorCounter.increment();
+            return fullMatch;
+        }
+
+        String cacheKey = cacheKey(ref);
 
         // Check cache first — only successful resolutions are cached
         String resolved = cache.getIfPresent(cacheKey);
@@ -378,17 +633,247 @@ public class SecretResolver {
             // Leave the original reference in place if resolution failed
             return fullMatch;
         }
-        // Only cache successful resolutions — never cache failures
-        cache.put(cacheKey, resolved);
-        if (invalidations.get() != generationBefore) {
-            // An invalidation (a delete or rotation) ran while this value was being
-            // read, so it may be the old one. Without this, the put above re-inserted
-            // a deleted or rotated value that then lived for the whole TTL. The
-            // invalidation bumps the counter BEFORE evicting, so either this check
-            // sees it, or the eviction lands after the put.
-            cache.invalidate(cacheKey);
-        }
+        // Only cache successful resolutions — never cache failures. And not a value
+        // read while an invalidation (a delete or rotation) ran: it may be the old one,
+        // and would otherwise live for the whole TTL. The check and the insertion are
+        // one atomic step on the entry, which the invalidation's eviction of the same
+        // key waits for; the invalidation bumps the counter BEFORE evicting, so either
+        // the check sees it or the eviction lands after the insertion. A put followed
+        // by a check left the entry readable in between.
+        putUnlessInvalidated(cache, cacheKey, resolved, generationBefore);
         return resolved;
+    }
+
+    /**
+     * Refuse {@code access} every vault reference in {@code references} whose grant
+     * does not admit it, without resolving anything.
+     * <p>
+     * For a caller that keeps a client built from resolved values in a cache of its
+     * own: a chat or embedding model, an embedding store, an MCP or A2A client, a
+     * connection's credential. Such a cache is keyed on the configuration, so a hit
+     * never reaches {@link #resolveValue} and would hand one agent a client built
+     * with a secret granted to another. Call this before that lookup.
+     * <p>
+     * A secret that does not exist is refused for an access the grant governs: it
+     * has no grant to read, and a cached client may still carry its old value. A
+     * reserved name is skipped; {@link #resolveValue} refuses it outright. With the
+     * vault not configured, or {@code eddi.vault.grant-enforcement=off}, this does
+     * nothing.
+     *
+     * @param references
+     *            the {@code ${vault:…}} strings, e.g. from
+     *            {@link VaultHostAllowlist#referencesIn}
+     * @param usedFor
+     *            what is being built, for the message (e.g. {@code "LLM provider
+     *            'openai'"})
+     * @throws SecretNotGrantedException
+     *             when one is refused; {@link SecretMissingException} when one does
+     *             not exist
+     */
+    public void requireGranted(Iterable<String> references, SecretAccess access, String usedFor) {
+        if (references == null || grantEnforcement == VaultGrantGate.Mode.OFF || !secretProvider.isAvailable()) {
+            return;
+        }
+        SecretAccess asking = access != null ? access : SecretAccess.agent(null);
+        if (!asking.checksGrant()) {
+            return;
+        }
+        for (String reference : references) {
+            SecretReference ref;
+            try {
+                ref = SecretReference.parse(reference);
+            } catch (IllegalArgumentException e) {
+                continue; // Not a vault reference: nothing to check.
+            }
+            if (SecretReference.isReservedKeyName(ref.keyName())) {
+                continue;
+            }
+            // The grant read is bound to one settled state of this secret, as a resolution
+            // is: not while an invalidation of it is part-way through (the value may
+            // already be evicted, and a caller fetching with it, while the old grant is
+            // still cached), and not kept if one started while the grant was read (#1179).
+            String key = cacheKey(ref);
+            boolean admitted = false;
+            boolean bound = false;
+            for (int attempt = 0; attempt < GRANT_BINDING_ATTEMPTS && !bound; attempt++) {
+                long generation = settledGenerationOf(key);
+                if (generation < 0) {
+                    continue;
+                }
+                try {
+                    admitted = grantAdmits(ref, asking, usedFor);
+                } catch (SecretNotGrantedException refused) {
+                    // A refusal read from a grant that changed meanwhile is no answer
+                    // either: only one bound to a settled state is final.
+                    if (generationOf(key) == generation) {
+                        throw refused;
+                    }
+                    continue;
+                }
+                bound = generationOf(key) == generation;
+            }
+            if (!bound) {
+                String changing = (usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
+                        + ", which is being changed; its grant cannot be checked for " + asking.describe()
+                        + " until the change has settled";
+                if (grantEnforcement == VaultGrantGate.Mode.ENFORCE) {
+                    // Transient, so not counted as a grant refusal: a retry is checked
+                    // against the settled grant.
+                    throw new SecretChangingException(changing + ", so it is refused. Retry shortly.");
+                }
+                // Warn mode refuses nothing; it says that the check it made is not bound.
+                // Names nothing taken from the reference or the caller (CodeQL treats both as
+                // sensitive); the grant warning the check below may log names the secret.
+                LOGGER.warn("A vault secret is being changed, so its grant check is not bound to a settled state; under "
+                        + "eddi.vault.grant-enforcement=warn it is checked against the grant read now");
+                admitted = grantAdmits(ref, asking, usedFor);
+            }
+            if (!admitted) {
+                // Not a grant refusal (not counted as one, refused under warn too): there
+                // is nothing to admit, and a cached client may still carry the old value.
+                throw new SecretMissingException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
+                        + ", which does not exist (it may just have been deleted), so its grant cannot be checked for "
+                        + asking.describe() + " and it is refused.");
+            }
+        }
+    }
+
+    /**
+     * {@link #requireGranted(Iterable, SecretAccess, String)} for every vault
+     * reference in the values of {@code params}.
+     */
+    public void requireGranted(Map<String, String> params, SecretAccess access, String usedFor) {
+        if (params == null || params.isEmpty()) {
+            return;
+        }
+        requireGranted(VaultHostAllowlist.referencesIn(params.values()), access, usedFor);
+    }
+
+    /** The configured grant enforcement mode. */
+    public VaultGrantGate.Mode grantEnforcement() {
+        return grantEnforcement;
+    }
+
+    /**
+     * Whether {@code access} may have {@code ref}, by its grant.
+     *
+     * @return {@code false} only when the secret does not exist (the caller decides
+     *         what that means); {@code true} when admitted, when the mode or the
+     *         access does not check grants, or in {@code warn} mode after logging
+     * @throws SecretNotGrantedException
+     *             when refused under {@code enforce}, including when the grant
+     *             could not be read
+     */
+    private boolean grantAdmits(SecretReference ref, SecretAccess access, String usedFor) {
+        if (grantEnforcement == VaultGrantGate.Mode.OFF || !access.checksGrant()) {
+            return true;
+        }
+        List<String> grant;
+        try {
+            grant = grantOf(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            return false;
+        } catch (ISecretProvider.SecretProviderException | RuntimeException e) {
+            // Fail closed: a grant that cannot be read is not a grant that admits.
+            LOGGER.errorf("Could not read the grant of %s for %s: %s", sanitize(ref.toReferenceString()), sanitize(access.describe()),
+                    sanitize(e.getMessage()));
+            return refuse(ref, access, usedFor, "its grant could not be read");
+        }
+        if (access.permits(grant)) {
+            return true;
+        }
+        return refuse(ref, access, usedFor, "its grant (allowedAgents) does not include it");
+    }
+
+    /** Refuses under {@code enforce}; logs once and admits under {@code warn}. */
+    private boolean refuse(SecretReference ref, SecretAccess access, String usedFor, String why) {
+        String message = "Vault secret " + ref.toReferenceString() + " is not resolved for " + access.describe()
+                + (usedFor != null ? " (" + usedFor + ")" : "") + ": " + why + ". The grant is checked whenever a secret is resolved, "
+                + "not only when an agent is deployed. " + fixFor(ref, access);
+        if (grantEnforcement == VaultGrantGate.Mode.WARN) {
+            String warnedKey = cacheKey(ref) + "|" + access.kind() + "|" + access.agentId() + "|" + access.purpose();
+            if (grantWarnings.asMap().putIfAbsent(warnedKey, Boolean.TRUE) == null) {
+                LOGGER.warn(sanitize(message) + " Resolved anyway (eddi.vault.grant-enforcement=warn); set it to 'enforce' to refuse.");
+            }
+            return true;
+        }
+        grantRefusalCounter.increment();
+        LOGGER.warn(sanitize(message));
+        throw new SecretNotGrantedException(message);
+    }
+
+    private static String fixFor(SecretReference ref, SecretAccess access) {
+        if (access.kind() == SecretAccess.Kind.AGENT && access.agentId() != null) {
+            return "Fix (eddi-admin): " + VaultGrantGate.appendEndpoint(ref, access.agentId()) + ", or remove the reference.";
+        }
+        return "Only a secret granted to every agent (allowedAgents [\"*\"]) may be used here: widen its grant, or use another secret.";
+    }
+
+    /** The grant of {@code ref}, from the grant cache or the provider. */
+    private List<String> grantOf(SecretReference ref) throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        String key = cacheKey(ref);
+        List<String> grant = grantCache.getIfPresent(key);
+        if (grant != null) {
+            return grant;
+        }
+        long generationBefore = invalidations.get();
+        SecretMetadata metadata = secretProvider.getMetadata(ref);
+        if (metadata == null) {
+            throw new ISecretProvider.SecretProviderException("No metadata returned for " + ref.toReferenceString());
+        }
+        grant = SecretMetadata.canonicalGrant(metadata.allowedAgents());
+        // A grant write that raced this read keeps it out of the cache, by the same
+        // atomic rule as the value's: inserted and then removed, an old grant was
+        // readable in between, by a resolution that then read the new value.
+        putUnlessInvalidated(grantCache, key, grant, generationBefore);
+        return grant;
+    }
+
+    /**
+     * Caches {@code value} under {@code key} unless an invalidation started since
+     * {@code generationBefore}; the check and the insertion are one atomic step on
+     * the entry.
+     */
+    private <V> void putUnlessInvalidated(Cache<String, V> target, String key, V value, long generationBefore) {
+        target.asMap().compute(key, (k, previous) -> invalidations.get() == generationBefore ? value : previous);
+    }
+
+    private static String cacheKey(SecretReference ref) {
+        return ref.tenantId() + "/" + ref.keyName();
+    }
+
+    /**
+     * A secret's agent grant does not admit the access it was resolved for. Never
+     * carries a value: the message names the reference, the asker and the fix.
+     */
+    public static class SecretNotGrantedException extends IllegalStateException {
+        public SecretNotGrantedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * {@link #requireGranted} met a reference to a secret that does not exist. A
+     * {@link SecretNotGrantedException} so that every caller fails closed on it the
+     * same way, but a configuration error rather than a refusal: it is raised in
+     * {@code warn} mode too, and is not counted in
+     * {@code eddi.vault.grant.refusals}.
+     */
+    public static class SecretMissingException extends SecretNotGrantedException {
+        public SecretMissingException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A secret whose invalidation did not settle while its grant was to be checked:
+     * refused, but transient (a retry succeeds), so a REST caller gets 503 rather
+     * than 403 and the grant refusal counter is not touched (#1179).
+     */
+    public static class SecretChangingException extends SecretNotGrantedException {
+        public SecretChangingException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -430,11 +915,62 @@ public class SecretResolver {
      * re-published).
      */
     public void invalidateLocal(SecretReference reference) {
-        String cacheKey = reference.tenantId() + "/" + reference.keyName();
+        String cacheKey = cacheKey(reference);
         invalidations.incrementAndGet();
-        cache.invalidate(cacheKey);
+        startInvalidationOf(cacheKey);
+        List<InvalidationInterval> intervals = List.copyOf(invalidationIntervals);
+        try {
+            intervalsStarted(intervals);
+            cache.invalidate(cacheKey);
+            invalidationStarted();
+            grantCache.invalidate(cacheKey);
+        } finally {
+            finishInvalidationOf(cacheKey);
+            intervalsFinished(intervals);
+        }
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
+    }
+
+    /**
+     * Event field marking a {@code SECRET_CHANGED} that changed the agent grant
+     * only.
+     */
+    static final String GRANT_ONLY = "grantOnly";
+
+    /**
+     * Evicts the cached agent grant of {@code reference}, on every node, and
+     * nothing else: for a write that changed {@code allowedAgents} alone. The value
+     * and the host list are unchanged, so the plaintext cache and every client
+     * built from the secret stay valid; the grant is read again at the next
+     * resolution and at the next pre-cache check (#1179). Unlike
+     * {@link #invalidateCache}, no invalidation listener runs, so a grant edit does
+     * not close the MCP sessions or drop the models that other agents are using. A
+     * node of an older version reads the event as a full invalidation, which is
+     * merely more than needed.
+     */
+    public void invalidateGrant(SecretReference reference) {
+        invalidateGrantLocal(reference);
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.SECRET_CHANGED,
+                    Map.of("tenantId", reference.tenantId(), "keyName", reference.keyName(), GRANT_ONLY, true));
+        }
+    }
+
+    /** The local half of {@link #invalidateGrant}. */
+    public void invalidateGrantLocal(SecretReference reference) {
+        String cacheKey = cacheKey(reference);
+        // The generation moves too, so a grant read racing this write is not kept
+        // (see grantOf).
+        invalidations.incrementAndGet();
+        startInvalidationOf(cacheKey);
+        try {
+            invalidationStarted();
+            grantCache.invalidate(cacheKey);
+        } finally {
+            finishInvalidationOf(cacheKey);
+        }
+        LOGGER.infof("Grant cache invalidated for: %s", sanitize(cacheKey));
     }
 
     /**
@@ -450,7 +986,16 @@ public class SecretResolver {
     /** The local half of {@link #invalidateAll}; see {@link #invalidateLocal}. */
     public void invalidateAllLocal() {
         invalidations.incrementAndGet();
-        cache.invalidateAll();
+        allInvalidations.incrementAndGet();
+        List<InvalidationInterval> intervals = List.copyOf(invalidationIntervals);
+        try {
+            intervalsStarted(intervals);
+            cache.invalidateAll();
+            grantCache.invalidateAll();
+        } finally {
+            allInvalidationsFinished.incrementAndGet();
+            intervalsFinished(intervals);
+        }
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);
     }
@@ -467,6 +1012,48 @@ public class SecretResolver {
      */
     public void registerInvalidationListener(Consumer<SecretReference> listener) {
         invalidationListeners.add(listener);
+    }
+
+    /**
+     * Told when a value invalidation (a rotation, a delete, or all secrets) starts,
+     * before any cache is evicted, and when its evictions have finished. Unlike an
+     * {@link #registerInvalidationListener invalidation listener}, which runs after
+     * the evictions, this lets a cache of things fetched with a secret treat the
+     * whole interval as in progress: something fetched with the new value while the
+     * old grant may still be cached is never served on that grant's strength
+     * (#1179). Grant-only writes are not reported.
+     */
+    public interface InvalidationInterval {
+        void started();
+
+        void finished();
+    }
+
+    /** Registers {@code interval}; see {@link InvalidationInterval}. */
+    public void registerInvalidationInterval(InvalidationInterval interval) {
+        invalidationIntervals.add(interval);
+    }
+
+    private final List<InvalidationInterval> invalidationIntervals = new CopyOnWriteArrayList<>();
+
+    private static void intervalsStarted(List<InvalidationInterval> intervals) {
+        for (InvalidationInterval interval : intervals) {
+            try {
+                interval.started();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "A secret invalidation interval failed to start");
+            }
+        }
+    }
+
+    private static void intervalsFinished(List<InvalidationInterval> intervals) {
+        for (InvalidationInterval interval : intervals) {
+            try {
+                interval.finished();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "A secret invalidation interval failed to finish");
+            }
+        }
     }
 
     private void fireInvalidationListeners(SecretReference reference) {

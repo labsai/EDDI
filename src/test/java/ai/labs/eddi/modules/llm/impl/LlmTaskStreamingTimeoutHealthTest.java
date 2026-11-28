@@ -73,9 +73,9 @@ class LlmTaskStreamingTimeoutHealthTest {
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(memoryItemConverter.convert(any())).thenAnswer(inv -> new HashMap<String, Object>());
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(mock(ChatModel.class));
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(mock(ChatModel.class));
         // A stream that never answers: the backstop ends it with no text.
-        lenient().when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(mock(StreamingChatModel.class));
+        lenient().when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(mock(StreamingChatModel.class));
         var counterweightService = mock(CounterweightService.class);
         lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         var identityMaskingService = mock(IdentityMaskingService.class);
@@ -136,7 +136,7 @@ class LlmTaskStreamingTimeoutHealthTest {
     void cascadeEndingInATimeout() throws Exception {
         ChatModel failing = mock(ChatModel.class);
         when(failing.chat(anyList())).thenThrow(new IllegalStateException("provider down"));
-        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(failing);
+        when(chatModelRegistry.getOrCreate(eq("openai"), any(), any())).thenReturn(failing);
         var config = config(null);
         var cascade = new LlmConfiguration.ModelCascadeConfig();
         cascade.setEnabled(true);
