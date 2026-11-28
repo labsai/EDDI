@@ -43,6 +43,12 @@ export interface ChannelTarget {
   targetId: string;
   observeMode: boolean;
   observeConfig: ObserveConfig | null;
+  /** Email only: handles that address this target as `@handle` in the sender's own text. */
+  mentions?: string[];
+  /** Email only: aliases or plus-addresses of the mailbox that address this target in To or Cc. */
+  addresses?: string[];
+  /** Email only: sender patterns; when set, only matching authenticated senders reach this target. */
+  allowedSenders?: string[];
 }
 
 export interface ChannelIntegrationConfiguration {

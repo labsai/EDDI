@@ -123,6 +123,32 @@ public record InboundMail(String messageId, boolean syntheticMessageId, String i
     }
 
     /**
+     * This message as its authentication vouches for it: under an aligned pass, the
+     * headers that steer where it goes are read only when the aligned signature
+     * wholly covers them: an uncovered {@code Subject} is no subject (no
+     * trigger-word routing), an uncovered {@code Reply-To} none (the reply goes to
+     * the authenticated {@code From}), and {@code To} / {@code Cc} keep only their
+     * signed instances (no added plus-tag). {@code In-Reply-To}, {@code References}
+     * and {@code Date} are kept. Without an aligned pass the message is returned as
+     * it is ({@link SignedHeaders#unrestricted()}). The Message-ID is kept, as the
+     * ledger's key; a caller deduplicating an authenticated mail whose Message-ID
+     * is unsigned uses {@link SignedHeaders#signatureDigest()} as well.
+     */
+    public InboundMail signedView() {
+        SignedHeaders signed = authentication.signedHeaders();
+        if (!signed.restricted()) {
+            return this;
+        }
+        // In-Reply-To, References and Date are kept even unsigned: Gmail does not sign
+        // the thread headers, a continuation needs the authenticated sender to be the
+        // conversation's own (so a forged id can only reach the sender's own
+        // conversation), and replays are held off by the signature age and digest.
+        return new InboundMail(messageId, syntheticMessageId, inReplyTo, references, from, signed.covers("reply-to") ? replyTo : List.of(),
+                signed.to(), signed.cc(), signed.covers("subject") ? subject : "", date, text, bodySource, quotedHistoryRemoved,
+                textTruncated, attachments, loopSignals, deliveryReport, authentication, anomalies, rawSize);
+    }
+
+    /**
      * No subject, body, addresses or ids: this record ends up in log lines, and all
      * of those are personal data or attacker text.
      */

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -73,6 +74,18 @@ class EmailIntegrationDirectoryTest {
     @DisplayName("scan lists every email integration and skips a descriptor it cannot parse")
     void skipsUnparseable() {
         assertEquals(List.of(FIRST, SECOND), directory.scan().stream().map(EmailIntegrationDirectory.EmailIntegration::id).toList());
+    }
+
+    @Test
+    @DisplayName("another integration's aliases count among its addresses: mail from them is that integration's own")
+    void otherAddressesIncludeAliases() throws Exception {
+        var second = new ChannelIntegrationConfiguration();
+        second.setChannelType("email");
+        second.setPlatformConfig(Map.of("mode", "trigger", "address", "orders@contoso.com", "aliases", "sales@contoso.com"));
+        when(channelStore.read(eq(SECOND), any())).thenReturn(second);
+
+        assertEquals(Set.of("orders@contoso.com", "sales@contoso.com"), directory.otherAddresses(FIRST));
+        assertEquals(Set.of("invoices@contoso.com"), directory.otherAddresses(SECOND));
     }
 
     @Test

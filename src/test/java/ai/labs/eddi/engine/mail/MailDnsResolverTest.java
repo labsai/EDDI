@@ -106,7 +106,7 @@ class MailDnsResolverTest {
         }
 
         @Test
-        @DisplayName("negative answers are cached; temporary failures are not")
+        @DisplayName("negative answers are cached; temporary failures briefly, so a slow server costs one timeout")
         void negativeAndTemporary() {
             MailDnsResolver resolver = resolver(n -> n.startsWith("missing")
                     ? new RawAnswer(Status.NOT_FOUND, List.of(), null)
@@ -115,9 +115,12 @@ class MailDnsResolverTest {
             resolver.lookupTxt("missing.example.com", resolver.newBudget());
             resolver.lookupTxt("missing.example.com", resolver.newBudget());
             assertEquals(1, queries.get());
+            assertEquals(Status.TEMPFAIL, resolver.lookupTxt("flaky.example.com", resolver.newBudget()).status());
+            assertEquals(Status.TEMPFAIL, resolver.lookupTxt("flaky.example.com", resolver.newBudget()).status());
+            assertEquals(2, queries.get(), "the second temporary failure came from the cache");
+            ticker.advance(MailDnsResolver.TEMPFAIL_TTL.plusSeconds(1));
             resolver.lookupTxt("flaky.example.com", resolver.newBudget());
-            resolver.lookupTxt("flaky.example.com", resolver.newBudget());
-            assertEquals(3, queries.get());
+            assertEquals(3, queries.get(), "and expired before a deferred mail's retry");
         }
 
         @Test

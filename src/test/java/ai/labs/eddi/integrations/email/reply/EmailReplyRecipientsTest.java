@@ -146,6 +146,17 @@ class EmailReplyRecipientsTest {
     }
 
     @Test
+    @DisplayName("a Reply-To that is an alias or a plus-address of the mailbox or an alias is the integration's own")
+    void replyToOwnAlias() {
+        var honoured = settings(Map.of("honorReplyTo", "true", "aliases", "team@contoso.com"));
+        for (String own : List.of("team@contoso.com", "support+urgent@contoso.com", "team+x@contoso.com")) {
+            assertEquals("own_address", decide(honoured, inbound(State.DONE), mailWith("replyTo", List.of(own)), PER_SENDER).refusal(), own);
+        }
+        assertEquals("teamlead@contoso.com",
+                decide(honoured, inbound(State.DONE), mailWith("replyTo", List.of("teamlead@contoso.com")), PER_SENDER).recipient());
+    }
+
+    @Test
     @DisplayName("never to the integration's own address")
     void ownAddress() {
         var decision = decide(settings(), inbound("in-3", EmailReplyTestSupport.MESSAGE_ID, MAILBOX, State.DONE),

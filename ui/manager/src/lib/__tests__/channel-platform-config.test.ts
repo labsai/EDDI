@@ -23,7 +23,7 @@ const SLACK = {
   signingSecret: "${vault:slack-signing}",
   hitlApprovalChannel: "C0999",
 };
-const FIXED = { mode: "trigger", transport: "imap" };
+const FIXED = { mode: "trigger", actWhen: "addressed", transport: "imap" };
 
 describe("platformConfigForType", () => {
   it("webhook → email keeps nothing but the fixed mode and transport", () => {

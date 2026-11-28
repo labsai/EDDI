@@ -127,7 +127,7 @@ public final class EmailReplyRecipients {
             return Decision.refuse("identity_mismatch");
         }
         String recipient = settings.honorReplyTo() ? singleReplyTo(stepMail).orElse(sender) : sender;
-        if (recipient.equals(settings.address())) {
+        if (isOwn(settings, recipient)) {
             return Decision.refuse("own_address");
         }
         return new Decision(recipient, null);
@@ -152,6 +152,18 @@ public final class EmailReplyRecipients {
     /**
      * The one valid {@code Reply-To} address of the step's mail, if exactly one.
      */
+    /**
+     * The integration's address, an alias, or a plus-address of either: a reply
+     * there would come back into the mailbox, and an alias that is a distribution
+     * list would mail all of its members.
+     */
+    static boolean isOwn(EmailChannelSettings settings, String recipient) {
+        if (settings.isOwnAddress(recipient) || EmailChannelSettings.isPlusAddressOf(recipient, settings.address())) {
+            return true;
+        }
+        return settings.aliases().stream().anyMatch(alias -> EmailChannelSettings.isPlusAddressOf(recipient, alias));
+    }
+
     static Optional<String> singleReplyTo(Map<String, Object> stepMail) {
         if (!(stepMail.get("replyTo") instanceof List<?> replyTo) || replyTo.size() != 1 || !(replyTo.get(0) instanceof String only)) {
             return Optional.empty();

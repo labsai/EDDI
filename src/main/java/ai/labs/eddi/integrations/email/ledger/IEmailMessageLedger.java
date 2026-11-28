@@ -194,10 +194,24 @@ public interface IEmailMessageLedger {
      *            when it last changed
      * @param expiresAt
      *            when retention removes it
+     * @param threadKey
+     *            for a {@link Kind#REPLY}, the thread it answers —
+     *            {@code sha256(integrationId + "\n" + threadRoot)}, see
+     *            {@code EmailThreads} — so a thread's replies are counted together
+     *            whoever they went to; null on every other row and on replies
+     *            written before it existed (email v2 plan §7.7)
      */
     record LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId, String sourceRef,
             String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken, String providerId,
-            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String threadKey) {
+
+        /** A row of no thread. */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts,
+                    nextAttemptAt, claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, null);
+        }
 
         public LedgerEntry {
             Objects.requireNonNull(id, "id");
@@ -342,6 +356,15 @@ public interface IEmailMessageLedger {
      * ({@code maxRepliesPerThreadPerHour}), counted cluster-wide.
      */
     long countByConversationSince(String conversationId, Kind kind, Instant since);
+
+    /**
+     * How many {@code kind} rows of {@code integrationId} with {@code threadKey}
+     * were created at or after {@code since} and not {@link State#SUPPRESSED} — the
+     * per-thread reply budget ({@code maxRepliesPerThreadPerHour}) across every
+     * conversation of one mail thread, counted cluster-wide. Rows without a thread
+     * key never count.
+     */
+    long countByThreadSince(String integrationId, String threadKey, Kind kind, Instant since);
 
     /** Rows addressed to {@code recipient} (normalised), for GDPR export. */
     List<LedgerEntry> findByRecipient(String recipient);
