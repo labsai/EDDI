@@ -413,19 +413,30 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Whether {@code failure}'s cause chain holds a timeout (the bridge's backstop
-     * or idle timer).
+     * Whether {@code failure}'s cause chain holds a stream timeout (the bridge's
+     * backstop or idle timer). An attempt cut by the turn deadline is not one: the
+     * turn is out of time, and its own deadline handling decides how it ends.
      */
     private static boolean timedOut(Throwable failure) {
+        boolean streamTimeout = false;
         Throwable current = failure;
         for (int depth = 0; current != null && depth < 16; depth++) {
-            if (current instanceof TimeoutException) {
-                return true;
+            if (current instanceof TimeoutException timeout) {
+                if (timeout.getMessage() != null && timeout.getMessage().endsWith(TURN_DEADLINE_TIMEOUT_SUFFIX)) {
+                    return false;
+                }
+                streamTimeout = true;
             }
             current = current.getCause();
         }
-        return false;
+        return streamTimeout;
     }
+
+    /**
+     * How RetryConfiguration words an attempt the turn deadline cut ("… timed out
+     * after Nms (turn deadline)").
+     */
+    private static final String TURN_DEADLINE_TIMEOUT_SUFFIX = "(turn deadline)";
 
     /**
      * A timeout that forwarded nothing, handed to the task's onStreamingTimeout
