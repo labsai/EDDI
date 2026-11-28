@@ -556,6 +556,13 @@ public class TeamCadenceService {
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Deleted — release the claim and return the pulled tasks; holding the
             // workspace hostage to a vanished discussion would stall every future fire.
+            // But not while a leg of it still runs: deleting the document signals a
+            // local leg without waiting for it, and a leg on another node stops only at
+            // its next write. Returning its tasks now would let another run execute
+            // them alongside it, so the claim is kept until the leg has stopped.
+            if (legStillRunning(run.discussionId())) {
+                return Settled.IN_FLIGHT;
+            }
             LOGGER.warnf("Cadence discussion %s for group %s is gone — releasing the claim",
                     run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()));
             return written(writebackFailure(workspace, run, null, 0));
@@ -566,7 +573,7 @@ public class TeamCadenceService {
             // releasing needs a read that shows the run has ended. Past the TTL it is
             // cancelled, so a live run stops; once it reads again it is CANCELLED and
             // written back the ordinary way. A document that never reads again is
-            // released by deleting it (the not-found arm above).
+            // released by deleting it (the not-found arm above), once no leg of it runs.
             if (pastTtl(run)) {
                 LOGGER.warnf("Cadence discussion %s for group %s is unreadable (%s) past the %s claim TTL — cancelling it "
                         + "and keeping the claim until it reads as ended; delete the discussion to release it",
@@ -579,10 +586,11 @@ public class TeamCadenceService {
             }
             return Settled.IN_FLIGHT;
         }
-        if (isEnded(gc.getState()) && legStillRunning(run.discussionId())) {
+        GroupConversationState endedAs = endedAs(gc);
+        if (isEnded(endedAs) && legStillRunning(run.discussionId())) {
             return Settled.IN_FLIGHT;
         }
-        return switch (gc.getState()) {
+        return switch (endedAs) {
             // A lost settle race means another reconciler (or a fresh claim) got
             // there first — this caller must treat the workspace as busy and let
             // the next fire read fresh state.
@@ -598,6 +606,12 @@ public class TeamCadenceService {
             // later: when
             // adding one, decide by hand which arm it belongs to.
             case FAILED, REJECTED, CANCELLED -> written(writebackFailure(workspace, run, gc, 0));
+            // Closed before the close recorded the state it closed from (a document
+            // closed by an older build): the run has ended -- close accepts only ended
+            // states -- but how is unknown, so it is written back as a stop. Waiting
+            // for the claim TTL instead, as the default arm would, wedged the team:
+            // a cancel cannot move a CLOSED document, so the claim was never released.
+            case CLOSED -> written(writebackFailure(workspace, run, gc, 0));
             // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
             // has been held past its TTL. See reclaimIfStale.
             default -> reclaimIfStale(workspace, run, gc);
@@ -653,7 +667,7 @@ public class TeamCadenceService {
                     gc.getId(), e.getClass().getSimpleName());
             return Settled.IN_FLIGHT;
         }
-        if (!isEnded(after.getState())) {
+        if (!isEnded(endedAs(after))) {
             LOGGER.infof("Cadence discussion %s is still running after the cancel (state %s) — keeping the claim "
                     + "until it ends, so its writeback sees the tasks it finished", gc.getId(), after.getState());
             return Settled.IN_FLIGHT;
@@ -668,7 +682,7 @@ public class TeamCadenceService {
         // any other ended run: a graceful cancel lets the current phase finish, so a
         // run can still end COMPLETED; a person can still have rejected it, and a
         // rejection at a PHASE pause keeps that rule rather than counting as a stop.
-        boolean won = after.getState() == GroupConversationState.COMPLETED
+        boolean won = endedAs(after) == GroupConversationState.COMPLETED
                 ? writebackCompleted(workspace, run, after, 0)
                 : writebackFailure(workspace, run, after, 0);
         if (won) {
@@ -709,10 +723,28 @@ public class TeamCadenceService {
         return true;
     }
 
-    /** States a discussion does not leave (stored): no further phase starts. */
+    /**
+     * States a discussion does not leave (stored): no further phase starts.
+     * {@code CLOSED} is one: close accepts only the other four.
+     */
     private static boolean isEnded(GroupConversationState state) {
         return state == GroupConversationState.COMPLETED || state == GroupConversationState.FAILED
-                || state == GroupConversationState.REJECTED || state == GroupConversationState.CANCELLED;
+                || state == GroupConversationState.REJECTED || state == GroupConversationState.CANCELLED
+                || state == GroupConversationState.CLOSED;
+    }
+
+    /**
+     * The state {@code gc}'s run ended in, as the writeback reads it: for a
+     * {@code CLOSED} discussion the state it was closed from, because a close after
+     * the run ended says nothing about how it ended. A {@code CLOSED} document
+     * without that record (closed by an older build) stays {@code CLOSED}.
+     */
+    static GroupConversationState endedAs(GroupConversation gc) {
+        GroupConversationState state = gc.getState();
+        if (state == GroupConversationState.CLOSED && gc.getClosedFromState() != null) {
+            return gc.getClosedFromState();
+        }
+        return state;
     }
 
     /**
@@ -922,7 +954,7 @@ public class TeamCadenceService {
      * pause is not: the person declined the phase's whole output.
      */
     static boolean keepsFinishedTasks(GroupConversation gc) {
-        return switch (gc.getState()) {
+        return switch (endedAs(gc)) {
             case FAILED, CANCELLED -> true;
             case REJECTED -> gc.getHitlPauseType() == HitlPauseType.TASK;
             default -> false;

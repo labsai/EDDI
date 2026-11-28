@@ -242,6 +242,45 @@ class GroupConversationStoreTest {
     }
 
     @Test
+    @DisplayName("compareAndSetState — a close records the state it closed from, in the same conditional write")
+    void compareAndSetState_closeRecordsFromState() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setState(GroupConversation.GroupConversationState.REJECTED);
+        IResourceStorage.IResource<GroupConversation> readResource = mock(IResourceStorage.IResource.class);
+        when(readResource.getData()).thenReturn(gc);
+        when(storage.read("gc-1", 1)).thenReturn(readResource);
+        IResourceStorage.IResource<GroupConversation> writeResource = mock(IResourceStorage.IResource.class);
+        ArgumentCaptor<GroupConversation> written = ArgumentCaptor.forClass(GroupConversation.class);
+        when(storage.newResource(eq("gc-1"), eq(1), written.capture())).thenReturn(writeResource);
+
+        assertTrue(store.compareAndSetState("gc-1",
+                GroupConversation.GroupConversationState.REJECTED,
+                GroupConversation.GroupConversationState.CLOSED));
+
+        assertEquals(GroupConversation.GroupConversationState.CLOSED, written.getValue().getState());
+        assertEquals(GroupConversation.GroupConversationState.REJECTED, written.getValue().getClosedFromState());
+        verify(storage).storeIfFieldEquals(writeResource, "state", "REJECTED");
+    }
+
+    @Test
+    @DisplayName("compareAndSetState — a transition other than close records no closed-from state")
+    void compareAndSetState_otherTransitionRecordsNothing() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setState(GroupConversation.GroupConversationState.COMPLETED);
+        IResourceStorage.IResource<GroupConversation> readResource = mock(IResourceStorage.IResource.class);
+        when(readResource.getData()).thenReturn(gc);
+        when(storage.read("gc-1", 1)).thenReturn(readResource);
+        when(storage.newResource(eq("gc-1"), eq(1), any(GroupConversation.class)))
+                .thenReturn(mock(IResourceStorage.IResource.class));
+
+        assertTrue(store.compareAndSetState("gc-1",
+                GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.IN_PROGRESS));
+
+        assertNull(gc.getClosedFromState());
+    }
+
+    @Test
     @DisplayName("compareAndSetState — returns false when the conditional write loses the race")
     void compareAndSetState_lostRace_returnsFalse() throws Exception {
         GroupConversation gc = new GroupConversation();

@@ -56,6 +56,20 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   `holdGroupLease` refuses such a leg instead of running it in degraded mode: while NATS is
   unreachable, cadence legs fail (tasks return, a later fire retries). Other discussions keep the
   degraded-mode behaviour. `docs/clustering.md` lists it in the degraded-mode table.
+  The same gate now covers a deleted discussion: deleting the document signals a local leg without
+  waiting for it, so the not-found arm keeps the claim while a leg runs and releases it at a later
+  fire (CodeRabbit).
+- A cadence run an operator closes before its claim is settled no longer wedges the team. Close
+  accepts only ended states, but `CLOSED` did not say which one, so the run fell into the
+  still-running arm, and past the TTL its cancel could not move a `CLOSED` document: the claim was
+  held on every fire. `GroupConversation.closedFromState` (persisted) now records the state a close
+  came from, set by `GroupConversationStore.compareAndSetState` in the same conditional write as
+  `CLOSED`, and the writeback settles a closed run at once by that state's rule (a run closed after
+  `COMPLETED` keeps its verified and approved tasks). A document closed by an older build has no
+  record and is written back as a stop (CodeRabbit).
+- Schema: `requiresGroupLease` and `closedFromState` ride `GroupConversation` v6, which main added
+  for `inheritedMaxTurns` (#1479) and no release carries yet (6.7.0 is v5), so every released
+  deployment refuses these documents; no second bump (CodeRabbit asked for one).
   Such a leg also registers `LeaseHandle.onLost` and is cancelled immediately
   (`stopLegOnLeaseLoss`, `CANCEL_IMMEDIATE`) when its lease is declared lost, which the holder does
   before the lease expires for other nodes. A cadence run stored before the flag existed is

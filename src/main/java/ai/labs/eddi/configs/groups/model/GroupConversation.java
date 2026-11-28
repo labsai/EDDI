@@ -73,6 +73,14 @@ public class GroupConversation {
      * and re-saving the document would drop the field. The bump makes it refuse.
      * Identity hop: a v5 document has none, which is a top-level discussion's
      * value.
+     * <p>
+     * Also v6 (same release, no released deployment reads v6 yet):
+     * {@code requiresGroupLease} and {@code closedFromState}, both read by team
+     * cadence runs. An older pod re-saving a cadence run would drop the lease
+     * requirement and run a resumed leg lease-free, so the cadence could hand its
+     * tasks to the next run while that leg still works; v6 makes every released
+     * deployment (v5) refuse the document instead. Identity hop for both: a v5
+     * document is no cadence run of this shape and was not closed by this code.
      */
     // v4: the 2026-08 release shape — adds I11's negotiationState, I12's
     // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
@@ -724,6 +732,21 @@ public class GroupConversation {
      * @since 6.8.0
      */
     private boolean requiresGroupLease;
+
+    /**
+     * The state a {@link GroupConversationState#CLOSED CLOSED} discussion was in
+     * when it was closed — one of the ended states close accepts — or {@code null}
+     * for any other state and for a document closed before this was recorded.
+     * Written in the same conditional write that sets {@code CLOSED}.
+     * <p>
+     * A team cadence run that an operator closes before its claim is settled is
+     * written back from this: {@code CLOSED} alone does not say whether the run
+     * completed (its verified and approved tasks stay done) or failed (they return
+     * to the backlog by the stopped-run rule).
+     *
+     * @since 6.8.0
+     */
+    private GroupConversationState closedFromState;
 
     /**
      * What this root discussion has charged to its team's monthly budget and the
@@ -2026,6 +2049,14 @@ public class GroupConversation {
 
     public void setRequiresGroupLease(boolean requiresGroupLease) {
         this.requiresGroupLease = requiresGroupLease;
+    }
+
+    public GroupConversationState getClosedFromState() {
+        return closedFromState;
+    }
+
+    public void setClosedFromState(GroupConversationState closedFromState) {
+        this.closedFromState = closedFromState;
     }
 
     public TeamBudgetState getTeamBudgetState() {

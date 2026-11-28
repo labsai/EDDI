@@ -612,6 +612,23 @@ class TeamCadenceNonBlockingApprovalsTest {
         }
 
         @Test
+        @DisplayName("deleted: a vanished discussion keeps the claim and its tasks while its leg runs")
+        void deletedWaitsForTheLeg() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
+            when(conversationStore.read(PAUSED_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertFalse(service.reconcile(workspace));
+            assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.IN_PROGRESS, status(), "the leg may still be working on it");
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(false);
+            assertTrue(service.reconcile(workspace));
+            assertEquals(TaskStatus.PENDING, status());
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+        }
+
+        @Test
         @DisplayName("a completed discussion whose leg has not released its lease yet is settled at the next fire")
         void completedWaitsForTheLeg() throws Exception {
             claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
@@ -905,6 +922,128 @@ class TeamCadenceNonBlockingApprovalsTest {
         }
     }
 
+    @Nested
+    @DisplayName("a run an operator closed before its claim was settled")
+    class ClosedBeforeSettled {
+
+        private TaskItem verifiedTask;
+        private TaskItem approvedTask;
+        private TaskItem undecidedTask;
+        private GroupWorkspace workspace;
+
+        @BeforeEach
+        void closed() {
+            verifiedTask = new TaskItem("Fix the typo", "", 3);
+            approvedTask = new TaskItem("Publish the post", "", 2);
+            undecidedTask = new TaskItem("Send the newsletter", "", 1);
+            workspace = workspace(verifiedTask, approvedTask, undecidedTask);
+            // Past the TTL: the default arm cancelled, re-read CLOSED and kept the claim,
+            // on this fire and every one after it.
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), verifiedTask, approvedTask,
+                    undecidedTask);
+        }
+
+        private void closedFrom(GroupConversationState from, HitlPauseType pauseType) throws Exception {
+            var gc = discussion(PAUSED_ID, GroupConversationState.CLOSED);
+            gc.setClosedFromState(from);
+            gc.setHitlPauseType(pauseType);
+            var tasks = new SharedTaskList();
+            verified(tasks, "Fix the typo");
+            tasks.approveTask(awaitingApproval(tasks, "Publish the post"), "alice");
+            awaitingApproval(tasks, "Send the newsletter");
+            gc.setTaskList(tasks);
+        }
+
+        private TaskStatus statusOf(TaskItem task) {
+            return workspace.getBacklog().findById(task.id()).status();
+        }
+
+        @Test
+        @DisplayName("closed after COMPLETED: released, and its verified and approved tasks stay done")
+        void closedCompletedKeepsItsWork() throws Exception {
+            configure(null, false, true);
+            closedFrom(GroupConversationState.COMPLETED, HitlPauseType.TASK);
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.VERIFIED, statusOf(verifiedTask));
+            assertEquals(TaskStatus.COMPLETED, statusOf(approvedTask));
+            assertEquals(TaskStatus.PENDING, statusOf(undecidedTask));
+            verify(groupConversationService, never()).cancelDiscussion(anyString(), any());
+            assertEquals(0, meters.counter("eddi_team_cadence_claims_reclaimed_total").count(),
+                    "an ended run is settled, not reclaimed");
+        }
+
+        @Test
+        @DisplayName("closed within the TTL: settled at once, the team does not wait for the claim to expire")
+        void closedWithinTheTtlIsSettled() throws Exception {
+            configure(null, false, true);
+            workspace.setClaimedAt(Instant.now());
+            closedFrom(GroupConversationState.COMPLETED, HitlPauseType.TASK);
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.VERIFIED, statusOf(verifiedTask));
+        }
+
+        @Test
+        @DisplayName("closed after a TASK-pause rejection: the stopped-run rule of the state it closed from applies")
+        void closedRejectedKeepsItsRule() throws Exception {
+            configure(null, true, true);
+            closedFrom(GroupConversationState.REJECTED, HitlPauseType.TASK);
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.VERIFIED, statusOf(verifiedTask));
+            assertEquals(TaskStatus.COMPLETED, statusOf(approvedTask));
+            assertEquals(TaskStatus.PENDING, statusOf(undecidedTask));
+        }
+
+        @Test
+        @DisplayName("closed after FAILED with the rule off: everything returns, as for the FAILED run itself")
+        void closedFailedReturnsEverything() throws Exception {
+            configure(null, false, true);
+            closedFrom(GroupConversationState.FAILED, null);
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.PENDING, statusOf(verifiedTask));
+            assertEquals(TaskStatus.PENDING, statusOf(approvedTask));
+        }
+
+        @Test
+        @DisplayName("closed by an older build (no recorded state): released as a stop rather than held forever")
+        void legacyClosedIsReleased() throws Exception {
+            configure(null, true, true);
+            closedFrom(null, HitlPauseType.TASK);
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.PENDING, statusOf(verifiedTask), "how the run ended is unknown");
+            // Settled as ended, not reclaimed: a real cancel cannot move a CLOSED
+            // document, so a path that needed one would never release the claim.
+            verify(groupConversationService, never()).cancelDiscussion(anyString(), any());
+            assertEquals(TaskStatus.PENDING, statusOf(undecidedTask));
+        }
+
+        @Test
+        @DisplayName("closed while a leg still runs: the claim is kept until it stops")
+        void closedWaitsForTheLeg() throws Exception {
+            configure(null, false, true);
+            closedFrom(GroupConversationState.COMPLETED, HitlPauseType.TASK);
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(true);
+
+            assertFalse(service.reconcile(workspace));
+            assertEquals(TaskStatus.IN_PROGRESS, statusOf(verifiedTask));
+
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(false);
+            assertTrue(service.reconcile(workspace));
+            assertEquals(TaskStatus.VERIFIED, statusOf(verifiedTask));
+        }
+    }
+
     // ---------------------------------------------------- rule and config
 
     @Test
@@ -923,6 +1062,14 @@ class TeamCadenceNonBlockingApprovalsTest {
         gc.setHitlPauseType(null);
         assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setState(GroupConversationState.AWAITING_APPROVAL);
+        assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
+        // A closed run follows the state it was closed from.
+        gc.setState(GroupConversationState.CLOSED);
+        gc.setClosedFromState(GroupConversationState.FAILED);
+        assertTrue(TeamCadenceService.keepsFinishedTasks(gc));
+        gc.setClosedFromState(GroupConversationState.COMPLETED);
+        assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
+        gc.setClosedFromState(null);
         assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
     }
 

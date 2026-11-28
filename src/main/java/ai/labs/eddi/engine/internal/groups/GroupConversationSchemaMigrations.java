@@ -28,7 +28,7 @@ public final class GroupConversationSchemaMigrations {
     /**
      * Migration functions, keyed by the version they upgrade <em>from</em> (so
      * entry {@code N} takes a version-{@code N} document to version {@code N+1}).
-     * Empty today: every bump so far ({@code 1→2→3→4→5}) was additive — the new
+     * Empty today: every bump so far ({@code 1→2→3→4→5→6}) was additive — the new
      * fields default correctly via Jackson, so those hops ride the identity
      * fallback below rather than a registered entry. That fallback path has
      * therefore already been exercised; do not read the empty map as "no version
