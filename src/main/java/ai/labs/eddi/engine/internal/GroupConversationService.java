@@ -3011,6 +3011,9 @@ public class GroupConversationService implements IGroupConversationService, User
         // The field initialiser is the LEGACY sentinel so key-less stored documents
         // read as legacy — a genuinely new document must claim current explicitly.
         gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        // Likewise: an absent human-member record means "written before it existed",
+        // and the GDPR export then trusts no agent evidence in this discussion.
+        gc.startHumanMemberRecord();
         // M3: counted from 0, so a later failed round can tell the discussion answered
         // before.
         gc.setAnsweredRounds(0);

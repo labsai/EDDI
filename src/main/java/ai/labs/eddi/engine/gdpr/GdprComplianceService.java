@@ -9,11 +9,17 @@ import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedArtifact;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -33,6 +39,7 @@ import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -171,6 +178,15 @@ public class GdprComplianceService {
      */
     @Inject
     GdprPseudonymizer pseudonymizer;
+
+    /**
+     * Group configurations, read by the export to tell a discussion's human members
+     * from its agents (their ids are masked in the subject's bundle).
+     * Field-injected and lazy; null in tests built with {@code new}, which fall
+     * back to the transcript heuristics of {@link ThirdPartyIdentifiers}.
+     */
+    @Inject
+    Instance<IAgentGroupStore> agentGroupStore;
 
     private String pseudonymFor(String userId) {
         return pseudonymizer != null ? pseudonymizer.pseudonymFor(userId) : AuditHmac.pseudonymFor(userId);
@@ -1092,6 +1108,8 @@ public class GdprComplianceService {
         // the re-run nothing to find those rows by (the same reason step 4c keeps the
         // snapshots until a retry).
         Map<String, Long> additionalDeleted = new LinkedHashMap<>();
+        Map<String, Object> participantBases = new LinkedHashMap<>();
+        List<String> notices = new ArrayList<>();
         List<String> participantsFailed = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
             if (participant.order() >= IGdprParticipant.LAST && !participantsFailed.isEmpty()) {
@@ -1099,6 +1117,9 @@ public class GdprComplianceService {
                         new IllegalStateException("kept until " + participantsFailed + " are erased; retry the erasure"), pseudonym);
                 continue;
             }
+            // Read before the erase: the basis may come from a record the erase removes.
+            collectAuditBasis(participant, userId, participantBases, pseudonym);
+            collectNotices(participant, userId, IGdprParticipant.Operation.ERASURE, notices, pseudonym);
             try {
                 long removed = participant.erase(userId);
                 additionalDeleted.put(participant.name(), removed);
@@ -1128,7 +1149,7 @@ public class GdprComplianceService {
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
                 schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted,
-                auditRedacted);
+                auditRedacted, notices);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -1164,11 +1185,83 @@ public class GdprComplianceService {
         auditDetails.put("auditPseudonymized", auditPseudonymized);
         auditDetails.put("auditRedacted", auditRedacted);
         additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
+        auditDetails.putAll(participantBases);
+        if (!notices.isEmpty()) {
+            auditDetails.put("notices", List.copyOf(notices));
+        }
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /**
+     * Adds {@code participant}'s {@link IGdprParticipant#auditBasis} under
+     * {@code <name>Basis} when it has one. Optional detail of the compliance entry:
+     * a failure is logged and leaves it out, it never fails the step.
+     */
+    private static void collectAuditBasis(IGdprParticipant participant, String userId, Map<String, Object> bases, String pseudonym) {
+        try {
+            Map<String, Object> basis = participant.auditBasis(userId);
+            if (basis != null && !basis.isEmpty()) {
+                bases.put(participant.name() + "Basis", basis);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[GDPR] Could not record the basis of %s [%s]: %s", participant.name(), pseudonym, e.getMessage());
+        }
+    }
+
+    /**
+     * The ids the current configuration of group {@code groupId} lists as
+     * {@code HUMAN} members, which the export masks in that group's transcripts.
+     * The configuration may only add masks: it describes the group as it is now,
+     * not as it was during the discussion, so its AGENT entries are not read at all
+     * — an agent is recognised only from what the stored discussion recorded
+     * ({@link ThirdPartyIdentifiers}). Empty when there is no group store, no such
+     * group any more, or it cannot be read; the export never fails for it.
+     */
+    Set<String> configuredHumanMembers(String groupId) {
+        if (groupId == null || agentGroupStore == null || !agentGroupStore.isResolvable()) {
+            return Set.of();
+        }
+        try {
+            IAgentGroupStore store = agentGroupStore.get();
+            IResourceStore.IResourceId current = store.getCurrentResourceId(groupId);
+            AgentGroupConfiguration config = current == null ? null : store.read(groupId, current.getVersion());
+            if (config == null || config.getMembers() == null) {
+                return Set.of();
+            }
+            Set<String> humans = new HashSet<>();
+            for (GroupMember member : config.getMembers()) {
+                if (member != null && member.agentId() != null && member.memberType() == MemberType.HUMAN) {
+                    humans.add(member.agentId());
+                }
+            }
+            return humans;
+        } catch (Exception e) {
+            LOGGER.debugf("[GDPR] Group configuration %s not readable for the export: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+            return Set.of();
+        }
+    }
+
+    /**
+     * Adds {@code participant}'s {@link IGdprParticipant#notices} to
+     * {@code notices}, each prefixed with the participant's name. A failure is
+     * logged and adds nothing.
+     */
+    private static void collectNotices(IGdprParticipant participant, String userId, IGdprParticipant.Operation operation, List<String> notices,
+                                       String pseudonym) {
+        try {
+            List<String> found = participant.notices(userId, operation);
+            if (found != null) {
+                for (String notice : found) {
+                    notices.add(participant.name() + ": " + notice);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[GDPR] Could not read the notices of %s [%s]: %s", participant.name(), pseudonym, e.getMessage());
+        }
     }
 
     private List<IGdprParticipant> participants() {
@@ -1197,10 +1290,13 @@ public class GdprComplianceService {
      * Principals that are not people. {@code __service__} owns every tenant's
      * service-bound connection grants: "erasing" it would delete them all and
      * disconnect every agent that uses a service connection, and exporting it would
-     * hand out the list of them. Refused as a caller error.
+     * hand out the list of them. {@code gdpr-erased} is what a node that hears of
+     * an erasure only by hash writes into the in-memory log store: erasing it would
+     * rewrite every entry of every user erased that way under one new pseudonym.
+     * Refused as a caller error.
      */
     public static boolean isReservedPrincipal(String userId) {
-        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId);
+        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId) || BoundedLogStore.REMOTE_ERASURE_MARKER.equals(userId);
     }
 
     private static void rejectReservedPrincipal(String userId) {
@@ -1273,6 +1369,28 @@ public class GdprComplianceService {
         String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting data export [%s]", pseudonym);
 
+        // An export that read personal data leaves a ledger entry whatever happens
+        // after the first read: an exception escaping the assembly (a participant
+        // listing that throws, an Error) used to skip the entry, because it was
+        // written at the end. It records what was gathered up to that point, the
+        // participants' bases included, and whether the bundle was handed out.
+        Map<String, Object> exportDetails = new LinkedHashMap<>();
+        boolean assembled = false;
+        try {
+            UserDataExport export = assembleExport(userId, pseudonym, exportDetails);
+            assembled = true;
+            return export;
+        } finally {
+            exportDetails.put("outcome", assembled ? "completed" : "aborted");
+            submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
+        }
+    }
+
+    /**
+     * The body of {@link #exportUserData}; fills {@code exportDetails} for the
+     * compliance entry the caller writes.
+     */
+    private UserDataExport assembleExport(String userId, String pseudonym, Map<String, Object> exportDetails) {
         // 1. User memories
         var memories = new ArrayList<UserMemoryEntry>();
         try {
@@ -1384,12 +1502,17 @@ public class GdprComplianceService {
         var groupConversationEntries = new ArrayList<UserDataExport.GroupConversationExportEntry>();
         boolean groupConversationsTruncated = false;
         Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
+        // One configuration read per group, however many of its discussions the user
+        // started.
+        Map<String, Set<String>> configuredHumans = new HashMap<>();
         try {
             GroupConversationsPage page = groupConversationsOf(userId, GROUP_CONVERSATION_EXPORT_LIMIT);
             groupConversationsTruncated = page.truncated();
             for (GroupConversation gc : page.owned()) {
+                Set<String> humans = configuredHumans.computeIfAbsent(gc.getGroupId(), this::configuredHumanMembers);
                 groupConversationEntries.add(new UserDataExport.GroupConversationExportEntry(gc.getId(), gc.getGroupId(),
-                        gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(), gc.getTranscript(),
+                        gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(),
+                        ThirdPartyIdentifiers.transcriptFor(gc, userId, humans),
                         gc.getCreated(), gc.getLastModified()));
                 blobOwnerIds.add(gc.getId());
                 if (gc.getMemberConversationIds() != null) {
@@ -1475,12 +1598,11 @@ public class GdprComplianceService {
                 failedConversationIds.size(), managedConversations.size(), auditExportEntries.size(),
                 attachmentEntries.size());
 
-        // Write compliance event to immutable audit ledger.
+        // The compliance event for the immutable audit ledger (written by the caller).
         // conversationsFailed is part of the record because the ledger entry is the
         // evidence that this export happened: an entry saying 998 of 1,000 were
         // exported with nothing to explain the two is a discrepancy nobody can
         // account for after the fact.
-        var exportDetails = new LinkedHashMap<String, Object>();
         exportDetails.put("memoriesExported", memories.size());
         exportDetails.put("conversationsExported", conversations.size());
         exportDetails.put("totalConversations", totalConversations);
@@ -1495,10 +1617,19 @@ public class GdprComplianceService {
         exportDetails.put("sharedArtifactsExported", sharedArtifactEntries.size());
         exportDetails.put("sharedArtifactsTruncated", sharedArtifactsTruncated);
         exportDetails.put("failedCategories", List.copyOf(failedCategories));
-        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
 
         Map<String, Object> additionalData = new LinkedHashMap<>();
+        List<String> notices = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
+            // Straight into the details: an export aborted further on still records
+            // the bases gathered up to then.
+            collectAuditBasis(participant, userId, exportDetails, pseudonym);
+            collectNotices(participant, userId, IGdprParticipant.Operation.EXPORT, notices, pseudonym);
+            if (!notices.isEmpty()) {
+                // Into the details as they come, like the bases: a later participant that
+                // aborts the export must not drop the notices already gathered.
+                exportDetails.put("notices", List.copyOf(notices));
+            }
             try {
                 Object held = participant.export(userId);
                 if (held != null) {
@@ -1512,12 +1643,11 @@ public class GdprComplianceService {
                 additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
             }
         }
-
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
                 totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData,
                 groupConversationEntries, groupConversationsTruncated, sharedArtifactEntries, sharedArtifactsTruncated,
-                failedCategories);
+                failedCategories, notices);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

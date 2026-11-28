@@ -157,6 +157,8 @@ class ReservedPrincipalsTest {
     void matching() {
         assertTrue(ReservedPrincipals.isReserved("SLACK:T1:U2"));
         assertTrue(ReservedPrincipals.isReserved("anonymous"));
+        assertTrue(ReservedPrincipals.isReserved("gdpr-erased"), "the remote log-erasure marker");
+        assertTrue(!ReservedPrincipals.isReserved("gdpr-erased-fan"));
         assertTrue(ReservedPrincipals.isReserved("Unverified:alice"));
         assertTrue(!ReservedPrincipals.isReserved("alice"));
         assertTrue(!ReservedPrincipals.isReserved("anonymous.user"));
