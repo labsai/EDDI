@@ -172,6 +172,23 @@ public interface IScheduleStore {
     Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
+     * Every schedule with the given name, up to {@code limit}, in no particular
+     * order. For a caller that must judge all the rows sharing a name rather than
+     * an arbitrary one of them — the HITL crash-recovery sweep, which decides
+     * whether a pause still has a timeout that can fire, and deletes what it judged
+     * by id. Read from the primary where the store has replicas. A row that cannot
+     * be decoded is skipped (logged at WARN with its id) instead of failing the
+     * read: the poller cannot fire it either, and one broken row must not stop the
+     * sweep from judging — and repairing — the rest. The store reads past skipped
+     * rows until it has {@code limit} decodable ones, so a result shorter than
+     * {@code limit} holds every decodable row of the name; when too many rows
+     * cannot be decoded to tell (a store-defined allowance), the read fails rather
+     * than return a short result that looks complete. A {@code limit} of zero or
+     * less returns nothing.
+     */
+    List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Delete all schedules owned by a user (GDPR Art. 17 erasure).
      * <p>
      * A schedule carries the {@code userId} it fires conversations as. Left behind,

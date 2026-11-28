@@ -246,6 +246,22 @@ class GroupHitlCoordinatorTest {
         gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setPausedAt(Instant.now());
         var coordinator = coordinator();
+        var meters = new SimpleMeterRegistry();
+        coordinator.setMeterRegistry(meters);
+        doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());
+
+        assertDoesNotThrow(() -> coordinator.scheduleGroupHitlTimeout(gc));
+        assertEquals(1.0, meters.counter("eddi_hitl_timeout_arm_failures", "surface", "group").count(),
+                "a group timeout that could not be scheduled must be counted");
+    }
+
+    @Test
+    void scheduleGroupHitlTimeout_storeThrows_withoutMeterRegistry_stillSwallowed() throws Exception {
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setHitlApprovalTimeout("PT10M");
+        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+        gc.setPausedAt(Instant.now());
+        var coordinator = coordinator(); // no setMeterRegistry: the registry is null
         doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());
 
         assertDoesNotThrow(() -> coordinator.scheduleGroupHitlTimeout(gc));

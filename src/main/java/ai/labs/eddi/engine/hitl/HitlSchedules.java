@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.hitl;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -82,6 +83,17 @@ public final class HitlSchedules {
             metadata.put(METADATA_PAUSE_ID_KEY, pauseId);
         }
         return metadata;
+    }
+
+    /**
+     * True for a name in the timeout namespace ({@code hitl-timeout-...}; the group
+     * prefix {@code hitl-timeout-group-} starts with it). The server finds a
+     * pause's timeout by this name and, on resume and cancel, deletes every row
+     * under it, so only the server may write one: the schedule REST API (and the
+     * MCP tools and the import, which write through it) refuse such a name.
+     */
+    public static boolean isReservedTimeoutName(String name) {
+        return name != null && name.trim().toLowerCase(Locale.ROOT).startsWith(NAME_PREFIX_REGULAR);
     }
 
     /** True if the metadata marks a HITL timeout schedule. */

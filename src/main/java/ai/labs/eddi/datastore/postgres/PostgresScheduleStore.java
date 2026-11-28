@@ -554,6 +554,51 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        if (limit <= 0) {
+            return new ArrayList<>(); // at most `limit` rows; PostgreSQL rejects a negative LIMIT
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {
+            int rawLimit = (int) Math.min((long) limit + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
+            ps.setString(1, name);
+            ps.setInt(2, rawLimit);
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            int scanned = 0;
+            try (ResultSet rs = ps.executeQuery()) {
+                while (result.size() < limit && rs.next()) {
+                    scanned++;
+                    try {
+                        result.add(fromResultSet(rs));
+                    } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                        // One undecodable row (unreadable metadata, say) must not hide its
+                        // readable siblings (see the interface): it is left in place, and
+                        // named so it can be removed.
+                        LOGGER.warnf("Schedule %s named '%s' cannot be decoded — skipped: %s", sanitize(rs.getString("id")),
+                                sanitize(name), sanitize(e.getMessage()));
+                    }
+                }
+            }
+            if (result.size() < limit && scanned >= rawLimit) {
+                // Fewer than `limit` decodable rows, but the scan stopped at its cap: rows
+                // may remain unseen, so a short result would falsely look complete.
+                throw new IResourceStore.ResourceStoreException("Too many undecodable schedules under one name to read them completely");
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules by name: " + name, e);
+        }
+    }
+
+    /**
+     * How many undecodable rows {@link #readSchedulesByName} reads past before it
+     * gives up: it keeps reading until it has {@code limit} decodable rows, so a
+     * result shorter than {@code limit} is complete, and fails beyond this.
+     */
+    private static final int UNDECODABLE_ALLOWANCE = 100;
+
+    @Override
     public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
@@ -917,8 +962,9 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setLong(2, lease.toMillis());
             ps.setLong(3, nowMs);
             ps.setInt(4, maxRetries);
-            ps.setInt(5, pollBatchSize);
-            return readScheduleList(ps);
+            int rawLimit = (int) Math.min((long) pollBatchSize + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
+            ps.setInt(5, rawLimit);
+            return readDueScheduleList(ps, pollBatchSize, rawLimit);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
@@ -1250,6 +1296,37 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     // ========================= Helpers =========================
+
+    /**
+     * Like {@link #readScheduleList}, but one undecodable row is skipped (and
+     * named) instead of failing the read: the poll must not be starved of its
+     * readable rows — a HITL timeout among them — by a row it could not fire
+     * anyway. A failing query still fails the read. A skipped row stays due and
+     * keeps its place at the head of the poll order, so the query fetches
+     * {@code rawLimit} rows ({@link #UNDECODABLE_ALLOWANCE} beyond the batch) and
+     * this stops at {@code batchSize} decoded ones: undecodable rows cannot fill
+     * every poll's batch and starve the readable rows behind them.
+     */
+    private List<ScheduleConfiguration> readDueScheduleList(PreparedStatement ps, int batchSize, int rawLimit) throws SQLException {
+        List<ScheduleConfiguration> result = new ArrayList<>();
+        int scanned = 0;
+        try (ResultSet rs = ps.executeQuery()) {
+            while (result.size() < batchSize && rs.next()) {
+                scanned++;
+                try {
+                    result.add(fromResultSet(rs));
+                } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                    LOGGER.warnf("Due schedule %s cannot be decoded — skipped: %s", sanitize(rs.getString("id")),
+                            sanitize(e.getMessage()));
+                }
+            }
+        }
+        if (result.size() < batchSize && scanned >= rawLimit) {
+            LOGGER.errorf("%d undecodable due schedules at the head of the poll order — due rows behind them wait until "
+                    + "they are removed", scanned - result.size());
+        }
+        return result;
+    }
 
     private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException, IResourceStore.ResourceStoreException {
         List<ScheduleConfiguration> result = new ArrayList<>();
