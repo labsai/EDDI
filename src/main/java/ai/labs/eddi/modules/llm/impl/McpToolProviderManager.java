@@ -125,13 +125,13 @@ public class McpToolProviderManager {
     private final Map<String, CachedTools> toolCache = new ConcurrentHashMap<>();
 
     /**
-     * How many times the client under a key was evicted after a listing limit. A
-     * discovery publishes its executors only if no eviction happened since it
-     * began: the client they are bound to may be closed by then. Read and bumped
-     * inside {@code toolCache.compute} for the key, so the check and the write are
-     * atomic with respect to the eviction.
+     * How many times the client under a key was evicted — after a listing limit or
+     * by {@link #closeClient}. A discovery publishes its executors only if no
+     * eviction happened since it began: the client they are bound to may be closed
+     * by then. Read and bumped inside {@code toolCache.compute} for the key, so the
+     * check and the write are atomic with respect to the eviction.
      */
-    private final Map<String, Long> listingEvictions = new ConcurrentHashMap<>();
+    private final Map<String, Long> clientEvictions = new ConcurrentHashMap<>();
 
     /** Cached discovery result for one server, with the time it was captured. */
     record CachedTools(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, long timestamp) {
@@ -480,7 +480,7 @@ public class McpToolProviderManager {
 
             try {
                 String toolCacheKey = cacheKey(serverConfig);
-                long evictionsBefore = listingEvictions.getOrDefault(toolCacheKey, 0L);
+                long evictionsBefore = clientEvictions.getOrDefault(toolCacheKey, 0L);
                 // Discover tools — McpToolProvider returns ToolProviderResult
                 ToolProviderResult result = probe ? probeToolsFromServer(serverConfig) : fetchToolsFromServer(serverConfig);
 
@@ -547,7 +547,7 @@ public class McpToolProviderManager {
                     // closed) after a listing limit while this discovery ran: a cache hit
                     // creates no client, so it would serve the closed one until the TTL.
                     toolCache.compute(toolCacheKey,
-                            (key, previous) -> listingEvictions.getOrDefault(key, 0L) == evictionsBefore ? discovered : previous);
+                            (key, previous) -> clientEvictions.getOrDefault(key, 0L) == evictionsBefore ? discovered : previous);
                 }
                 mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
@@ -785,10 +785,7 @@ public class McpToolProviderManager {
             return; // a limit during construction: the client was never cached
         }
         if (clientCache.remove(key, origin)) {
-            toolCache.compute(key, (k, cached) -> {
-                listingEvictions.merge(k, 1L, Long::sum);
-                return null;
-            });
+            dropCachedTools(key);
         }
         try {
             origin.close();
@@ -796,6 +793,17 @@ public class McpToolProviderManager {
             LOGGER.debugf("Error closing MCP client after a listing limit for '%s': %s", sanitize(UriRedactor.redactUri(urlOfKey(key))),
                     sanitize(e.getMessage()));
         }
+    }
+
+    /**
+     * Drops the tools cached under {@code key} and counts the eviction, so a
+     * discovery still running on the evicted client does not cache them again.
+     */
+    private void dropCachedTools(String key) {
+        toolCache.compute(key, (k, cached) -> {
+            clientEvictions.merge(k, 1L, Long::sum);
+            return null;
+        });
     }
 
     /** The URL part of a client cache key, for log lines. */
@@ -1727,6 +1735,7 @@ public class McpToolProviderManager {
             if (client == null) {
                 continue;
             }
+            dropCachedTools(key);
             try {
                 client.close();
                 LOGGER.infof("Closed MCP client for '%s'", sanitize(url));

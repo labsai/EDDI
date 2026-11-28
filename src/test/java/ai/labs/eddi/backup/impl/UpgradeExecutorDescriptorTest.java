@@ -28,7 +28,8 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
-import jakarta.ws.rs.ForbiddenException;
+import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -226,14 +227,29 @@ class UpgradeExecutorDescriptorTest {
     @DisplayName("an agent write the oversight guard refuses (403) is an agent failure in the result, not an escaping exception")
     void agentWriteRefusedByTheOversightGuardIsReported() throws Exception {
         givenTargetAt(3);
-        // An admin changed the target's oversight after the preflight check passed.
-        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), eq(false))).thenThrow(new ForbiddenException("oversight changed"));
+        // An admin changed the target's oversight after the preflight check passed: the
+        // guard's JAX-RS ForbiddenException is a 403 WebApplicationException.
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), eq(false)))
+                .thenThrow(new WebApplicationException("oversight changed", Response.Status.FORBIDDEN));
 
         UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
 
         assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("refused")),
                 "a refused agent write must be reported, got: " + result.failures());
         assertEquals(0, result.updated(), "what this run wrote is not deployed");
+    }
+
+    @Test
+    @DisplayName("an agent write the access guard refuses (Quarkus ForbiddenException) is reported the same way")
+    void agentWriteRefusedByTheAccessGuardIsReported() throws Exception {
+        givenTargetAt(3);
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), eq(false))).thenThrow(new ForbiddenException("no edit access"));
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("refused")),
+                "a refused agent write must be reported, got: " + result.failures());
+        assertEquals(0, result.updated());
     }
 
     @Test

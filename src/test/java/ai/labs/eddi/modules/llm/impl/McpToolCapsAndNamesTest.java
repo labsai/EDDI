@@ -228,6 +228,23 @@ class McpToolCapsAndNamesTest {
         }
 
         @Test
+        @DisplayName("a discovery whose server was closed (closeClient) while it ran does not cache its tools either")
+        void discoveryDoesNotCacheAfterCloseClient() {
+            var manager = managerBuilding(mock(McpClient.class));
+            ToolExecutor executor = (request, memoryId) -> "ok";
+            doAnswer(invocation -> {
+                McpServerConfig server = invocation.getArgument(0);
+                manager.getOrCreateClient(server);
+                manager.closeClient(server.getUrl()); // the server's config changed mid-discovery
+                return resultOf(Map.of(ToolSpecification.builder().name("t").build(), executor));
+            }).when(manager).fetchToolsFromServer(any());
+
+            manager.discoverTools(List.of(config()));
+
+            assertEquals(0, manager.getCachedToolServerCount());
+        }
+
+        @Test
         @DisplayName("a discovery with no eviction still caches its tools")
         void discoveryCachesWithoutEviction() {
             var manager = managerBuilding(mock(McpClient.class));
