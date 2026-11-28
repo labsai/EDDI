@@ -222,7 +222,7 @@ public class WebCrawler {
                 continue;
             }
             if (request.politeness().respectRobots()
-                    && !candidateRobots.isAllowed(CrawlUrls.pathAndQuery(candidate.fetchUrl()))) {
+                    && !robotsAllow(candidateRobots, candidate.fetchUrl())) {
                 counters.skipped++;
                 frontier.releaseDeferred(candidate.canonicalId());
                 continue;
@@ -285,7 +285,11 @@ public class WebCrawler {
                 request.limits().requestTimeout(),
                 conditional.etag(),
                 conditional.lastModified(),
-                request.limits().maxBytesPerPage());
+                request.limits().maxBytesPerPage(),
+                // Each redirect hop is held to the scope before it is requested: the scope
+                // check of the final URL below only discards the page, after the fetch.
+                // The hop as it will be requested, not a normalized copy of it.
+                hop -> isInScope(CrawlUrls.stripFragment(hop), seedHost, request, excludes));
 
         FetchedPage page;
         try {
@@ -436,7 +440,9 @@ public class WebCrawler {
             if (canonical.isEmpty() || visited.contains(canonical) || queued.contains(canonical)) {
                 continue;
             }
-            if (!isInScope(canonical, seedHost, request, excludes)) {
+            // The URL that will be fetched is held to the scope as well as its identity:
+            // canonicalizing can remove a reading of the path that the server would use.
+            if (!isInScope(canonical, seedHost, request, excludes) || !isInScope(fetchUrl, seedHost, request, excludes)) {
                 continue;
             }
             // Both strings are retained, and a short relative link inherits the whole of
@@ -523,7 +529,7 @@ public class WebCrawler {
         if (sitemapQueue.isEmpty() && robotsUrl != null) {
             String conventional = resolve(robotsUrl, "/sitemap.xml");
             if (conventional != null && (!request.politeness().respectRobots()
-                    || robots.isAllowed(CrawlUrls.pathAndQuery(conventional)))
+                    || robotsAllow(robots, conventional))
                     && sitemapsSeen.add(conventional)) {
                 sitemapQueue.add(conventional);
             }
@@ -570,7 +576,7 @@ public class WebCrawler {
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list
                 // anything at all — so it earns no exemption from the scope.
-                if (!canonical.isEmpty() && frontier.queued.add(canonical)
+                if (!canonical.isEmpty() && isInScope(fetchUrl, seedHost, request, excludes) && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
                     frontier.queue.add(new Candidate(fetchUrl, canonical, 0, false));
                     pagesFromSitemaps++;
@@ -640,12 +646,29 @@ public class WebCrawler {
             if (!CrawlUrls.isSameSite(host, seedHost, request.scope().includeSubdomains())) {
                 return false;
             }
+            // The host alone let an https seed follow http:// and :8443 links on it.
+            if (!CrawlUrls.isSameSchemeAndPort(url, request.seedUrl())) {
+                return false;
+            }
         }
+        // One canonical path for the prefix and the excludes (robots reads its encoded
+        // form): dot segments, encoded ones included, already resolved.
         String path = CrawlUrls.path(url);
-        if (!CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())) {
+        // Both readings of a path with ;parameters: as written, and as Tomcat serves it
+        // with them dropped. In scope only when both are; excluded when either is.
+        String withoutParameters = CrawlUrls.pathWithoutParameters(url);
+        if (path == null || withoutParameters == null || !CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())
+                || !CrawlUrls.isUnderPathPrefix(withoutParameters, request.scope().pathPrefix())) {
             return false;
         }
-        return !UrlPattern.anyMatches(excludes, path);
+        return !UrlPattern.anyMatches(excludes, path) && !UrlPattern.anyMatches(excludes, withoutParameters);
+    }
+
+    /**
+     * Whether robots.txt allows both readings of the URL's path (see isInScope).
+     */
+    private static boolean robotsAllow(RobotsPolicy robots, String url) {
+        return robots.isAllowed(CrawlUrls.pathAndQuery(url)) && robots.isAllowed(CrawlUrls.pathAndQueryWithoutParameters(url));
     }
 
     /**

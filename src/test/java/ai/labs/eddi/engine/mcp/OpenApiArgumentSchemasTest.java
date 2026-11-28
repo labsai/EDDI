@@ -223,4 +223,90 @@ class OpenApiArgumentSchemasTest {
         s.setEnum(new ArrayList<>(List.of(true, 3, new StringBuilder("sb"))));
         assertEquals(List.of(true, 3, "sb"), OpenApiArgumentSchemas.bodySchema(s, null).get("enum"));
     }
+
+    // --- review follow-ups ---
+
+    @Test
+    void onlyAnEmptyNotIsAFalseSchema() {
+        assertTrue(OpenApiArgumentSchemas.isFalseSchema(new Schema<>().not(new Schema<>())));
+        assertFalse(OpenApiArgumentSchemas.isFalseSchema(new Schema<>().not(new Schema<>().minimum(BigDecimal.ZERO))),
+                "not: {minimum: 0} admits every negative number");
+        assertFalse(OpenApiArgumentSchemas.isFalseSchema(new Schema<>().not(new Schema<>().maxLength(3))));
+    }
+
+    @Test
+    void aConstrainedNotKeepsARequiredPropertySendable() {
+        Schema<?> body = new ObjectSchema().addProperty("delta", new IntegerSchema().not(new Schema<>().minimum(BigDecimal.ZERO)));
+        body.setRequired(List.of("delta"));
+
+        Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(body, null);
+
+        assertTrue(((Map<?, ?>) converted.get("properties")).containsKey("delta"), converted.toString());
+        assertEquals(List.of("delta"), converted.get("required"));
+        assertFalse(Boolean.FALSE.equals(converted.get("additionalProperties")), converted.toString());
+    }
+
+    @Test
+    void aForbiddenPropertyDoesNotMakeARequiredAdditionalKeyUnsendable() {
+        // Through the parser, as a spec reaches the converter.
+        String template = """
+                {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"type":"object","required":["tenant"],
+                   "properties":{"legacy":%s},"additionalProperties":{"type":"string"}}}}}
+                """;
+        for (String[] variant : new String[][]{{"3.0.3", "{\"not\":{}}"}, {"3.1.0", "false"}}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec(template.formatted(variant[0], variant[1]), null);
+
+            Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+
+            Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+            assertFalse(properties.containsKey("legacy"), variant[0] + ": " + converted);
+            assertEquals(Map.of("type", "string"), properties.get("tenant"),
+                    variant[0] + ": declared under the additionalProperties schema: " + converted);
+            assertEquals(List.of("tenant"), converted.get("required"), variant[0] + ": " + converted);
+            assertEquals(Boolean.FALSE, converted.get("additionalProperties"), variant[0] + ": " + converted);
+        }
+    }
+
+    @Test
+    void aPropertyOnePartOfAnAllOfForbidsStaysForbidden() {
+        Schema<?> closing = new ObjectSchema().addProperty("name", new StringSchema()).addProperty("legacy", new Schema<>().not(new Schema<>()));
+        Schema<?> open = new ObjectSchema().addProperty("legacy", new StringSchema()).addProperty("name", new StringSchema());
+        open.setAdditionalProperties(true);
+        Schema<?> composed = new Schema<>().allOf(List.of(closing, open));
+
+        Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(composed, null);
+
+        Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+        assertFalse(properties.containsKey("legacy"), "another part cannot reopen a forbidden name: " + converted);
+        assertTrue(properties.containsKey("name"), converted.toString());
+        assertEquals(Boolean.FALSE, converted.get("additionalProperties"), converted.toString());
+    }
+
+    @Test
+    void aClosedAllOfPartDoesNotDropTheOtherPartsProperties() {
+        Schema<?> base = new ObjectSchema().addProperty("id", new StringSchema());
+        base.setRequired(List.of("id"));
+        Schema<?> closed = new ObjectSchema().addProperty("note", new StringSchema());
+        closed.setAdditionalProperties(false);
+        Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(new Schema<>().allOf(List.of(ref("Base"), closed)),
+                withComponents(Map.of("Base", base)));
+
+        Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+        assertTrue(properties.containsKey("id") && properties.containsKey("note"), converted.toString());
+        assertEquals(List.of("id"), converted.get("required"));
+    }
+
+    @Test
+    void aParsedEmptyNotIsAFalseSchemaUnder30And31() {
+        for (String version : new String[]{"3.0.3", "3.1.0"}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec("""
+                    {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                     "components":{"schemas":{"S":{"type":"object","properties":{"gone":{"not":{}},"kept":{"type":"string"}}}}}}
+                    """.formatted(version), null);
+            Schema<?> s = openAPI.getComponents().getSchemas().get("S");
+            assertTrue(OpenApiArgumentSchemas.isFalseSchema((Schema<?>) s.getProperties().get("gone")), version);
+            assertFalse(OpenApiArgumentSchemas.isFalseSchema((Schema<?>) s.getProperties().get("kept")), version);
+        }
+    }
 }

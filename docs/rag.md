@@ -482,7 +482,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | Field | Default | What it does |
 | --- | --- | --- |
 | `startUrl` | required | Where the crawl begins |
-| `sameSiteOnly` | `true` | Stay on the seed's site. Turning it off lets links take the crawl anywhere the other limits allow |
+| `sameSiteOnly` | `true` | Stay on the seed's site: its host, scheme and port. One exception: an `http://` seed on port 80 may follow its own host's `https://` on port 443, where nearly every site redirects. Otherwise scheme and port must both match the seed's — an `http://…:8080` seed does not follow a redirect to `https://` on 443, an `https://` seed never follows `http://`, and an `https://…:8443` seed follows links on `:8443` and nothing else. Turning it off lets links take the crawl anywhere the other limits allow. The path every scope, `excludePatterns` and robots.txt decision reads is the one the server serves: encoded dot segments (`%2e%2e`, `..;`) are resolved first, adjacent slashes count as one, a path with `;` parameters is judged both as written and with them dropped (as Tomcat serves it: in scope only if both are, excluded if either is), and a path with an encoded `/` or `\` (`%2F`, `%5C`) is out of scope. A page's redirect is held to the same scope before it is followed, not only checked after the fetch. The fetches of robots.txt and sitemaps are not: their redirects are bounded only by the outbound SSRF policy, so one may leave the crawl's scope where that policy permits it (what they return is still scope-checked before any page is queued) |
 | `includeSubdomains` | `false` | Treat `docs.example.com` as the same site as `example.com` |
 | `pathPrefix` | `/` | Only paths under this prefix are ingested |
 | `maxDepth` | `3` | How many links from the seed |
@@ -499,7 +499,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | Field | Default | What it does |
 | --- | --- | --- |
 | `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
-| `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
+| `maxBytesPerPage` | `5242880` | Cap on one response body. Must be between 1 and 52428800 (50 MB) — a non-positive value would read as "no cap", and the page is held in memory up to the cap. Saving or importing a larger value is refused; a source stored with one before the ceiling existed still runs, clamped to it |
 | `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control. Checked before a document is embedded: a document that would cross it waits for the next run, and one that alone needs more chunks than the ceiling is reported as failed rather than embedded in part |
 | `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
 | `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |

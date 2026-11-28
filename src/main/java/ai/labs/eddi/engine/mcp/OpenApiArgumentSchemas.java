@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.core.util.Json31;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.media.Schema;
 
@@ -148,18 +150,48 @@ final class OpenApiArgumentSchemas {
      * Adds an object's {@code properties} (each converted, {@code readOnly} ones
      * left out), its {@code required} names that are still declared, and a boolean
      * {@code additionalProperties}: a schema-valued one becomes {@code true} (any
-     * key; the value schema is not carried).
+     * key; the value schema is not carried). A property whose schema is
+     * {@code false} is left out and closes the contract
+     * ({@code additionalProperties:
+     * false}), the one way the contract can keep it from being sent.
      */
     private static void putObjectShape(Map<String, Object> out, Schema<?> schema, OpenAPI openAPI, Set<String> resolving, int depth) {
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
+        boolean forbidden = false;
         if (properties != null && !properties.isEmpty()) {
             Map<String, Object> converted = new LinkedHashMap<>();
             for (var entry : properties.entrySet()) {
                 if (entry.getValue() != null && Boolean.TRUE.equals(entry.getValue().getReadOnly())) {
                     continue;
                 }
+                if (isFalseSchema(entry.getValue())) {
+                    // A property whose schema is false is forbidden. The contract cannot say
+                    // "forbidden" for one key while extra keys are otherwise allowed, so the
+                    // property is left out and the contract is closed below: the stricter,
+                    // safe direction - the tool can only send less than the spec permits.
+                    forbidden = true;
+                    continue;
+                }
                 converted.put(entry.getKey(), convert(entry.getValue(), openAPI, resolving, depth + 1));
+            }
+            Object additional = schema.getAdditionalProperties();
+            if (forbidden && schema.getRequired() != null) {
+                // Closing the contract would make a required key that only the
+                // additionalProperties schema (or its absence) allows impossible to send.
+                // Declare each such key explicitly, under the schema that governs it.
+                for (String name : schema.getRequired()) {
+                    if (name == null || converted.containsKey(name) || properties.containsKey(name)) {
+                        continue;
+                    }
+                    if (additional instanceof Schema<?> additionalSchema && additionalSchema.getBooleanSchemaValue() == null) {
+                        converted.put(name, convert(additionalSchema, openAPI, resolving, depth + 1));
+                    } else if (additional == null || Boolean.TRUE.equals(additional)
+                            || additional instanceof Schema<?> booleanSchema && Boolean.TRUE.equals(booleanSchema.getBooleanSchemaValue())) {
+                        converted.put(name, new LinkedHashMap<>());
+                    }
+                    // additionalProperties false: the key was never sendable; left out.
+                }
             }
             out.put("properties", converted);
             if (schema.getRequired() != null) {
@@ -170,10 +202,46 @@ final class OpenApiArgumentSchemas {
             }
         }
         Object additional = schema.getAdditionalProperties();
-        if (additional instanceof Boolean allowed) {
+        if (forbidden) {
+            out.put("additionalProperties", false);
+        } else if (additional instanceof Boolean allowed) {
             out.put("additionalProperties", allowed);
-        } else if (additional instanceof Schema<?>) {
-            out.put("additionalProperties", true);
+        } else if (additional instanceof Schema<?> additionalSchema) {
+            // OpenAPI 3.1 parses "additionalProperties: false" into a boolean schema, not a
+            // Boolean: read as an ordinary schema it became "true", and the argument
+            // contract accepted the undeclared properties the spec forbids.
+            out.put("additionalProperties", !Boolean.FALSE.equals(additionalSchema.getBooleanSchemaValue()));
+        }
+    }
+
+    /**
+     * A schema that admits no value: the 3.1 boolean schema {@code false}, or
+     * {@code {"not": {}}}, the way OpenAPI 3.0 says it.
+     */
+    static boolean isFalseSchema(Schema<?> schema) {
+        if (schema == null) {
+            return false;
+        }
+        if (Boolean.FALSE.equals(schema.getBooleanSchemaValue())) {
+            return true;
+        }
+        Schema<?> not = schema.getNot();
+        return not != null && not.getBooleanSchemaValue() == null && isEmptySchema(not);
+    }
+
+    /**
+     * Whether {@code schema} has no keyword at all - judged from the whole schema
+     * as serialized, not from a list of getters: {@code not: {minimum: 0}} keeps
+     * its {@code minimum}, which a getter list without it would miss, and would
+     * forbid a property that accepts every negative number.
+     */
+    private static boolean isEmptySchema(Schema<?> schema) {
+        try {
+            JsonNode tree = Json31.mapper().valueToTree(schema);
+            return tree != null && tree.isObject() && tree.isEmpty();
+        } catch (IllegalArgumentException e) {
+            // Not serializable: not provably empty, so not treated as false.
+            return false;
         }
     }
 
@@ -187,6 +255,11 @@ final class OpenApiArgumentSchemas {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();
         Boolean additional = null;
+        // A name one part forbids (its schema is false) stays forbidden in the merge:
+        // allOf applies every part. Without this, the part closed itself, another
+        // part's "true" reopened the merge, and a part declaring the same name made it
+        // sendable again.
+        Set<String> forbidden = new HashSet<>();
         List<Schema> parts = new ArrayList<>(schema.getAllOf());
         if (schema.getProperties() != null && !schema.getProperties().isEmpty()) {
             Schema<Object> own = new Schema<>();
@@ -215,6 +288,12 @@ final class OpenApiArgumentSchemas {
             if (Boolean.TRUE.equals(converted.get("additionalProperties"))) {
                 additional = true;
             }
+            forbidden.addAll(forbiddenNames(part, openAPI, 0));
+        }
+        if (!forbidden.isEmpty()) {
+            properties.keySet().removeAll(forbidden);
+            required.removeIf(forbidden::contains);
+            additional = false;
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("type", "object");
@@ -227,6 +306,39 @@ final class OpenApiArgumentSchemas {
             out.put("additionalProperties", additional);
         }
         return out;
+    }
+
+    /**
+     * The names an object part forbids - properties whose schema is false - through
+     * component references and nested {@code allOf}, a bounded number of hops deep.
+     */
+    private static Set<String> forbiddenNames(Schema<?> part, OpenAPI openAPI, int hops) {
+        Set<String> names = new HashSet<>();
+        if (part == null || hops > MAX_DEPTH) {
+            return names;
+        }
+        String ref = part.get$ref();
+        if (ref != null) {
+            if (ref.startsWith(SCHEMA_REF_PREFIX) && openAPI != null && openAPI.getComponents() != null
+                    && openAPI.getComponents().getSchemas() != null) {
+                names.addAll(forbiddenNames(openAPI.getComponents().getSchemas().get(ref.substring(SCHEMA_REF_PREFIX.length())), openAPI,
+                        hops + 1));
+            }
+            return names;
+        }
+        if (part.getProperties() != null) {
+            part.getProperties().forEach((name, schema) -> {
+                if (isFalseSchema(schema)) {
+                    names.add(name);
+                }
+            });
+        }
+        if (part.getAllOf() != null) {
+            for (Schema<?> nested : part.getAllOf()) {
+                names.addAll(forbiddenNames(nested, openAPI, hops + 1));
+            }
+        }
+        return names;
     }
 
     /**
