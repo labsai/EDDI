@@ -255,6 +255,11 @@ final class OpenApiArgumentSchemas {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();
         Boolean additional = null;
+        // A closed part (additionalProperties false, or closed because it forbids a
+        // property) admits only the names it declares, whatever another part allows:
+        // allOf applies every part. Without this, a part that forbids "legacy" closed
+        // itself, another part's "true" reopened the merge, and "legacy" was sendable.
+        Set<String> closedTo = null;
         List<Schema> parts = new ArrayList<>(schema.getAllOf());
         if (schema.getProperties() != null && !schema.getProperties().isEmpty()) {
             Schema<Object> own = new Schema<>();
@@ -282,7 +287,21 @@ final class OpenApiArgumentSchemas {
             }
             if (Boolean.TRUE.equals(converted.get("additionalProperties"))) {
                 additional = true;
+            } else if (Boolean.FALSE.equals(converted.get("additionalProperties"))) {
+                Set<String> declared = converted.get("properties") instanceof Map<?, ?> partProperties
+                        ? new HashSet<>((Set<String>) partProperties.keySet())
+                        : new HashSet<>();
+                if (closedTo == null) {
+                    closedTo = declared;
+                } else {
+                    closedTo.retainAll(declared);
+                }
             }
+        }
+        if (closedTo != null) {
+            properties.keySet().retainAll(closedTo);
+            required.removeIf(name -> !properties.containsKey(name));
+            additional = false;
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("type", "object");

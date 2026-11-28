@@ -267,4 +267,19 @@ class OpenApiArgumentSchemasTest {
             assertEquals(Boolean.FALSE, converted.get("additionalProperties"), variant[0] + ": " + converted);
         }
     }
+
+    @Test
+    void aPropertyOnePartOfAnAllOfForbidsStaysForbidden() {
+        Schema<?> closing = new ObjectSchema().addProperty("name", new StringSchema()).addProperty("legacy", new Schema<>().not(new Schema<>()));
+        Schema<?> open = new ObjectSchema().addProperty("legacy", new StringSchema()).addProperty("name", new StringSchema());
+        open.setAdditionalProperties(true);
+        Schema<?> composed = new Schema<>().allOf(List.of(closing, open));
+
+        Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(composed, null);
+
+        Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+        assertFalse(properties.containsKey("legacy"), "another part cannot reopen a forbidden name: " + converted);
+        assertTrue(properties.containsKey("name"), converted.toString());
+        assertEquals(Boolean.FALSE, converted.get("additionalProperties"), converted.toString());
+    }
 }
