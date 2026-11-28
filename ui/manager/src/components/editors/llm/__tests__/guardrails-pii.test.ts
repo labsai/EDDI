@@ -9,7 +9,7 @@ import {
   withPiiCountries,
   withPiiKinds,
 } from "../guardrails";
-import type { GuardrailConfig } from "../types";
+import type { GuardrailConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 const pii = (parameters?: Record<string, string>): GuardrailConfig =>
   parameters === undefined ? { type: "pii-redaction" } : { type: "pii-redaction", parameters };

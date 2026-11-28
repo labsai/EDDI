@@ -129,7 +129,7 @@ public class McpGroupTools {
      * caller, and a non-admin naming someone else is rejected) — so the creator can
      * subsequently read/continue/close their own conversation through the ownership
      * gate, and cannot create one owned by another user. The legacy "mcp-client"
-     * default only applies when auth is off (with auth on, {@code requireRole} has
+     * default only applies when auth is off (with auth on, the role gate has
      * already rejected anonymous callers before this runs).
      */
     private String resolveOwner(String userId) {
@@ -198,7 +198,7 @@ public class McpGroupTools {
             + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, plus CUSTOM). Call this "
             + "before create_group to choose the right style.")
     public String describe_discussion_styles() {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("describe_discussion_styles"));
         return """
                 ## Discussion Styles
 
@@ -275,7 +275,7 @@ public class McpGroupTools {
     public String list_groups(@ToolArg(description = "Filter by group name (optional)", required = false) String filter,
                               @ToolArg(description = "Page index, 0-based (default: 0)", required = false, defaultValue = "0") String index,
                               @ToolArg(description = "Page size (default: 20)", required = false, defaultValue = "20") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_groups"));
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
@@ -290,7 +290,7 @@ public class McpGroupTools {
     @Tool(description = "Read a group configuration including its members, " + "discussion style, phases, and protocol settings.")
     public String read_group(@ToolArg(description = "Group configuration ID") String groupId,
                              @ToolArg(description = "Version number (default: latest; 0 also means latest)", required = false) String version) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_group"));
         try {
             int ver = parseIntOrDefault(version, 0);
             if (ver == 0) {
@@ -321,7 +321,7 @@ public class McpGroupTools {
                                         required = false) String maxTurns,
                                @ToolArg(description = "JSON array of pre-configured tasks for TASK_FORCE style (optional). Each element: {\"subject\":\"...\",\"description\":\"...\",\"assignToRole\":\"ALL\",\"dependsOn\":[],\"priority\":0}. If provided, the PLAN phase is skipped.",
                                         required = false) String tasks) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_group"));
         try {
             if (name == null || name.isBlank()) {
                 return errorJson("name is required", "BAD_REQUEST", null);
@@ -416,7 +416,7 @@ public class McpGroupTools {
                                @ToolArg(description = "Version number to update (default: latest; 0 also means latest)",
                                         required = false) String version,
                                @ToolArg(description = "Full JSON configuration body") String configJson) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("update_group"));
         try {
             int ver = parseIntOrDefault(version, 0);
             // Same strictness as PUT /groupstore/groups — AgentGroupConfiguration is a
@@ -434,7 +434,7 @@ public class McpGroupTools {
     public String delete_group(@ToolArg(description = "Group ID") String groupId,
                                @ToolArg(description = "Version number to delete (default: latest; 0 also means latest)",
                                         required = false) String version) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_group"));
         try {
             int ver = parseIntOrDefault(version, 0);
             groupStore.deleteGroup(groupId, ver, false);
@@ -450,6 +450,8 @@ public class McpGroupTools {
             + "All configured member agents participate using the group's discussion style. "
             + "Returns the full GroupConversation including transcript, task list (for TASK_FORCE), "
             + "dynamic agent tracking, and synthesized answer. "
+            + "Check 'outcome': ANSWERED, NO_ANSWER (COMPLETED without an answer — see 'outcomeReason') or FAILED "
+            + "(no member answered); a transcript entry whose 'outcome' is not ANSWERED is a member that did not answer. "
             + "WARNING: TASK_FORCE discussions with many agents/tasks can take several minutes. "
             + "For long-running discussions, use start_group_discussion instead (returns immediately, "
             + "poll with read_group_conversation).")
@@ -457,7 +459,7 @@ public class McpGroupTools {
                                      @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
                                      @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                               required = false) String userId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("discuss_with_group"));
         // The ceilings REST holds a question to: no validator sees an in-process MCP
         // call, and the question is fanned out to every member in every phase.
         String rejection = GroupQuestionLimits.rejectionReason(question, userId);
@@ -487,13 +489,14 @@ public class McpGroupTools {
             + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
             + "the structured decision record in the 'decision' field "
             + "(verdict/vote/agreement/award, if one was reached), "
-            + "and conversation state. Use this to poll for completion after start_group_discussion, "
+            + "and conversation state with its 'outcome' and 'outcomeReason' (COMPLETED with outcome NO_ANSWER "
+            + "ended without an answer). Use this to poll for completion after start_group_discussion, "
             + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(
                                           @ToolArg(description = "Group conversation ID (from "
                                                   + "discuss_with_group, start_group_discussion, "
                                                   + "or list_group_conversations)") String groupConversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_group_conversation"));
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
@@ -513,7 +516,7 @@ public class McpGroupTools {
                                            @ToolArg(description = "Page index, 0-based (default: 0)", required = false,
                                                     defaultValue = "0") String index,
                                            @ToolArg(description = "Page size (default: 20)", required = false, defaultValue = "20") String limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_group_conversations"));
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
@@ -555,7 +558,7 @@ public class McpGroupTools {
                                          @ToolArg(description = "The question or topic for the group to discuss") String question,
                                          @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                                   required = false) String userId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("start_group_discussion"));
         String rejection = GroupQuestionLimits.rejectionReason(question, userId);
         if (rejection != null) {
             return errorJson(rejection, "BAD_REQUEST", null);
@@ -584,7 +587,7 @@ public class McpGroupTools {
             + "remain readable afterwards.")
     public String delete_group_conversation(
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_group_conversation"));
         try {
             requireConversationOwner(groupConversationId);
             groupConversationService.deleteGroupConversation(groupConversationId);
@@ -607,7 +610,7 @@ public class McpGroupTools {
                                        @ToolArg(description = "Group conversation ID") String groupConversationId,
                                        @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
                                        @ToolArg(description = "The follow-up question") String question) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("followup_with_member"));
         String rejection = GroupQuestionLimits.followUpRejectionReason(question, targetAgentId, null);
         if (rejection != null) {
             return errorJson(rejection, "BAD_REQUEST", null);
@@ -642,7 +645,7 @@ public class McpGroupTools {
     public String continue_group_discussion(
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
                                             @ToolArg(description = "The follow-up question for the group") String question) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("continue_group_discussion"));
         String rejection = GroupQuestionLimits.rejectionReason(question, null);
         if (rejection != null) {
             return errorJson(rejection, "BAD_REQUEST", null);
@@ -681,7 +684,7 @@ public class McpGroupTools {
             + "Returns the closed GroupConversation.")
     public String close_group_conversation(
                                            @ToolArg(description = "Group conversation ID") String groupConversationId) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("close_group_conversation"));
         try {
             requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.closeGroupConversation(groupConversationId);
@@ -712,7 +715,7 @@ public class McpGroupTools {
                                 @ToolArg(description = "With hypothesis: the value that counts as success", required = false) String target,
                                 @ToolArg(description = "With hypothesis: ISO date the bet is due for a verdict, e.g. 2026-12-01",
                                          required = false) String reviewDate) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("add_team_task"));
         try {
             if (subject == null || subject.isBlank()) {
                 return errorJson("subject is required");
@@ -768,7 +771,7 @@ public class McpGroupTools {
     public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId,
                                     @ToolArg(description = "true to list only the bets whose review date has arrived and have no verdict yet",
                                              required = false) Boolean dueForReview) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_team_backlog"));
         try {
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
@@ -797,7 +800,7 @@ public class McpGroupTools {
             + "decision-board, negotiation-table. Each entry names its required roles — the keys "
             + "create_group_from_template expects.")
     public String list_group_templates() {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_group_templates"));
         try {
             return jsonSerialization.serialize(templateService.list());
         } catch (Exception e) {
@@ -812,7 +815,7 @@ public class McpGroupTools {
                                              @ToolArg(description = "Name for the new group (optional; defaults to the template's name)",
                                                       required = false) String name,
                                              @ToolArg(description = "JSON object: role -> agent id") String roleAssignments) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_group_from_template"));
         try {
             Map<String, String> assignments = roleAssignments != null && !roleAssignments.isBlank()
                     ? MAPPER.readValue(roleAssignments, new TypeReference<Map<String, String>>() {

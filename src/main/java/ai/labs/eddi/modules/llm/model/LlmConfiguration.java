@@ -56,7 +56,7 @@ import java.util.Map;
  * "systemMessage": "You are helpful"
  * },
  * "enableBuiltInTools": true,
- * "tools": ["eddi://ai.labs.apicalls/weather?version=1"],
+ * "builtInToolsWhitelist": ["calculator", "websearch"],
  * "maxBudgetPerConversation": 1.0
  * }
  * ]
@@ -278,7 +278,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Zero-infrastructure RAG: name of an httpCall in the workflow to execute
          * before the LLM call. The httpCall's response is injected as context into the
-         * system message. This is Phase 8c-0 (quick-win, no vector store needed).
+         * system message. Needs no vector store.
          */
         private String httpCallRag;
 
@@ -436,6 +436,18 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.7.0
          */
         private AgentOpsConfig agentOps;
+
+        /**
+         * How this task treats PDF documents: structure, splitting into units, sharing
+         * with other agents, the library, large documents. Absent means today's
+         * behaviour. Every key is nullable (unset = the deployment default
+         * {@code eddi.documents.defaults.<path>}); a key that is not available in this
+         * version is refused at save. See {@link DocumentsConfig} and
+         * {@code docs/langchain.md} for which keys are available.
+         *
+         * @since 6.8.0
+         */
+        private DocumentsConfig documents;
 
         /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
@@ -1228,6 +1240,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             return agentOps;
         }
 
+        public DocumentsConfig getDocuments() {
+            return documents;
+        }
+
+        public void setDocuments(DocumentsConfig documents) {
+            this.documents = documents;
+        }
+
         public void setAgentOps(AgentOpsConfig agentOps) {
             this.agentOps = agentOps;
         }
@@ -1601,16 +1621,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <p>
      * Supported actions per policy:
      * <ul>
-     * <li>{@code "ignore"} — do nothing (default for most signals)</li>
+     * <li>{@code "ignore"} — do nothing (the default of {@link #onRefusal},
+     * {@link #onInvalidJson} and {@link #onSchemaMismatch})</li>
      * <li>{@code "warn"} — log a warning, store metadata, continue</li>
      * <li>{@code "fallback"} — substitute a static fallback message</li>
      * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
      * error digest)</li>
      * <li>{@code "retry"} — only for {@link #onEmpty}, {@link #onTruncation},
-     * {@link #onContentFilter}, {@link #onInvalidJson} and
-     * {@link #onContextTooLong}: re-ask the same model (see {@link #maxRetries}),
-     * then, once the re-asks are spent, escalate to the next cascade step and
-     * finally apply {@link #fallbackAction}</li>
+     * {@link #onContentFilter}, {@link #onInvalidJson}, {@link #onSchemaMismatch}
+     * and {@link #onContextTooLong}: re-ask the same model (see
+     * {@link #maxRetries}), then, once the re-asks are spent, escalate to the next
+     * cascade step and finally apply {@link #fallbackAction}</li>
      * </ul>
      *
      * @since 6.0.0
@@ -2460,7 +2481,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Cascade strategy: "cascade" (sequential escalation, default) or "parallel"
-         * (concurrent, future)
+         * (reserved: currently runs sequentially, with a deploy-time warning)
          */
         private String strategy = "cascade";
 

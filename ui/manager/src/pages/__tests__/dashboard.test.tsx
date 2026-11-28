@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { DashboardPage } from "@/pages/dashboard";
 
 // ─── Dynamic mocks ────────────────────────────────────────────────────────
@@ -23,12 +23,12 @@ vi.mock("@/hooks/use-platform-status", () => ({
 }));
 
 const mockUseVaultHealth = vi.fn();
-vi.mock("@/hooks/use-secrets", () => ({
+vi.mock("@eddi/app-kit/hooks/use-secrets", () => ({
   useVaultHealth: (...args: unknown[]) => mockUseVaultHealth(...args),
   useSecrets: () => ({ data: [], isLoading: false }),
 }));
 
-vi.mock("@/hooks/use-agents", () => ({
+vi.mock("@eddi/app-kit/hooks/use-agents", () => ({
   useAgentDescriptors: () => ({
     data: [
       { resource: "eddi://ai.labs.bot/botstore/bots/agent-1?version=1", name: "Support Agent" },

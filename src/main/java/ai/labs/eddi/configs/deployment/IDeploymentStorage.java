@@ -12,8 +12,9 @@ import java.util.List;
 /**
  * Database-agnostic storage interface for deployment information.
  * <p>
- * Implementations: MongoDeploymentStorage (@DefaultBean),
- * PostgresDeploymentStorage (@LookupIfProperty).
+ * Implementations: {@code MongoDeploymentStorage} and
+ * {@code PostgresDeploymentStorage}; the {@code DataStoreProducers} producer
+ * picks one by the configured datastore type.
  */
 public interface IDeploymentStorage {
 

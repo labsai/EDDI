@@ -5,8 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@eddi/ui";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { sampleSpendControlChange, seedSpendControlMock } from "@/test/mocks/spend-control-handlers";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { sampleSpendControlChange, seedSpendControlMock } from "@eddi/app-kit/test/mocks/spend-control-handlers";
 import { toast } from "sonner";
 
 import { QuotasPage } from "@/pages/quotas";

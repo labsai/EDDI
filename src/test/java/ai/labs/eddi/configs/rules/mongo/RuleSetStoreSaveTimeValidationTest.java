@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rules.mongo;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -137,6 +138,63 @@ class RuleSetStoreSaveTimeValidationTest {
         assertThrows(IllegalArgumentException.class, () -> ruleSetStore.update("rs1", 1, ruleSet));
 
         verify(resourceStorage, never()).read(any(), any());
+    }
+
+    @Test
+    @DisplayName("a retired tagMatches is refused when an author saves the ruleset (REST/MCP create)")
+    void tagMatchesIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("Cautious In Production", "deploymentContext", Map.of("when", "production", "tagMatches", "high-risk"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("Cautious In Production"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("tagMatches"), thrown.getMessage());
+        verify(resourceStorage, never()).newResource(any());
+    }
+
+    @Test
+    @DisplayName("a retired tagMatches is refused on an author's update too")
+    void tagMatchesIsRefusedOnUpdate() throws Exception {
+        var ruleSet = ruleSetWith("Cautious In Production", "deploymentContext", Map.of("tagMatches", "high-risk"));
+
+        assertThrows(IllegalArgumentException.class, () -> ruleSetStore.update("rs1", 1, ruleSet));
+
+        verify(resourceStorage, never()).read(any(), any());
+    }
+
+    @Test
+    @DisplayName("a dependency without a reference is refused when an author saves the ruleset")
+    void dependencyWithoutReferenceIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("Follow Up", "dependency", Map.of());
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("reference"), thrown.getMessage());
+        verify(resourceStorage, never()).newResource(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("an existing ruleset with a retired config is persisted when imported, synced or duplicated")
+    void retiredConfigIsAcceptedForAnExistingRuleSet() throws Exception {
+        var createdResource = mock(IResourceStorage.IResource.class);
+        when(resourceStorage.newResource(any(RuleSetConfiguration.class))).thenReturn(createdResource);
+        var ruleSet = ruleSetWith("Cautious In Production", "deploymentContext", Map.of("when", "production", "tagMatches", "high-risk"));
+
+        ExistingRuleSetWrite.call(() -> ruleSetStore.create(ruleSet));
+
+        verify(resourceStorage).newResource(ruleSet);
+        verify(resourceStorage).store(createdResource);
+    }
+
+    @Test
+    @DisplayName("every other check still applies to an existing ruleset")
+    void otherChecksStillApplyToAnExistingRuleSet() throws Exception {
+        var ruleSet = ruleSetWith("Start over", "actionmatcher", Map.of("actions", "confirm_creation", "occurrence", "lastSteps"));
+
+        assertThrows(IllegalArgumentException.class, () -> ExistingRuleSetWrite.call(() -> ruleSetStore.create(ruleSet)));
+
+        verify(resourceStorage, never()).newResource(any());
     }
 
     @SuppressWarnings("unchecked")

@@ -38,7 +38,8 @@ import java.util.List;
  * Tables:
  * <ul>
  * <li>{@code tenant_quotas} — quota configuration</li>
- * <li>{@code tenant_usage} — rolling usage counters</li>
+ * <li>{@code tenant_usage} — usage counters in wall-clock-aligned windows (day,
+ * minute, calendar month)</li>
  * </ul>
  *
  * @since 6.0.0

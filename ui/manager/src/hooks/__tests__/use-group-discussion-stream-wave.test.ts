@@ -3,14 +3,14 @@ import { renderHook, act } from "@testing-library/react";
 import {
   useGroupDiscussionStream,
   useGroupStreamStore,
-} from "@/hooks/use-group-discussion-stream";
-import type { GroupSSEEvent } from "@/lib/api/groups";
+} from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import type { GroupSSEEvent } from "@eddi/app-kit/lib/api/groups";
 
 const mockStreamGroupDiscussion = vi.fn();
 const mockStreamGroupContinue = vi.fn();
 
-vi.mock("@/lib/api/groups", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/api/groups")>();
+vi.mock("@eddi/app-kit/lib/api/groups", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@eddi/app-kit/lib/api/groups")>();
   return {
     ...original,
     streamGroupDiscussion: (...args: unknown[]) => mockStreamGroupDiscussion(...args),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SETUP_MAX_SYSTEM_PROMPT_LENGTH } from "@/lib/api/agent-setup";
-import { PRODUCT_NAME_MAX } from "@/lib/brand-validation";
+import { SETUP_MAX_SYSTEM_PROMPT_LENGTH } from "@eddi/app-kit/lib/api/agent-setup";
+import { PRODUCT_NAME_MAX } from "@eddi/app-kit/lib/brand-validation";
 import { buildOperatorSystemPrompt, defaultOperatorPromptBody } from "../system-prompt";
 import type { OperatorScope } from "../tool-scopes";
 

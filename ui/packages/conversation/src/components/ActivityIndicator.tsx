@@ -65,7 +65,9 @@ export function indicatorStatusText(
   tool: ToolActivity | null,
   t: Translate = englishText,
   guardrail = false,
+  reconnecting = false,
 ): string {
+  if (reconnecting) return t("conversation.indicator.reconnecting");
   if (tool) {
     // An identifier is put into words ("Using Get agent descriptors…"); a
     // designer's toolDisplay phrase ("Creating an action: …") stands alone.
@@ -100,13 +102,16 @@ export function ThinkingIndicator({
   escalating = false,
   tool = null,
   guardrail = false,
+  reconnecting = false,
 }: {
   escalating?: boolean;
   tool?: ToolActivity | null;
   guardrail?: boolean;
+  /** The stream dropped and the turn is being followed on the server (`reconnecting`). */
+  reconnecting?: boolean;
 }) {
   const t = useConversationText();
-  const mode = tool ? "tool" : guardrail ? "guardrail" : escalating ? "escalating" : "thinking";
+  const mode = reconnecting ? "reconnecting" : tool ? "tool" : guardrail ? "guardrail" : escalating ? "escalating" : "thinking";
   // Hidden from assistive technology: the transcript is aria-busy while this is
   // on screen, so ChatWidget announces indicatorStatusText() from a status
   // region outside it. Announcing here as well would read it twice.
@@ -124,7 +129,7 @@ export function ThinkingIndicator({
           ) : (
             <Brain className="indicator__brain" size="1em" />
           )}
-          <span>{indicatorStatusText(escalating, tool, t, guardrail)}</span>
+          <span>{indicatorStatusText(escalating, tool, t, guardrail, reconnecting)}</span>
         </div>
       </div>
     </div>

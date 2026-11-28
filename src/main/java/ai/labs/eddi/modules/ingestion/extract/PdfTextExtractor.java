@@ -39,11 +39,13 @@ import java.util.List;
  * programs. Three bounds, each on a different way a file can take the process
  * down with it:
  * <ul>
- * <li><b>Memory, per stream.</b> {@link PdfStreamBudget} measures what every
- * compressed stream expands to before the file is opened, because PDFBox
- * decodes a stream whole into memory and a deflate bomb is a few kilobytes that
- * expand to gigabytes. The parser's own scratch space is capped at the same
- * figure.</li>
+ * <li><b>Memory, per stream and per document.</b> {@link PdfStreamBudget}
+ * measures what every compressed stream expands to before the file is opened,
+ * because PDFBox decodes a stream whole into memory and a deflate bomb is a few
+ * kilobytes that expand to gigabytes. That scan is a pre-filter; the bound is
+ * {@link PdfDecodeBudget}, which counts everything PDFBox decodes while the
+ * document is read (twice {@code maxUncompressedBytes} in total). The parser's
+ * own scratch space is capped at {@code maxUncompressedBytes}.</li>
  * <li><b>Memory, per page.</b> Text is laid out a page at a time and a page's
  * glyphs are held until it is done. A page may claim millions of them, so the
  * count is capped a little above what the character budget could ever keep; a

@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { EditableAnswer } from "@/lib/api/hitl";
+import type { EditableAnswer } from "@eddi/app-kit/lib/api/hitl";
 
 /** Length in code points — the backend counts `maxEditChars` the same way. */
 export function codePointLength(text: string): number {

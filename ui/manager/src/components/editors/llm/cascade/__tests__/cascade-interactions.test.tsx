@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { TaskCascadeSection } from "../../task-cascade-section";
-import type { LlmTask, ModelCascadeConfig } from "../../types";
+import type { LlmTask, ModelCascadeConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Stateful harness so every onChange re-renders with the new task. */
 function Harness({ initial }: { initial: LlmTask }) {

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Environment } from "@/lib/constants";
+import type { Environment } from "@eddi/app-kit/lib/constants";
 
 export type ChatDrawerStep =
   | "idle"

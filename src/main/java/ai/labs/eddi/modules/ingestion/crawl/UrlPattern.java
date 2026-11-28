@@ -75,8 +75,9 @@ public final class UrlPattern {
     }
 
     /**
-     * Compiles a glob, or returns empty when it is unusable. Compilation happens
-     * once per crawl rather than once per URL per pattern.
+     * Compiles a glob, or returns empty when it is unusable: null, blank, or longer
+     * than 512 characters. Compilation happens once per crawl rather than once per
+     * URL per pattern.
      */
     public static Optional<UrlPattern> compile(String glob) {
         if (glob == null || glob.isBlank() || glob.length() > MAX_PATTERN_LENGTH) {

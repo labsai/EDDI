@@ -4,8 +4,8 @@ import {
   updateQuota,
   getUsage,
   resetUsage,
-} from "@/lib/api/quotas";
-import type { TenantQuota } from "@/lib/api/quotas";
+} from "@eddi/app-kit/lib/api/quotas";
+import type { TenantQuota } from "@eddi/app-kit/lib/api/quotas";
 
 /* ─── Query Keys ─── */
 

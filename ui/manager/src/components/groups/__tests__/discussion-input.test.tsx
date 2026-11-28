@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEvent, fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 
 describe("DiscussionInput", () => {

@@ -70,12 +70,14 @@ import java.util.stream.Collectors;
  * CAS pattern, and race-window comment carries over unchanged.
  * <p>
  * Holds a back-reference to the concrete {@link GroupConversationService} for
- * three calls that stay on the facade: {@code executeDiscussion} (the phase
- * loop {@code resumeDiscussion} re-enters), {@code resolvePhases}, and
- * {@code cleanupEphemeralAgents}. Same safety argument as
- * {@link MemberTurnExecutor}'s self-reference — this class's constructor only
- * stores it, never invokes a method on it before the facade's own constructor
- * (and therefore full field initialization) completes.
+ * the calls that stay on the facade: {@code executeDiscussion} (the phase loop
+ * {@code resumeDiscussion} re-enters), {@code effectivePhases},
+ * {@code resolveParticipants} / {@code rosterWithRecruits},
+ * {@code approvalContextRenderer}, {@code planHashStrict},
+ * {@code announceUserEvents} and {@code cleanupEphemeralAgents}. Same safety
+ * argument as {@link MemberTurnExecutor}'s self-reference — this class's
+ * constructor only stores it, never invokes a method on it before the facade's
+ * own constructor (and therefore full field initialization) completes.
  * <p>
  * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
@@ -340,7 +342,15 @@ public class GroupHitlCoordinator {
         gc.getTranscript().add(new TranscriptEntry(
                 "system", "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.ERROR, Instant.now(), msg, null));
-        gc.setState(GroupConversationState.FAILED);
+        // The stalled round fails; the discussion fails only if no earlier round
+        // answered (the rule of a round that ends without an answer): an answered one
+        // stays COMPLETED, continuable, with its agents kept.
+        boolean discussionFails = !gc.hasAnsweredRound();
+        gc.setState(discussionFails ? GroupConversationState.FAILED : GroupConversationState.COMPLETED);
+        DiscussionOutcomes.noProgress(gc);
+        // The stalled round's turn count dies with it, as on a normal completion: a
+        // continuation seeds its counter from it and would start with the cap spent.
+        gc.setPausedTurnCount(0);
         gc.setPausedAt(null);
         gc.setHitlApprovalContext(null);
         gc.setHitlLastPauseFingerprint(null);
@@ -348,8 +358,11 @@ public class GroupHitlCoordinator {
         // H14a: only while still running — a cancel committed elsewhere must win.
         RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
         counterGroupFailure.increment();
+        DiscussionOutcomes.countUnanswered(gc);
         deleteGroupHitlTimeoutSchedule(gc.getId());
-        cleanupAfterTerminalState(gc);
+        if (discussionFails) {
+            cleanupAfterTerminalState(gc);
+        }
         if (listener != null) {
             listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(msg));
         }
@@ -606,6 +619,9 @@ public class GroupHitlCoordinator {
         // The audit entry names the cancelled pause, which setPausedAt(null) clears.
         final Instant cancelledPausedAt = gc.getPausedAt();
         gc.setState(GroupConversationState.CANCELLED);
+        // outcome is null after a cancel: a record read while a continuation was
+        // claiming its round can still carry the previous round's outcome.
+        DiscussionOutcomes.clear(gc);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
         gc.setHitlApprovalContext(null);
         gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed
@@ -626,6 +642,11 @@ public class GroupHitlCoordinator {
             // release resources that were kept alive across the pause.
             auditHitlCancellation(gc, mode, cancelledPausedAt);
             cleanupAfterTerminalState(gc);
+        }
+        // No running leg ends here, so the leg's own end-of-leg announcement never
+        // runs: tell the owner and the human members that it ended.
+        if (groupConversationService != null) {
+            groupConversationService.announceUserEvents(gc);
         }
         return true;
     }
@@ -858,6 +879,13 @@ public class GroupHitlCoordinator {
             // and rendering a recorded decision as "Failed" is wrong in a product whose
             // point is the human in the loop.
             gc.setState(GroupConversationState.REJECTED);
+            // S7: the same outcome vocabulary as every other end — a timeout's
+            // AUTO_REJECT is told apart from a person's rejection.
+            if (humanDecision) {
+                DiscussionOutcomes.rejected(gc);
+            } else {
+                DiscussionOutcomes.approvalTimedOut(gc);
+            }
             gc.setPausedAt(null);
             gc.setHitlApprovalContext(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
@@ -868,8 +896,7 @@ public class GroupHitlCoordinator {
             // A rejection is terminal: notify the (SSE) listener so streams close
             // instead of hanging, and release paused-state resources.
             if (listener != null) {
-                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                        gc.getState(), gc.getSynthesizedAnswer()));
+                listener.onGroupComplete(GroupConversationEventSink.GroupCompleteEvent.of(gc));
             }
             cleanupAfterTerminalState(gc);
             return gc;

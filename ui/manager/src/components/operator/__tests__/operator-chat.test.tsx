@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { OperatorChat, type OperatorChatProps } from "../operator-chat";
-import type { ToolCallPauseDetails } from "@/lib/api/hitl";
+import type { ToolCallPauseDetails } from "@eddi/app-kit/lib/api/hitl";
 
 beforeEach(() => {
   // jsdom has no scrollIntoView; the chat auto-scroll effect calls it.

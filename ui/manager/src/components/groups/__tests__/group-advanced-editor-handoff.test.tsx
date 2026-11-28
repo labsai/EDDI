@@ -1,18 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
-vi.mock("@/hooks/use-agents", () => ({
+vi.mock("@eddi/app-kit/hooks/use-agents", () => ({
   useAgentDescriptors: () => ({ data: [] }),
   groupAgentsByName: () => [],
 }));
 
-import { GroupAdvancedEditor } from "@/components/groups/group-advanced-editor";
-import type { AgentGroupConfiguration } from "@/lib/api/groups";
+import { GroupAdvancedEditor } from "@eddi/app-kit/components/groups/group-advanced-editor";
+import type { AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
 
 function makeConfig(overrides: Partial<AgentGroupConfiguration> = {}): AgentGroupConfiguration {
   return { name: "G", style: "ROUND_TABLE", maxRounds: 1, members: [], phases: [], ...overrides } as AgentGroupConfiguration;

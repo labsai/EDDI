@@ -67,6 +67,7 @@ class AgentDeploymentManagementClusterTest {
     private IDeploymentStore deploymentStore;
     private IAgentFactory agentFactory;
     private AgentDeploymentManagement management;
+    private V6RenameMigration v6RenameMigration;
     /** Runs what is submitted on the calling thread, unless a test re-stubs it. */
     private ExecutorService executor;
 
@@ -82,9 +83,10 @@ class AgentDeploymentManagementClusterTest {
         });
         when(runtime.getExecutorService()).thenReturn(executor);
         when(runtime.getScheduledExecutorService()).thenReturn(mock(ScheduledExecutorService.class));
+        v6RenameMigration = mock(V6RenameMigration.class);
         management = new AgentDeploymentManagement(deploymentStore, agentFactory, mock(IAgentStore.class), mock(IAgentsReadiness.class),
                 mock(IConversationMemoryStore.class), mock(IDocumentDescriptorStore.class), mock(IMigrationManager.class),
-                mock(V6RenameMigration.class), mock(V6QuteMigration.class), mock(ChannelConnectorMigration.class),
+                v6RenameMigration, mock(V6QuteMigration.class), mock(ChannelConnectorMigration.class),
                 mock(WorkspaceAccessIndexMigration.class), runtime, mock(IWorkflowStore.class), mock(IRuleSetStore.class), 30);
         IAgent ready = mock(IAgent.class);
         when(ready.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
@@ -129,6 +131,20 @@ class AgentDeploymentManagementClusterTest {
         long start = System.nanoTime();
         assertNull(management.awaitClusterDeployment(Environment.production, "agent1", () -> "never", Duration.ofSeconds(5)));
         assertTrue(System.nanoTime() - start < Duration.ofSeconds(2).toNanos(), "a real 404 must not wait");
+        verify(agentFactory, never()).deployAgent(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a version missing here while the migrations are owed answers at once: nothing would deploy it during the wait")
+    void missingWhileMigrationsAreOwedDoesNotWait() throws Exception {
+        clustered(true);
+        when(v6RenameMigration.isPending()).thenReturn(true);
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("agent1")));
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of());
+
+        long start = System.nanoTime();
+        assertNull(management.awaitClusterDeployment(Environment.production, "agent1", () -> null, Duration.ofSeconds(5)));
+        assertTrue(System.nanoTime() - start < Duration.ofSeconds(2).toNanos(), "an undeployable version must not cost the full wait");
         verify(agentFactory, never()).deployAgent(any(), any(), any(), any());
     }
 

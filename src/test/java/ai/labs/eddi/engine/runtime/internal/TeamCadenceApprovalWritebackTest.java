@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -54,8 +56,14 @@ class TeamCadenceApprovalWritebackTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(true);
         groupStore = mock(IAgentGroupStore.class);
+        var groupConversationService = mock(GroupConversationService.class);
+        // These tests are about the writeback, not signing: the records show a task as
+        // stored.
+        when(groupConversationService.recordedFeedback(any(), any()))
+                .thenAnswer(inv -> GroupSigningGuard.recordedFeedback(null, inv.getArgument(0), null, inv.getArgument(1)));
+        when(groupConversationService.recordsTrustFeedback(any(), any(), anyBoolean(), any())).thenReturn(true);
         service = new TeamCadenceService(workspaceStore, mock(IGroupConversationStore.class),
-                mock(GroupConversationService.class), mock(ITemplatingEngine.class), new SimpleMeterRegistry(),
+                groupConversationService, mock(ITemplatingEngine.class), new SimpleMeterRegistry(),
                 TeamCadenceService.DEFAULT_CLAIM_TTL);
         service.initMetrics();
         service.groupStore = groupStore;
@@ -169,6 +177,7 @@ class TeamCadenceApprovalWritebackTest {
         assertFalse(after.verified(), "approved is not verified");
         assertEquals("the post", after.result());
         assertEquals("original description", after.description(), "no retry feedback appended");
+        assertTrue(workspace.feedbackFor(post.id()).isEmpty(), "no retry feedback kept");
         assertEquals("writer", after.assignedAgentId());
         assertEquals(1, workspace.getMetrics().getTasksApproved());
         assertEquals(0, workspace.getMetrics().getTasksVerified(), "tasksVerified keeps meaning verified");
@@ -211,7 +220,7 @@ class TeamCadenceApprovalWritebackTest {
 
         TaskItem after = workspace.getBacklog().findById(task.id());
         assertEquals(TaskStatus.PENDING, after.status());
-        assertTrue(after.description().contains("notes"), "the usual retry feedback");
+        assertEquals("notes", workspace.feedbackFor(task.id()).getFirst().text(), "the usual retry feedback");
         assertEquals(0, workspace.getMetrics().getTasksApproved());
     }
 
@@ -259,7 +268,7 @@ class TeamCadenceApprovalWritebackTest {
 
         TaskItem after = workspace.getBacklog().findById(post.id());
         assertEquals(TaskStatus.PENDING, after.status());
-        assertTrue(after.description().contains("wrong channel"));
+        assertEquals("wrong channel", workspace.feedbackFor(post.id()).getFirst().text());
     }
 
     @Test
