@@ -9,6 +9,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.io.MemoryUsageSetting;
@@ -21,6 +22,7 @@ import org.apache.pdfbox.text.TextPosition;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringWriter;
 import java.time.Instant;
 import java.util.List;
 
@@ -211,13 +213,26 @@ public class PdfTextExtractor implements DocumentTextExtractor {
         return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
     }
 
-    /** Stops a page that runs too long or lays out too much. */
-    private static final class BoundedTextStripper extends PDFTextStripper {
+    /**
+     * Stops a page that runs too long or lays out too much. Package-private so
+     * {@link PdfStructureExtractor} measures pages under the same bounds.
+     */
+    static final class BoundedTextStripper extends PDFTextStripper {
 
         private final Instant deadline;
         private long glyphsLeft;
         private boolean pageWasCut;
         private int operatorsSinceCheck;
+        /** Marked-content sequences begun and not yet ended on the current page. */
+        private int markedContentDepth;
+        /**
+         * Set while {@link #measurePages} runs: where the page being laid out is
+         * written.
+         */
+        private StringWriter measuring;
+        private int[] measured;
+        private int measuredFirst;
+        private long glyphsPerPage;
 
         BoundedTextStripper(Instant deadline) {
             this.deadline = deadline;
@@ -234,6 +249,76 @@ public class PdfTextExtractor implements DocumentTextExtractor {
         }
 
         /**
+         * Lays out pages {@code first..last} in ONE pass over the page tree, each with
+         * its own allowance of {@code glyphsPerPage}, and returns each page's character
+         * count after {@link String#strip()}, page {@code first} first. A pass per page
+         * visited every page of the tree each time: at 250,000 pages and 500 measured,
+         * 125 million visits. Lines end in {@code \n} whatever the host, so the same
+         * PDF gives the same counts everywhere.
+         */
+        int[] measurePages(PDDocument document, int first, int last, long glyphsPerPage)
+                throws IOException {
+            setStartPage(first);
+            setEndPage(last);
+            setLineSeparator("\n");
+            this.glyphsPerPage = glyphsPerPage;
+            this.measured = new int[last - first + 1];
+            this.measuredFirst = first;
+            this.measuring = new StringWriter();
+            try {
+                writeText(document, measuring);
+                return measured;
+            } finally {
+                measuring = null;
+            }
+        }
+
+        @Override
+        protected void startPage(PDPage page) throws IOException {
+            if (measuring != null) {
+                requireBeforeDeadline();
+                measuring.getBuffer().setLength(0);
+                allowGlyphs(glyphsPerPage);
+            }
+            super.startPage(page);
+        }
+
+        @Override
+        protected void endPage(PDPage page) throws IOException {
+            super.endPage(page);
+            if (measuring != null) {
+                measured[getCurrentPageNo() - measuredFirst] = measuring.toString().strip().length();
+            }
+        }
+
+        @Override
+        public void beginMarkedContentSequence(COSName tag, COSDictionary properties) {
+            markedContentDepth++;
+            super.beginMarkedContentSequence(tag, properties);
+        }
+
+        @Override
+        public void endMarkedContentSequence() {
+            if (markedContentDepth > 0) {
+                markedContentDepth--;
+            }
+            super.endMarkedContentSequence();
+        }
+
+        /**
+         * Ends every marked-content sequence the page left open. A page cut at its
+         * glyph allowance inside an {@code /ActualText} sequence never reaches its
+         * {@code EMC}, and PDFBox keeps the replacement text pending — across pages and
+         * across {@code getText} calls — so the next page's first glyph would read as
+         * the previous page's replacement and the rest as nothing.
+         */
+        private void closeOpenMarkedContent() {
+            while (markedContentDepth > 0) {
+                endMarkedContentSequence();
+            }
+        }
+
+        /**
          * A page stopped at its glyph allowance still lays out the glyphs it gave
          * before that. Dropping them made a readable PDF whose first page is dense — a
          * small-font table, a large drawing — look like a scan with no text layer,
@@ -243,16 +328,36 @@ public class PdfTextExtractor implements DocumentTextExtractor {
          * {@link PDFTextStripper#processPage} is startPage, the page's program,
          * writePage, endPage; the program is what {@link PageTooLong} leaves, so the
          * remaining two are done here on what was collected.
+         *
+         * <p>
+         * PDFTextStripper calls this for every page that has content, in or out of the
+         * requested range, and lays out only those in range. A page outside it is
+         * skipped before its content is decoded or charged: reading a document one page
+         * at a time otherwise charged every page on every pass, and the square of the
+         * page count refused ordinary long documents as decompression bombs.
          */
         @Override
         public void processPage(PDPage page) throws IOException {
+            if (getCurrentPageNo() < getStartPage() || getCurrentPageNo() > getEndPage()) {
+                return;
+            }
             chargePageContents(page);
             try {
                 super.processPage(page);
             } catch (PageTooLong e) {
                 pageWasCut = true;
+                closeOpenMarkedContent();
                 writePage();
                 endPage(page);
+            } finally {
+                closeOpenMarkedContent();
+            }
+        }
+
+        private void requireBeforeDeadline() {
+            if (Instant.now().isAfter(deadline) || Thread.currentThread().isInterrupted()) {
+                throw new UnreadableDocumentException(
+                        "This PDF took too long to read. Split it into smaller files and upload those.");
             }
         }
 
