@@ -388,6 +388,11 @@ public final class ModelOutputParser {
                 depth++;
             } else if (c == '}' || c == ']') {
                 depth--;
+                if (depth == 0) {
+                    // The root object closed: what follows (a second object, say) holds
+                    // no member of it, so nothing after this point is recovered.
+                    break;
+                }
             }
             if (!Character.isWhitespace(c)) {
                 last = c;
@@ -539,12 +544,17 @@ public final class ModelOutputParser {
 
     /**
      * What the next key of an object looks like after a comma: a quoted name and a
-     * colon, or a quote and name cut off by the end of the text. The name is
-     * bounded (one quantifier, so the match stays linear) at the longest name
-     * {@code recoverFields} accepts; a longer, unrecognised key is read as part of
-     * the value, which only ever keeps text, never skips a check.
+     * colon, a quoted name cut off by the end of the text before its colon, or a
+     * quote and name cut off by the end of the text. The name may hold JSON
+     * escapes; a backslash and the character after it count as one character. It is
+     * bounded (one quantifier over two alternatives that cannot both match, so the
+     * match stays linear) at the longest name {@code recoverFields} accepts; a
+     * longer, unrecognised key is read as part of the value, which only ever keeps
+     * text, never skips a check. A quoted word followed by anything but a colon or
+     * the end, as in prose, is no key.
      */
-    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{0," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*:|\\z)");
+    private static final Pattern NEXT_KEY = Pattern
+            .compile("\"(?:[^\"\\\\]|\\\\.){0," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*(?::|\\z)|\\z)");
 
     /**
      * Whether a quote followed by {@code text[from..]} closes a value. Prose can

@@ -336,6 +336,31 @@ class ModelOutputParserRecoverFieldsTest {
     }
 
     @Test
+    @DisplayName("a following key with an escape in its name ends the value")
+    void escapedNextKeyEndsValue() {
+        String raw = "{\"htmlResponseText\":\"bad \"x\" quote\",\"a\\u0062\":0,\"broken\":[";
+
+        assertEquals("bad \"x\" quote", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a following key cut off before its colon ends the value; a quoted word followed by prose does not")
+    void nextKeyTruncatedBeforeColon() {
+        assertEquals("bad \"x\" quote", map(parse("{\"htmlResponseText\":\"bad \"x\" quote\",\"next\"", recover(FIELD))).get(FIELD));
+        assertEquals("bad \"x\" quote\",\"next\" and more",
+                map(parse("{\"htmlResponseText\":\"bad \"x\" quote\",\"next\" and more", recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("once the root object closes nothing after it is recovered: a second object's field is not the root's")
+    void stopsWhenTheRootCloses() {
+        JsonOutcome outcome = parse("{} {\"htmlResponseText\":\"wrong", recover(FIELD));
+
+        assertFalse(outcome.recovered());
+        assertTrue(outcome.kind() != Kind.VALID, "the root holds no such field: " + outcome.kind());
+    }
+
+    @Test
     @DisplayName("fieldAliases apply to a recovered field as they do to a parsed reply, even when wrapDefaults holds the target")
     void aliasesApplyToRecoveredFields() {
         var options = new RescueOptions(null, Map.of("answer", ""), RescueOptions.DEFAULT_WRAP_MAX_CHARS, false,
