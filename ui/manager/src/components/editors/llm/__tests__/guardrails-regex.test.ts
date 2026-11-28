@@ -58,6 +58,10 @@ describe("regexPatternProblems", () => {
       "a{2}{3}",
       "a*{2}",
       "a+?{2}",
+      // A range over characters outside the BMP is ordered by code point in Java;
+      // JavaScript without `u` compares the surrogate halves and calls it backwards.
+      "[\u{1F600}-\u{1F64F}]",
+      String.raw`[\uD83D\uDE00-\uD83D\uDE4F]`,
     ];
     for (const javaOnly of samples) {
       const problems = regexPatternProblems(javaOnly);
@@ -89,6 +93,9 @@ describe("blockingRegexProblem", () => {
   it("never blocks a Java nested character class, and still blocks a plain malformed class", () => {
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: "[a-z[-+]]" } })).toBeUndefined();
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: "[z-a]" } })?.line).toBe(1);
+    for (const supplementary of ["[\u{1F600}-\u{1F64F}]", String.raw`[\uD83D\uDE00-\uD83D\uDE4F]`]) {
+      expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: supplementary } }), supplementary).toBeUndefined();
+    }
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: String.raw`\[(` } })?.line).toBe(1);
   });
 

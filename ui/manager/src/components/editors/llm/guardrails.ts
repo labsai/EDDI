@@ -428,8 +428,12 @@ const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHvVRXe]|\\
 /**
  * Whether a character class uses what only Java understands: a nested class
  * (`[a-z[-+]]`, a union — JavaScript reads `[-+` as a backwards range and
- * rejects it), an `&&` intersection, or a `]` right after the opening `[` (a
- * literal in Java, an empty class in JavaScript).
+ * rejects it), an `&&` intersection, a `]` right after the opening `[` (a
+ * literal in Java, an empty class in JavaScript), or a character outside the
+ * Basic Multilingual Plane, written as itself or as a `\uD83D\uDE00` escape
+ * pair. Java reads such a character as one code point; JavaScript without the
+ * `u` flag reads its two surrogate halves, so a range like `[U+1F600-U+1F64F]` is a
+ * backwards range there and valid in Java.
  */
 function usesJavaOnlyClassSyntax(source: string): boolean {
   let inClass = false;
@@ -438,9 +442,12 @@ function usesJavaOnlyClassSyntax(source: string): boolean {
     if (c === "\\") {
       // `\Q…\E` quotes everything up to `\E`, brackets included.
       if (source[i + 1] === "Q") return true;
+      if (inClass && source[i + 1] === "u" && /^[dD][89abAB][0-9a-fA-F]{2}$/.test(source.slice(i + 2, i + 6))) return true;
       i++;
       continue;
     }
+    // A high surrogate: the first half of a character outside the BMP.
+    if (inClass && source.charCodeAt(i) >= 0xd800 && source.charCodeAt(i) <= 0xdbff) return true;
     if (!inClass) {
       if (c === "[") {
         inClass = true;
