@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.List;
 import java.util.Map;
@@ -88,6 +89,58 @@ public class PendingToolCallBatch {
          * from an {@code operationId}, which is a guess from a spec that can drift.
          */
         private ResolvedRequestPreview requestPreview;
+
+        /**
+         * Set when a mandatory, argument-aware rule ({@code MandatoryApprovalRule})
+         * gated this call: its stable reason code, e.g. {@code file-egress}. Null for a
+         * call only the agent's approval patterns gated, and on every batch persisted
+         * before the hook existed.
+         * <p>
+         * The resume enforces {@link #mandatoryApprover} for every call that carries
+         * one, and no timeout policy or system decision approves it.
+         */
+        private String mandatoryReasonCode;
+        /**
+         * {@code ApproverRule} name of a mandatory call: {@code ANY_PERMITTED_APPROVER}
+         * or {@code CONVERSATION_USER}. An unrecognised value is enforced as the
+         * strictest, {@code CONVERSATION_USER}.
+         */
+        private String mandatoryApprover;
+        /**
+         * The server-built sentence telling the approver why this call is asked — no
+         * model text, no storage reference.
+         */
+        private String mandatorySummary;
+
+        public String getMandatoryReasonCode() {
+            return mandatoryReasonCode;
+        }
+
+        public void setMandatoryReasonCode(String mandatoryReasonCode) {
+            this.mandatoryReasonCode = mandatoryReasonCode;
+        }
+
+        public String getMandatoryApprover() {
+            return mandatoryApprover;
+        }
+
+        public void setMandatoryApprover(String mandatoryApprover) {
+            this.mandatoryApprover = mandatoryApprover;
+        }
+
+        public String getMandatorySummary() {
+            return mandatorySummary;
+        }
+
+        public void setMandatorySummary(String mandatorySummary) {
+            this.mandatorySummary = mandatorySummary;
+        }
+
+        /** Whether a mandatory, argument-aware rule gated this call. */
+        @JsonIgnore
+        public boolean isMandatory() {
+            return mandatoryReasonCode != null && !mandatoryReasonCode.isBlank();
+        }
 
         public String getCallId() {
             return callId;

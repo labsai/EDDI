@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.alerts;
 
+import ai.labs.eddi.engine.gdpr.erasure.DrainBarrier;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,6 +12,7 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -29,6 +31,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * rating request must not wait for Slack, a webhook or the database, and an
  * alert storm big enough to fill the queue is already visible in the inbox and
  * in that counter.
+ * <p>
+ * Every task goes through a {@link DrainBarrier}, so a GDPR erasure can wait
+ * until the work queued before it has finished ({@link #awaitDrained}, see
+ * {@link AlertErasureWriter}).
  */
 @ApplicationScoped
 public class AlertDispatcher {
@@ -43,6 +49,7 @@ public class AlertDispatcher {
     private final AlertSettings settings;
     private final ThreadPoolExecutor executor;
     private final AtomicLong lastDropWarning = new AtomicLong();
+    private final DrainBarrier barrier = new DrainBarrier();
 
     @Inject
     public AlertDispatcher(AlertEngine engine, AlertMetrics metrics, AlertSettings settings) {
@@ -82,7 +89,7 @@ public class AlertDispatcher {
             return false;
         }
         try {
-            executor.execute(() -> {
+            barrier.execute(executor, () -> {
                 try {
                     work.run();
                 } catch (RuntimeException e) {
@@ -100,6 +107,15 @@ public class AlertDispatcher {
             }
             return false;
         }
+    }
+
+    /**
+     * Waits until the work queued before this call has finished.
+     *
+     * @return {@code false} on timeout
+     */
+    public boolean awaitDrained(Duration timeout) throws InterruptedException {
+        return barrier.awaitDrained(timeout);
     }
 
     @PreDestroy

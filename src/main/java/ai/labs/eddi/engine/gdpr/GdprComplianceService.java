@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.gdpr;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -153,6 +154,15 @@ public class GdprComplianceService {
 
     @Inject
     IConversationCoordinator conversationCoordinator;
+
+    /**
+     * The erasure guarantee for rows written asynchronously (alert events, and any
+     * other {@code AsyncErasureWriter}): tombstones before the deletes, a drain
+     * barrier in the stop step, verification in the participants. Field-injected;
+     * null in tests built with {@code new}, which then run without it.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
 
     /**
      * The keyed pseudonym for database logs, log lines and compliance records (L9).
@@ -403,15 +413,19 @@ public class GdprComplianceService {
      * <p>
      * Order of operations:
      * <ol>
+     * <li>Record the durable erasure tombstones of the user and their conversations
+     * ({@link ErasureGuard})</li>
      * <li>Make this node's audit ledger write the user's pseudonym from here on,
      * then signal the user's in-flight turns and group discussions to stop (see
-     * {@link UserErasureParticipant}) — on every other node too in cluster
-     * mode</li>
+     * {@link UserErasureParticipant}) — on every other node too in cluster mode —
+     * and pass the drain barrier of the async writers on each node</li>
      * <li>Delete all persistent user memories</li>
      * <li>Delete all binary attachments for user conversations and group
      * discussions, and purge the conversations' dead letters</li>
      * <li>Delete all HITL tool execution journal entries for user
      * conversations</li>
+     * <li>Delete and verify the async writers' rows of the user's conversations
+     * ({@link ErasureGuard#eraseConversationRows})</li>
      * <li>Delete all conversation descriptors</li>
      * <li>Delete all conversation memory checkpoints</li>
      * <li>Delete the vault slots holding the user's {@code scope: "secret"}
@@ -432,6 +446,8 @@ public class GdprComplianceService {
      * {@code eddi.audit.erasure-mode=pseudonymize}), then pseudonymize any rows
      * left under the raw id</li>
      * <li>Run every registered {@link IGdprParticipant}, in {@code order()}</li>
+     * <li>Require no pending removal of the user's async-written rows to be left,
+     * of any writer ({@link ErasureGuard#verifyNoPendingRemovals})</li>
      * </ol>
      * <p>
      * Conversation IDs are resolved once, after the user memories are deleted and
@@ -453,6 +469,32 @@ public class GdprComplianceService {
         // failure must be visible in the response, or an admin files an Art. 17
         // request as fulfilled while the data is still there.
         var failedSteps = new ArrayList<String>();
+
+        // 00. Durable tombstones of the user and of each of their conversations,
+        // BEFORE anything below deletes or stops: an asynchronous writer whose work was
+        // queued before this point — on any node — refuses to write the row, or removes
+        // it again, once it sees them (ErasureGuard). Not best effort: a failure here
+        // is
+        // a failed step, because nothing then stops a late write from recreating data.
+        // The conversations tombstoned here, before the drain barrier of step 0; one
+        // listed later (3b) has its tombstone written after that barrier.
+        List<String> tombstonedConversations = List.of();
+        if (erasureGuard != null) {
+            List<String> listed = List.of();
+            try {
+                listed = conversationMemoryStore.getConversationIdsByUserId(userId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
+            }
+            try {
+                erasureGuard.tombstoneUser(userId, listed);
+                // Only once written: a conversation whose tombstone failed counts as late
+                // in 3b, which drains again for it.
+                tombstonedConversations = listed;
+            } catch (Exception e) {
+                recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
+            }
+        }
 
         // 0a. From here on this node's audit ledger writes the user's pseudonym, not
         // their id. Work cancelled below can still flush audit entries while it
@@ -478,6 +520,25 @@ public class GdprComplianceService {
                 recordFailure(failedSteps, participant.erasureStepName(), e, pseudonym);
             }
         }
+        // 0-drain. The drain barrier on this node: wait until the async writers
+        // finished
+        // the work they had queued before the tombstones existed. Work queued later is
+        // refused by the tombstones, so once this returns nothing can still write a
+        // guarded row of the user here. A writer that does not drain in time fails the
+        // step: its queued work could still land after the deletes below.
+        // Whether the drain barrier is unconfirmed anywhere (this node or another): a
+        // queued write may then still land, and its self-removal can leave a pending
+        // removal that names only a conversation. The snapshots are what a re-run
+        // finds those conversations by, so they are kept (4c).
+        boolean drainUnconfirmed = false;
+        if (erasureGuard != null) {
+            List<String> undrained = erasureGuard.drainLocal();
+            if (!undrained.isEmpty()) {
+                drainUnconfirmed = true;
+                recordFailure(failedSteps, "asyncWriteDrain",
+                        new IllegalStateException("async writer(s) " + undrained + " did not drain in time — retry the erasure"), pseudonym);
+            }
+        }
         // 0b. Cluster mode: the same stop on every other node, where the user's turns
         // and discussions may be running. The user travels as a hash. A node that does
         // not answer marks the step incomplete (its running work still cannot recreate
@@ -485,19 +546,24 @@ public class GdprComplianceService {
         // conversation — but it can still flush audit entries after the sweep).
         if (clusterRpc != null && clusterRpc.isClustered()) {
             try {
-                // One fresh count for both the wait and the verdict (B5): the scatter used to
+                // One fresh read for both the wait and the verdict (B5): the scatter used to
                 // stop at a presence count cached for 3 s and the verdict compared a fresh one,
                 // so a node that had just joined or left made the step fail, or wait,
-                // spuriously.
-                int expectedPeers = clusterRpc.expectedPeers();
-                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, clusterStopRequest(userId), clusterStopTimeout, expectedPeers);
-                if (replies.size() < expectedPeers) {
+                // spuriously. By id, not by count: a node that joins meanwhile answers too,
+                // and must not stand in for one of these that did not.
+                Set<String> expectedPeers = clusterRpc.expectedPeerIds();
+                // Each node also drains its async writers before it answers (up to
+                // eddi.gdpr.drain-timeout), so the wait covers both.
+                Duration wait = erasureGuard == null ? clusterStopTimeout : clusterStopTimeout.plus(erasureGuard.drainTimeout());
+                var replies = clusterRpc.callAllAwaiting(IClusterRpc.GDPR_STOP, clusterStopRequest(userId), wait, expectedPeers);
+                List<String> unconfirmed = expectedPeers.stream().filter(node -> !replies.containsKey(node)).sorted().toList();
+                if (!unconfirmed.isEmpty()) {
                     // A node that did not answer may still be running the user's work and
                     // flush it (audit entries, memory) after the sweeps below. The cascade
                     // goes on, but must not report a clean erasure.
-                    recordFailure(failedSteps, "clusterStop", new IllegalStateException(
-                            (expectedPeers - replies.size()) + " of " + expectedPeers + " node(s) did not confirm the stop — retry the erasure"),
-                            pseudonym);
+                    drainUnconfirmed |= erasureGuard != null;
+                    recordFailure(failedSteps, "clusterStop", new IllegalStateException(unconfirmed.size() + " of " + expectedPeers.size()
+                            + " node(s) did not confirm the stop (" + String.join(", ", unconfirmed) + ") — retry the erasure"), pseudonym);
                 }
                 for (var reply : replies.entrySet()) {
                     if (reply.getValue().get("stopped") instanceof Number stopped) {
@@ -506,12 +572,21 @@ public class GdprComplianceService {
                     if (reply.getValue().get("error") != null) {
                         // A node could not stop all of the user's work: the cascade still runs,
                         // but reports the step incomplete rather than a clean erasure.
+                        drainUnconfirmed |= erasureGuard != null && !Boolean.TRUE.equals(reply.getValue().get("drained"));
                         recordFailure(failedSteps, "clusterStop",
                                 new IllegalStateException("node " + reply.getKey() + ": " + reply.getValue().get("error")), pseudonym);
+                    } else if (erasureGuard != null && !Boolean.TRUE.equals(reply.getValue().get("drained"))) {
+                        // A node that stopped the work but did not confirm the drain barrier
+                        // (an older release, mid rolling upgrade) may still write a queued
+                        // guarded row after the deletes below.
+                        drainUnconfirmed = true;
+                        recordFailure(failedSteps, "clusterStop", new IllegalStateException(
+                                "node " + reply.getKey() + " did not confirm that its async writers drained — retry the erasure"), pseudonym);
                     }
                 }
                 LOGGER.infof("[GDPR] Cluster stop answered by node(s) %s [%s]", replies.keySet(), pseudonym);
             } catch (RuntimeException e) {
+                drainUnconfirmed |= erasureGuard != null;
                 recordFailure(failedSteps, "clusterStop", e, pseudonym);
             }
         }
@@ -669,6 +744,45 @@ public class GdprComplianceService {
                     journalEntriesDeleted, pseudonym);
         }
 
+        // 3b. The async writers' rows of the user's conversations (ErasureGuard), for
+        // a row that carries the conversation but no reference to the user — the
+        // writers' participants (step 8) find only the rows that name the user. Runs
+        // after the drain barrier of step 0 and, like the journal above, before the
+        // snapshots are deleted: they are how a re-run finds these conversations
+        // again, so a failure keeps them.
+        if (erasureGuard != null && !conversationIds.isEmpty()) {
+            try {
+                // The ids were listed again after step 00: a conversation created in
+                // between has no tombstone yet, and one is written before its rows go.
+                erasureGuard.tombstoneConversations(conversationIds);
+                // Its tombstone postdates the drain of step 0, so a write admitted before it
+                // — a row that names only that conversation, which no user tombstone
+                // refuses — may still be queued. Drain again, everywhere, before its rows
+                // are counted; only when there is such a conversation.
+                Set<String> lateConversations = new LinkedHashSet<>(conversationIds);
+                lateConversations.removeAll(tombstonedConversations);
+                if (!lateConversations.isEmpty()) {
+                    List<String> undrained = erasureGuard.drainEverywhere(lateConversations.size());
+                    if (!undrained.isEmpty()) {
+                        dependentCleanupIncomplete = true;
+                        recordFailure(failedSteps, "asyncWriteConversations", new IllegalStateException(lateConversations.size()
+                                + " conversation(s) started during the erasure could not be drained: " + String.join("; ", undrained)),
+                                pseudonym);
+                    }
+                }
+                Map<String, String> notErased = erasureGuard.eraseConversationRows(conversationIds);
+                if (!notErased.isEmpty()) {
+                    dependentCleanupIncomplete = true;
+                    recordFailure(failedSteps, "asyncWriteConversations", new IllegalStateException(
+                            notErased.size() + " conversation(s) still hold asynchronously written rows: " + notErased.values().iterator().next()),
+                            pseudonym);
+                }
+            } catch (Exception e) {
+                dependentCleanupIncomplete = true;
+                recordFailure(failedSteps, "asyncWriteConversations", e, pseudonym);
+            }
+        }
+
         // 4a. Delete conversation descriptors (must run BEFORE or alongside
         // the snapshot delete so the ids are still available)
         long descriptorsDeleted = 0;
@@ -756,6 +870,13 @@ public class GdprComplianceService {
         } else if (dependentCleanupIncomplete) {
             recordFailure(failedSteps, "conversations",
                     new IllegalStateException("kept until their dependent records are erased — retry the erasure"), pseudonym);
+        } else if (drainUnconfirmed) {
+            // A write still queued somewhere may land after this cascade, and a failed
+            // self-removal of a row that names only the conversation is a pending removal
+            // the user's last check does not count. A re-run finds it through these
+            // conversations, so keep them until a drain is confirmed everywhere.
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until every node confirmed its async writers drained — retry the erasure"), pseudonym);
         } else if (conversationLookupFailed) {
             // The ids that the journal, descriptor, checkpoint and attachment sweeps above
             // work
@@ -987,6 +1108,18 @@ public class GdprComplianceService {
             } catch (Exception e) {
                 participantsFailed.add(participant.name());
                 recordFailure(failedSteps, participant.name(), e, pseudonym);
+            }
+        }
+
+        // 9. The erasure guarantee's last check: no pending removal of the user is
+        // left, whatever writer recorded it — also one of a writer that has no
+        // participant, or is no longer deployed (each participant checks only its
+        // own writer's).
+        if (erasureGuard != null) {
+            try {
+                erasureGuard.verifyNoPendingRemovals(userId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "asyncWritePending", e, pseudonym);
             }
         }
 
@@ -1559,14 +1692,29 @@ public class GdprComplianceService {
      */
     private Map<String, Object> clusterStopRequest(String userId) {
         String hash = KvKeys.sha256(userId);
+        Map<String, Object> request = new LinkedHashMap<>();
+        // Tells the other nodes that this erasure wrote tombstones first; a node that
+        // receives a stop without it knows the erasure runs on a node without the
+        // guarantee and says so (see ClusterControlHandlers).
+        if (erasureGuard != null) {
+            request.put(TOMBSTONED, true);
+        }
         if (clusterSigner != null && clusterSigner.isResolvable()) {
             String sealed = clusterSigner.get().seal(hash);
             if (sealed != null) {
-                return Map.of("userIdSealed", sealed);
+                request.put("userIdSealed", sealed);
+                return request;
             }
         }
-        return Map.of("userIdHash", hash);
+        request.put("userIdHash", hash);
+        return request;
     }
+
+    /**
+     * Key of the {@code gdpr-stop} request saying the erasing node wrote erasure
+     * tombstones before it.
+     */
+    public static final String TOMBSTONED = "tombstoned";
 
     /**
      * Drop a cached restriction verdict. Null-safe because it is called from catch
