@@ -130,3 +130,27 @@ Seven confirmed findings from a security review of the outbound paths.
 [`AttachmentForwarder.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/AttachmentForwarder.java),
 [`HtmlToMarkdownConverter.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/HtmlToMarkdownConverter.java);
 docs: [`security.md`](../security.md), [`hitl-oversight.md`](../hitl-oversight.md), [`rag.md`](../rag.md).
+
+### Review follow-ups (CodeRabbit, 2026-11-12 review)
+
+- **A property both sides declare intersects boolean schemas**: `true` keeps the other side's schema,
+  `false` stays forbidden (before, `p: true` replaced `p: {type: string}`).
+- **Disjoint enums are refused** ("no value can satisfy both") instead of becoming an empty enum that the
+  argument converter drops, which left the argument unrestricted.
+- **The aggregate 16 MB cap counts downloaded bytes** (`FetchedSpec.bytes`), not UTF-16 characters.
+- **A referenced document's reference preflight walks its structure only**, as the bundler does, so a
+  `$ref` inside an `example` payload no longer refuses the import; a structural unsupported reference
+  still does.
+- **`not: {minimum: 0}` is no longer read as `false`**: a negated schema counts as empty only when it
+  serializes to `{}`, not when a fixed list of getters is null.
+- **A forbidden property no longer makes a required additional key unsendable**: when the contract is
+  closed, a required key that only `additionalProperties` (a schema, `true` or absent) admitted is
+  declared explicitly under that schema.
+- Docs: the crawler's `sameSiteOnly` port examples match `isSameSchemeAndPort`, and robots.txt and
+  sitemap redirects are named as outside the page-redirect scope check (`rag.md`); inline specs need
+  absolute external references, and the forward-proxy row names the post-exchange recheck correctly
+  (`security.md`).
+- Kept, not changed: a sibling beside a `$ref` is still merged in OpenAPI 3.0 documents too, although
+  3.0 says a Reference Object's siblings are ignored. The merge keeps the stricter bound, so it can only
+  narrow what the generated tool sends, never admit a value the referenced schema refuses, and
+  `expressBooleanPropertySchemasFor30` exists to carry such merges through 3.0.

@@ -140,7 +140,18 @@ public class OpenApiSpecFetcher {
      * {@code ./schemas.yaml} beside the <em>fetched</em> document, not the
      * original.
      */
-    public record FetchedSpec(String content, String location) {
+    public record FetchedSpec(String content, String location, long bytes) {
+        /**
+         * {@code bytes}: the size of the body as downloaded, the figure the byte caps
+         * are about - not {@code content().length()}, which counts UTF-16 units.
+         */
+        public FetchedSpec {
+        }
+
+        /** The byte count of {@code content} encoded as UTF-8. */
+        public FetchedSpec(String content, String location) {
+            this(content, location, content == null ? 0 : content.getBytes(StandardCharsets.UTF_8).length);
+        }
     }
 
     /** {@link #fetchSpec(String)}, content only. */
@@ -227,7 +238,7 @@ public class OpenApiSpecFetcher {
             } catch (IOException e) {
                 throw new IllegalArgumentException("Could not read the OpenAPI spec from " + forMessage(uri) + ": " + e.getMessage(), e);
             }
-            return new FetchedSpec(new String(body, StandardCharsets.UTF_8), uri.toString());
+            return new FetchedSpec(new String(body, StandardCharsets.UTF_8), uri.toString(), body.length);
         }
         throw new IllegalArgumentException("OpenAPI spec location redirected more than " + MAX_REDIRECTS + " times: " + forMessage(uri));
     }

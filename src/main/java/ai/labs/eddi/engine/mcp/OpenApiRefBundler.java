@@ -87,7 +87,7 @@ final class OpenApiRefBundler {
     private final OpenApiSpecFetcher fetcher;
     private final String rootUrl;
     private final Map<String, Doc> documents = new HashMap<>();
-    private long fetchedChars;
+    private long fetchedBytes;
     private int expandedNodes;
     /**
      * Distinct documents fetched: {@link #documents} also holds redirect aliases.
@@ -686,9 +686,7 @@ final class OpenApiRefBundler {
             properties.setAll((ObjectNode) target);
             for (Map.Entry<String, JsonNode> property : holder.properties()) {
                 JsonNode existing = properties.get(property.getKey());
-                properties.set(property.getKey(), existing instanceof ObjectNode existingSchema && property.getValue().isObject()
-                        ? mergeSchemas(existingSchema, property.getValue())
-                        : property.getValue());
+                properties.set(property.getKey(), intersectSchemas(existing, property.getValue()));
             }
             return properties;
         }
@@ -732,9 +730,37 @@ final class OpenApiRefBundler {
                     both.add(value);
                 }
             }
+            if (both.isEmpty()) {
+                // No value is in both: the merged schema admits nothing. An empty enum
+                // does not survive conversion (the argument schema would have no enum at
+                // all, so any value), so the spec is refused instead.
+                throw new IllegalArgumentException("OpenAPI spec merges a $ref with a sibling whose enum values are disjoint: no "
+                        + "value can satisfy both; refused");
+            }
             return both;
         }
         return holder;
+    }
+
+    /**
+     * Both schemas of a property apply. Two objects are merged; a boolean schema
+     * intersects: {@code true} leaves the other schema, {@code false} admits
+     * nothing whatever the other says.
+     */
+    private static JsonNode intersectSchemas(JsonNode existing, JsonNode added) {
+        if (existing == null) {
+            return added;
+        }
+        if (existing.isBoolean() || added.isBoolean()) {
+            if (existing.isBoolean() && !existing.asBoolean() || added.isBoolean() && !added.asBoolean()) {
+                return NODES.booleanNode(false);
+            }
+            return existing.isBoolean() ? added : existing;
+        }
+        if (existing instanceof ObjectNode existingSchema && added.isObject()) {
+            return mergeSchemas(existingSchema, added);
+        }
+        return added;
     }
 
     /**
@@ -888,18 +914,22 @@ final class OpenApiRefBundler {
                     "OpenAPI spec $ref " + OpenApiSpecFetcher.forMessage(target) + " refused: " + e.getMessage(), e);
         }
         fetchedDocuments++;
-        fetchedChars += fetched.content().length();
-        if (fetchedChars > OpenApiSpecFetcher.MAX_SPEC_BYTES) {
+        // Bytes as downloaded: content().length() counts UTF-16 units, and two UTF-8
+        // documents each under the cap could pass together.
+        fetchedBytes += fetched.bytes();
+        if (fetchedBytes > OpenApiSpecFetcher.MAX_SPEC_BYTES) {
             throw new IllegalArgumentException("The documents an OpenAPI spec references through its $refs are larger than "
                     + OpenApiSpecFetcher.MAX_SPEC_BYTES + " bytes together; refused");
         }
         // A referenced document is the publisher's: the same scheme rules as a
         // downloaded spec (no file:, classpath:, UNC or local $id base).
-        McpApiToolBuilder.rejectUnsafeRefs(fetched.content(), true);
         JsonNode tree = McpApiToolBuilder.deserializeLikeParser(fetched.content());
         if (tree == null) {
             throw new IllegalArgumentException("OpenAPI spec $ref " + OpenApiSpecFetcher.forMessage(target) + " points at an empty document");
         }
+        // Over the document's structure only, as the bundler itself reads it: a
+        // "$ref" inside an example payload is data, and must not refuse the import.
+        forEachKeywordObject(tree, Context.KEYWORDS, node -> McpApiToolBuilder.rejectUnsafeRefAt(node, true));
         // Relative references in it resolve beside the URL it was finally read from.
         Doc doc = new Doc(withoutFragment(URI.create(fetched.location())), tree, false);
         documents.put(docUrl, doc);

@@ -549,6 +549,26 @@ public final class McpApiToolBuilder {
      * reads: {@code file:}, {@code jar:}, {@code classpath:}, a drive or UNC path.
      * Other schemes ({@code urn:}, http) cannot be read from the filesystem.
      */
+    /**
+     * The checks {@link #rejectUnsafeRefs} applies to one object: its {@code $ref}
+     * and, in a downloaded document, its {@code $id}. For a caller that walks only
+     * the document's structure, so a {@code $ref} inside an example payload is left
+     * alone.
+     */
+    static void rejectUnsafeRefAt(JsonNode node, boolean downloaded) {
+        if (node == null || !node.isObject()) {
+            return;
+        }
+        JsonNode ref = node.get("$ref");
+        if (ref != null && ref.isValueNode()) {
+            checkRef(ref.asText(), downloaded);
+        }
+        JsonNode id = downloaded ? node.get("$id") : null;
+        if (id != null && id.isTextual()) {
+            checkSchemaId(id.asText());
+        }
+    }
+
     private static void checkSchemaId(String rawId) {
         String id = rawId.trim();
         String lower = id.toLowerCase(Locale.ROOT);

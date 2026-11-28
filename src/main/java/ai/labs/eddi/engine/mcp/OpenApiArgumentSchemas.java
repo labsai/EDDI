@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.core.util.Json31;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.media.Schema;
 
@@ -173,6 +175,24 @@ final class OpenApiArgumentSchemas {
                 }
                 converted.put(entry.getKey(), convert(entry.getValue(), openAPI, resolving, depth + 1));
             }
+            Object additional = schema.getAdditionalProperties();
+            if (forbidden && schema.getRequired() != null) {
+                // Closing the contract would make a required key that only the
+                // additionalProperties schema (or its absence) allows impossible to send.
+                // Declare each such key explicitly, under the schema that governs it.
+                for (String name : schema.getRequired()) {
+                    if (name == null || converted.containsKey(name) || properties.containsKey(name)) {
+                        continue;
+                    }
+                    if (additional instanceof Schema<?> additionalSchema && additionalSchema.getBooleanSchemaValue() == null) {
+                        converted.put(name, convert(additionalSchema, openAPI, resolving, depth + 1));
+                    } else if (additional == null || Boolean.TRUE.equals(additional)
+                            || additional instanceof Schema<?> booleanSchema && Boolean.TRUE.equals(booleanSchema.getBooleanSchemaValue())) {
+                        converted.put(name, new LinkedHashMap<>());
+                    }
+                    // additionalProperties false: the key was never sendable; left out.
+                }
+            }
             out.put("properties", converted);
             if (schema.getRequired() != null) {
                 List<String> required = schema.getRequired().stream().filter(converted::containsKey).toList();
@@ -206,10 +226,23 @@ final class OpenApiArgumentSchemas {
             return true;
         }
         Schema<?> not = schema.getNot();
-        return not != null && not.getBooleanSchemaValue() == null && not.getType() == null && (not.getTypes() == null || not.getTypes().isEmpty())
-                && not.get$ref() == null && not.getProperties() == null && not.getItems() == null && not.getAllOf() == null
-                && not.getAnyOf() == null && not.getOneOf() == null && not.getNot() == null && not.getEnum() == null
-                && not.getFormat() == null && not.getPattern() == null;
+        return not != null && not.getBooleanSchemaValue() == null && isEmptySchema(not);
+    }
+
+    /**
+     * Whether {@code schema} has no keyword at all - judged from the whole schema
+     * as serialized, not from a list of getters: {@code not: {minimum: 0}} keeps
+     * its {@code minimum}, which a getter list without it would miss, and would
+     * forbid a property that accepts every negative number.
+     */
+    private static boolean isEmptySchema(Schema<?> schema) {
+        try {
+            JsonNode tree = Json31.mapper().valueToTree(schema);
+            return tree != null && tree.isObject() && tree.isEmpty();
+        } catch (IllegalArgumentException e) {
+            // Not serializable: not provably empty, so not treated as false.
+            return false;
+        }
     }
 
     /**

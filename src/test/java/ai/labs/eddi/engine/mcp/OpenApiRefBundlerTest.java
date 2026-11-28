@@ -743,4 +743,70 @@ class OpenApiRefBundlerTest {
         String bundled = OpenApiRefBundler.bundle(spec, null, mock(OpenApiSpecFetcher.class));
         assertTrue(!bundled.contains("$id") && bundled.contains("\"type\":\"object\""), bundled);
     }
+
+    // --- review follow-ups ---
+
+    @Test
+    @DisplayName("a property both sides declare: a boolean true does not replace the other side's schema, false stays forbidden")
+    void booleanPropertySchemasIntersect() throws Exception {
+        String defs = "{\"T\":{\"type\":\"object\",\"properties\":{\"p\":{\"type\":\"string\"},\"q\":{\"type\":\"string\"}}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/T","properties":{"p":true,"q":false}}}}}
+                """;
+
+        JsonNode bundled = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher));
+        assertEquals("string", bundled.at("/components/schemas/S/properties/p/type").asText(), bundled.toString());
+        assertTrue(bundled.at("/components/schemas/S/properties/q").isBoolean()
+                && !bundled.at("/components/schemas/S/properties/q").asBoolean(), bundled.toString());
+    }
+
+    @Test
+    @DisplayName("enums with no value in common are refused, not turned into an unrestricted argument")
+    void disjointEnumsAreRefused() {
+        String defs = "{\"Status\":{\"type\":\"string\",\"enum\":[\"draft\"]}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Status","enum":["published"]}}}}
+                """;
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> OpenApiRefBundler.bundle(spec, null, fetcher));
+        assertTrue(e.getMessage().contains("no value can satisfy both"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("the aggregate cap counts the bytes downloaded, not UTF-16 characters")
+    void aggregateCapCountsBytes() {
+        long eachBytes = OpenApiSpecFetcher.MAX_SPEC_BYTES / 2 + 1;
+        OpenApiSpecFetcher fetcher = mock(OpenApiSpecFetcher.class);
+        when(fetcher.fetchSpec(anyString()))
+                .thenAnswer(invocation -> new OpenApiSpecFetcher.FetchedSpec("{\"type\":\"string\"}", invocation.getArgument(0), eachBytes));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"type":"object","properties":{
+                   "a":{"$ref":"https://example.com/a.json"},"b":{"$ref":"https://example.com/b.json"}}}}}}
+                """;
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> OpenApiRefBundler.bundle(spec, null, fetcher));
+        assertTrue(e.getMessage().contains("bytes together"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a $ref inside a referenced document's example payload is data: the import is not refused")
+    void exampleRefInAReferencedDocumentIsData() throws Exception {
+        String defs = "{\"Pet\":{\"type\":\"object\",\"example\":{\"$ref\":\"customer-record:42\"}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Pet"}}}}
+                """;
+
+        JsonNode bundled = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher));
+        assertEquals("customer-record:42", bundled.at("/components/schemas/S/example/$ref").asText(), bundled.toString());
+        // A structural one is still refused.
+        OpenApiSpecFetcher refusing = fetcherServing(Map.of("https://example.com/defs.json", "{\"Pet\":{\"$ref\":\"customer-record:42\"}}"));
+        assertThrows(IllegalArgumentException.class, () -> OpenApiRefBundler.bundle(spec, null, refusing));
+    }
 }
