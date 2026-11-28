@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -284,5 +284,80 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     await user.click(screen.getByTestId("save-btn"));
     await waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0]).toMatchObject({ hitlConfig: { notify: { email: { recipients: ["lead@example.com"] } } } });
+  });
+
+  it("Discard drops an unsavable Slack name kept while the HITL section was collapsed", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } },
+        }),
+      ),
+    );
+    renderPage("agent-hitl");
+
+    const field = await screen.findByTestId("hitl-notify-slack-integration");
+    await user.clear(field);
+    await user.type(field, "ops-slack2"); // a valid edit makes the draft dirty
+    await user.clear(field);
+    await user.type(field, "ops|slack"); // the unsavable one stays in the section
+    await user.click(screen.getByTestId("hitl-config-toggle"));
+    expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+    await waitFor(() => expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops-slack"));
+  });
+
+  it("an unsavable Slack name counts as an unsaved edit: dirty marker, Discard enabled, and Discard clears it", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } },
+        }),
+      ),
+    );
+    renderPage("agent-hitl");
+
+    const field = await screen.findByTestId("hitl-notify-slack-integration");
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+    // One change event, so no valid intermediate name reaches the draft.
+    fireEvent.change(field, { target: { value: "ops|slack" } });
+
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("discard-btn")).toBeEnabled();
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument());
+    expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops-slack");
+  });
+
+  it("Review changes with only an unsavable HITL value shows a note and no removed lines", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } },
+        }),
+      ),
+    );
+    renderPage("agent-hitl");
+
+    fireEvent.change(await screen.findByTestId("hitl-notify-slack-integration"), { target: { value: "ops|slack" } });
+    await user.click(await screen.findByTestId("review-changes-btn"));
+
+    const dialog = await screen.findByTestId("review-changes-dialog");
+    expect(within(dialog).getByTestId("review-pending-hitl-note")).toBeInTheDocument();
+    expect(within(dialog).queryAllByTestId("diff-line")).toHaveLength(0);
+    expect(within(dialog).getByTestId("diff-identical")).toBeInTheDocument();
   });
 });

@@ -1044,12 +1044,20 @@ public class SlackEventHandler {
         }
         String auth = "Bearer " + botToken;
         try {
-            if (contextShown) {
-                // Conversation text on the card: no link or media preview of anything a model
-                // wrote.
-                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback, false);
-            } else {
-                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            // Conversation text on the card: no link or media preview of anything a model
+            // wrote.
+            String ts = contextShown
+                    ? slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback, false)
+                    : slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            if (recorded && ts != null) {
+                // Remembered so the card is updated when its pause ends somewhere else. A
+                // storage failure must not turn a delivered card into a failed delivery.
+                try {
+                    approvalRecords.markPosted(integrationName, conversationId, pauseEpoch, ts);
+                } catch (RuntimeException e) {
+                    LOGGER.warnf("Could not store the Slack timestamp of the HITL approval card for %s: %s",
+                            sanitize(conversationId), e.getMessage());
+                }
             }
         } catch (SlackDeliveryException e) {
             // F12: delivery failed — drop the record so a later retry can re-attempt

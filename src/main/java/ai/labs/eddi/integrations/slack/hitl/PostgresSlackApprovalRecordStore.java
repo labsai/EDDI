@@ -46,6 +46,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
                 approval_channel_id VARCHAR(255),
                 created_at TIMESTAMP NOT NULL,
                 expires_at TIMESTAMP NOT NULL,
+                message_ts VARCHAR(64),
                 PRIMARY KEY (integration_name, subject, pause_epoch)
             )
             """;
@@ -55,6 +56,12 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
      * binding. A row without it can never resolve a decision.
      */
     private static final String ADD_CARD_ID = "ALTER TABLE slack_hitl_approval_records ADD COLUMN IF NOT EXISTS card_id VARCHAR(64)";
+
+    /**
+     * Adds {@code message_ts} to a table created before cards were updated on
+     * resolution. A row without it is simply never updated.
+     */
+    private static final String ADD_MESSAGE_TS = "ALTER TABLE slack_hitl_approval_records ADD COLUMN IF NOT EXISTS message_ts VARCHAR(64)";
 
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_slack_approval_expires ON slack_hitl_approval_records (expires_at)";
 
@@ -81,6 +88,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(ADD_CARD_ID);
+            statement.execute(ADD_MESSAGE_TS);
             statement.execute(CREATE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -102,7 +110,8 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
                     SET card_id = EXCLUDED.card_id,
                         approval_channel_id = EXCLUDED.approval_channel_id,
                         created_at = EXCLUDED.created_at,
-                        expires_at = EXCLUDED.expires_at
+                        expires_at = EXCLUDED.expires_at,
+                        message_ts = NULL
                     WHERE r.expires_at <= ?
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -124,7 +133,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     public List<SlackApprovalRecord> findBySubject(String integrationName, String subject) {
         createSchema();
         String sql = """
-                SELECT integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at
+                SELECT integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at, message_ts
                   FROM slack_hitl_approval_records
                  WHERE integration_name = ? AND subject = ? AND expires_at > ?
                 """;
@@ -132,20 +141,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
             statement.setString(1, integrationName);
             statement.setString(2, subject);
             statement.setTimestamp(3, Timestamp.from(Instant.now()));
-            List<SlackApprovalRecord> result = new ArrayList<>();
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    result.add(new SlackApprovalRecord(
-                            rows.getString("integration_name"),
-                            rows.getString("subject"),
-                            rows.getString("pause_epoch"),
-                            rows.getString("card_id"),
-                            rows.getString("approval_channel_id"),
-                            toInstant(rows.getTimestamp("created_at")),
-                            toInstant(rows.getTimestamp("expires_at"))));
-                }
-            }
-            return result;
+            return readRecords(statement);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to read Slack HITL approval records", e);
         }
@@ -163,6 +159,60 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete a Slack HITL approval record", e);
         }
+    }
+
+    @Override
+    public void markPosted(String integrationName, String subject, String pauseEpoch, String messageTs) {
+        createSchema();
+        String sql = "UPDATE slack_hitl_approval_records SET message_ts = ? WHERE integration_name = ? AND subject = ? AND pause_epoch = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, messageTs);
+            statement.setString(2, integrationName);
+            statement.setString(3, subject);
+            statement.setString(4, pauseEpoch);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to mark a Slack HITL approval card as posted", e);
+        }
+    }
+
+    @Override
+    public List<SlackApprovalRecord> findPosted(int limit, int offset) {
+        createSchema();
+        String sql = """
+
+                SELECT integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at, message_ts
+                  FROM slack_hitl_approval_records
+                 WHERE message_ts IS NOT NULL AND expires_at > ?
+                 ORDER BY created_at, card_id
+                 LIMIT ? OFFSET ?
+                """;
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, Timestamp.from(Instant.now()));
+            statement.setInt(2, Math.max(1, limit));
+            statement.setInt(3, Math.max(0, offset));
+            return readRecords(statement);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read posted Slack HITL approval records", e);
+        }
+    }
+
+    private static List<SlackApprovalRecord> readRecords(PreparedStatement statement) throws SQLException {
+        List<SlackApprovalRecord> result = new ArrayList<>();
+        try (ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                result.add(new SlackApprovalRecord(
+                        rows.getString("integration_name"),
+                        rows.getString("subject"),
+                        rows.getString("pause_epoch"),
+                        rows.getString("card_id"),
+                        rows.getString("approval_channel_id"),
+                        toInstant(rows.getTimestamp("created_at")),
+                        toInstant(rows.getTimestamp("expires_at")),
+                        rows.getString("message_ts")));
+            }
+        }
+        return result;
     }
 
     private void sweepExpired(Instant now) {

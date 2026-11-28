@@ -10,6 +10,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
@@ -49,6 +50,7 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
     private static final String FIELD_CHANNEL = "approvalChannelId";
     private static final String FIELD_CREATED = "createdAt";
     private static final String FIELD_EXPIRES = "expiresAt";
+    private static final String FIELD_MESSAGE_TS = "messageTs";
 
     private final MongoCollection<Document> records;
     private final Duration retention;
@@ -84,7 +86,9 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
                 Updates.set(FIELD_CARD, cardId),
                 Updates.set(FIELD_CHANNEL, approvalChannelId),
                 Updates.set(FIELD_CREATED, Date.from(now)),
-                Updates.set(FIELD_EXPIRES, Date.from(now.plus(retention))));
+                Updates.set(FIELD_EXPIRES, Date.from(now.plus(retention))),
+                // A replaced expired record must not keep the earlier card's ts.
+                Updates.unset(FIELD_MESSAGE_TS));
         try {
             records.updateOne(filter, update, new UpdateOptions().upsert(true));
             return true;
@@ -117,6 +121,29 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
                 Filters.eq(FIELD_PAUSE, pauseEpoch)));
     }
 
+    @Override
+    public void markPosted(String integrationName, String subject, String pauseEpoch, String messageTs) {
+        records.updateOne(Filters.and(
+                Filters.eq(FIELD_INTEGRATION, integrationName),
+                Filters.eq(FIELD_SUBJECT, subject),
+                Filters.eq(FIELD_PAUSE, pauseEpoch)),
+                Updates.set(FIELD_MESSAGE_TS, messageTs));
+    }
+
+    @Override
+    public List<SlackApprovalRecord> findPosted(int limit, int offset) {
+        var filter = Filters.and(
+                Filters.exists(FIELD_MESSAGE_TS),
+                Filters.ne(FIELD_MESSAGE_TS, null),
+                Filters.gt(FIELD_EXPIRES, Date.from(Instant.now())));
+        List<SlackApprovalRecord> result = new ArrayList<>();
+        for (Document document : records.find(filter).sort(Sorts.ascending(FIELD_CREATED, FIELD_CARD)).skip(Math.max(0, offset))
+                .limit(Math.max(1, limit))) {
+            result.add(toRecord(document));
+        }
+        return result;
+    }
+
     private static SlackApprovalRecord toRecord(Document document) {
         return new SlackApprovalRecord(
                 document.getString(FIELD_INTEGRATION),
@@ -125,7 +152,8 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
                 document.getString(FIELD_CARD),
                 document.getString(FIELD_CHANNEL),
                 toInstant(document.getDate(FIELD_CREATED)),
-                toInstant(document.getDate(FIELD_EXPIRES)));
+                toInstant(document.getDate(FIELD_EXPIRES)),
+                document.getString(FIELD_MESSAGE_TS));
     }
 
     private static Instant toInstant(Date date) {

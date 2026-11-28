@@ -868,7 +868,16 @@
     "confirmCancelGroupButton": "Cancel discussion",
     "noticeAutoApprove": "Approved automatically at {{time}} unless someone decides first",
     "noticeAutoReject": "Rejected automatically at {{time}} unless someone decides first",
-    "noticeAutoAbort": "Stopped automatically at {{time}} unless someone decides first"
+    "noticeAutoAbort": "Stopped automatically at {{time}} unless someone decides first",
+    "slackNotifyEmpty": "Name a Slack integration, or switch this off to use the deployment default (if one is set).",
+    "slackNotifyPipe": "The name contains '|', which approval buttons cannot carry — rename the integration.",
+    "slackNotifyTooLong": "At most {{max}} characters.",
+    "slackNotifyEnableGroup": "Use a specific Slack integration for this group's approval cards",
+    "slackNotifyEnableAgent": "Use a specific Slack integration for this agent's approval cards",
+    "slackNotifyIntegration": "Slack integration name",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "With this off, the deployment default integration (eddi.slack.hitl.notify.default-integration) applies; without one, no card is posted.",
+    "slackNotifyHint": "The named Slack channel integration posts the same approval card a Slack-started pause gets — also for scheduled runs, team cadences, webhooks, REST and MCP. Its own settings decide the channel (hitlApprovalChannel), who may press the buttons (hitlApproverUserIds) and whether the approval context is shown. The card is updated when the request is decided anywhere else. With this off, the deployment default integration (eddi.slack.hitl.notify.default-integration) applies; without one, no card is posted."
   },
   "chatDrawer": {
     "timeout": "Deploy timed out"

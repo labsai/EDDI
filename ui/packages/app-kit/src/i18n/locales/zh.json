@@ -868,7 +868,16 @@
     "confirmCancelGroupButton": "取消讨论",
     "noticeAutoApprove": "如无人提前决定，将于 {{time}} 自动批准",
     "noticeAutoReject": "如无人提前决定，将于 {{time}} 自动拒绝",
-    "noticeAutoAbort": "如无人提前决定，将于 {{time}} 自动停止"
+    "noticeAutoAbort": "如无人提前决定，将于 {{time}} 自动停止",
+    "slackNotifyEmpty": "请指定一个 Slack 集成，或关闭此项以使用部署默认值（如已设置）。",
+    "slackNotifyPipe": "名称包含 '|'，审批按钮无法携带该字符——请重命名该集成。",
+    "slackNotifyTooLong": "最多 {{max}} 个字符。",
+    "slackNotifyEnableGroup": "为此群组的审批卡片使用指定的 Slack 集成",
+    "slackNotifyEnableAgent": "为此智能体的审批卡片使用指定的 Slack 集成",
+    "slackNotifyIntegration": "Slack 集成名称",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "关闭时使用部署默认集成（eddi.slack.hitl.notify.default-integration）；未设置则不发布卡片。",
+    "slackNotifyHint": "指定的 Slack 频道集成会发布与 Slack 发起的暂停相同的审批卡片——计划运行、团队节奏、Webhook、REST 和 MCP 也同样适用。由该集成自身的设置决定频道（hitlApprovalChannel）、谁可以点击按钮（hitlApproverUserIds）以及是否显示审批上下文。请求在其他地方被决定后，卡片会随之更新。关闭时使用部署默认集成（eddi.slack.hitl.notify.default-integration）；未设置则不发布卡片。"
   },
   "chatDrawer": {
     "timeout": "部署超时"

@@ -148,7 +148,10 @@ export function ResourceDiffViewer({
 
   if (diff === "identical") {
     return (
-      <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground bg-secondary/30 rounded-lg">
+      <div
+        className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground bg-secondary/30 rounded-lg"
+        data-testid="diff-identical"
+      >
         <Equal className="h-4 w-4" />
         {t("importDialog.contentIdentical", "Content identical")}
       </div>
