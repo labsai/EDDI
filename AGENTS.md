@@ -2,7 +2,7 @@
 
 > **This file is automatically loaded by AI coding assistants. Follow ALL rules below.**
 >
-> **New here?** Read the [README](README.md) first — it has setup, the quick start, and a feature tour. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
+> **New here?** Read the [README](README.md) first — it has the quick start, a feature overview and the short version of the development setup; [CONTRIBUTING.md](CONTRIBUTING.md) has the long one. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
 >
 > **Working under `ui/`?** This file still applies (branching, pushing, commits, changelog). Also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md), [`ui/workforce/AGENTS.md`](ui/workforce/AGENTS.md) or [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md), and [`ui/packages/README.md`](ui/packages/README.md) for the shared packages the apps compile as source (`@eddi/core`, `@eddi/ui`, `@eddi/conversation`, `@eddi/app-kit`).
 
@@ -38,13 +38,13 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [CONTRIBUTING → Development Setup](CONTRIBUTING.md#development-setup) (the short version is [README → Development](README.md#development)); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
 **Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
 **Once per clone:** run `git config core.hooksPath .githooks` to activate the pre-push safety hook (§2 rule 4) — a fresh clone does not enable it automatically.
 
-The [README "Maven Command Reference"](README.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
+The [CONTRIBUTING "Maven Command Reference"](CONTRIBUTING.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
 
 | Command | What it does |
 | --- | --- |
@@ -163,7 +163,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| MCP server (120 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -173,7 +173,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Agent sync (export/import, instance-to-instance), attachments, capability registry | [`docs/agent-sync-guide.md`](docs/agent-sync-guide.md), [`docs/attachments-guide.md`](docs/attachments-guide.md), [`docs/capability-match-guide.md`](docs/capability-match-guide.md) |
 | Tracing and metrics — per-task OpenTelemetry spans, Micrometer | [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md), [`docs/metrics.md`](docs/metrics.md) |
 
-Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts them; the Manager and Chat UI suites come on top), with >90% instruction / >80% branch coverage enforced (OpenSSF Gold).
+Tests: more than 50,000 run in CI: about 38,400 JUnit (unit and integration), 11,300 Vitest across the Manager, Workforce, Chat UI and the shared packages, and 500 Playwright end-to-end. `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts about 29,800 JUnit methods, fewer than the 38,400 that run because a parameterized test runs once per case. The backend enforces >90% instruction / >80% branch coverage (OpenSSF Gold).
 
 ### In Progress / Upcoming
 

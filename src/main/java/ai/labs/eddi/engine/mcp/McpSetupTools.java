@@ -78,7 +78,7 @@ public class McpSetupTools {
                                       defaultValue = "production") String environment) {
         // Admin-only, exactly like REST /administration/agents/setup: provisioning
         // writes the caller's API key into the vault and picks the new agent's tools.
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("setup_agent"));
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // lets the caller choose the created agent's own tool surface
@@ -141,7 +141,7 @@ public class McpSetupTools {
                                           required = false) String llmBaseUrl,
                                  @ToolArg(description = "Comma-separated MCP server URLs whose tools the agent should also get, alongside the ones generated from the OpenAPI spec (optional).",
                                           required = false) String mcpServerUrls) {
-        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("create_api_agent"));
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // provisions an agent with a caller-chosen endpoint filter, so also letting

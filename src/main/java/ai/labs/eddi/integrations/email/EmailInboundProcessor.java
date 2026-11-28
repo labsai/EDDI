@@ -1021,7 +1021,10 @@ public class EmailInboundProcessor {
      * of the ledger cannot confirm a sender by hashing a list of candidate
      * addresses — unless the deployment has neither a key nor a salt, where
      * {@link GdprPseudonymizer} falls back to an unsalted hash. It is the token
-     * HITL notifications, replies and GDPR erasure write for that address.
+     * HITL notifications and replies write for that address. It is not what GDPR
+     * erasure writes: erasure pseudonymises the user id (for a per-sender identity
+     * {@code email:<integrationId>:<address>}, see {@link EmailUserIdentity}), not
+     * the bare address, so the two tokens differ.
      */
     private void audit(IntegrationContext ctx, LedgerEntry row, String reason, String sender) {
         if (!auditLedger.isResolvable()) {

@@ -1179,6 +1179,8 @@ export async function reactivateOperator(
     agentId: config.agentId,
     version: config.version,
     environment: config.environment,
+    // As in activation: the operator's key is granted to the operator, not widened.
+    offerAllowAll: false,
   });
   if (outcome.kind === "cancelled") {
     throw new Error(

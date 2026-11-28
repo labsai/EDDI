@@ -46,7 +46,7 @@ casually.
 - `system-prompt.test.ts`: three assertions now match whitespace-normalised text (they pinned line
   wraps), and a new test pins, for every topic whose detail moved, the boundary or symptom that
   stayed and its page pointer.
-- Operator revision 81 → 82.
+- Operator revision 82 → 83 (main reached 82 first).
 
 ### Not measured
 

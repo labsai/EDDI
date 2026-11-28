@@ -1010,6 +1010,41 @@ class MongoConversationMemoryStoreTest {
             store.storeConversationMemorySnapshot(holder);
             assertEquals(12L, store.loadConversationMemorySnapshot(id).getFence());
         }
+
+        @Test
+        @DisplayName("raiseFence answers below the fence when it moved it, and the stored fence when it did not")
+        void raiseAnswersWhetherItMovedTheFence() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            assertTrue(store.raiseFence(id, 278352L) < 278352L, "the first raise moves it");
+            assertEquals(278352L, store.raiseFence(id, 278352L), "the same fence again does not move it, and says so");
+            // a lease from a revision range the bucket lost raised it higher
+            assertTrue(store.raiseFence(id, 278765L) < 278765L);
+            assertEquals(278765L, store.raiseFence(id, 278359L), "a lower fence does not move it, and says so");
+            assertEquals(278765L, store.loadConversationMemorySnapshot(id).getFence());
+        }
+
+        @Test
+        @DisplayName("failover: liftFence moves the fence by compare-and-set, fencing out the holder of the lost range")
+        void liftFenceFencesOutTheLostRange() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            store.raiseFence(id, 278765L); // the lease of the lost range
+            var ghost = loadForTurn(id);
+
+            assertFalse(store.liftFence(id, 278700L, 278701L), "a lift from a value the document does not carry misses");
+            assertTrue(store.liftFence(id, 278765L, 278766L));
+            assertFalse(store.liftFence(id, 278765L, 278766L), "of two lifts from the same value only one wins");
+            assertEquals(278766L, store.loadConversationMemorySnapshot(id).getFence());
+
+            addTurn(ghost);
+            ghost.setFenceToken(278765L);
+            assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(ghost));
+
+            var current = loadForTurn(id);
+            addTurn(current);
+            current.setFenceToken(278766L);
+            store.storeConversationMemorySnapshot(current);
+            assertEquals(1, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+        }
     }
 
     @Nested

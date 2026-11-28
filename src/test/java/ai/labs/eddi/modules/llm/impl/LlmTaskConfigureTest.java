@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.documents.DocumentBounds;
+import ai.labs.eddi.engine.documents.DocumentSettings;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.*;
@@ -36,7 +38,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.util.*;
 
@@ -179,6 +183,29 @@ class LlmTaskConfigureTest {
                     Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null);
 
             assertSame(config, result);
+        }
+
+        @Test
+        @DisplayName("a stored documents key that is not available deploys, and configure() resolves the block")
+        void documentsKeyNotAvailableDeploysWithWarning() throws Exception {
+            var config = new ObjectMapper().readValue("""
+                    {"tasks":[{"actions":["help"],"id":"answer","type":"openai","documents":{"sharing":{"delegation":true}}}]}
+                    """, LlmConfiguration.class);
+            when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.none());
+            llmTask.documentSettings = settings;
+
+            // configure() must hand the stored configuration (with its documents block) and
+            // the deployment's settings to the warning helper, whose output
+            // LlmTaskDocumentsConfigTest asserts (log capture is not reliable in a shared
+            // JVM).
+            try (MockedStatic<LlmTask> statics = mockStatic(LlmTask.class, CALLS_REAL_METHODS)) {
+                Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
+
+                assertSame(config, result);
+                statics.verify(() -> LlmTask.warnOnDocumentsConfig(argThat(c -> c == config && c.tasks().get(0).getDocuments() != null),
+                        same(settings)));
+            }
         }
 
         @Test
