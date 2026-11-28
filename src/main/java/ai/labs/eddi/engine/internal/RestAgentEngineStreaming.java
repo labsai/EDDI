@@ -420,7 +420,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         try {
             refusal = restAgentEngine.resumeStreaming(conversationId, decision,
                     turnHandler(stream, safeConversationId, true), returnDetailed, returnCurrentStepOnly, returningFields);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
+            // An Error too: the unused slot is released whatever ends the admission.
             stream.releaseIfUnused();
             throw e;
         }

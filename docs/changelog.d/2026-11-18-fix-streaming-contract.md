@@ -182,6 +182,21 @@ cases in `AbandonableStreamCallTest`, cancel before an attempt / during a backof
 `/v1` and A2A slots and concurrent senders whose writes complete on other threads, some exceptionally; a mass disconnect
 through the bounded pool in `RestAgentEngineStreamingContractTest`. Adjusted where tests pinned the old outcome.
 
+### Review follow-up (same branch, 2026-11-28)
+
+- **Model paths.** `maxAttempts <= 0` makes one attempt again; a JSON-format stream that failed after its first token is
+  not re-sent without the format; a timeout before any text reaches an active `onStreamingTimeout` policy once the
+  retries are spent; the cascade's buffered calls honour the turn's cancel; a cancel's wake is no longer reported as a
+  completed provider call; `onCancel` runs each registration once; a streamed resumed answer records its finish
+  reason; both snapshot projections normalise `finishReason`.
+- **Transport.** A2A maps the shared stream cap's 503 to its busy answer (with the cap's `Retry-After`) and counts a
+  drain that timed out or was interrupted as failed; group streams start keep-alive only after admission, end a
+  continuation whose worker threw an `Error`, and get `group_error` on shutdown; a disconnect is signalled only by
+  the path that won the close; a client gone before the first event releases its slot at once (its turn is still
+  cancelled by its own first event); the backstop waits for the next tick instead of blocking the shared ticker on a
+  producer's write lock; the node byte reservation is a compare-and-set; `resume()` reports generation finished; a
+  resume admission ended by an `Error` releases its slot.
+
 ### Left open
 
 - **Abandoned calls are not charged** (see above). Charging them needs the usage of a stream that never completed —

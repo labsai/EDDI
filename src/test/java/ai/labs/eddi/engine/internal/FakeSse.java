@@ -25,7 +25,7 @@ final class FakeSse implements Sse {
 
     @Override
     public OutboundSseEvent.Builder newEventBuilder() {
-        return new Builder();
+        return new FakeBuilder();
     }
 
     @Override
@@ -81,7 +81,7 @@ final class FakeSse implements Sse {
         }
     }
 
-    private static final class Builder implements OutboundSseEvent.Builder {
+    private static final class FakeBuilder implements OutboundSseEvent.Builder {
         private String name;
         private String comment;
         private Object data;

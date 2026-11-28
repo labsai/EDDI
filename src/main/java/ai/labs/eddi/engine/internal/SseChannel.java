@@ -89,6 +89,11 @@ final class SseChannel {
     private final Runnable onBackstop;
 
     private final ReentrantLock writeLock = new ReentrantLock();
+    /**
+     * The tick released this stream because its client left before the stream's
+     * first event; the turn's first send then signals the disconnect.
+     */
+    private volatile boolean goneBeforeFirstEvent;
     private final AtomicInteger pendingEvents = new AtomicInteger();
     private final AtomicLong pendingBytes = new AtomicLong();
     private final AtomicBoolean terminal = new AtomicBoolean();
@@ -246,6 +251,12 @@ final class SseChannel {
      */
     boolean send(String eventName, String data) {
         if (released.get()) {
+            // The client left before this stream's first event and the tick released
+            // the slot (keepAliveTick): the turn's own first event is the moment its
+            // cancel can no longer hit an earlier turn of the conversation.
+            if (goneBeforeFirstEvent && !terminal.get()) {
+                signalGone();
+            }
             return false;
         }
         if (sink.isClosed()) {
@@ -358,19 +369,22 @@ final class SseChannel {
 
     private void overflow() {
         boolean beforeTerminal = !terminal.get();
-        close(CloseReason.BACKPRESSURE);
-        if (beforeTerminal) {
+        // Only if this path closed the stream: one that node-budget shedding already
+        // closed must let its turn finish.
+        if (close(CloseReason.BACKPRESSURE) && beforeTerminal) {
             signalGone();
         }
     }
 
     /**
-     * The client is no longer reading. Signals the endpoint once, off this thread.
+     * The client is no longer reading. Signals the endpoint once, off this thread —
+     * and only when this call is the one that closed the stream: a send that saw
+     * the sink closed by node-budget shedding must not cancel the turn shedding
+     * lets finish.
      */
     void clientGone() {
         boolean beforeTerminal = !terminal.get();
-        close(beforeTerminal ? CloseReason.CLIENT_GONE : CloseReason.COMPLETED);
-        if (beforeTerminal) {
+        if (close(beforeTerminal ? CloseReason.CLIENT_GONE : CloseReason.COMPLETED) && beforeTerminal) {
             signalGone();
         }
     }
@@ -427,10 +441,10 @@ final class SseChannel {
      * Ends the stream with one last event — the node is shutting down — unless it
      * already delivered its terminal frame.
      */
-    void shutdown(String errorEventData) {
+    void shutdown(String eventName, String errorEventData) {
         if (terminal.compareAndSet(false, true)) {
             try {
-                send("error", errorEventData);
+                send(eventName, errorEventData);
             } catch (Throwable t) {
                 LOGGER.debugf("Shutdown event of %s failed: %s", name, t.getMessage());
             }
@@ -446,13 +460,26 @@ final class SseChannel {
         long now = clock.millis();
         if (backstopMillis > 0 && eventSent && now - lastEventMillis > backstopMillis) {
             // The error frame is a non-blocking send like any other, so it is written
-            // from the tick itself; the turn was already abandoned by the watchdog.
-            if (terminal.compareAndSet(false, true) && onBackstop != null) {
-                try {
-                    onBackstop.run();
-                } catch (RuntimeException e) {
-                    LOGGER.debugf("Backstop event of %s failed: %s", name, e.getMessage());
+            // from the tick itself; the turn was already abandoned by the watchdog. But
+            // only with the write lock in hand (the send re-enters it): a producer that
+            // holds it must not stall the shared ticker, so the timeout waits for the
+            // next tick — and is checked again then, since that write may have been one.
+            if (!writeLock.tryLock()) {
+                return;
+            }
+            try {
+                if (now - lastEventMillis <= backstopMillis) {
+                    return;
                 }
+                if (terminal.compareAndSet(false, true) && onBackstop != null) {
+                    try {
+                        onBackstop.run();
+                    } catch (RuntimeException e) {
+                        LOGGER.debugf("Backstop event of %s failed: %s", name, e.getMessage());
+                    }
+                }
+            } finally {
+                writeLock.unlock();
             }
             close(CloseReason.IDLE_TIMEOUT);
             return;
@@ -464,9 +491,13 @@ final class SseChannel {
             stopTick();
             // Before the stream's first own event the turn may still be queued behind
             // another turn of the same conversation: a cancel now would hit that turn.
-            // Its own first event notices the closed sink and handles it then.
+            // So the stream is closed and its slot released, but nothing is cancelled; a
+            // silent or queued turn no longer keeps the slot of a client that is gone.
             if (eventSent) {
                 clientGone();
+            } else if (close(CloseReason.CLIENT_GONE)) {
+                // The turn's own first send signals the disconnect (see send).
+                goneBeforeFirstEvent = true;
             }
             return;
         }
@@ -550,9 +581,15 @@ final class SseChannel {
      * — exactly once, whoever calls it first. Safe from any thread and from inside
      * a send.
      */
-    void close(CloseReason reason) {
+    /**
+     * Closes the stream and releases its slot, once.
+     *
+     * @return whether this call closed it ({@code false} when another path already
+     *         had)
+     */
+    boolean close(CloseReason reason) {
         if (!released.compareAndSet(false, true)) {
-            return;
+            return false;
         }
         try {
             stopTick();
@@ -566,5 +603,6 @@ final class SseChannel {
             returnPendingBytes();
             streams.release(this, kind, reason);
         }
+        return true;
     }
 }

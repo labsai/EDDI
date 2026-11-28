@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -261,6 +262,13 @@ public class SseStreams {
             + SERVER_SHUTDOWN_CODE + "\",\"retryable\":true}";
 
     /**
+     * The shutdown event of a group discussion stream: a {@code group_error} — the
+     * terminal event group clients listen for — in its {@code error} field shape.
+     */
+    static final String SHUTDOWN_EVENT_GROUP = "{\"error\":\"The server is shutting down; reconnect to continue\",\"code\":\""
+            + SERVER_SHUTDOWN_CODE + "\",\"retryable\":true}";
+
+    /**
      * Ends every stream still open when the application stops — each with one
      * {@code error} event ({@value #SERVER_SHUTDOWN_CODE}) first, so a client is
      * told instead of seeing a bare end of stream — and stops the disconnect pool.
@@ -269,7 +277,11 @@ public class SseStreams {
     @PreDestroy
     void shutdown() {
         for (SseChannel channel : openChannels()) {
-            channel.shutdown(channel.kind() == Kind.AGENT ? SHUTDOWN_EVENT_TURN : SHUTDOWN_EVENT_RECONNECT);
+            switch (channel.kind()) {
+                case AGENT -> channel.shutdown("error", SHUTDOWN_EVENT_TURN);
+                case GROUP -> channel.shutdown(GroupConversationEventSink.EVENT_GROUP_ERROR, SHUTDOWN_EVENT_GROUP);
+                default -> channel.shutdown("error", SHUTDOWN_EVENT_RECONNECT);
+            }
         }
         disconnectPool.shutdown();
     }
@@ -401,12 +413,19 @@ public class SseStreams {
      *         for backpressure
      */
     boolean reservePendingBytes(long bytes) {
-        long now = pendingBytesTotal.addAndGet(bytes);
-        if (now > maxPendingBytesTotal) {
-            pendingBytesTotal.addAndGet(-bytes);
-            return false;
+        // Compare-and-set: a refused reservation never shows in the total, so another
+        // stream checking meanwhile does not see a budget its own write would fit in
+        // as spent (and shed someone for it).
+        while (true) {
+            long held = pendingBytesTotal.get();
+            long next = held + bytes;
+            if (next > maxPendingBytesTotal) {
+                return false;
+            }
+            if (pendingBytesTotal.compareAndSet(held, next)) {
+                return true;
+            }
         }
-        return true;
     }
 
     /**

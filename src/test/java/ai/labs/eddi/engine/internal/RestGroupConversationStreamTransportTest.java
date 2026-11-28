@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,11 +31,13 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -91,6 +94,26 @@ class RestGroupConversationStreamTransportTest {
         var listener = ArgumentCaptor.forClass(GroupDiscussionEventListener.class);
         verify(groupService).startAndDiscussAsync(anyString(), anyString(), anyString(), listener.capture());
         return listener.getValue();
+    }
+
+    @Test
+    @DisplayName("keep-alive starts only after admission: a refused caller still gets a plain 403, no 200 comment")
+    void noKeepAliveBeforeAdmission() {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no use")).when(guard).requireUseAccess(anyString(), anyString());
+        var identity = mock(SecurityIdentity.class);
+        var ownershipValidator = mock(OwnershipValidator.class);
+        var refusing = new RestGroupConversation(groupService, mock(IJsonSerialization.class), identity, ownershipValidator,
+                new HitlAccessGuard(identity, ownershipValidator, mock(IConversationDescriptorStore.class), mock(IConversationService.class),
+                        groupService),
+                guard, new CallerIdentityContext(null, null));
+        refusing.sseStreams = rest.sseStreams;
+
+        assertThrows(ForbiddenException.class,
+                () -> refusing.discussStreaming("group-1", new DiscussRequest("Hello", "user-1"), new FakeSse.Sink(false), sse));
+
+        assertTrue(ticks.isEmpty(), "no keep-alive was scheduled before the USE check returned");
+        assertEquals(0, rest.sseStreams.totalActive());
     }
 
     @Test

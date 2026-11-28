@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -353,6 +354,11 @@ class SseChannelLoadTest {
         }
         String groupData = String.valueOf(groupSink.events.getLast().data());
         assertTrue(groupData.contains("\"retryable\":true"), "a group discussion persists round by round: " + groupData);
+        // A group client listens for group_error, not error; the payload carries its
+        // error field.
+        assertEquals(1, groupSink.count("group_error"));
+        assertEquals(0, groupSink.count("error"));
+        assertTrue(groupData.contains("\"error\":"), groupData);
         assertEquals(0, finished.count("error"), "a stream that already delivered its end gets nothing more");
         assertEquals(0, streams.totalActive());
     }
@@ -539,5 +545,102 @@ class SseChannelLoadTest {
         } finally {
             completer.shutdownNow();
         }
+    }
+
+    @Test
+    @DisplayName("a send that finds the sink closed by node-budget shedding does not cancel the turn shedding lets finish")
+    void clientGoneAfterSheddingSignalsNothing() {
+        var immediate = new AtomicInteger();
+        var channel = open(new FakeSse.Sink(false), () -> {
+        });
+        channel.onClientGoneNow(immediate::incrementAndGet);
+        assertTrue(channel.send("token", "x"));
+
+        channel.shedForNodeBudget();
+        // What a send racing the shed does once it sees the closed sink.
+        channel.clientGone();
+
+        assertEquals(0, immediate.get(), "the turn must not be signalled: shedding won the close");
+        assertTrue(goneTasks.isEmpty());
+    }
+
+    @Test
+    @DisplayName("a client gone before the stream's first event is released by the tick, cancelling nothing")
+    void closedBeforeFirstEventIsReleased() {
+        var immediate = new AtomicInteger();
+        var sink = new FakeSse.Sink(false);
+        var channel = open(sink, () -> {
+        });
+        channel.onClientGoneNow(immediate::incrementAndGet);
+        sink.close();
+
+        now.addAndGet(TimeUnit.SECONDS.toMillis(KEEPALIVE_SECONDS) + 1);
+        ticks.forEach(Runnable::run);
+
+        assertTrue(channel.isReleased(), "the slot of a client that is gone is released");
+        assertTrue(streams.openChannels().isEmpty());
+        assertEquals(0, immediate.get());
+        assertTrue(goneTasks.isEmpty());
+
+        // The turn's own first event, once it runs: now its cancel is its own.
+        assertFalse(channel.send("token", "late"));
+        assertEquals(1, immediate.get());
+        assertEquals(1, goneTasks.size());
+    }
+
+    @Test
+    @DisplayName("the backstop waits for the next tick while a producer holds the write lock, instead of blocking the ticker")
+    void backstopDoesNotBlockTheTicker() throws Exception {
+        var release = new CountDownLatch(1);
+        var inWrite = new CountDownLatch(1);
+        var block = new AtomicBoolean();
+        var sink = new FakeSse.Sink(false) {
+            @Override
+            public synchronized CompletionStage<?> send(OutboundSseEvent event) {
+                if (block.get() && event.getName() != null) {
+                    inWrite.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return super.send(event);
+            }
+        };
+        var backstops = new AtomicInteger();
+        var holder = new AtomicReference<SseChannel>();
+        var channel = streams.open(SseStreams.Kind.AGENT, "stream", sink, sse, KEEPALIVE_SECONDS, 1, () -> {
+        }, () -> {
+            backstops.incrementAndGet();
+            holder.get().send("error", "{}");
+        });
+        holder.set(channel);
+        channel.startKeepAlive();
+        assertTrue(channel.send("token", "x"));
+
+        // A producer is mid-write (holding the write lock) when the backstop is due.
+        block.set(true);
+        var producer = Executors.newSingleThreadExecutor();
+        try {
+            producer.submit(() -> channel.send("token", "y"));
+            assertTrue(inWrite.await(5, TimeUnit.SECONDS));
+            now.addAndGet(2_000);
+            assertTimeoutPreemptively(Duration.ofSeconds(5), () -> ticks.forEach(Runnable::run),
+                    "the tick must not wait on the producer's lock");
+            assertEquals(0, backstops.get(), "deferred to the next tick");
+            assertFalse(channel.isReleased());
+        } finally {
+            block.set(false);
+            release.countDown();
+            producer.shutdown();
+            assertTrue(producer.awaitTermination(5, TimeUnit.SECONDS));
+        }
+
+        // Still silent past the backstop on a later tick: now it fires.
+        now.addAndGet(2_000);
+        ticks.forEach(Runnable::run);
+        assertEquals(1, backstops.get());
+        assertTrue(channel.isReleased());
     }
 }

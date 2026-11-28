@@ -362,6 +362,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         // yet, so the refusal still reaches the client as a plain 403 — the same
         // contract continueDiscussionStreaming has for its ownership check.
         requireGroupUseAccess(groupId);
+        admitted(channel);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -879,6 +880,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             // Strict: a continuation is a write (see followUpWithMember).
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             requireGroupUseAccess(groupId);
+            admitted(channel);
 
             // Reuse the shared streaming listener so a continuation that pauses or is
             // cancelled for HITL streams the awaiting_approval / cancelled /
@@ -900,8 +902,14 @@ public class RestGroupConversation implements IRestGroupConversation {
                 } catch (Exception e) {
                     // Curated event text — never forward the raw message over SSE.
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
-                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
-                            "The continuation could not be completed."));
+                    reportWorkerFailure(listener, channel, "The continuation could not be completed.");
+                } catch (Error e) {
+                    // An Error ends the worker without notifying anyone, and the channel has
+                    // no silence backstop: the client would get keep-alives for good and the
+                    // slot would stay taken. End the stream, then let the Error go on.
+                    LOGGER.errorf(e, "Continue discussion streaming aborted");
+                    reportWorkerFailure(listener, channel, "The continuation could not be completed.");
+                    throw e;
                 }
             }));
 
@@ -913,6 +921,20 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (Exception e) {
             LOGGER.errorf("Continue discussion streaming setup failed: %s", e.getMessage());
             sendErrorEvent(channel, "The continuation could not be started.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
+        }
+    }
+
+    /**
+     * Ends a continuation whose worker failed with the curated error, and releases
+     * the channel even if reporting the error fails.
+     */
+    private void reportWorkerFailure(GroupDiscussionEventListener listener, SseChannel channel, String text) {
+        try {
+            listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(text));
+        } catch (Throwable reportFailed) {
+            LOGGER.debugf("Reporting a failed continuation failed: %s", reportFailed.getMessage());
+        } finally {
             closeQuietly(channel, SseChannel.CloseReason.FAILED);
         }
     }
@@ -953,6 +975,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             return;
         }
         requireResumeUseAccess(groupId);
+        admitted(channel);
         setDecidedByFromIdentity(request);
         try {
             // Deciding a pause and reading the resumed discussion are separate rights
@@ -1474,8 +1497,18 @@ public class RestGroupConversation implements IRestGroupConversation {
         SseChannel channel = sseStreams.open(SseStreams.Kind.GROUP, "group discussion stream", eventSink, sse, keepAliveIntervalSeconds,
                 0L, () -> LOGGER.info("Group discussion stream client disconnected — the discussion continues and persists"), () -> {
                 });
-        channel.startKeepAlive();
+        // No keep-alive yet: a comment written before the ownership and USE checks
+        // return commits the response as 200, and a refusal could no longer reach the
+        // caller as a 403. Each path starts it once it is admitted (admitted()).
         return channel;
+    }
+
+    /**
+     * The stream's caller passed its checks: from here on the silence is kept
+     * alive.
+     */
+    private static void admitted(SseChannel channel) {
+        channel.startKeepAlive();
     }
 
     /**

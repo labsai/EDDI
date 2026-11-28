@@ -2138,6 +2138,13 @@ public class Conversation implements IConversation {
                 setConversationState(ConversationState.ERROR);
                 throw new LifecycleException("Paused workflow '" + pausedWorkflowId + "' no longer exists (config drift)");
             }
+            // The answer exists, as in executeConversationStep: a streaming client that
+            // leaves from now on must not cancel (and so discard) a turn that is only
+            // being stored — its approved tool calls have already run.
+            var eventSink = conversationMemory.getEventSink();
+            if (eventSink != null) {
+                eventSink.onGenerationFinished();
+            }
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
