@@ -868,7 +868,16 @@
     "confirmCancelGroupButton": "Diskussion abbrechen",
     "noticeAutoApprove": "Wird um {{time}} automatisch genehmigt, sofern niemand vorher entscheidet",
     "noticeAutoReject": "Wird um {{time}} automatisch abgelehnt, sofern niemand vorher entscheidet",
-    "noticeAutoAbort": "Wird um {{time}} automatisch beendet, sofern niemand vorher entscheidet"
+    "noticeAutoAbort": "Wird um {{time}} automatisch beendet, sofern niemand vorher entscheidet",
+    "slackNotifyEmpty": "Geben Sie eine Slack-Integration an oder schalten Sie dies aus, um den Standard der Installation zu verwenden (falls gesetzt).",
+    "slackNotifyPipe": "Der Name enthält '|', das Freigabe-Schaltflächen nicht transportieren können — benennen Sie die Integration um.",
+    "slackNotifyTooLong": "Höchstens {{max}} Zeichen.",
+    "slackNotifyEnableGroup": "Eine bestimmte Slack-Integration für die Freigabekarten dieser Gruppe verwenden",
+    "slackNotifyEnableAgent": "Eine bestimmte Slack-Integration für die Freigabekarten dieses Agenten verwenden",
+    "slackNotifyIntegration": "Name der Slack-Integration",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "Ist dies aus, gilt die Standard-Integration der Installation (eddi.slack.hitl.notify.default-integration); ohne sie wird keine Karte gepostet.",
+    "slackNotifyHint": "Die genannte Slack-Kanalintegration postet dieselbe Freigabekarte wie bei einer in Slack gestarteten Pause — auch für geplante Läufe, Team-Kadenzen, Webhooks, REST und MCP. Ihre eigenen Einstellungen bestimmen den Kanal (hitlApprovalChannel), wer die Schaltflächen drücken darf (hitlApproverUserIds) und ob der Freigabekontext angezeigt wird. Die Karte wird aktualisiert, wenn die Anfrage an anderer Stelle entschieden wird. Ist dies aus, gilt die Standard-Integration der Installation (eddi.slack.hitl.notify.default-integration); ohne sie wird keine Karte gepostet."
   },
   "chatDrawer": {
     "timeout": "Zeitüberschreitung bei der Bereitstellung"

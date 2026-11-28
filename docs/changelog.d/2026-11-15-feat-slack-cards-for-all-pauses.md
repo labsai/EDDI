@@ -37,12 +37,14 @@ announces its pauses, and every committed pause gets the same card.
   first, past the ones kept) so 50 pending cards cannot starve a newer resolved one, and a late resume event
   finalizes only cards whose own pause ended, never a newer pause's, and shows its decision only on the card of the
   pause it decided (`HitlResumeCompletedEvent` gained an optional `pauseId`; without one the cards get the neutral
-  resolved text). Cards from the Slack thread path
+  resolved text). A resume fills that `pauseId` with the pause it settled, read from the stored bookmark, not with the
+  decision's own `pauseId`, which a REST or MCP caller may omit. Cards from the Slack thread path
   (`SlackEventHandler.notifyApprovers`) store their `ts` too; older ones carry none and behave as before.
 - **Metric** `eddi_slack_hitl_notify_total{outcome}`.
 - **Manager.** A shared `SlackNotifyField` on the agent's and the group's Human-in-the-Loop settings, validation
   mirrored in `slackIntegrationProblem`, and `mergeNotify` so that switching email off no longer drops `notify` as a
-  whole (it would have wiped the Slack card) and vice versa. 8 keys × 11 locales. Clearing the field is "use the
+  whole (it would have wiped the Slack card) and vice versa. The field's 9 keys × 11 locales live in
+  `@eddi/app-kit`'s locale files, beside the component, so Workforce's `i18n:check` resolves them too. Clearing the field is "use the
   deployment default" (there is no per-agent opt-out), and the wording in all locales says so; collapsing the section
   keeps an unsavable name blocking the save.
 - **Platform Operator.** The prompt explains when a pause gets a Slack card and which settings decide it; revision

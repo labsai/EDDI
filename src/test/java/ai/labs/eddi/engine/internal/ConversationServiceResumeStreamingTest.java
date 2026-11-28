@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -39,6 +40,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.event.Event;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -110,6 +112,7 @@ class ConversationServiceResumeStreamingTest {
 
     private ConversationService conversationService;
     private StreamingResponseHandler handler;
+    private final Event<HitlResumeCompletedEvent> resumeCompleted = ConversationServiceTestFixtures.hitlResumeEvent();
 
     private final AtomicReference<IConversationMemory> memoryRef = new AtomicReference<>();
     private final AtomicReference<IConversation.IConversationOutputRenderer> rendererRef = new AtomicReference<>();
@@ -127,7 +130,7 @@ class ConversationServiceResumeStreamingTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), 30);
+                new SimpleMeterRegistry(), resumeCompleted, new CallerIdentityContext(null, null), 30);
 
         doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
         lenient().when(runtime.submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any()))
@@ -291,6 +294,25 @@ class ConversationServiceResumeStreamingTest {
         assertEquals(ConversationState.READY, snapshot.getValue().getConversationState());
         verify(handler, never()).onSkipped(any());
         verify(handler, never()).onError(any());
+    }
+
+    @Test
+    @DisplayName("a settled resume names the pause it settled even when the decision carried no pauseId")
+    void resumeCompletedNamesTheSettledPause() throws Exception {
+        doAnswer(inv -> {
+            memoryRef.get().setConversationState(ConversationState.READY);
+            rendererRef.get().renderOutput(memoryRef.get());
+            return null;
+        }).when(conversation).resume(any(HitlDecision.class));
+        HitlDecision decision = approved();
+        assertNull(decision.getPauseId(), "a REST or MCP decision may omit the pause id");
+
+        queuedResume(decision).call();
+
+        ArgumentCaptor<HitlResumeCompletedEvent> event = ArgumentCaptor.forClass(HitlResumeCompletedEvent.class);
+        verify(resumeCompleted).fireAsync(event.capture());
+        assertEquals(HitlDecision.pauseIdOf(PAUSED_AT), event.getValue().pauseId());
+        assertEquals(HitlVerdict.APPROVED, event.getValue().verdict());
     }
 
     @Test

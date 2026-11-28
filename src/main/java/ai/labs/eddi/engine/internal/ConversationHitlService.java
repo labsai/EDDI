@@ -972,7 +972,11 @@ class ConversationHitlService {
                             // the continuation without polling. Fired async and
                             // best-effort: a failing observer must never affect the
                             // persisted resume above.
-                            fireHitlResumeCompleted(conversationId, environment, memory, decision);
+                            // The pause this resume settled, not the caller's pauseId: a
+                            // REST or MCP decision may omit it, and the event would then
+                            // name no pause, so the Slack card of the pause it decided
+                            // would show the neutral text instead of the outcome.
+                            fireHitlResumeCompleted(conversationId, environment, memory, decision, settledPauseId);
                             conversationService.armContinuation(conversationId, memory, environment);
                         }
                     } catch (ResourceStoreException e) {
@@ -1846,10 +1850,16 @@ class ConversationHitlService {
      * are wrapped so any failure here (serialization, no observers, …) is logged
      * and swallowed — the resume itself has already succeeded and must not be
      * affected by delivery-side concerns.
+     *
+     * @param settledPauseId
+     *            the id of the pause the decision settled, as the resume read it
+     *            from the stored bookmark; the decision's own pauseId is used only
+     *            when this is null
      */
     void fireHitlResumeCompleted(String conversationId, Environment environment,
                                  IConversationMemory memory,
-                                 HitlDecision decision) {
+                                 HitlDecision decision,
+                                 String settledPauseId) {
         try {
             var snapshot = convertSimpleConversationMemorySnapshot(memory, false, true, List.of());
             snapshot.setEnvironment(environment);
@@ -1858,7 +1868,7 @@ class ConversationHitlService {
                     decision != null ? decision.getVerdict() : null,
                     decision != null ? decision.getDecidedBy() : null,
                     snapshot,
-                    decision != null ? decision.getPauseId() : null));
+                    settledPauseId != null ? settledPauseId : decision != null ? decision.getPauseId() : null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to fire HITL resume-completed event for %s: %s", conversationId, e.getMessage());
         }
