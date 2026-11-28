@@ -607,7 +607,10 @@ export function OperatorPage() {
         </div>
       </header>
 
-      <RegisteredOperatorHealth config={config!} status={status.data} />
+      {/* Not while an upgrade runs: it undeploys and deletes the very agent the
+          cached config still names, and the banner would report that as a fault
+          ("not deployed", "no longer exists") with a button to redeploy it. */}
+      {!activate.isPending && <RegisteredOperatorHealth config={config!} status={status.data} />}
       <UnregisteredOperators config={config} registeredHealthy={registeredHealthy} />
 
       {/* No upgrade of an unverified agent: the upgrade is a replacement that

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.eq;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -99,7 +100,8 @@ class RestAgentStoreExpandedTest {
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
                 jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore, permissiveGuard(),
-                mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
+                mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class),
+                mock(VaultGrantService.class));
         try {
             // The Agent is live at v1. A cascade only runs against the CURRENT version —
             // it tears workflows and schedules down before the delete's own version check.

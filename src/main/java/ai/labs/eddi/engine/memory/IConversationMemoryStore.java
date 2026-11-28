@@ -447,16 +447,55 @@ public interface IConversationMemoryStore {
      * when the successor starts closes that gap: from then on the predecessor's
      * write is refused. No-op for stores without fencing and for a missing
      * document.
+     * <p>
+     * The answer tells the caller whether the raise moved the fence. Below
+     * {@code fence}: it did, and no other holder carries this token. Otherwise it
+     * is the fence the document carries, at least {@code fence}, and the raise did
+     * not move it. Above {@code fence} means either a newer holder started (this
+     * lease is gone) or the lease's revision is below a fence handed out from a
+     * revision range the KV bucket no longer has — a JetStream stream-leader change
+     * can acknowledge writes at sequences its successor never had, and reissue
+     * them. Equal to {@code fence} is this very lease raising again (a turn it was
+     * handed), or another holder carrying the same number: a reissued revision, or
+     * a {@link #liftFence lifted} fence the sequence later reached. The caller
+     * tells those apart; it must not run a turn on a fence it cannot claim as its
+     * own.
      *
      * @param conversationId
      *            the conversation
      * @param fence
      *            the lease's fencing token
+     * @return a value below {@code fence} when the raise moved the stored fence
+     *         (and for stores without fencing, and a missing document); otherwise
+     *         the stored fence, at least {@code fence}
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    default void raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
+    default long raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
         // single-node stores have nothing to fence
+        return 0;
+    }
+
+    /**
+     * Cluster mode: moves the document's {@code _fence} from exactly
+     * {@code expected} to {@code lifted} — a compare-and-set, so of two holders
+     * lifting from the same value only one wins, and a raise that landed in between
+     * makes it miss.
+     * <p>
+     * Only for a holder that has just confirmed with the lease bucket's stream
+     * leader that it still holds its lease, after {@link #raiseFence} answered a
+     * fence above its own: no holder after it can exist, so the stored fence came
+     * from a revision range the bucket lost, and its holder — if it still runs —
+     * must be fenced out by a value above it.
+     *
+     * @return {@code true} when the fence was {@code expected} and is now
+     *         {@code lifted}
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    default boolean liftFence(String conversationId, long expected, long lifted) throws IResourceStore.ResourceStoreException {
+        // single-node stores have nothing to fence
+        return true;
     }
 
     /**

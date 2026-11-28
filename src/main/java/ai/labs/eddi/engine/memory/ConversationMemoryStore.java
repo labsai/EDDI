@@ -1363,13 +1363,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public void raiseFence(String conversationId, long fence) {
+    public long raiseFence(String conversationId, long fence) {
         // $max: never lowers; the revision is deliberately not touched, so the turn
         // that is about to write on the revision it loaded does not conflict with it.
-        conversationCollectionDocument.updateOne(
-                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
-                        Filters.or(Filters.exists(KEY_FENCE, false), Filters.lt(KEY_FENCE, fence))),
-                Updates.max(KEY_FENCE, fence));
+        // One round trip that also answers the fence the document carried before it:
+        // below `fence` the raise moved it, otherwise it is the stored fence.
+        Document before = conversationCollectionDocument.findOneAndUpdate(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Updates.max(KEY_FENCE, fence),
+                new FindOneAndUpdateOptions().projection(new Document(KEY_FENCE, 1)).returnDocument(ReturnDocument.BEFORE));
+        return before != null && before.get(KEY_FENCE) instanceof Number stored ? stored.longValue() : 0;
+    }
+
+    @Override
+    public boolean liftFence(String conversationId, long expected, long lifted) {
+        return conversationCollectionDocument.updateOne(
+                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)), Filters.eq(KEY_FENCE, expected)),
+                Updates.set(KEY_FENCE, lifted)).getModifiedCount() == 1;
     }
 
     @Override
