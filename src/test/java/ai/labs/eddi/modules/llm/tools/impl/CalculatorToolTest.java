@@ -92,12 +92,12 @@ class CalculatorToolTest {
 
     @Test
     void testCalculate_DivisionByZero() {
-        assertEquals("Infinity", calculatorTool.calculate("10 / 0"));
+        assertTrue(calculatorTool.calculate("10 / 0").startsWith("Error: Division by zero"));
     }
 
     @Test
     void testCalculate_NegativeDivisionByZero() {
-        assertEquals("-Infinity", calculatorTool.calculate("-10 / 0"));
+        assertTrue(calculatorTool.calculate("-10 / 0").startsWith("Error: Division by zero"));
     }
 
     // === Math Functions ===
@@ -378,5 +378,37 @@ class CalculatorToolTest {
         String expr = "(".repeat(300) + "1" + ")".repeat(300);
         String result = calculatorTool.calculate(expr);
         assertEquals("1", result);
+    }
+
+    // === Results that must not be presented as facts (review P3) ===
+
+    @Test
+    void smallResultsAreNotPrintedAsZero() {
+        assertEquals("1E-12", calculatorTool.calculate("1 / 1000000000000"));
+        assertEquals("1.5E-11", calculatorTool.calculate("3 / 200000000000"));
+    }
+
+    @Test
+    void roundDoesNotSaturateAtLongRange() {
+        assertEquals("100000000000000000000", calculatorTool.calculate("round(10^20)"));
+        assertEquals("-2", calculatorTool.calculate("round(-2.5)"));
+        // floor(v + 0.5) rounded this up: the addition itself rounds to 1.0
+        assertEquals("0", calculatorTool.calculate("round(0.49999999999999994)"));
+    }
+
+    @Test
+    void overflowAndUndefinedResultsAreErrors() {
+        assertTrue(calculatorTool.calculate("10^400").startsWith("Error:"));
+        assertTrue(calculatorTool.calculate("exp(1000)").startsWith("Error:"));
+        assertTrue(calculatorTool.calculate("sqrt(-1)").startsWith("Error:"));
+        assertTrue(calculatorTool.calculate("5 % 0").startsWith("Error: Division by zero"));
+        assertTrue(calculatorTool.calculate("0 / 0").startsWith("Error: Division by zero"));
+    }
+
+    @Test
+    void anOverflowingLiteralIsAnErrorNotAnInfinityThatDividesToZero() {
+        // 10^308 / 10^309 is 0.1; with the denominator parsed as Infinity it was "0".
+        String expression = "1" + "0".repeat(308) + " / " + "1" + "0".repeat(309);
+        assertTrue(calculatorTool.calculate(expression).startsWith("Error:"), calculatorTool.calculate(expression));
     }
 }

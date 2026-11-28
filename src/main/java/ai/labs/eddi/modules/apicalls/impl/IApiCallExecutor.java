@@ -37,6 +37,22 @@ public interface IApiCallExecutor {
             throws LifecycleException;
 
     /**
+     * {@link #execute(ApiCall, IConversationMemory, Map, String)} for an LLM tool
+     * call whose model-supplied arguments are in {@code templateDataObjects}: the
+     * request body is rendered through {@code guard}, so no argument can change the
+     * JSON around it, and every rendered header is checked for control characters.
+     *
+     * @param guard
+     *            the tool call's guard, {@code null} for none
+     * @throws ToolArgumentBodyEscaper.ArgumentRefusedException
+     *             (unchecked) when the arguments cannot be placed in the request;
+     *             nothing was sent and the message is safe to give the model
+     */
+    Map<String, Object> execute(ApiCall httpCall, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl,
+                                ToolArgumentBodyEscaper.Guard guard)
+            throws LifecycleException;
+
+    /**
      * Resolves what this call <em>would</em> send, without sending it.
      * <p>
      * Exists so a human approving a gated tool call can be shown the actual request
@@ -66,6 +82,20 @@ public interface IApiCallExecutor {
      *             {@link LifecycleException}.
      */
     ResolvedRequest resolve(ApiCall httpCall, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
+            throws LifecycleException;
+
+    /**
+     * {@link #resolve(ApiCall, IConversationMemory, Map, String)} through the same
+     * {@code guard} execution will use, so the pinned request is the one that is
+     * sent.
+     *
+     * @throws ToolArgumentBodyEscaper.ArgumentRefusedException
+     *             (unchecked) when execution would refuse the same arguments — for
+     *             a call whose resolution is what execution builds, as with
+     *             {@link ConfigReferenceRefusedException}
+     */
+    ResolvedRequest resolve(ApiCall httpCall, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl,
+                            ToolArgumentBodyEscaper.Guard guard)
             throws LifecycleException;
 
     /**

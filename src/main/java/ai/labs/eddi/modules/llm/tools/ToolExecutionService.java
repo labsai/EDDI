@@ -222,6 +222,23 @@ public class ToolExecutionService {
     }
 
     /**
+     * Removes the result {@link #executeToolWrapped} just stored for a call, when
+     * the caller learns afterwards that the call never ran: a tool that refuses its
+     * arguments answers with an error object, which the in-band failure test
+     * ({@code Error:} prefix) does not recognise, so the answer was cached and an
+     * identical later call would be served the refusal without the tool judging it
+     * again. Successful results are untouched.
+     *
+     * @param cacheScopeTag
+     *            the tag the call was made with; {@code null} removes nothing
+     */
+    public void discardCachedResult(String cacheScopeTag, ToolInvocation invocation, String arguments) {
+        if (cacheScopeTag != null) {
+            cacheService.invalidate(cacheScopeTag, invocation.dispatchName(), arguments);
+        }
+    }
+
+    /**
      * Returns the cost tracker for budget checking.
      */
     public ToolCostTracker getCostTracker() {
@@ -429,7 +446,10 @@ public class ToolExecutionService {
             }
 
             // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
-            if (cacheable) {
+            // A failure is not an answer: a tool that reports one in-band (an "Error:"
+            // string) must not have it replayed for the whole TTL. ToolFailureException
+            // is the explicit signal and never reaches this line.
+            if (cacheable && !isInBandFailure(result)) {
                 cacheService.put(cacheScopeTag, invocation, arguments, result);
             }
 
@@ -797,5 +817,13 @@ public class ToolExecutionService {
             super("tool execution exceeded " + timeoutMs + "ms", null, false, false);
             this.timeoutMs = timeoutMs;
         }
+    }
+
+    /**
+     * The in-band failure convention of built-in tools: a result starting
+     * {@code Error:}.
+     */
+    static boolean isInBandFailure(String result) {
+        return result != null && result.startsWith("Error:");
     }
 }

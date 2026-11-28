@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
@@ -74,8 +75,9 @@ class WebSearchToolExtendedTest {
         @Test
         @DisplayName("should handle malformed JSON")
         void handlesMalformedJson() {
-            String result = tool.formatGoogleResults("not json at all", "query");
-            assertTrue(result.contains("No results found"));
+            var failure = assertThrows(ToolFailureException.class,
+                    () -> tool.formatGoogleResults("not json at all", "query"));
+            assertTrue(failure.getMessage().startsWith("Error: the search failed"));
         }
 
         @Test
@@ -154,7 +156,7 @@ class WebSearchToolExtendedTest {
                     """;
 
             String result = tool.formatDuckDuckGoResults(json, "query", 5);
-            assertTrue(result.contains("No instant results found"));
+            assertTrue(result.contains("no instant answer"));
         }
 
         @Test
@@ -182,8 +184,7 @@ class WebSearchToolExtendedTest {
         @Test
         @DisplayName("should handle malformed JSON")
         void handlesMalformedJson() {
-            String result = tool.formatDuckDuckGoResults("{bad json", "query", 5);
-            assertTrue(result.contains("could not parse"));
+            assertThrows(ToolFailureException.class, () -> tool.formatDuckDuckGoResults("{bad json", "query", 5));
         }
 
         @Test
@@ -240,18 +241,16 @@ class WebSearchToolExtendedTest {
         }
 
         @Test
-        @DisplayName("should handle missing query node")
+        @DisplayName("an error envelope is a failed search, not an empty one")
         void handlesMissingQueryNode() {
             String json = "{\"error\": \"something\"}";
-            String result = tool.formatWikipediaResults(json, "test");
-            assertTrue(result.contains("No Wikipedia articles found"));
+            assertThrows(ToolFailureException.class, () -> tool.formatWikipediaResults(json, "test"));
         }
 
         @Test
         @DisplayName("should handle malformed JSON")
         void handlesMalformedJson() {
-            String result = tool.formatWikipediaResults("not json", "query");
-            assertTrue(result.contains("could not parse"));
+            assertThrows(ToolFailureException.class, () -> tool.formatWikipediaResults("not json", "query"));
         }
 
         @Test

@@ -286,6 +286,27 @@ class AttachmentContextExtractorTest {
             assertTrue(result.errors().get(0).contains("could not be resolved"));
         }
 
+        /**
+         * The note is conversation data a caller can read back (attachments:errors), so
+         * it must not tell "missing" from "another conversation's".
+         */
+        @Test
+        void missingAndForeignAttachmentsReadTheSame() throws Exception {
+            var stored = new Attachment();
+            stored.setStorageRef("ref-1");
+            var missing = mock(IAttachmentStore.class);
+            when(missing.getMetadata(any(), any())).thenThrow(new IAttachmentStore.AttachmentStoreException("Attachment not found: ref-1"));
+            var foreign = mock(IAttachmentStore.class);
+            when(foreign.getMetadata(any(), any()))
+                    .thenThrow(new IAttachmentStore.AttachmentStoreException("Cross-conversation access denied: requested from 'conv-1'"));
+
+            String missingNote = AttachmentContextExtractor.resolveAndGuard(List.of(stored), missing, "conv-1", 5).errors().getFirst();
+            String foreignNote = AttachmentContextExtractor.resolveAndGuard(List.of(stored), foreign, "conv-1", 5).errors().getFirst();
+
+            assertEquals(missingNote, foreignNote);
+            assertFalse(foreignNote.contains("denied") || foreignNote.contains("not found"), foreignNote);
+        }
+
         @Test
         void shouldPassThroughUrlAndBase64Unchanged() {
             var url = new Attachment();

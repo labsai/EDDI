@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
@@ -182,10 +183,12 @@ class WebSearchToolTest {
         }
 
         @Test
-        void formatGoogleResults_InvalidJson_ShouldReturnNoResults() {
-            String result = webSearchTool.formatGoogleResults("not valid json at all{{{", "test");
+        void formatGoogleResults_InvalidJson_ShouldFailTheSearch() {
+            var failure = assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatGoogleResults("not valid json at all{{{", "test"));
 
-            assertTrue(result.contains("No results found"));
+            assertTrue(failure.getMessage().startsWith("Error: the search failed"), failure.getMessage());
+            assertFalse(failure.getMessage().contains("No results found"));
         }
 
         @Test
@@ -286,7 +289,8 @@ class WebSearchToolTest {
 
             String result = webSearchTool.formatDuckDuckGoResults(json, "xyznoexist", 5);
 
-            assertTrue(result.contains("No instant results found"));
+            assertTrue(result.contains("no instant answer"));
+            assertFalse(result.contains("No results found"));
         }
 
         @Test
@@ -310,9 +314,10 @@ class WebSearchToolTest {
 
         @Test
         void formatDuckDuckGoResults_InvalidJson_ShouldReturnParseError() {
-            String result = webSearchTool.formatDuckDuckGoResults("{bad json!!!", "test", 5);
+            var failure = assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatDuckDuckGoResults("{bad json!!!", "test", 5));
 
-            assertTrue(result.contains("could not parse results"));
+            assertTrue(failure.getMessage().contains("could not be read"), failure.getMessage());
         }
 
         @Test
@@ -402,16 +407,15 @@ class WebSearchToolTest {
         }
 
         @Test
-        void formatWikipediaResults_MissingQueryNode_ShouldReturnNoArticles() {
+        void formatWikipediaResults_MissingQueryNode_IsAFailedSearch() {
             String json = """
                     {
                       "warnings": {"search": {"*": "some warning"}}
                     }
                     """;
 
-            String result = webSearchTool.formatWikipediaResults(json, "test");
-
-            assertTrue(result.contains("No Wikipedia articles found"));
+            // Without query.search the answer says nothing about whether articles exist.
+            assertThrows(ToolFailureException.class, () -> webSearchTool.formatWikipediaResults(json, "test"));
         }
 
         @Test
@@ -434,9 +438,10 @@ class WebSearchToolTest {
 
         @Test
         void formatWikipediaResults_InvalidJson_ShouldReturnParseError() {
-            String result = webSearchTool.formatWikipediaResults("{bad", "test");
+            var failure = assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatWikipediaResults("{bad", "test"));
 
-            assertTrue(result.contains("could not parse results"));
+            assertTrue(failure.getMessage().contains("could not be read"), failure.getMessage());
         }
 
         @Test
@@ -462,7 +467,7 @@ class WebSearchToolTest {
         }
 
         @Test
-        void formatWikipediaResults_MissingSearchNode_ShouldReturnNoArticles() {
+        void formatWikipediaResults_MissingSearchNode_IsAFailedSearch() {
             String json = """
                     {
                       "query": {
@@ -471,9 +476,17 @@ class WebSearchToolTest {
                     }
                     """;
 
-            String result = webSearchTool.formatWikipediaResults(json, "test");
+            // Only an array with no hits is "nothing found"; a result without one is
+            // unreadable.
+            assertThrows(ToolFailureException.class, () -> webSearchTool.formatWikipediaResults(json, "test"));
+        }
 
-            assertTrue(result.contains("No Wikipedia articles found"));
+        @Test
+        void formatWikipediaResults_NullOrNonArraySearch_IsAFailedSearch() {
+            assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatWikipediaResults("{\"query\":{\"search\":null}}", "test"));
+            assertThrows(ToolFailureException.class,
+                    () -> webSearchTool.formatWikipediaResults("{\"query\":{\"search\":{\"title\":\"x\"}}}", "test"));
         }
     }
 

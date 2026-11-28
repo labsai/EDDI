@@ -504,9 +504,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         // unlike readable: deleting discloses nothing, and refusing it would leave
         // personal data that no erasure path could remove.
         if (owner != null && !owner.equals(requestingConversationId)) {
-            throw new AttachmentAccessDeniedException(
-                    "Delete denied: attachment belongs to '%s', requested from '%s'"
-                            .formatted(owner, requestingConversationId));
+            throw new AttachmentAccessDeniedException("Delete denied: requested from '%s'".formatted(requestingConversationId));
         }
         gridFSBucket.delete(file.getObjectId());
         grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef(file)));
@@ -697,8 +695,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 Filters.and(Filters.eq(GRANT_STORAGE_REF, ref), Filters.eq(GRANT_CONVERSATION_ID, requester))) > 0) {
             return;
         }
-        throw new AttachmentAccessDeniedException(
-                "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
-                        .formatted(owner, requester));
+        // The owner is deliberately not named: this text reaches clients, and an owning
+        // conversation id would tell a prober who holds a legacy blob. The requester is
+        // the caller's own id.
+        throw new AttachmentAccessDeniedException("Cross-conversation access denied: requested from '%s'".formatted(requester));
     }
 }
