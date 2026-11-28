@@ -624,6 +624,8 @@ class PostgresSecretPersistenceUnitTest {
         assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("allowed_agents @> ?::jsonb AND allowed_agents <@ ?::jsonb")),
                 sql.getAllValues().toString());
         verify(preparedStatement).setString(5, "[\"a\",\"b\"]");
+        // A null description must keep the stored one, in the same statement.
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("description = COALESCE(?, description)")), sql.getAllValues().toString());
     }
 
     @Test

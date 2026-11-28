@@ -378,7 +378,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         String wildcardCondition = "(allowed_agents IS NULL OR allowed_agents = '[]'::jsonb OR allowed_agents @> '[\"*\"]'::jsonb)";
         String listCondition = "(allowed_agents @> ?::jsonb AND allowed_agents <@ ?::jsonb)";
         boolean wildcard = SecretMetadata.grantsAllAgents(expectedAllowedAgents);
-        String sql = "UPDATE secret_vault_secrets SET allowed_agents = ?::jsonb, description = ? WHERE tenant_id = ? AND key_name = ? AND "
+        String sql = "UPDATE secret_vault_secrets SET allowed_agents = ?::jsonb, description = COALESCE(?, description) WHERE tenant_id = ? AND key_name = ? AND "
                 + (wildcard ? wildcardCondition : listCondition);
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, MAPPER.writeValueAsString(allowedAgents != null ? allowedAgents : List.of("*")));

@@ -1,0 +1,22 @@
+# Overlay for the operator REAL-UPGRADE E2E (e2e/operator/*.upgrade.spec.ts),
+# layered on the integration and operator compose files:
+#
+#   docker compose -f docker-compose.integration.yml \
+#                  -f docker-compose.integration-operator.yml \
+#                  -f docker-compose.integration-operator-upgrade.yml ...
+#
+# The spec drives this stack itself (`npm run test:e2e:operator-upgrade`): it
+# starts EDDI from the PREVIOUS release's image (e2e/operator/previous-release.json),
+# activates the operator through that release's own Manager, then stops the
+# container and starts the image under test on the same MongoDB volume — the way
+# an administrator upgrades a deployment — and upgrades the operator through the
+# current Manager.
+services:
+  eddi:
+    environment:
+      # The operator's model key is a vault secret, and the model is the stub on
+      # plain http inside the compose network. The vault refuses to send a secret
+      # over http to a remote host unless this is set, so without it every model
+      # call fails before it reaches the stub. A loopback-only throwaway backend
+      # whose "secret" is a fixture string.
+      EDDI_VAULT_ALLOW_PLAINTEXT_REMOTE_HOSTS: "true"

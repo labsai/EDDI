@@ -564,7 +564,7 @@ public class VaultSecretProvider implements ISecretProvider {
                     throw grantConflict(reference, existing.getAllowedAgents());
                 }
                 if (!persistence.updateSecretGrantIfUnchanged(reference.tenantId(), reference.keyName(), expected, grant,
-                        effectiveDescription)) {
+                        description)) {
                     var now = persistence.findSecret(reference.tenantId(), reference.keyName());
                     if (now.isEmpty()) {
                         throw new SecretNotFoundException("Secret not found: " + describe(reference));

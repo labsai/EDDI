@@ -438,6 +438,17 @@ what it finds. Off by default. Worth knowing before touching it:
   canaries, the tool generator or a tool's argument shape can break the stub's
   assumptions too: it calls `readAgentDescriptors` for "list the agents" and the
   tool the write canary names, filling arguments from the tool's own schema.
+  Two more tiers use the same stub. `operator-upgrade` (`*.upgrade.spec.ts`, same
+  CI job) activates the operator on the **previous release's** image through that
+  release's own Manager, swaps in the image under test on the same MongoDB volume
+  and upgrades it; the release it starts from is pinned in
+  `e2e/operator/previous-release.json` and bumped after each GA release
+  (`docs/release-versioning.md`). `operator-oidc` (`*.oidc.spec.ts`, in the
+  `Auth E2E (Keycloak)` job) activates it with `caller-identity` under Keycloak
+  and checks the admin-action audit records an approved write under the signed-in
+  user. The stub reads a tool result from inside the engine's
+  `[tool result — …]` envelope; reading the raw text once let every refused call
+  pass as `OPERATOR_E2E_TOOL_OK`.
 
 #### 4b. Router, navigation guard and route labels
 

@@ -2666,7 +2666,10 @@ jobs:
     if: needs.detect-changes.outputs.code == 'true'
     env:
       EDDI_IMAGE: labsai/eddi:ci
-      COMPOSE: ui/manager/docker-compose.integration-keycloak.yml
+      # The operator overlay adds the model stub (and turns the vault on) for the
+      # operator-under-OIDC step at the end; the auth tier uses neither. Two -f
+      # pairs, so it is expanded unquoted below.
+      COMPOSE_FILES: -f ui/manager/docker-compose.integration-keycloak.yml -f ui/manager/docker-compose.integration-operator.yml
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2699,7 +2702,7 @@ jobs:
         run: npm run realm:test
 
       - name: Start EDDI, MongoDB and Keycloak
-        run: docker compose -f "$COMPOSE" up -d --wait
+        run: docker compose $COMPOSE_FILES up -d --wait
         timeout-minutes: 6
 
       - name: Wait for EDDI health
@@ -2712,7 +2715,7 @@ jobs:
             sleep 2
           done
           echo "::error::Backend did not become healthy within 120s"
-          docker compose -f "$COMPOSE" logs
+          docker compose $COMPOSE_FILES logs
           exit 1
 
       # One install for both apps at the npm workspaces root (ui/package.json).
@@ -2732,9 +2735,27 @@ jobs:
         working-directory: ui/manager
         run: npm run test:e2e:auth
 
+      # The Platform Operator activated under this Keycloak with
+      # authMode "caller-identity": the administrator signs in through the login
+      # page, both canaries pass, a read tool call answers, and an approved write
+      # is audited under the signed-in user's name (e2e/operator/*.oidc.spec.ts).
+      # Here rather than in e2e-operator because this job already has Keycloak and
+      # the realm up; it costs one ~30 s Playwright run on the same stack. The auth
+      # report is moved aside first, since the next run overwrites playwright-report/.
+      - name: Activate the operator under Keycloak
+        if: ${{ !cancelled() }}
+        working-directory: ui/manager
+        env:
+          # The browser drives the Manager EDDI serves on :7070, and the
+          # onboarding seed in e2e/storage-state.json is re-pointed at this port.
+          PORT: "7070"
+        run: |
+          if [ -d playwright-report ]; then mv playwright-report playwright-report-auth; fi
+          npm run test:e2e:operator-oidc
+
       - name: Collect logs
         if: ${{ !cancelled() }}
-        run: docker compose -f "$COMPOSE" logs > auth-logs.txt 2>&1
+        run: docker compose $COMPOSE_FILES logs > auth-logs.txt 2>&1
 
       - name: Upload report
         if: ${{ !cancelled() }}
@@ -2743,13 +2764,14 @@ jobs:
           name: auth-e2e-report
           path: |
             ui/manager/playwright-report/
+            ui/manager/playwright-report-auth/
             auth-logs.txt
           if-no-files-found: ignore
           retention-days: 14
 
       - name: Tear down
         if: always()
-        run: docker compose -f "$COMPOSE" down -v
+        run: docker compose $COMPOSE_FILES down -v
 
   # ─── Job 3e: Operator Activation E2E ────────────────────────────
   # The Platform Operator activated through the shipped Manager against the image
@@ -2767,12 +2789,21 @@ jobs:
   #
   # MongoDB only: provisioning is not a datastore concern, and the Postgres leg
   # of e2e-fullstack already proves the store swap.
+  #
+  # A second step upgrades a REAL older operator: the previous release's image
+  # (ui/manager/e2e/operator/previous-release.json) activates it through its own
+  # Manager, then this image replaces that container on the same MongoDB volume
+  # and the current Manager upgrades it (operator-real-upgrade.upgrade.spec.ts).
+  # It shares this job rather than taking one of its own: the image download,
+  # npm ci and the browser install are most of a job's cost, and it needs all three.
   e2e-operator:
     name: Operator Activation E2E
     runs-on: ubuntu-latest
     # Bounded so a stalled runner fails in minutes rather than at GitHub's
-    # 6-hour default. The test itself takes under a minute.
-    timeout-minutes: 20
+    # 6-hour default. The activation test takes under a minute; the real upgrade
+    # (two full cycles of: previous release up, activate, swap, upgrade) took
+    # 2.2-2.5 minutes on a laptop, plus the previous release's image pull here.
+    timeout-minutes: 35
     needs: [detect-changes, build-image]
     if: needs.detect-changes.outputs.code == 'true'
     env:
@@ -2843,6 +2874,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: docker compose $COMPOSE_FILES logs > operator-logs.txt 2>&1
 
+      # The upgrade spec brings up its own stack on the same ports (7070, 8089),
+      # so the activation stack goes first. Its report is kept apart, because the
+      # next Playwright run overwrites playwright-report/.
+      - name: Stop the activation stack
+        if: ${{ !cancelled() }}
+        run: |
+          docker compose $COMPOSE_FILES down -v
+          if [ -d ui/manager/playwright-report ]; then mv ui/manager/playwright-report ui/manager/playwright-report-activation; fi
+          if [ -f ui/manager/test-results.json ]; then mv ui/manager/test-results.json ui/manager/test-results-activation.json; fi
+
+      # Starts the previous release, activates the operator through ITS Manager,
+      # swaps in this image on the same MongoDB volume and upgrades it. The spec
+      # drives docker compose itself (project eddi-operator-upgrade) and writes
+      # each cycle's compose logs to ui/manager/test-results/.
+      - name: Upgrade a real older operator
+        if: ${{ !cancelled() }}
+        working-directory: ui/manager
+        env:
+          PORT: "7070"
+          E2E_AGAINST_BACKEND: "1"
+          OPERATOR_UPGRADE_PROJECT: eddi-operator-upgrade
+        run: npm run test:e2e:operator-upgrade
+
       - name: Upload report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -2850,14 +2904,19 @@ jobs:
           name: operator-e2e-report
           path: |
             ui/manager/playwright-report/
+            ui/manager/playwright-report-activation/
             ui/manager/test-results.json
+            ui/manager/test-results-activation.json
+            ui/manager/test-results/operator-upgrade-*-logs.txt
             operator-logs.txt
           if-no-files-found: ignore
           retention-days: 14
 
       - name: Tear down
         if: always()
-        run: docker compose $COMPOSE_FILES down -v
+        run: |
+          docker compose $COMPOSE_FILES down -v
+          docker compose -p eddi-operator-upgrade $COMPOSE_FILES -f ui/manager/docker-compose.integration-operator-upgrade.yml down -v
 
   # ─── Job 3a-gate: E2E Gate ──────────────────────────────────────
   # The requirable form of e2e-fullstack. A matrix job's check names carry the
@@ -2912,7 +2971,8 @@ jobs:
     #                     failure was authorization still built and published
     #   e2e-operator      the Platform Operator activated against that image with
     #                     a stub model — the only job that sends the operator's
-    #                     real prompt and allow-list to setup-api
+    #                     real prompt and allow-list to setup-api — and a real
+    #                     operator of the previous release upgraded by it
     #   e2e-gate          the E2E jobs' own verdict, the check branch protection
     #                     names — so a job added to the gate cannot be forgotten
     #                     here

@@ -347,6 +347,15 @@ test.describe("Platform Operator activation against a real backend", () => {
       (window as unknown as { __operatorUpgradeSeen: Set<string> }).__operatorUpgradeSeen = seen;
     });
 
+    // The upgraded operator's probes run in the background; their traffic is what says they are done.
+    let probeEnds = 0;
+    let canaryReports = 0;
+    page.on("request", (req) => {
+      if (req.method() !== "POST") return;
+      if (req.url().endsWith("/endConversation")) probeEnds++;
+      if (req.url().endsWith("/administration/operator/canary-result")) canaryReports++;
+    });
+
     await page.getByTestId("operator-upgrade-start").click();
     // (a) A body that only removes lines is replaced, and the dialog says why.
     await expect(page.getByTestId("operator-upgrade-use-default")).toBeChecked();
@@ -375,8 +384,13 @@ test.describe("Platform Operator activation against a real backend", () => {
     expect(after.provisionedRevision).toBe(OPERATOR_REVISION);
     expect(after.promptBodyIsDefault, "the trimmed instructions were kept instead of replaced").toBe(true);
 
-    // Let the background probes and any late refetch run before reading the record.
-    await page.waitForTimeout(3_000);
+    // Both probes and the write canary must have finished before the record counts.
+    await expect
+      .poll(() => canaryReports, { message: "the upgraded operator's write canary never reported", timeout: ACTIVATION_TIMEOUT })
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => probeEnds, { message: "the upgraded operator's probes did not finish", timeout: 60_000 })
+      .toBeGreaterThanOrEqual(2);
     const seen = await page.evaluate(() =>
       [...(window as unknown as { __operatorUpgradeSeen: Set<string> }).__operatorUpgradeSeen],
     );

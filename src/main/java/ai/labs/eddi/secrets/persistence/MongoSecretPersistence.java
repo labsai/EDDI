@@ -327,7 +327,11 @@ public class MongoSecretPersistence implements ISecretPersistence {
             // atomic statement: there is no window in which a concurrent edit could land
             // between them.
             var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName), grantEquals(expectedAllowedAgents));
-            var update = Updates.combine(Updates.set(FIELD_ALLOWED_AGENTS, allowedAgents), Updates.set(FIELD_DESCRIPTION, description));
+            // A null description is left out of the update, so a description edit that
+            // lands after the caller's read is not overwritten with the value it read.
+            var update = description == null
+                    ? Updates.set(FIELD_ALLOWED_AGENTS, allowedAgents)
+                    : Updates.combine(Updates.set(FIELD_ALLOWED_AGENTS, allowedAgents), Updates.set(FIELD_DESCRIPTION, description));
             return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
         } catch (MongoException e) {
             throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);

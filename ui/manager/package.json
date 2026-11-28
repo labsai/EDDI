@@ -24,6 +24,8 @@
     "test:e2e:fullstack": "playwright test --project=fullstack",
     "test:e2e:auth": "playwright test --project=auth",
     "test:e2e:operator": "playwright test --project=operator",
+    "test:e2e:operator-upgrade": "playwright test --project=operator-upgrade",
+    "test:e2e:operator-oidc": "playwright test --project=operator-oidc",
     "test:e2e:all": "playwright test --project=ui --project=integration --project=fullstack",
     "test:all": "vitest run && playwright test --project=ui",
     "infra:up:mongo": "docker compose -f docker-compose.integration.yml up -d --wait",

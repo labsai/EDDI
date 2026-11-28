@@ -251,7 +251,7 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         if (stored == null || !SecretMetadata.sameGrant(stored.getAllowedAgents(), expectedAllowedAgents)) {
             return false;
         }
-        return updateSecretGrant(tenantId, keyName, allowedAgents, description);
+        return updateSecretGrant(tenantId, keyName, allowedAgents, description != null ? description : stored.getDescription());
     }
 
     @Override

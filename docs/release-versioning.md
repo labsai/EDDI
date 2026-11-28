@@ -327,6 +327,15 @@ covered without anyone listing it, and a stale one fails the build instead of sh
 excluded (the changelog, `docs/archive/`, `docs/release-notes-*`), and so is this page, whose
 version numbers are worked examples.
 
+**One pin to move by hand.** The operator real-upgrade E2E (`Operator Activation E2E`, step
+*Upgrade a real older operator*) activates the Platform Operator on the **previous release's** image
+and upgrades it with the image under test. That release is named in
+[`ui/manager/e2e/operator/previous-release.json`](../ui/manager/e2e/operator/previous-release.json)
+(`"image": "labsai/eddi:6.7.1"`), which is not a release pointer and which the script above does not
+touch. After a GA release, once its image is on Docker Hub, point it at the new release in the same PR
+as the post-release bump. A release whose operator revision equals main's still works: the spec then
+lowers the stored revision by one and says so in an annotation.
+
 **Tokens.** The PR is opened with `RELEASE_BOT_TOKEN`, or `CHANGELOG_BOT_TOKEN`, a bot account's
 fine-grained PAT. With neither set, it falls back to the default `GITHUB_TOKEN`, and GitHub then
 does not start the PR's required checks: close and reopen the PR to start them. That fallback also
