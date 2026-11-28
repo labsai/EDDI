@@ -692,6 +692,16 @@ class RetryConfigurationTest {
             assertEquals(10_000L, RetryConfiguration.effectiveMaxBackoffMs(partial));
         }
 
+        @Test
+        @DisplayName("a maxAttempts of zero or below still makes one attempt")
+        void zeroOrNegativeAttemptsMakeOne() {
+            var zero = new RetryConfiguration();
+            zero.setMaxAttempts(0);
+            assertEquals(1, RetryConfiguration.effectiveMaxAttempts(zero));
+            zero.setMaxAttempts(-5);
+            assertEquals(1, RetryConfiguration.effectiveMaxAttempts(zero));
+        }
+
         /**
          * The "your config is not being honoured as written" warning is deduplicated
          * and bounded on purpose: it sits on the path of every LLM and MCP call, and a

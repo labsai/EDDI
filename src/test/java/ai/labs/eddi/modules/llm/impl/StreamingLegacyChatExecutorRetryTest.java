@@ -148,11 +148,9 @@ class StreamingLegacyChatExecutorRetryTest {
         @DisplayName("without a retry block the default policy applies — three attempts, as on the non-streaming path")
         void defaultPolicyMakesThreeAttempts() {
             var calls = new AtomicInteger();
+            // No retry block at all: the shared retry code supplies the default (its
+            // backoff included, so this test waits a few seconds).
             var task = taskWithoutRetry();
-            var retry = new RetryConfiguration();
-            retry.setBackoffDelayMs(1L);
-            // Only the backoff is shortened for the test; maxAttempts stays the default.
-            task.setRetry(retry);
 
             assertThrows(LifecycleException.class,
                     () -> executor.execute(failingWith(new InternalServerException("provider 500"), calls), messages(), eventSink, task));
@@ -169,6 +167,44 @@ class StreamingLegacyChatExecutorRetryTest {
                     () -> executor.execute(failingWith(new AuthenticationException("invalid api key"), calls), messages(), eventSink, task(3)));
 
             assertEquals(1, calls.get(), "an authentication failure fails identically on every attempt");
+        }
+
+        @Test
+        @DisplayName("maxAttempts of 0 still makes one call: it means no retry, not no call")
+        void zeroAttemptsStillCallsOnce() throws Exception {
+            var calls = new AtomicInteger();
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    calls.incrementAndGet();
+                    handler.onPartialResponse("Hello");
+                    handler.onCompleteResponse(complete("Hello", FinishReason.STOP));
+                }
+            };
+
+            var result = executor.execute(model, messages(), eventSink, task(0));
+
+            assertEquals("Hello", result.response());
+            assertEquals(1, calls.get());
+        }
+
+        @Test
+        @DisplayName("a JSON-format stream that fails after its first token is not re-sent without the format")
+        void noFormatFallbackAfterText() {
+            var calls = new AtomicInteger();
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    calls.incrementAndGet();
+                    handler.onPartialResponse("{\"a\":");
+                    handler.onError(new RuntimeException("stream broke"));
+                }
+            };
+
+            assertThrows(LifecycleException.class, () -> executor.execute(model, messages(), eventSink, task(3),
+                    JsonResponseFormatPolicy.of(true, "openai", null)));
+
+            assertEquals(1, calls.get(), "the fragment is on screen: a second, unformatted answer must not follow it");
         }
 
         @Test
@@ -470,6 +506,30 @@ class StreamingLegacyChatExecutorRetryTest {
 
             assertEquals("partial ", result.response());
             assertEquals(Boolean.TRUE, result.metadata().get("streamingTimeout"));
+        }
+
+        @Test
+        @DisplayName("a timeout with no content goes to an active onStreamingTimeout policy too, once the retries are spent")
+        void emptyTimeoutGoesToAnActiveValidationPolicy() throws Exception {
+            var calls = new AtomicInteger();
+            var task = task(2);
+            task.setStreamingTimeoutSeconds(1);
+            var validation = new LlmConfiguration.ResponseValidation();
+            validation.setEnabled(true);
+            validation.setOnStreamingTimeout("fallback");
+            task.setResponseValidation(validation);
+            StreamingChatModel silent = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    calls.incrementAndGet();
+                }
+            };
+
+            var result = executor.execute(silent, messages(), eventSink, task);
+
+            assertEquals("", result.response());
+            assertEquals(Boolean.TRUE, result.metadata().get("streamingTimeout"));
+            assertEquals(2, calls.get(), "the retries still run first");
         }
 
         @Test

@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Executes a streaming chat completion without tools — tokens are emitted in
@@ -167,6 +168,13 @@ class StreamingLegacyChatExecutor {
             PartiallyStreamedRoundException partial = partialFailure(e);
             if (partial != null && keepsPartialText(policy, task, partial)) {
                 return salvaged(partial);
+            }
+            // A timeout before any text, after its retries: nothing was forwarded, so
+            // there is no PartiallyStreamedRoundException — but an active
+            // onStreamingTimeout policy exists to act on exactly this, and LlmTask runs it
+            // only on a normal return flagged streamingTimeout (its fallback, say).
+            if (partial == null && timedOut(e) && hasActiveTimeoutPolicy(task)) {
+                return emptyTimeout();
             }
             throw e;
         }
@@ -389,11 +397,46 @@ class StreamingLegacyChatExecutor {
         if (policy.keepPartialText()) {
             return true;
         }
-        if (!partial.timedOut() || task == null || task.getResponseValidation() == null || !task.getResponseValidation().isEnabled()) {
+        return partial.timedOut() && hasActiveTimeoutPolicy(task);
+    }
+
+    /**
+     * Whether the task's responseValidation names an active
+     * {@code onStreamingTimeout} action.
+     */
+    private static boolean hasActiveTimeoutPolicy(LlmConfiguration.Task task) {
+        if (task == null || task.getResponseValidation() == null || !task.getResponseValidation().isEnabled()) {
             return false;
         }
         String action = task.getResponseValidation().getOnStreamingTimeout();
         return action != null && !PASSIVE_VALIDATION_ACTIONS.contains(action.toLowerCase());
+    }
+
+    /**
+     * Whether {@code failure}'s cause chain holds a timeout (the bridge's backstop
+     * or idle timer).
+     */
+    private static boolean timedOut(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (current instanceof TimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * A timeout that forwarded nothing, handed to the task's onStreamingTimeout
+     * policy.
+     */
+    private static StreamingResult emptyTimeout() {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("streamingTimeout", true);
+        metadata.put("warning", "streaming_timeout_partial");
+        LOGGER.warn("Streaming call timed out before any text, after its retries; handing it to onStreamingTimeout");
+        return new StreamingResult("", metadata);
     }
 
     /** The partial answer of a failed call, flagged as such. */

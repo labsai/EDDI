@@ -148,6 +148,12 @@ class LegacyChatExecutor {
                         || CallCancelledException.isCancellation(e) || (cancelled != null && cancelled.getAsBoolean())) {
                     throw e;
                 }
+                // Text already reached the client (a streamed JSON round that failed after
+                // its first token): a second request without the format would append a
+                // second answer to the failed fragment.
+                if (afterStreamedText(e)) {
+                    throw e;
+                }
                 // Neither does a refusal that has nothing to do with the format: a prompt
                 // over the context window would fail identically without it (and the
                 // context-too-long recovery needs to see the failure), and bad credentials,
@@ -193,6 +199,21 @@ class LegacyChatExecutor {
         }
 
         return new ChatResult(responseContent, responseMetadata);
+    }
+
+    /**
+     * Whether {@code failure}'s cause chain says text of this call was already
+     * streamed.
+     */
+    private static boolean afterStreamedText(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (current instanceof ToolLoopStreamingChatModel.PartiallyStreamedRoundException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static ChatResponse chatWithRetry(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task,

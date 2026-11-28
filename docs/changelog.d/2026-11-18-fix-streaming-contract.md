@@ -120,10 +120,13 @@ The agent turn stream, its resume and the group discussion streams now write thr
 
 ### Upgrade notes
 
-- A provider or OpenAI-compatible server that never sends `finish_reason` now fails every streamed turn until the task
-  sets `streaming.requireFinishReason: false` (or the deployment sets `eddi.llm.streaming.require-finish-reason=false`).
-  langchain4j maps OpenAI's `finish_reason` and Ollama's `done_reason` (an Ollama server old enough not to send it
-  needs the opt-out); jlama reports one too.
+- Only the strict configurations need an opt-out: a task of a strict type (OpenAI, Azure OpenAI, Anthropic, Bedrock,
+  Gemini, Vertex Gemini, Mistral, jlama) **without** a custom `baseUrl` whose endpoint never sends a finish reason now
+  fails every streamed turn until the task sets `streaming.requireFinishReason: false` (or the deployment sets
+  `eddi.llm.streaming.require-finish-reason=false`). Every other provider (Ollama, the OpenAI-compatible endpoint and
+  catalog presets, Hugging Face, OCI) and any task with its own `baseUrl` already accepts a completion without one by
+  default, so do not disable the check for those. A deployment that sets `require-finish-reason=true` makes every task
+  strict.
 - A no-tools streaming task without a `retry` block now makes up to three attempts on a 429/5xx/timeout before the first
   token (it made one).
 - A mid-stream error, a malformed frame or a timeout after the first token now fails the turn (`ERROR`, `task_failed`,

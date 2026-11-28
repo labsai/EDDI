@@ -14,6 +14,7 @@ import java.util.List;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.TURN_FINISH_REASON;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * B4 / B12: why a turn's answer is not a plain complete one ({@code length},
@@ -53,5 +54,19 @@ class ConversationMemoryUtilitiesFinishReasonTest {
         var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(truncatedTurn(), true, true);
 
         assertEquals("length", simple.getConversationOutputs().getLast().get(TURN_FINISH_REASON));
+    }
+
+    @Test
+    @DisplayName("an 'empty' reason is dropped in both projections once another task added an answer")
+    void emptyWithAnAnswerIsDroppedInBothModes() {
+        var snapshot = truncatedTurn();
+        var output = snapshot.getConversationOutputs().getLast();
+        output.put(TURN_FINISH_REASON, MemoryKeys.TURN_FINISH_REASON_EMPTY);
+        output.put("output", List.of("An answer from another task"));
+
+        for (boolean detailed : new boolean[]{false, true}) {
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, true);
+            assertNull(simple.getConversationOutputs().getLast().get(TURN_FINISH_REASON), "returnDetailed=" + detailed);
+        }
     }
 }

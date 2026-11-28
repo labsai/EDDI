@@ -54,6 +54,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
+import java.util.function.BooleanSupplier;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -1432,6 +1433,9 @@ class CascadingModelExecutor {
         Map<String, Object> tokenUsage;
         Map<String, Object> responseMetadata;
         boolean streamedLive = false;
+        // The turn's cancel reaches the buffered calls too: no further attempt, and no
+        // JSON-format fallback request, once the turn is cancelled.
+        BooleanSupplier cancelled = memory != null ? memory::isCancelled : null;
         FormatRetryRunner.Trigger unresolved = null;
         int reasks = 0;
         if (recovery.policy() != null && streamingModel == null) {
@@ -1443,7 +1447,7 @@ class CascadingModelExecutor {
                         : smaller;
             };
             var outcome = formatRetryRunner.run(recovery.policy(), messages, (msgs, maxTokens) -> {
-                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, turnDeadline);
+                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, turnDeadline, cancelled);
                 return new FormatRetryRunner.Attempt(r.response() != null ? r.response() : "", r.responseMetadata());
             }, shrinker, recovery.budget(), recovery.gate(), recovery.listener());
             responseText = outcome.attempt().text();
@@ -1459,7 +1463,7 @@ class CascadingModelExecutor {
             tokenUsage = extractTokenUsage(responseMetadata);
             streamedLive = true;
         } else {
-            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, turnDeadline);
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, null, turnDeadline, cancelled);
             responseText = chatResult.response() != null ? chatResult.response() : "";
             responseMetadata = chatResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);

@@ -753,11 +753,19 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public AutoCloseable onCancel(Runnable listener) {
-        cancelListeners.add(listener);
+        // One-shot per registration: a raise between the add and the check below would
+        // otherwise run the listener from the list AND here.
+        AtomicBoolean fired = new AtomicBoolean();
+        Runnable once = () -> {
+            if (fired.compareAndSet(false, true)) {
+                listener.run();
+            }
+        };
+        cancelListeners.add(once);
         if (cancelled.get()) {
-            listener.run();
+            once.run();
         }
-        return () -> cancelListeners.remove(listener);
+        return () -> cancelListeners.remove(once);
     }
 
     @Override

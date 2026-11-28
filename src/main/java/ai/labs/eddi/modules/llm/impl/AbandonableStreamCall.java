@@ -327,7 +327,9 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
                     }
                     return outcome;
                 }
-                if (done.getCount() == 0) {
+                // Not a cancel's wake: signalCancel releases `done` without a terminal, and
+                // a cancel landing after the check above must still take the cancel path.
+                if (done.getCount() == 0 && !cancelSignalled) {
                     return terminalOutcome();
                 }
                 long now = System.nanoTime();

@@ -541,6 +541,14 @@ public class ConversationMemoryUtilities {
                     }
                     newConversationOutput.put(key, redactDetailedValue(source.get(key), isCredentialValueKey(key)));
                 }
+                // The same normalisation as the default projection: "empty" is dropped once
+                // another task added an answer, so both modes report one completion.
+                String detailedReason = TurnFinishReason.of(conversationOutput);
+                if (detailedReason != null) {
+                    newConversationOutput.put(TURN_FINISH_REASON, detailedReason);
+                } else {
+                    newConversationOutput.remove(TURN_FINISH_REASON);
+                }
                 newConversationOutputs.add(newConversationOutput);
                 continue;
             }

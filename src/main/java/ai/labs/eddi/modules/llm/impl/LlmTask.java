@@ -2458,6 +2458,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+        // The streamed continuation's finish reason, as the live path records it, so
+        // onTruncation and the turn's finish marker see a resumed LENGTH answer. (A
+        // buffered resume has no bridge; its finish reason is not carried yet.)
+        if (resumeBridge != null) {
+            resumeBridge.recordLastFinish(responseMetadata);
+        }
+        recordAbnormalFinish(currentStep, responseMetadata);
         // A resumed cascade step ran on that step's model, so its tokens are priced at
         // the step's rates (as the live cascade does), not the task's: set
         // cascadeCostUsd — which pricedCost prefers — from the resumed token usage,

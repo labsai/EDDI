@@ -569,7 +569,9 @@ public class RetryConfiguration {
      */
     static int effectiveMaxAttempts(RetryConfiguration retryConfig) {
         int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 3;
-        return clampAttempts(configured);
+        // At least one: maxAttempts <= 0 means "do not retry", not "never call" — the
+        // streaming path clamped it so before 6.7, and a zero here skips the call.
+        return Math.max(1, clampAttempts(configured));
     }
 
     /**
