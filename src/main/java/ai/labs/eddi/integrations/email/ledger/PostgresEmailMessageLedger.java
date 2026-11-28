@@ -18,10 +18,15 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * PostgreSQL implementation of {@link IEmailMessageLedger}.
@@ -77,12 +82,28 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
 
     /**
+     * Indexes added after ledgers already held rows: built {@code CONCURRENTLY} in
+     * the background ({@link PostgresLateIndexes}), so an upgrade never blocks
+     * ledger writes — and with them mail processing — for the length of a plain
+     * {@code CREATE INDEX}. Until one exists its query scans.
+     */
+    static final List<String[]> LATE_INDEXES = List.<String[]>of(
+            new String[]{"idx_email_ledger_integration_created", "email_message_ledger (integration_id, created_at DESC, id COLLATE \"C\" DESC)"});
+
+    /** Advisory-lock class of the late index builds (ASCII "eeml"). */
+    private static final int INDEX_LOCK_CLASS = 0x65656d6c;
+
+    /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
      * resolving it at construction aborts the boot (see
      * {@code PostgresOAuthStateStore}).
      */
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
+    private final AtomicBoolean lateIndexBuildStarted = new AtomicBoolean();
+
+    /** Where the late index build runs; a test may swap it for a no-op. */
+    Consumer<Runnable> indexBuildLauncher = task -> Thread.ofVirtual().name("pg-email-ledger-index-build").start(task);
 
     @Inject
     public PostgresEmailMessageLedger(Instance<DataSource> dataSourceInstance) {
@@ -99,15 +120,46 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return;
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
+            // Only what is missing: even CREATE INDEX IF NOT EXISTS asks for a SHARE lock
+            // before it finds the index, and that request queues behind another
+            // replica's concurrent late build — and ledger writes queue behind it.
+            if (!PostgresLateIndexes.exists(connection, TABLE)) {
+                statement.execute(CREATE_TABLE);
+            }
             for (String index : INDEXES) {
-                statement.execute(index);
+                if (!PostgresLateIndexes.hasIndex(connection, TABLE, indexName(index))) {
+                    statement.execute(index);
+                }
             }
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the %s schema", TABLE);
             throw e;
         }
+        if (lateIndexBuildStarted.compareAndSet(false, true)) {
+            DataSource dataSource = dataSourceInstance.get();
+            indexBuildLauncher.accept(() -> PostgresLateIndexes.buildWithRetries(dataSource::getConnection, INDEX_LOCK_CLASS, LATE_INDEXES,
+                    "email ledger", "Listing an integration's mail log scans its rows until then"));
+        }
+    }
+
+    /**
+     * The index name in a {@code CREATE INDEX IF NOT EXISTS <name> ON ...}
+     * statement.
+     */
+    static String indexName(String createIndex) {
+        String rest = createIndex.substring(createIndex.indexOf("IF NOT EXISTS ") + "IF NOT EXISTS ".length());
+        return rest.substring(0, rest.indexOf(' '));
+    }
+
+    /**
+     * The smallest microsecond at or after {@code instant}: PostgreSQL stores
+     * microseconds, and the driver rounds a finer bind value to the nearest one,
+     * which would move a bound across a row stored at that microsecond.
+     */
+    static Instant ceilToMicros(Instant instant) {
+        Instant truncated = instant.truncatedTo(ChronoUnit.MICROS);
+        return truncated.equals(instant) ? instant : truncated.plus(1, ChronoUnit.MICROS);
     }
 
     @Override
@@ -410,6 +462,89 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete email ledger rows", e);
+        }
+    }
+
+    @Override
+    public LedgerPage findByIntegration(String integrationId, LedgerQuery query) {
+        // Ids compare byte-wise (COLLATE "C"), as in MongoDB and the in-memory fake:
+        // a locale collation that ignores hyphens would order ties differently.
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM " + TABLE + " WHERE integration_id = ?");
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(integrationId);
+        if (query.direction() != null) {
+            sql.append(" AND direction = ?");
+            parameters.add(query.direction().name());
+        }
+        if (query.kind() != null) {
+            sql.append(" AND kind = ?");
+            parameters.add(query.kind().name());
+        }
+        if (query.state() != null) {
+            sql.append(" AND state = ?");
+            parameters.add(query.state().name());
+        }
+        if (query.reasonPrefix() != null) {
+            // starts_with, not LIKE: reasons contain '_', which LIKE reads as a wildcard
+            // (and not LEFT(n), which counts characters where Java counts UTF-16 units).
+            sql.append(" AND starts_with(last_error, ?)");
+            parameters.add(query.reasonPrefix());
+        }
+        if (query.since() != null) {
+            sql.append(" AND created_at >= ?");
+            parameters.add(timestamp(ceilToMicros(query.since())));
+        }
+        if (query.until() != null) {
+            sql.append(" AND created_at < ?");
+            parameters.add(timestamp(ceilToMicros(query.until())));
+        }
+        if (!query.includeMarkers()) {
+            sql.append(" AND (last_error IS NULL OR last_error <> ?)");
+            parameters.add(MARKER_REASON);
+        }
+        if (query.after() != null) {
+            sql.append(" AND (created_at < ? OR (created_at = ? AND id COLLATE \"C\" < ?))");
+            Timestamp at = timestamp(query.after().createdAt());
+            parameters.add(at);
+            parameters.add(at);
+            parameters.add(query.after().id());
+        }
+        sql.append(" ORDER BY created_at DESC, id COLLATE \"C\" DESC LIMIT ?");
+        parameters.add(query.limit() + 1);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < parameters.size(); i++) {
+                statement.setObject(i + 1, parameters.get(i));
+            }
+            List<LedgerEntry> readAhead = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    readAhead.add(toEntry(rows));
+                }
+            }
+            return LedgerPage.of(readAhead, query.limit());
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to list email ledger rows", e);
+        }
+    }
+
+    @Override
+    public Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until) {
+        String sql = "SELECT state, last_error, COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND kind = 'TRIGGER' AND created_at >= ? "
+                + "AND created_at < ? AND (last_error IS NULL OR last_error <> ?) GROUP BY state, last_error";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setTimestamp(2, timestamp(ceilToMicros(since)));
+            statement.setTimestamp(3, timestamp(ceilToMicros(until)));
+            statement.setString(4, MARKER_REASON);
+            Map<String, Long> counts = new TreeMap<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    counts.merge(IEmailMessageLedger.outcomeKey(State.valueOf(rows.getString(1)), rows.getString(2)), rows.getLong(3), Long::sum);
+                }
+            }
+            return counts;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count email ledger rows", e);
         }
     }
 

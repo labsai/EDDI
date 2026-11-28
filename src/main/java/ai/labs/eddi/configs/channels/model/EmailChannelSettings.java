@@ -70,7 +70,8 @@ public record EmailChannelSettings(
         String aiDisclosure,
         ThreadParticipants threadParticipants,
         int maxRepliesPerThreadPerHour,
-        boolean honorReplyTo) {
+        boolean honorReplyTo,
+        boolean dailyOwnerDigest) {
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "email";
@@ -105,12 +106,16 @@ public record EmailChannelSettings(
     public static final String KEY_THREAD_PARTICIPANTS = "threadParticipants";
     public static final String KEY_MAX_REPLIES_PER_THREAD_PER_HOUR = "maxRepliesPerThreadPerHour";
     public static final String KEY_HONOR_REPLY_TO = "honorReplyTo";
+    public static final String KEY_OWNER_DIGEST = "ownerDigest";
+    /** {@code ownerDigest} values: no digest (the default), or one per UTC day. */
+    public static final String OWNER_DIGEST_OFF = "off";
+    public static final String OWNER_DIGEST_DAILY = "daily";
 
     /** Every key both modes read. */
     public static final Set<String> COMMON_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
             KEY_PROCESSED_ACTION, KEY_POLL_SECONDS, KEY_REQUIRE_AUTHENTICATION, KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST, KEY_IDENTITY_MODE,
             KEY_ATTACHMENTS, KEY_ATTACHMENT_MIME_TYPES, KEY_MAX_MESSAGE_BYTES, KEY_STRIP_QUOTED_HISTORY, KEY_INPUT_TEMPLATE,
-            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES);
+            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES, KEY_OWNER_DIGEST);
 
     /**
      * Keys only trigger mode reads: a conversation always threads, so
@@ -387,7 +392,8 @@ public record EmailChannelSettings(
                 replyTemplate == null || replyTemplate.isBlank() ? DEFAULT_REPLY_TEMPLATE : replyTemplate, disclosure,
                 ThreadParticipants.fromId(pc.get(KEY_THREAD_PARTICIPANTS)),
                 (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
-                bool(pc.get(KEY_HONOR_REPLY_TO), false));
+                bool(pc.get(KEY_HONOR_REPLY_TO), false),
+                OWNER_DIGEST_DAILY.equalsIgnoreCase(orDefault(blankToNull(pc.get(KEY_OWNER_DIGEST)), "").trim()));
     }
 
     /**
@@ -532,6 +538,10 @@ public record EmailChannelSettings(
             } catch (NumberFormatException e) {
                 errors.add("platformConfig.dailyCostBudgetUsd must be a decimal number of US dollars, e.g. 20 or 2.50.");
             }
+        }
+        String digest = blankToNull(pc.get(KEY_OWNER_DIGEST));
+        if (digest != null && !OWNER_DIGEST_OFF.equalsIgnoreCase(digest.trim()) && !OWNER_DIGEST_DAILY.equalsIgnoreCase(digest.trim())) {
+            errors.add("platformConfig.ownerDigest must be 'off' or 'daily'.");
         }
         List<String> owners = list(pc.get(KEY_OWNER_NOTIFY_ADDRESSES));
         if (owners.size() > MAX_OWNER_NOTIFY_ADDRESSES) {

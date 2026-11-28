@@ -28,7 +28,7 @@ const EMAIL_KEYS = [
   "mode", "transport", "connection", "host", "port", "address", "folder", "processedAction",
   "pollSeconds", "requireAuthentication", "senderAllowlist", "senderBlocklist", "identityMode",
   "correlateThreads", "attachments", "attachmentMimeTypes", "maxMessageBytes", "stripQuotedHistory",
-  "inputTemplate", "maxTurnsPerSenderPerDay", "dailyCostBudgetUsd", "ownerNotifyAddresses",
+  "inputTemplate", "maxTurnsPerSenderPerDay", "dailyCostBudgetUsd", "ownerNotifyAddresses", "ownerDigest",
   ...EMAIL_CONVERSATION_KEYS,
 ];
 

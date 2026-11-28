@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailLogView;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -23,6 +24,7 @@ import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
 import ai.labs.eddi.integrations.channels.ChannelTypeDescriptor;
 import ai.labs.eddi.integrations.channels.ChannelTypeRegistry;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -40,6 +42,8 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -468,6 +472,115 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         return emailSupport().clearSuppression(id, request.address())
                 ? Response.noContent().build()
                 : Response.status(Response.Status.NOT_FOUND).build();
+    }
+
+    @Override
+    public EmailLogView.Page readEmailLog(String id, String direction, String kind, String state, String reason, String since, String until,
+                                          String limit, String after) {
+        requireEmailIntegrationForEdit(id);
+        var query = new IEmailMessageLedger.LedgerQuery(enumParam("direction", direction, IEmailMessageLedger.Direction.class),
+                enumParam("kind", kind, IEmailMessageLedger.Kind.class), enumParam("state", state, IEmailMessageLedger.State.class),
+                reasonParam(reason), instantParam("since", since), instantParam("until", until), limitParam(limit),
+                cursorParam(after), false);
+        var page = emailSupport().mailLog(id, query);
+        return new EmailLogView.Page(page.rows().stream().map(RestChannelIntegrationStore::logView).toList(), page.nextCursor());
+    }
+
+    @Override
+    public List<EmailLogView> lookupEmailLog(String id, EmailLogView.LookupRequest request) {
+        requireEmailIntegrationForEdit(id);
+        List<EmailLogView> rows = emailSupport().lookup(id, request == null ? null : request.messageId()).stream()
+                .map(RestChannelIntegrationStore::logView).toList();
+        if (rows.isEmpty()) {
+            throw new NotFoundException("The mail log has no message with that Message-ID (rows are kept for the ledger's retention).");
+        }
+        return rows;
+    }
+
+    static EmailLogView logView(IEmailMessageLedger.LedgerEntry row) {
+        return new EmailLogView(row.id(), row.kind().name(), row.direction().name(), row.messageId(), row.state().name(), row.lastError(),
+                IEmailMessageLedger.reasonCategory(row.lastError()), row.conversationId(), row.recipient(), row.attempts(),
+                row.createdAt().toString(), row.updatedAt() == null ? null : row.updatedAt().toString());
+    }
+
+    /**
+     * The reason prefix, trimmed. A NUL is a 400: PostgreSQL refuses it in a text
+     * parameter, which would otherwise surface as a 500.
+     */
+    private static String reasonParam(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        if (reason.indexOf('\0') >= 0) {
+            throw new BadRequestException("'reason' must not contain a NUL character.");
+        }
+        return reason.trim();
+    }
+
+    /** Blank and absent are the same (Quarkus hands {@code ?x=} over as null). */
+    private static <E extends Enum<E>> E enumParam(String name, String value, Class<E> type) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("Unknown " + name + " '" + sanitize(value) + "'.");
+        }
+    }
+
+    /**
+     * A String, not an Integer: JAX-RS turns a failed {@code @QueryParam}
+     * conversion into a 404, which reads as "no such integration".
+     */
+    private static int limitParam(String value) {
+        if (value == null || value.isBlank()) {
+            return 50;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("'limit' must be a whole number (1-200).");
+        }
+    }
+
+    private static Instant instantParam(String name, String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        Instant instant;
+        try {
+            instant = Instant.parse(value.trim());
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("'" + name + "' must be an ISO-8601 instant such as 2026-11-18T00:00:00Z.");
+        }
+        // ISO-8601 reaches far past what a BSON date or a SQL timestamp holds; such a
+        // bound would fail in the store (a 500), not filter.
+        if (instant.isBefore(Instant.EPOCH) || instant.isAfter(LATEST_BOUND)) {
+            throw new BadRequestException("'" + name + "' must lie between 1970-01-01T00:00:00Z and 9999-12-31T23:59:59Z.");
+        }
+        return instant;
+    }
+
+    private static final Instant LATEST_BOUND = Instant.parse("9999-12-31T23:59:59Z");
+
+    private static IEmailMessageLedger.Cursor cursorParam(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        IEmailMessageLedger.Cursor cursor;
+        try {
+            cursor = IEmailMessageLedger.Cursor.decode(value.trim());
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("'after' is not a cursor this mail log issued.");
+        }
+        // Same range as since/until: a forged cursor far outside it would fail in
+        // the store (a 500), not page.
+        if (cursor.createdAt().isBefore(Instant.EPOCH) || cursor.createdAt().isAfter(LATEST_BOUND)
+                || cursor.id().chars().anyMatch(c -> c < 0x20 || c == 0x7f)) {
+            throw new BadRequestException("'after' is not a cursor this mail log issued.");
+        }
+        return cursor;
     }
 
     /**

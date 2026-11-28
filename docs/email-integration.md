@@ -203,6 +203,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `maxTurnsPerSenderPerDay` | `50` | Turns one sender address may start per UTC day; over it, the sender's further mail waits for the next day. `0` = no limit |
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
 | `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
+| `ownerDigest` | `off` | `daily`: the `ownerNotifyAddresses` also get one mail per UTC day with the previous day's mail counts by outcome ([Troubleshooting](#troubleshooting-why-didnt-eddi-act-on-a-mail)) |
 
 Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
@@ -371,7 +372,85 @@ it is `UIDVALIDITY` plus the last settled UID, also kept in the `uidValidity`/`l
 so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, deduplicated by the ledger and the
 `$EddiProcessed` keyword.
 
+## Troubleshooting: why didn't EDDI act on a mail?
+
+Every mail the poll fetched has a ledger row for the ledger's retention (`eddi.email.ledger-retention`, 30 days), and
+a mail EDDI did not act on carries the reason. Nothing is ever sent back to the sender about it. Three ways to read
+the rows (none shows a subject or a body, since the ledger stores neither):
+
+- **The Manager**: the **Mail log** section of the integration's page (`/manage/channels/<id>#mail-log`). It has
+  filters by direction, state and reason category, and a "Look up Message-ID" box.
+- **REST**, with edit access to the integration (the same rule as the suppression list). The response is 404 for a
+  channel that is not an email integration:
+
+  ```bash
+  # newest first, 50 per page; pass nextCursor back as `after`
+  curl "http://localhost:7070/channelstore/channels/<id>/email-log?direction=IN&state=REFUSED&reason=blocked&limit=50"
+  # one mail by its Message-ID (from the sender's mail client: "show original" / "view source")
+  curl -X POST http://localhost:7070/channelstore/channels/<id>/email-log/lookup \
+       -H 'Content-Type: application/json' -d '{"messageId": "<CAF1234@mail.example.com>"}'
+  ```
+
+  Filters: `direction` (`IN`, `OUT`), `kind` (`TRIGGER` = an inbound mail in either mode, `REPLY`, `NOTIFY`,
+  `NOTICE`), `state`, `reason` (a prefix such as `blocked` or `loop:own_address`), and `since`/`until` (ISO-8601
+  instants; `until` is exclusive). `limit` defaults to 50 and is clamped to 1–200. An unknown or malformed value, or a
+  malformed cursor, is a 400. A cursor is a position (time and row id), not a credential: the listing stays limited to
+  the integration in the path whatever cursor is sent.
+  A row has `id, kind, direction, messageId, state, reason, reasonCategory, conversationId, counterpart` (the sender
+  of an inbound mail, the recipient of an outbound one), `attempts, createdAt, updatedAt`. The lookup is a POST so
+  the Message-ID, which usually names a domain, stays out of access logs. It returns an **array** of the rows with
+  that id, inbound first — an inbound mail's, and that of a reply or notice EDDI sent (which carries a Message-ID of
+  its own; the reply to a mail shares its `conversationId`) — or 404 when there is none.
+- **The daily digest** (`ownerDigest: daily`): from 00:05 UTC, one mail per day to the `ownerNotifyAddresses` that
+  pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
+  (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
+  subjects or bodies. A day without mail sends nothing, and so does a day whose only mail was refused as a loop
+  (`refused:loop`: auto-replies, bounces, mail from EDDI itself — still visible in the mail log); otherwise such
+  mail, the digest included, would trigger the next day's digest. It counts the rows still in the ledger when it is
+  sent: with an `eddi.email.ledger-retention` near one day, the earliest rows of the day may have expired by then,
+  so for complete counts keep the retention above 24 hours plus the longest delay you expect between UTC midnight
+  and the digest (it is due from 00:05 UTC and goes out with the next inbound sweep, `eddi.email.inbound.sweep-interval`,
+  or later if no node runs one) — two days is a comfortable floor. It needs the [system mailer](hitl.md#email-notifications),
+  and the inbound sweep sends it, so no extra schedule is involved. It is sent at most once: one node claims the day
+  before counting, so a count or relay failure loses that day's digest rather than risking two. With no owner address
+  inside the allowed domains nothing is claimed, so the digest still goes out once one is added that day.
+
+What the reason means. The category is the part before the first `:`:
+
+| `reason` | State | Meaning |
+|---|---|---|
+| *(none)* | `DONE` | The turn ran. Look at the conversation (`conversationId`) for what the agent did |
+| `group_discussion` | `DONE` | The mail started a group discussion; `conversationId` is the group conversation's id |
+| `reply_rebuild_failed:<n>` | `TURN_SUBMITTED` | Conversation mode: the turn ran, but its reply could not be rebuilt yet; the sweep has tried `n` times and tries again |
+| `loop:<auto_submitted…>`, `loop:own_address`, `loop:other_integration`, `loop:eddi_message_id`, `loop:refers_to_eddi_mail` | `REFUSED` | An auto-reply, a list or bulk mail, a delivery report, mail from this or another integration's address, or a reply to mail EDDI sent. See [How a mail is processed](#how-a-mail-is-processed) step 3 |
+| `blocked:no_single_sender` | `REFUSED` | The mail has no `From`, or more than one |
+| `blocked:blocklist` | `REFUSED` | The sender matches `senderBlocklist` (or is the integration's own address) |
+| `blocked:not_allowlisted` | `REFUSED` | `senderAllowlist` is set and the sender matches none of its entries |
+| `unauthenticated:<verdict>` | `REFUSED` | No aligned DKIM pass (`fail`, `none`, `pass-unaligned`, …) and `requireAuthentication` is on (always in conversation mode) |
+| `processing_restricted` | `REFUSED` | The sender has restricted the processing of their data ([GDPR](gdpr-compliance.md)); the mail is not run |
+| `unroutable` | `REFUSED` | No target matched and there is no usable default target |
+| `too_large`, `too_large:input` | `REFUSED` | Over `maxMessageBytes`, or the rendered input was too long |
+| `parse_error:<reason>` | `REFUSED` | The MIME could not be parsed |
+| `failed:<exception>` | `REFUSED` or `RECEIVED` | Submitting the turn failed; retried with back-off, then refused |
+| `stranded`, `stranded:not_in_mailbox` | `REFUSED` | A node stopped mid-turn; see the crash table above (owners get the `lost` notice) |
+| `auth_temporary`, `budget`, `throttled`, `quota`, `busy`, `agent_not_ready`, `conversation_busy`, `store_unavailable`, `conversation_ended` | `RECEIVED` | **Deferred, not refused**: the mail waits in the mailbox and is tried again, at the next poll or, for `budget` and `throttled`, on the next UTC day |
+| `requeued_stale_claim` | `RECEIVED` | A claim outlived its node; the next poll processes the mail |
+| `unauthenticated:unsigned_message_id`, `duplicate:replayed_signature` | `REFUSED` | *Coming with the inbound-mail hardening (signed headers only):* a mail whose signature covers no `Message-ID`, or a replay of a signature already seen. Its marker rows (`signature_seen`) are hidden from the log |
+
+When **no row is found**, first rule out the filters and paging (clear the filters, load more). Then: the row may
+have expired (`eddi.email.ledger-retention`, 30 days by default — a mail fetched and processed earlier leaves no
+trace once its row is gone), or the mail was never fetched — it may sit in another folder (`folder` is polled, spam
+folders are not) or have arrived before the integration existed. Check the mailbox and the poll's state in the
+[Operations](#operations) logs.
+
 ## Operations
+
+**Upgrading on PostgreSQL.** The mail log's index (`idx_email_ledger_integration_created`) is built in the background
+with `CREATE INDEX CONCURRENTLY` the first time the ledger is used, so an upgrade never blocks mail processing on a
+large ledger. Until it exists, listing an integration's mail log scans the table. A failed build is retried after
+30 seconds, 2 minutes and 10 minutes, then logged as a WARN and tried again on the next restart; an index an
+interrupted build left invalid is dropped and rebuilt. To build it ahead of an upgrade instead:
+`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_email_ledger_integration_created ON email_message_ledger (integration_id, created_at DESC, id COLLATE "C" DESC);`
 
 | Property | Default | |
 |---|---|---|

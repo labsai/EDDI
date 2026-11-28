@@ -813,6 +813,56 @@ export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "E
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
 /** What the mocked ingestion status says for a `replace=true` ingestion. */
+/** The mock email integration, the only channel with a mail log. */
+export const MOCK_EMAIL_CHANNEL_ID = "ch-email";
+
+/** Rows of `GET /channelstore/channels/{id}/email-log`, shaped like the backend's `EmailLogView`. */
+export const MOCK_EMAIL_LOG = [
+  {
+    id: "log-1",
+    kind: "TRIGGER",
+    direction: "IN",
+    messageId: "<CAF0001@mail.supplier-a.example>",
+    state: "REFUSED",
+    reason: "blocked:not_allowlisted",
+    reasonCategory: "blocked",
+    conversationId: null,
+    counterpart: "billing@unknown.example",
+    attempts: 0,
+    createdAt: "2026-11-17T10:00:00Z",
+    updatedAt: "2026-11-17T10:00:01Z",
+  },
+  {
+    id: "log-2",
+    kind: "TRIGGER",
+    direction: "IN",
+    messageId: "<CAF0002@mail.supplier-a.example>",
+    state: "DONE",
+    reason: null,
+    reasonCategory: null,
+    conversationId: "6a1b2c3d4e5f60718293a4b5",
+    counterpart: "invoices@supplier-a.example",
+    attempts: 0,
+    createdAt: "2026-11-17T09:00:00Z",
+    updatedAt: "2026-11-17T09:00:30Z",
+  },
+  {
+    id: "log-3",
+    kind: "REPLY",
+    direction: "OUT",
+    // EDDI mints its own Message-ID for a reply; the conversation links the two.
+    messageId: "<eddi.3f2c9a1e-5b7d-4c11-9e0a-2d4b6f8a1c33@contoso.example>",
+    state: "SENT",
+    reason: null,
+    reasonCategory: null,
+    conversationId: "6a1b2c3d4e5f60718293a4b5",
+    counterpart: "invoices@supplier-a.example",
+    attempts: 1,
+    createdAt: "2026-11-17T09:00:31Z",
+    updatedAt: "2026-11-17T09:00:32Z",
+  },
+] as const;
+
 export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
 
 function readSeed<T>(key: string): T | null {
@@ -5702,6 +5752,38 @@ export const backupSyncHandlers = [
     ]);
   }),
 
+  // An email integration's mail log (`EmailLogView` rows): no subject or body,
+  // the reason in `reason` and its part before the first ':' in `reasonCategory`.
+  // Only the email fixture has a mail log (any other channel is a 404, as on the
+  // backend). Newest first, ties by id descending; `limit` and the `after` cursor
+  // page like the backend's keyset (the mock's cursor is the last row's id).
+  http.get("*/channelstore/channels/:id/email-log", ({ request, params }) => {
+    if (params.id !== MOCK_EMAIL_CHANNEL_ID) return HttpResponse.json({ error: "not an email integration" }, { status: 404 });
+    const url = new URL(request.url);
+    const sorted = MOCK_EMAIL_LOG.filter(
+      (row) =>
+        (!url.searchParams.get("direction") || row.direction === url.searchParams.get("direction")) &&
+        (!url.searchParams.get("kind") || row.kind === url.searchParams.get("kind")) &&
+        (!url.searchParams.get("state") || row.state === url.searchParams.get("state")) &&
+        (!url.searchParams.get("reason") || (row.reason ?? "").startsWith(url.searchParams.get("reason") ?? "")) &&
+        (!url.searchParams.get("since") || Date.parse(row.createdAt) >= Date.parse(url.searchParams.get("since") ?? "")) &&
+        (!url.searchParams.get("until") || Date.parse(row.createdAt) < Date.parse(url.searchParams.get("until") ?? "")),
+    ).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    const after = url.searchParams.get("after");
+    const start = after ? sorted.findIndex((row) => row.id === after) + 1 : 0;
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? "50") || 50, 1), 200);
+    const rows = sorted.slice(start, start + limit);
+    const nextCursor = start + limit < sorted.length ? (rows[rows.length - 1]?.id ?? null) : null;
+    return HttpResponse.json({ rows, nextCursor });
+  }),
+
+  http.post("*/channelstore/channels/:id/email-log/lookup", async ({ request, params }) => {
+    if (params.id !== MOCK_EMAIL_CHANNEL_ID) return HttpResponse.json({ error: "not an email integration" }, { status: 404 });
+    const body = (await request.json()) as { messageId?: string };
+    const rows = MOCK_EMAIL_LOG.filter((row) => row.messageId === body.messageId);
+    return rows.length > 0 ? HttpResponse.json(rows) : HttpResponse.json({ error: "not found" }, { status: 404 });
+  }),
+
   http.get("*/channelstore/channels/:id", ({ params }) => {
     const channelId = params.id as string;
     const configs: Record<string, object> = {
@@ -5732,6 +5814,33 @@ export const backupSyncHandlers = [
           },
         ],
         defaultTargetName: "default",
+      },
+      // Reachable by URL only (not in the descriptor list), so the channel
+      // list's counts stay as they are; its page shows the Mail log.
+      "ch-email": {
+        name: "Invoice intake",
+        channelType: "email",
+        platformConfig: {
+          mode: "trigger",
+          transport: "imap",
+          connection: "exo-invoices-mailbox",
+          host: "outlook.office365.com",
+          address: "invoices@contoso.example",
+          senderAllowlist: "*@supplier-a.example",
+          ownerNotifyAddresses: "ops@contoso.example",
+          ownerDigest: "daily",
+        },
+        targets: [
+          {
+            name: "intake",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "intake",
       },
       ch1: {
         name: "Engineering Slack",

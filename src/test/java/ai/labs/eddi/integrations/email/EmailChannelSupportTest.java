@@ -10,7 +10,9 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
+import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
 import ai.labs.eddi.utils.LogCaptureSupport.CapturedRecord;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
@@ -19,12 +21,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -123,6 +129,44 @@ class EmailChannelSupportTest {
         assertThrows(BadRequestException.class, () -> support.clearSuppression("int-1", "not an address"));
         support.afterDelete("int-1");
         verify(suppressions).removeAll("int-1");
+    }
+
+    private static IEmailMessageLedger.LedgerEntry row(String integrationId, IEmailMessageLedger.Direction direction, String messageId) {
+        Instant now = Instant.parse("2026-11-17T10:00:00Z");
+        return new IEmailMessageLedger.LedgerEntry(UUID.randomUUID().toString(), integrationId,
+                direction == IEmailMessageLedger.Direction.IN ? IEmailMessageLedger.Kind.TRIGGER : IEmailMessageLedger.Kind.REPLY, direction,
+                messageId, null, "ref", integrationId + direction + messageId, "alice@example.com", IEmailMessageLedger.State.DONE, 0, null, null,
+                null,
+                null, now, now, now.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    @DisplayName("mail log: one integration's rows only; lookup finds IN and OUT rows, bracketed or bare; blank or overlong ids are refused")
+    @SuppressWarnings("unchecked")
+    void mailLogIsScopedToTheIntegration() {
+        InMemoryEmailMessageLedger ledger = new InMemoryEmailMessageLedger();
+        Instance<IEmailMessageLedger> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(ledger);
+        support.ledger = instance;
+        ledger.insertIfAbsent(row("int-1", IEmailMessageLedger.Direction.IN, "<m1@x.example>"));
+        ledger.insertIfAbsent(row("int-1", IEmailMessageLedger.Direction.OUT, "<m1@x.example>"));
+        ledger.insertIfAbsent(row("int-2", IEmailMessageLedger.Direction.IN, "<m1@x.example>"));
+        ledger.insertIfAbsent(row("int-2", IEmailMessageLedger.Direction.IN, "<m2@x.example>"));
+
+        var page = support.mailLog("int-1", IEmailMessageLedger.LedgerQuery.all(50));
+        assertEquals(2, page.rows().size());
+        assertTrue(page.rows().stream().allMatch(r -> r.integrationId().equals("int-1")));
+
+        var found = support.lookup("int-1", " m1@x.example ");
+        assertEquals(2, found.size());
+        assertEquals(IEmailMessageLedger.Direction.IN, found.get(0).direction(), "inbound first");
+        assertTrue(found.stream().allMatch(r -> r.integrationId().equals("int-1")));
+        assertTrue(support.lookup("int-1", "<m2@x.example>").isEmpty(), "another integration's mail is not found");
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", " "));
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", "<" + "a".repeat(600) + "@x.example>"));
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", "missing:" + (char) 0 + "x"), "a NUL is a 400, not a 500");
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", "<m1" + (char) 0 + "@x.example>"));
     }
 
     @Test

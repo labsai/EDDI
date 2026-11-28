@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "@eddi/ui";
 import { server } from "@eddi/app-kit/test/mocks/server";
-import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { createTestQueryClient, renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { NavigationGuardDialog } from "@eddi/app-kit/components/shared/navigation-guard-dialog";
+import { Link, Route, RouterProvider, Routes, createMemoryRouter, useNavigate } from "react-router-dom";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
@@ -316,11 +320,11 @@ describe("ChannelDetailPage", () => {
 
     // Click the header to collapse
     // A real button now, so it is reachable from the keyboard and announces its state.
-    const header = within(targetCard).getAllByText("default")[0]!.closest("button");
-    expect(header).toBeTruthy();
+    const header = within(targetCard).getByTestId("target-header-0");
+    expect(header.tagName).toBe("BUTTON");
     expect(header).toHaveAttribute("aria-expanded", "true");
 
-    await user.click(header!);
+    await user.click(header);
     expect(header).toHaveAttribute("aria-expanded", "false");
     // After collapsing, the name input should not be visible
     await waitFor(() => {
@@ -398,11 +402,40 @@ describe("ChannelDetailPage", () => {
     server.use(
       http.delete("*/channelstore/channels/:id", () => new HttpResponse(null, { status: 204 })),
     );
-    renderChannelDetail("ch1", 1);
+    // A data router, so the blocker is really there (a MemoryRouter has none).
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: (
+            <>
+              <NavigationGuardDialog />
+              <Routes>
+                <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
+                <Route path="/manage/channels" element={<div data-testid="channel-list" />} />
+              </Routes>
+            </>
+          ),
+        },
+      ],
+      { initialEntries: ["/manage/channels/ch1?version=1"] },
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+          <RouterProvider router={router} />
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
     const user = userEvent.setup();
-    await user.click(await screen.findByTestId("delete-channel-btn"));
+    // A dirty draft: without the bypass, leaving would ask to discard it.
+    const nameInput = await screen.findByTestId("channel-name-input");
+    await user.type(nameInput, " edited");
+    await user.click(screen.getByTestId("delete-channel-btn"));
     await user.click(await screen.findByTestId("alert-dialog-confirm"));
-    await waitFor(() => expect(guard.allowNextNavigation).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("channel-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
+    expect(guard.allowNextNavigation).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -497,5 +530,158 @@ describe("ChannelDetailPage — switching the channel type", () => {
     await user.selectOptions(screen.getByTestId("channel-type-select"), "webhook");
     expect(raw().platformConfig).toEqual({});
     expect(screen.getByTestId("webhook-signing-secret")).toBeInTheDocument();
+  });
+});
+
+describe("ChannelDetailPage — a link without ?version (the owner digest's)", () => {
+  function BackButton() {
+    const navigate = useNavigate();
+    return <button type="button" data-testid="go-back" onClick={() => void navigate(-1)}>back</button>;
+  }
+
+  function renderWithLinks(path: string) {
+    return renderPage(
+      path,
+      <>
+        <Link to="/manage/channels/ch-email#mail-log" data-testid="go-email">email</Link>
+        <Link to="/manage/channels/ch1" data-testid="go-ch1">ch1</Link>
+        <Link to="/manage/channels/ch4?version=1" data-testid="go-ch4">ch4</Link>
+        <BackButton />
+        <ChannelDetailPage />
+      </>,
+      "/manage/channels/:id",
+    );
+  }
+
+  it("opens the current version, not version 1", async () => {
+    const requested: string[] = [];
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () => HttpResponse.json(3)),
+      http.get("*/channelstore/channels/ch1", ({ request }) => {
+        requested.push(new URL(request.url).searchParams.get("version") ?? "");
+        return HttpResponse.json({ name: "Engineering Slack v3", channelType: "slack", platformConfig: {}, targets: [] });
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack v3");
+    expect(requested).toContain("3");
+    expect(requested).not.toContain("1"); // never version 1
+  });
+
+  it("shows a retryable error when the version cannot be resolved, and never loads version 1", async () => {
+    let fail = true;
+    const requested: string[] = [];
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () =>
+        fail ? HttpResponse.json({ error: "unavailable" }, { status: 503 }) : HttpResponse.json(2),
+      ),
+      http.get("*/channelstore/channels/ch1", ({ request }) => {
+        requested.push(new URL(request.url).searchParams.get("version") ?? "");
+        return HttpResponse.json({ name: "Engineering Slack v2", channelType: "slack", platformConfig: {}, targets: [] });
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+
+    expect(await screen.findByTestId("channel-detail-error")).toBeInTheDocument();
+    expect(requested).toEqual([]);
+
+    fail = false;
+    await userEvent.click(within(screen.getByTestId("channel-detail-error")).getByTestId("error-state-retry"));
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack v2");
+    expect(requested).toEqual(["2"]);
+  });
+
+  it("does not reuse an earlier answer when the same page asks again and the lookup fails", async () => {
+    let fail = false;
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () =>
+        fail ? HttpResponse.json({ error: "unavailable" }, { status: 503 }) : HttpResponse.json(1),
+      ),
+    );
+    renderWithLinks("/manage/channels/ch1");
+    expect(await screen.findByText("Engineering Slack")).toBeInTheDocument();
+
+    fail = true;
+    await userEvent.click(screen.getByTestId("go-ch1"));
+
+    expect(await screen.findByTestId("channel-detail-error")).toBeInTheDocument();
+  });
+
+  it("never shows the previous channel's draft under the next channel while its version resolves", async () => {
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("*/channelstore/channels/ch-email/currentversion", async () => {
+        await pending;
+        return HttpResponse.json(1);
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1?version=1");
+    expect(await screen.findByText("Engineering Slack")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("go-email"));
+
+    expect(await screen.findByTestId("channel-detail-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("channel-name-input")).not.toBeInTheDocument(); // no editor for A under B
+    expect(screen.queryByTestId("save-channel-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-channel-btn")).not.toBeInTheDocument();
+
+    release();
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
+  });
+
+  it("asks again on Back instead of reusing a lookup still pending from the earlier visit", async () => {
+    const answers: Array<() => void> = [];
+    let asked = 0;
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", async () => {
+        // Every answer is held until the end: the first visit's lookup is still
+        // pending when the user leaves and comes back.
+        asked++;
+        await new Promise<void>((resolve) => answers.push(resolve));
+        return HttpResponse.json(1);
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+    await waitFor(() => expect(answers.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = asked;
+
+    await userEvent.click(screen.getByTestId("go-ch4"));
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Billing Webhook");
+    await userEvent.click(screen.getByTestId("go-back"));
+
+    await waitFor(() => expect(asked).toBeGreaterThan(before)); // a new request for this visit
+    answers.forEach((release) => release());
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack");
+  });
+
+  it("shows no mail log on an older email version when the integration is no longer email", async () => {
+    server.use(
+      http.get("*/channelstore/channels/ch-email/currentversion", () => HttpResponse.json(2)),
+      http.get("*/channelstore/channels/ch-email", ({ request }) =>
+        new URL(request.url).searchParams.get("version") === "2"
+          ? HttpResponse.json({ name: "Now Slack", channelType: "slack", platformConfig: {}, targets: [] })
+          : HttpResponse.json({ name: "Invoice intake", channelType: "EMAIL", platformConfig: { mode: "trigger", transport: "imap" }, targets: [] }),
+      ),
+    );
+    const { queryClient } = renderWithLinks("/manage/channels/ch-email?version=1");
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
+    // Settled: the current version's type is known, so the absence is a decision.
+    await waitFor(() => expect(queryClient.getQueryState(["channels", "ch-email", 2])?.status).toBe("success"));
+    expect(screen.queryByTestId("email-mail-log-section")).not.toBeInTheDocument();
+  });
+
+  it("shows the mail log for a saved type of EMAIL (case-insensitive, as the server)", async () => {
+    server.use(
+      http.get("*/channelstore/channels/ch-email", () =>
+        HttpResponse.json({ name: "Invoice intake", channelType: "EMAIL", platformConfig: { mode: "trigger", transport: "imap" }, targets: [] }),
+      ),
+    );
+    renderWithLinks("/manage/channels/ch-email?version=1");
+    expect(await screen.findByTestId("email-mail-log-section")).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
@@ -10,7 +10,7 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
-  ExternalLink, Star, AlertTriangle, ShieldCheck,
+  ExternalLink, Star, AlertTriangle, ShieldCheck, Inbox,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
@@ -21,9 +21,10 @@ import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-sec
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
-import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
+import { useChannel, useChannelCurrentVersion, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { EmailMailLog } from "@/components/channels/email-mail-log";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -75,6 +76,7 @@ function TargetCard({
         type="button"
         className="flex w-full items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer text-start"
         onClick={() => setExpanded(!expanded)}
+        data-testid={`target-header-${index}`}
         aria-expanded={expanded}
         aria-controls={`${uid}-target-content`}
       >
@@ -235,20 +237,54 @@ function GroupTargetPicker({
 
 /* ─── Main Page ───────────────────────────────────────────────── */
 
+/** A fresh number for each visit of a versionless link (module-wide, so a remount never repeats one). */
+let visitCounter = 0;
+function nextVisit() {
+  visitCounter += 1;
+  return visitCounter;
+}
+
 export function ChannelDetailPage() {
   const { t } = useTranslation();
   const uid = useId();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // A link without ?version (the owner digest's) opens the current version, not
+  // version 1: resolve it, then put it in the URL (keeping the #mail-log hash).
+  const hasVersion = searchParams.has("version");
+  // One version lookup per VISIT, not per history entry: Back restores an earlier
+  // `location.key`, and a request still pending under it must not be reused.
+  const [visit, setVisit] = useState(() => ({ key: location.key, n: nextVisit() }));
+  useEffect(() => {
+    if (visit.key !== location.key) setVisit({ key: location.key, n: nextVisit() });
+  }, [visit.key, location.key]);
+  const currentVersion = useChannelCurrentVersion(id!, `visit-${visit.n}`, !hasVersion && visit.key === location.key);
+  // The query is this visit's own, so a settled success is this visit's answer
+  // and a settled failure is its error.
+  const versionAnswered = currentVersion.isSuccess && !currentVersion.isFetching;
+  const versionLookupFailed = !hasVersion && currentVersion.isError && !currentVersion.isFetching;
+  useEffect(() => {
+    if (hasVersion || !versionAnswered || currentVersion.data === undefined) return;
+    const params = new URLSearchParams(location.search);
+    params.set("version", String(currentVersion.data));
+    navigate({ search: params.toString(), hash: location.hash }, { replace: true });
+  }, [hasVersion, versionAnswered, currentVersion.data, location.search, location.hash, navigate]);
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
+  // Without a version nothing loads until it is resolved: a failed lookup is an
+  // error with Retry, never a silent fallback to version 1.
+  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version, hasVersion);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
   const [draft, setDraft] = useState<ChannelIntegrationConfiguration | null>(null);
+  // Which `${id}@${version}` the draft was seeded from. Moving to another channel
+  // (or version) keeps the old draft in state until the new one loads; the
+  // editor, Save and Delete must never act on it under the new identity.
+  const [draftKey, setDraftKey] = useState<string | null>(null);
   // React keys for the target cards, parallel to `draft.targets`. Not on the
   // targets themselves, which are saved verbatim. The cards keep local state
   // (a half-typed trigger, collapsed or not); keyed by index, removing one
@@ -277,6 +313,7 @@ export function ChannelDetailPage() {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
       seededFor.current = key;
+      setDraftKey(key);
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
@@ -285,6 +322,24 @@ export function ChannelDetailPage() {
 
   const isWebhook = draft?.channelType === "webhook";
   const isEmail = draft?.channelType === "email";
+  // The mail log belongs to the saved version: an unsaved switch to email has
+  // no log yet (and a switch away still has one).
+  // Case-insensitive, as the server's own check is.
+  // The log belongs to the integration as it is NOW: the server checks the
+  // current version's type, so an older email version of a channel that is no
+  // longer email has no log. Case-insensitive, as the server's check is.
+  const latest = useChannelCurrentVersion(id!, "latest");
+  const latestConfig = useChannel(id!, latest.data, latest.data !== undefined && latest.data !== version);
+  // If the latest version cannot be resolved, fall back to the loaded version's
+  // type rather than hiding the section the owner digest links to.
+  const currentType = latest.isError
+    ? config?.channelType
+    : latest.data === undefined
+      ? undefined
+      : latest.data === version
+        ? config?.channelType
+        : latestConfig.data?.channelType;
+  const savedIsEmail = currentType?.toLowerCase() === "email";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;
@@ -420,7 +475,23 @@ export function ChannelDetailPage() {
   // through editing — trading a stuck skeleton for silent data loss. Once a draft
   // exists the form stays mounted and a refetch failure is surfaced by the banner
   // below instead.
-  if (isError && !draft) {
+  const draftIsCurrent = hasVersion && draftKey === `${id}@${version}`;
+
+  if (versionLookupFailed) {
+    return (
+      <div data-testid="channel-detail-error">
+        <ErrorState
+          error={currentVersion.error}
+          message={t("common.error")}
+          onRetry={() => void currentVersion.refetch()}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
+
+  // A background error for the channel already on screen keeps its draft.
+  if (isError && !draftIsCurrent) {
     return (
       <div data-testid="channel-detail-error">
         <ErrorState
@@ -433,7 +504,7 @@ export function ChannelDetailPage() {
     );
   }
 
-  if (isLoading || !draft) {
+  if (isLoading || !draft || !draftIsCurrent) {
     return (
       <div className="space-y-6" data-testid="channel-detail-loading">
         <div className="h-8 w-48 bg-muted rounded animate-pulse" />
@@ -570,6 +641,14 @@ export function ChannelDetailPage() {
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
           <EmailSecurityNotes conversation={emailMode(draft?.platformConfig ?? {}) === "conversation"} />
+        </section>
+      )}
+
+      {/* Email: the mail log — why a mail was or was not acted on. The owner digest links here (#mail-log). */}
+      {savedIsEmail && id && (
+        <section id="mail-log" className="rounded-xl border border-border bg-card p-5 space-y-3 scroll-mt-4" data-testid="email-mail-log-section">
+          <h2 className="text-sm font-semibold flex items-center gap-2"><Inbox className="h-4 w-4 text-primary" />{t("emailLog.title", "Mail log")}</h2>
+          <EmailMailLog key={id} channelId={id} />
         </section>
       )}
 

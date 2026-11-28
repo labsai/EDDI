@@ -26,6 +26,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Optional;
 
@@ -141,7 +142,7 @@ public class EmailInboundSweeper {
     @Scheduled(every = "${eddi.email.inbound.sweep-interval:5m}", delayed = "60s", identity = "email-inbound-sweeper",
                concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void sweep() {
-        Instant now = Instant.now();
+        Instant now = clock.get();
         try {
             resolveStranded(now);
         } catch (RuntimeException e) {
@@ -152,6 +153,50 @@ public class EmailInboundSweeper {
         } catch (RuntimeException e) {
             LOGGER.warnf("Email inbound sweep (poll schedules) failed: %s", e.getMessage());
         }
+        try {
+            sendDigests(clock);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email inbound sweep (owner digests) failed: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Sends the daily owner digest of every integration that asked for one and has
+     * not had today's yet ({@code ownerDigest: daily}); the notifier claims each
+     * once cluster-wide. Returns how many went out.
+     */
+    /**
+     * The time each digest is judged at, read right before its send: earlier sends
+     * in one sweep take time, and a sweep that started before midnight must not
+     * judge a later integration by the previous day.
+     */
+    Supplier<Instant> clock = Instant::now;
+
+    int sendDigests(Supplier<Instant> clock) {
+        int sent = 0;
+        // A fresh read, never the directory's last-good fallback: a stale list could
+        // still name an owner an editor removed. A failed read sends nothing this
+        // tick (the next one retries; nothing was claimed).
+        for (EmailIntegration listed : directory.scan()) {
+            if (listed.settings() == null || !listed.settings().dailyOwnerDigest()) {
+                continue;
+            }
+            try {
+                // Read again right before this integration's send: earlier sends in the
+                // loop take time, and an owner removed meanwhile must not be mailed.
+                EmailIntegration integration = directory.find(listed.id()).orElse(null);
+                EmailChannelSettings settings = integration == null ? null : integration.settings();
+                if (settings == null || !settings.dailyOwnerDigest()) {
+                    continue;
+                }
+                if (ownerNotifier.sendDigestIfDue(integration.id(), integration.configuration().getName(), settings, clock.get())) {
+                    sent++;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Email integration %s: its daily digest failed: %s", sanitize(listed.id()), e.getMessage());
+            }
+        }
+        return sent;
     }
 
     /**
