@@ -27,7 +27,9 @@ import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.invocation.InvocationParameters;
+import dev.langchain4j.mcp.McpToolExecutor;
 import dev.langchain4j.mcp.client.McpCallContext;
+import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.service.tool.ToolExecutionResult;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -569,6 +571,31 @@ class McpConnectionCredentialTest {
             assertEquals("ok", result);
             assertEquals("memory-1", seen.get().chatMemoryId());
             assertEquals(SecretAccess.agent(GRANTED), McpToolProviderManager.callerAccess(new McpCallContext(seen.get(), null)));
+        }
+
+        /**
+         * The executors discovery caches are langchain4j's own {@link McpToolExecutor}
+         * (no tool wrapper is configured), and only its context overload hands the
+         * invocation to the client, and so to the transport's header lookup.
+         */
+        @Test
+        @DisplayName("through the real MCP executor, the agent reaches the client's tool call")
+        void theAgentReachesTheClientThroughTheRealExecutor() {
+            register(serviceConnection());
+            McpClient client = mock(McpClient.class);
+            var sent = new AtomicReference<InvocationContext>();
+            when(client.executeTool(any(ToolExecutionRequest.class), any(InvocationContext.class))).thenAnswer(inv -> {
+                sent.set(inv.getArgument(1));
+                return ToolExecutionResult.builder().resultText("done").build();
+            });
+            var request = ToolExecutionRequest.builder().name("lookup").arguments("{}").build();
+
+            String result = manager()
+                    .grantChecked(Map.of("lookup", new McpToolExecutor(client)), config("${connection:crm}"), SecretAccess.agent(GRANTED))
+                    .get("lookup").execute(request, "memory-1");
+
+            assertEquals("done", result);
+            assertEquals(SecretAccess.agent(GRANTED), McpToolProviderManager.callerAccess(new McpCallContext(sent.get(), null)));
         }
     }
 }
