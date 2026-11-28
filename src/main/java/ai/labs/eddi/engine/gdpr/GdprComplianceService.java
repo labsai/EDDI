@@ -39,6 +39,7 @@ import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -1289,10 +1290,13 @@ public class GdprComplianceService {
      * Principals that are not people. {@code __service__} owns every tenant's
      * service-bound connection grants: "erasing" it would delete them all and
      * disconnect every agent that uses a service connection, and exporting it would
-     * hand out the list of them. Refused as a caller error.
+     * hand out the list of them. {@code gdpr-erased} is what a node that hears of
+     * an erasure only by hash writes into the in-memory log store: erasing it would
+     * rewrite every entry of every user erased that way under one new pseudonym.
+     * Refused as a caller error.
      */
     public static boolean isReservedPrincipal(String userId) {
-        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId);
+        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId) || BoundedLogStore.REMOTE_ERASURE_MARKER.equals(userId);
     }
 
     private static void rejectReservedPrincipal(String userId) {
@@ -1621,6 +1625,11 @@ public class GdprComplianceService {
             // the bases gathered up to then.
             collectAuditBasis(participant, userId, exportDetails, pseudonym);
             collectNotices(participant, userId, IGdprParticipant.Operation.EXPORT, notices, pseudonym);
+            if (!notices.isEmpty()) {
+                // Into the details as they come, like the bases: a later participant that
+                // aborts the export must not drop the notices already gathered.
+                exportDetails.put("notices", List.copyOf(notices));
+            }
             try {
                 Object held = participant.export(userId);
                 if (held != null) {
@@ -1634,10 +1643,6 @@ public class GdprComplianceService {
                 additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
             }
         }
-        if (!notices.isEmpty()) {
-            exportDetails.put("notices", List.copyOf(notices));
-        }
-
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
                 totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData,

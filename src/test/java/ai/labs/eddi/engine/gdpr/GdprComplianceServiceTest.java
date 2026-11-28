@@ -2182,6 +2182,7 @@ class GdprComplianceServiceTest {
         void abortedExportStillLeavesALedgerEntry() throws Exception {
             var ledger = participant("emailLedger", 0, null);
             when(ledger.auditBasis("alice")).thenReturn(Map.of("emailAddresses", 1));
+            when(ledger.notices("alice", IGdprParticipant.Operation.EXPORT)).thenReturn(List.of("skipped: not exported"));
             var exploding = participant("userDirectory", 0, null);
             // An Error is not caught by the per-participant handler: it aborts the export.
             when(exploding.export("alice")).thenThrow(new AssertionError("boom"));
@@ -2195,7 +2196,16 @@ class GdprComplianceServiceTest {
             assertEquals("GDPR_EXPORT", entries.getValue().input().get("eventType"));
             assertEquals("aborted", output.get("outcome"));
             assertEquals(Map.of("emailAddresses", 1), output.get("emailLedgerBasis"), "the bases gathered so far are kept");
+            assertEquals(List.of("emailLedger: skipped: not exported"), output.get("notices"), "and so are the notices");
             assertTrue(output.containsKey("memoriesExported"));
+        }
+
+        @Test
+        @DisplayName("the remote log-erasure marker is no user: erasing or exporting it is refused")
+        void remoteErasureMarkerIsRefused() {
+            assertTrue(GdprComplianceService.isReservedPrincipal("gdpr-erased"));
+            assertThrows(IllegalArgumentException.class, () -> service.deleteUserData("gdpr-erased"));
+            assertThrows(IllegalArgumentException.class, () -> service.exportUserData("gdpr-erased"));
         }
 
         @Test

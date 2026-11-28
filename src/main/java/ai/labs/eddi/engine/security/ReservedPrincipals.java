@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.audit.AuditHmac;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.openai.OpenAiUserIdentity;
 import ai.labs.eddi.integrations.slack.SlackUserIdentity;
@@ -76,9 +77,12 @@ public final class ReservedPrincipals {
 
     /**
      * Whole names that are synthetic too: the owner recorded for work done while
-     * authorization was off.
+     * authorization was off, and the marker a node that hears of an erasure only by
+     * hash writes into its in-memory log store ({@code gdpr-erased}) — an account
+     * of that name would own, and on its own erasure re-pseudonymise, the log
+     * entries of every user erased that way.
      */
-    public static final Set<String> NAMES = Set.of("anonymous");
+    public static final Set<String> NAMES = Set.of("anonymous", BoundedLogStore.REMOTE_ERASURE_MARKER);
 
     private ReservedPrincipals() {
     }

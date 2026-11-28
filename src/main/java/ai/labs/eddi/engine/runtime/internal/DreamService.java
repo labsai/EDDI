@@ -251,7 +251,10 @@ public class DreamService {
         // not a failure: the restriction is a legal state, and a failed fire would
         // spend the schedule's retry budget and dead-letter it, so consolidation would
         // not resume once the restriction is lifted. A flag that cannot be read skips
-        // the cycle as well (fail closed, see below).
+        // the cycle as well (fail closed, see below). The check is at admission, as for
+        // a conversation turn (start, say): a restriction placed while a cycle runs
+        // stops the next cycle, not the one already admitted, which is a bounded
+        // piece of work over one user's memories.
         // GdprComplianceService is an unconditional @ApplicationScoped bean, so under
         // CDI
         // the Instance always resolves; unresolvable means a broken bean graph, and is

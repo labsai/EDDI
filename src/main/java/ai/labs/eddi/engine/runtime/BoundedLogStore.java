@@ -166,9 +166,16 @@ public class BoundedLogStore {
 
     @PreDestroy
     void shutdown() {
-        // Final flush
+        // Final flush — on the writer, behind a flush it may be running, so flushes
+        // stay
+        // serialised and the timeout below still applies when one is stuck in the
+        // database (called here, it would wait for that flush's monitor first).
         if (dbEnabled && dbWriter != null) {
-            flushToDb();
+            try {
+                dbWriter.execute(this::flushToDb);
+            } catch (RejectedExecutionException _) {
+                // already shut down
+            }
             dbWriter.shutdown();
             try {
                 if (!dbWriter.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -281,7 +288,7 @@ public class BoundedLogStore {
      * Replacement on a node that hears of an erasure only by hash (cluster mode):
      * it cannot compute the keyed pseudonym, which needs the raw id.
      */
-    static final String REMOTE_ERASURE_MARKER = "gdpr-erased";
+    public static final String REMOTE_ERASURE_MARKER = "gdpr-erased";
 
     /**
      * {@code KvKeys.sha256(userId)} of a recently erased user → what replaces the
@@ -461,8 +468,11 @@ public class BoundedLogStore {
         if (entry == null || entry.userId() == null || erasedUserHashes.isEmpty()) {
             return entry;
         }
+        // The clock first: a renewal the lookup sees must not be judged by a later
+        // read.
+        Instant now = clock.instant();
         Erasure erasure = erasedUserHashes.get(KvKeys.sha256(entry.userId()));
-        if (erasure == null || erasure.until().isBefore(clock.instant())) {
+        if (erasure == null || erasure.until().isBefore(now)) {
             return entry;
         }
         return withUserId(entry, erasure.replacement());

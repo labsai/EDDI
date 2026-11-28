@@ -106,7 +106,9 @@ succeeded and `"partially_completed"` otherwise, alongside the same `complete`
 and `failedSteps`.
 
 `__service__` (the owner of service-bound connection grants) is a reserved system
-principal, not a user: erasing or exporting it is refused with 400.
+principal, not a user: erasing or exporting it is refused with 400. So is
+`gdpr-erased`, the id a replica writes into its in-memory log store for an erasure
+it hears of only by hash; no account may sign in under that name either.
 
 **What happens:**
 

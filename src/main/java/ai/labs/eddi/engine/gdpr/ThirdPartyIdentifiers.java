@@ -161,8 +161,8 @@ public final class ThirdPartyIdentifiers {
                 masked.add(null);
                 continue;
             }
-            boolean speakerMasked = !recognisable(entry.speakerAgentId(), subjectId, agents);
-            boolean targetMasked = !recognisable(entry.targetAgentId(), subjectId, agents);
+            boolean speakerMasked = !recognisable(entry.speakerAgentId(), subjectId, agents, humans);
+            boolean targetMasked = !recognisable(entry.targetAgentId(), subjectId, agents, humans);
             if (!speakerMasked && !targetMasked) {
                 masked.add(entry);
                 continue;
@@ -196,10 +196,16 @@ public final class ThirdPartyIdentifiers {
 
     /**
      * Whether {@code id} may stay in the subject's bundle: absent, the subject's
-     * own, no person, or a known agent.
+     * own, a known agent, or no person — unless the discussion recorded a human
+     * under it: a HUMAN member whose id happens to be {@code unknown},
+     * {@code anonymous} or {@code system:*} is still a person, and keeping the id
+     * would keep their display name too.
      */
-    private static boolean recognisable(String id, String subjectId, Set<String> agents) {
-        if (id == null || id.isBlank() || id.equals(subjectId) || namesNoPerson(id) || agents.contains(id)) {
+    private static boolean recognisable(String id, String subjectId, Set<String> agents, Set<String> humans) {
+        if (id == null || id.isBlank() || id.equals(subjectId) || agents.contains(id)) {
+            return true;
+        }
+        if (!humans.contains(id) && namesNoPerson(id)) {
             return true;
         }
         Optional<String> address = AddressNormalizer.tryNormalize(id);

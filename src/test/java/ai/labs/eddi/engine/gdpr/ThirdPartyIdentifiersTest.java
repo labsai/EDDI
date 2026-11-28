@@ -90,7 +90,24 @@ class ThirdPartyIdentifiersTest {
         assertEquals("No response from [x] within PT1H",
                 HumanTurnSkipReasons.maskTimedOutName("No response from Ann within Reach within PT1H", "[x]"));
         assertEquals("No response from [x]", HumanTurnSkipReasons.maskTimedOutName("No response from Ann within the team", "[x]"));
+        // written without a window: the name's own single-token suffix is not one
+        assertEquals("No response from [x]",
+                HumanTurnSkipReasons.maskTimedOutName(HumanTurnSkipReasons.timedOut("Ann within Smith", null), "[x]"));
         assertEquals("Agent not deployed", HumanTurnSkipReasons.maskTimedOutName("Agent not deployed", "[x]"));
+    }
+
+    @Test
+    @DisplayName("a recorded human under a no-person marker id is masked, name included; a genuine system entry is kept")
+    void humanEvidenceOverridesTheNoPersonMarker() {
+        GroupConversation discussion = recorded();
+        discussion.setTranscript(List.of(entry("anonymous", "Bob Person", TranscriptEntryType.HUMAN_INPUT, null),
+                entry("system:scheduler", "Scheduler", TranscriptEntryType.OPINION, null)));
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner");
+
+        assertEquals(OTHER_PERSON, masked.get(0).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(0).speakerDisplayName(), "the person's name does not survive under the marker");
+        assertSame(discussion.getTranscript().get(1), masked.get(1));
     }
 
     private static TranscriptEntry entry(String speaker, String name, TranscriptEntryType type, String target) {

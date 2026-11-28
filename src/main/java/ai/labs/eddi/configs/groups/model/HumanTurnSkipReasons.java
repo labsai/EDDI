@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 /**
@@ -45,8 +47,10 @@ public final class HumanTurnSkipReasons {
      * {@code reason} with the member's name replaced by {@code replacement} when it
      * is a timed-out reason ({@link #timedOut}); any other reason unchanged. The
      * window is kept only when it is recognisably the one the writer appended — the
-     * last {@link #WINDOW_SEPARATOR} followed by a single token — so a display name
-     * that itself contains the separator cannot leak through it.
+     * last {@link #WINDOW_SEPARATOR} followed by an ISO-8601 duration (the group's
+     * {@code hitlApprovalTimeout}) — so a display name that itself contains the
+     * separator ({@code "Ann within Smith"}, written without a window) cannot leak
+     * through it.
      */
     public static String maskTimedOutName(String reason, String replacement) {
         if (reason == null || !reason.startsWith(TIMED_OUT_PREFIX)) {
@@ -56,11 +60,23 @@ public final class HumanTurnSkipReasons {
         int at = rest.lastIndexOf(WINDOW_SEPARATOR);
         if (at >= 0) {
             String window = rest.substring(at + WINDOW_SEPARATOR.length());
-            if (!window.isEmpty() && window.chars().noneMatch(Character::isWhitespace)) {
+            if (isDuration(window)) {
                 return TIMED_OUT_PREFIX + replacement + WINDOW_SEPARATOR + window;
             }
         }
         return TIMED_OUT_PREFIX + replacement;
+    }
+
+    private static boolean isDuration(String window) {
+        if (window.isEmpty() || window.chars().anyMatch(Character::isWhitespace)) {
+            return false;
+        }
+        try {
+            Duration.parse(window);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     /**

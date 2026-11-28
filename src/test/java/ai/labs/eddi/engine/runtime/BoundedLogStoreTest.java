@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -171,32 +172,71 @@ class BoundedLogStoreTest {
             }).when(databaseLogs).addLogsBatch(any());
 
             dbStore.publish(entryOf("carol", "WARN"));
-            Thread flusher = new Thread(dbStore::flushToDb);
-            flusher.start();
-            assertTrue(flushEntered.await(30, TimeUnit.SECONDS));
-            // queued while the flush is stuck: not in its batch
-            dbStore.publish(entryOf("alice", "WARN"));
-
-            // loaded now, so the only thing the marker can block on is the flush's monitor
+            // Futures, not bare threads: a failure on a worker (the mock's latch assertion,
+            // say) is rethrown on the test thread by get() instead of being lost with it.
+            FutureTask<Void> flush = new FutureTask<>(dbStore::flushToDb, null);
+            FutureTask<Integer> mark = new FutureTask<>(() -> dbStore.markUserErased("alice", "gdpr-erased:k1:abc"));
             String aliceHash = KvKeys.sha256("alice");
-            Thread marker = new Thread(() -> dbStore.markUserErased("alice", "gdpr-erased:k1:abc"));
-            marker.start();
-            // waits until the marker sits on the flush's monitor (it has already been
-            // called)
-            while (marker.getState() != Thread.State.BLOCKED && marker.getState() != Thread.State.TERMINATED) {
-                Thread.onSpinWait();
+            try {
+                new Thread(flush).start();
+                assertTrue(flushEntered.await(30, TimeUnit.SECONDS));
+                // queued while the flush is stuck: not in its batch
+                dbStore.publish(entryOf("alice", "WARN"));
+
+                // loaded now, so the only thing the marker can block on is the flush's monitor
+                Thread marker = new Thread(mark);
+                marker.start();
+                // waits until the marker sits on the flush's monitor (it has already been
+                // called) — bounded, so a marker that never gets there fails the test
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (marker.getState() != Thread.State.BLOCKED && marker.getState() != Thread.State.TERMINATED
+                        && System.nanoTime() < deadline) {
+                    Thread.onSpinWait();
+                }
+                assertEquals(Thread.State.BLOCKED, marker.getState());
+                // the flush stays stuck for longer than a mark lives
+                clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusMinutes(5));
+            } finally {
+                releaseFlush.countDown();
             }
-            assertEquals(Thread.State.BLOCKED, marker.getState());
-            // the flush stays stuck for longer than a mark lives
-            clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusMinutes(5));
-            releaseFlush.countDown();
-            flusher.join(30_000);
-            marker.join(30_000);
+            // both workers finished, and without a failure, before the store is used again
+            flush.get(30, TimeUnit.SECONDS);
+            mark.get(30, TimeUnit.SECONDS);
 
             dbStore.flushToDb();
 
             assertEquals(List.of(List.of("carol"), List.of("gdpr-erased:k1:abc")), batches);
             assertEquals(Set.of(aliceHash), dbStore.markKeys(), "the mark lives a full window from when it was placed");
+        }
+
+        @Test
+        void shutdownIsNotHeldByAFlushStuckInTheDatabase() throws Exception {
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.init(); // starts the writer shutdown() stops
+            CountDownLatch flushEntered = new CountDownLatch(1);
+            CountDownLatch releaseFlush = new CountDownLatch(1);
+            doAnswer(invocation -> {
+                flushEntered.countDown();
+                releaseFlush.await(60, TimeUnit.SECONDS);
+                return null;
+            }).when(databaseLogs).addLogsBatch(any());
+            dbStore.publish(entryOf("carol", "WARN"));
+            FutureTask<Void> flush = new FutureTask<>(dbStore::flushToDb, null);
+            FutureTask<Void> shutdown = new FutureTask<>(dbStore::shutdown, null);
+            try {
+                new Thread(flush).start();
+                assertTrue(flushEntered.await(30, TimeUnit.SECONDS));
+                // the queue is drained and the flush holds the store's monitor
+
+                new Thread(shutdown).start();
+
+                // the writer's 5 s termination timeout applies; shutdown does not wait for
+                // the stuck flush to come back from the database
+                shutdown.get(20, TimeUnit.SECONDS);
+            } finally {
+                releaseFlush.countDown();
+            }
+            flush.get(30, TimeUnit.SECONDS);
         }
 
         @Test
