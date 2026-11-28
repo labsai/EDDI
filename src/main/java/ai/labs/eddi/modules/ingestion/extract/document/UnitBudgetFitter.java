@@ -22,9 +22,11 @@ import java.util.Objects;
  * when it is the last of its list, into the one before. Its pages join the
  * neighbour's first (or last) part, and the neighbour's title names both. A
  * section with no text at all — a scanned chapter, a window of scanned pages —
- * is neither merged nor merged into: its estimate of zero says nothing about
- * its size, and a run of them would otherwise fold into one unit of hundreds of
- * pages.</li>
+ * is neither merged nor merged into, and neither is a part with no text that a
+ * merge would push pages into: its estimate of zero says nothing about its
+ * size, and a run of them would otherwise fold into one unit of hundreds of
+ * pages. This rule is this step's; the count cap below can still merge
+ * them.</li>
  * <li><b>Split the large.</b> A section with no parts that is estimated above
  * {@link SplitConfig#maxUnitTokens()} is cut at page boundaries into parts as
  * full as the budget allows: a part ends only where the next page would not
@@ -32,7 +34,9 @@ import java.util.Objects;
  * above the budget becomes a part of its own, and the result says so.</li>
  * <li><b>Cap the count.</b> While there are more leaf units than
  * {@link SplitConfig#maxUnits()}, the last leaf is merged into the leaf before
- * it, whatever that does to the budget; the result says so.</li>
+ * it, whatever that does to the budget and whether or not either has text; the
+ * result says so. Split parts are titled after this, by their final
+ * number.</li>
  * <li><b>Number.</b> Top-level units are {@code u1, u2, …} in document order,
  * the parts of {@code u3} are {@code u3.1, u3.2, …}, and so on down.</li>
  * </ol>
@@ -47,6 +51,13 @@ public final class UnitBudgetFitter {
 
     /** The longest title a unit is given, in code points, before it is cut. */
     static final int MAX_TITLE_CODE_POINTS = 200;
+
+    /**
+     * The deepest a section tree may nest. The walks below recurse, and an outline
+     * deeper than this is no outline a reader could use; {@link #fit} refuses one
+     * before any walk.
+     */
+    public static final int MAX_SECTION_DEPTH = 64;
 
     private UnitBudgetFitter() {
     }
@@ -92,14 +103,15 @@ public final class UnitBudgetFitter {
      * @param pageTokens
      *            the estimate for each page, page 1 first
      * @throws IllegalArgumentException
-     *             when the sections do not cover the pages as described
+     *             when the sections do not cover the pages as described, or nest
+     *             deeper than {@link #MAX_SECTION_DEPTH}
      */
     public static Result fit(List<Section> sections, int[] pageTokens, SplitConfig config) {
         Objects.requireNonNull(config, "config");
         if (pageTokens == null || pageTokens.length == 0) {
             throw new IllegalArgumentException("A document has at least one page");
         }
-        requireCover(sections, 1, pageTokens.length, "the document");
+        requireCover(sections, 1, pageTokens.length, "the document", 1);
 
         var fitter = new Fitting(pageTokens, config);
         List<Node> top = new ArrayList<>();
@@ -115,15 +127,20 @@ public final class UnitBudgetFitter {
         fitter.splitLarge(top);
         fitter.reportPagesOverBudget();
         fitter.capCount(top);
+        fitter.titleParts(top);
 
         List<DocumentUnit> units = new ArrayList<>();
         fitter.number(top, null, 1, units);
         return new Result(units, fitter.warnings);
     }
 
-    private static void requireCover(List<Section> sections, int from, int to, String what) {
+    private static void requireCover(List<Section> sections, int from, int to, String what, int depth) {
         if (sections == null || sections.isEmpty()) {
             throw new IllegalArgumentException("No sections for " + what);
+        }
+        if (depth > MAX_SECTION_DEPTH) {
+            throw new IllegalArgumentException(
+                    "Sections nest more than " + MAX_SECTION_DEPTH + " levels deep, which no outline needs");
         }
         int next = from;
         for (Section section : sections) {
@@ -131,8 +148,14 @@ public final class UnitBudgetFitter {
                 throw new IllegalArgumentException("Sections must cover pages " + from + "–" + to + " of " + what
                         + " in order, once each; page " + next + " is not where a section starts");
             }
+            // Before `next` moves past it: an end beyond the range (Integer.MAX_VALUE, say)
+            // would wrap `next` round to a later section's start.
+            if (section.lastPage() > to) {
+                throw new IllegalArgumentException("Sections must cover pages " + from + "–" + to + " of " + what
+                        + "; a section ends at page " + section.lastPage());
+            }
             if (!section.children().isEmpty()) {
-                requireCover(section.children(), section.firstPage(), section.lastPage(), "a section");
+                requireCover(section.children(), section.firstPage(), section.lastPage(), "a section", depth + 1);
             }
             next = section.lastPage() + 1;
         }
@@ -159,6 +182,12 @@ public final class UnitBudgetFitter {
         int first;
         int last;
         List<Node> children = new ArrayList<>();
+        /**
+         * Set when this leaf was cut into parts: the title its parts carry before their
+         * "(part k of n)". Applied by {@code titleParts}, after the count cap, so n is
+         * the number of parts that are left.
+         */
+        String partTitle;
 
         static Node of(Section section) {
             var node = new Node();
@@ -246,7 +275,13 @@ public final class UnitBudgetFitter {
                     continue;
                 }
                 if (carried != null) {
-                    node.absorbFromBefore(carried);
+                    if (firstPartsHaveText(node)) {
+                        node.absorbFromBefore(carried);
+                    } else {
+                        // The part that would take the pages has no text: it is kept as it
+                        // is, and so is the tiny unit.
+                        kept.add(carried);
+                    }
                     carried = null;
                 }
                 if (tokens(node) < config.minUnitTokens()) {
@@ -256,7 +291,7 @@ public final class UnitBudgetFitter {
                 }
             }
             if (carried != null) {
-                if (kept.isEmpty() || tokens(kept.getLast()) == 0) {
+                if (kept.isEmpty() || !lastPartsHaveText(kept.getLast())) {
                     kept.add(carried);
                 } else {
                     kept.getLast().absorbFromAfter(carried);
@@ -270,6 +305,32 @@ public final class UnitBudgetFitter {
                     collapseSingleParts(node);
                 }
             }
+        }
+
+        /**
+         * Whether every node down the first-part chain, which a merge from before
+         * extends, has text.
+         */
+        private boolean firstPartsHaveText(Node node) {
+            for (Node n = node; n != null; n = n.isLeaf() ? null : n.children.getFirst()) {
+                if (tokens(n) == 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Whether every node down the last-part chain, which a merge from after
+         * extends, has text.
+         */
+        private boolean lastPartsHaveText(Node node) {
+            for (Node n = node; n != null; n = n.isLeaf() ? null : n.children.getLast()) {
+                if (tokens(n) == 0) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         void splitLarge(List<Node> list) {
@@ -288,18 +349,39 @@ public final class UnitBudgetFitter {
                 }
                 // An untitled section (a page window) names its parts by their own pages;
                 // "Pages 1–10 (part 1 of 2)" would claim pages the part does not hold.
-                String title = node.firstTitle == null && node.lastTitle == null ? null : display(node);
-                for (int k = 0; k < parts.size(); k++) {
-                    int[] part = parts.get(k);
+                node.partTitle = node.firstTitle == null && node.lastTitle == null ? null : display(node);
+                for (int[] part : parts) {
                     if (part[0] == part[1] && tokens(part[0], part[1]) > config.maxUnitTokens()) {
                         pagesOverBudget++;
                     }
-                    // The suffix is what tells the parts apart, so the title gives way to it.
-                    String suffix = " (part " + (k + 1) + " of " + parts.size() + ")";
-                    node.children.add(Node.leaf(
-                            title == null ? null : capped(title, MAX_TITLE_CODE_POINTS - suffix.length()) + suffix,
-                            part[0], part[1]));
+                    // Untitled until titleParts: the count cap may still merge parts.
+                    node.children.add(Node.leaf(null, part[0], part[1]));
                 }
+            }
+        }
+
+        /**
+         * Titles the parts of every cut section by their final count. A part that took
+         * a later unit's pages in the cap keeps that unit's title as its last.
+         */
+        void titleParts(List<Node> list) {
+            for (Node node : list) {
+                if (node.partTitle != null && !node.isLeaf()) {
+                    int count = node.children.size();
+                    for (int k = 0; k < count; k++) {
+                        Node part = node.children.get(k);
+                        // The suffix is what tells the parts apart, so the title gives way to it.
+                        String suffix = " (part " + (k + 1) + " of " + count + ")";
+                        String title = capped(node.partTitle, MAX_TITLE_CODE_POINTS - suffix.length()) + suffix;
+                        if (part.firstTitle == null) {
+                            part.firstTitle = title;
+                        }
+                        if (part.lastTitle == null) {
+                            part.lastTitle = title;
+                        }
+                    }
+                }
+                titleParts(node.children);
             }
         }
 

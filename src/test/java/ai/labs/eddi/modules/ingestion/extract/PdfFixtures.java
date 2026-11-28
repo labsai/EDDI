@@ -494,6 +494,41 @@ public final class PdfFixtures {
         });
     }
 
+    /**
+     * Two pages in Helvetica. Page 1 shows {@code glyphs} letters inside a
+     * {@code /Span} whose {@code /ActualText} is {@code replacement}; page 2 shows
+     * {@code secondPage}, untagged. A glyph allowance below {@code glyphs} cuts
+     * page 1 inside the span, before its {@code EMC}.
+     */
+    public static byte[] actualTextThenPlain(int glyphs, String replacement, String secondPage) {
+        byte[] tagged = ascii("/Span <</ActualText (" + replacement + ")>> BDC BT /F1 12 Tf 72 700 Td ("
+                + "A".repeat(glyphs) + ") Tj ET EMC");
+        byte[] plain = ascii("BT /F1 12 Tf 72 700 Td (" + secondPage + ") Tj ET");
+        String resources = "/Resources<</Font<</F1 5 0 R>>>>";
+        return rawPdf(List.of(
+                ascii("<</Type/Catalog/Pages 2 0 R>>"),
+                ascii("<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]" + resources + "/Contents 6 0 R>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]" + resources + "/Contents 7 0 R>>"),
+                ascii("<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>"),
+                stream("", tagged),
+                stream("", plain)));
+    }
+
+    /**
+     * One page with two lines, {@code first} above {@code second}, in Helvetica.
+     */
+    public static byte[] twoLines(String first, String second) {
+        byte[] content = ascii("BT /F1 12 Tf 72 700 Td (" + first + ") Tj 0 -20 Td (" + second + ") Tj ET");
+        return rawPdf(List.of(
+                ascii("<</Type/Catalog/Pages 2 0 R>>"),
+                ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>"
+                        + "/Contents 5 0 R>>"),
+                ascii("<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>"),
+                stream("", content)));
+    }
+
     /** The same document, loaded and saved again by PDFBox: different bytes. */
     public static byte[] resaved(byte[] pdf) {
         try (PDDocument document = Loader.loadPDF(pdf)) {

@@ -46,6 +46,32 @@ class UnitBudgetFitterTest {
     class MergeTiny {
 
         @Test
+        @DisplayName("does not push a tiny unit's pages into a part with no text, from before or after")
+        void keepsTextFreePartsApart() {
+            // Page 1 is tiny; the chapter after it starts with a scanned part.
+            var forward = List.of(Section.of("Note", 1, 1),
+                    new Section("Ch", 2, 3, List.of(Section.of("Scan", 2, 2), Section.of("Text", 3, 3))));
+            Result result = UnitBudgetFitter.fit(forward, new int[]{10, 0, 500}, config(10_000, 100, 60));
+            assertEquals("u1:1-1 u2:2-3 u2.1:2-2 u2.2:3-3", shape(result));
+
+            // The tiny unit is last; the chapter before it ends with a scanned part.
+            var backward = List.of(
+                    new Section("Ch", 1, 2, List.of(Section.of("Text", 1, 1), Section.of("Scan", 2, 2))),
+                    Section.of("Note", 3, 3));
+            Result back = UnitBudgetFitter.fit(backward, new int[]{500, 0, 10}, config(10_000, 100, 60));
+            assertEquals("u1:1-2 u1.1:1-1 u1.2:2-2 u2:3-3", shape(back));
+        }
+
+        @Test
+        @DisplayName("still merges into a part that has text")
+        void mergesIntoAPartWithText() {
+            var sections = List.of(Section.of("Note", 1, 1),
+                    new Section("Ch", 2, 3, List.of(Section.of("Text", 2, 2), Section.of("More", 3, 3))));
+            Result result = UnitBudgetFitter.fit(sections, new int[]{10, 500, 500}, config(10_000, 100, 60));
+            assertEquals("u1:1-3 u1.1:1-2 u1.2:3-3", shape(result));
+        }
+
+        @Test
         @DisplayName("merges a unit below the minimum into the one after it, naming both")
         void mergesForward() {
             var sections = List.of(Section.of("Preface", 1, 1), Section.of("Chapter 1", 2, 5),
@@ -162,6 +188,18 @@ class UnitBudgetFitterTest {
         }
 
         @Test
+        @DisplayName("saturates a parent's estimate at Integer.MAX_VALUE, and the invariants agree")
+        void saturatesTheParentEstimate() {
+            SplitConfig config = config(1_000_000_000, 0, 60);
+            Result result = UnitBudgetFitter.fit(List.of(Section.of("Huge", 1, 2)),
+                    new int[]{1_500_000_000, 1_500_000_000}, config);
+
+            assertEquals("u1:1-2 u1.1:1-1 u1.2:2-2", shape(result));
+            assertEquals(Integer.MAX_VALUE, result.units().get(0).estimatedTokens());
+            assertInvariants(result, 2, config, "saturated parent");
+        }
+
+        @Test
         @DisplayName("names the parts of an untitled window by their own pages")
         void untitledParts() {
             Result result = UnitBudgetFitter.fit(List.of(Section.of(null, 1, 10)), tokens(10, 300),
@@ -220,6 +258,18 @@ class UnitBudgetFitterTest {
     @Nested
     @DisplayName("capping the count")
     class CapCount {
+
+        @Test
+        @DisplayName("titles a cut section's parts by the number left after the cap")
+        void partTitlesCountTheFinalParts() {
+            // Cut into three parts, capped at two: the second takes the third's pages.
+            Result result = UnitBudgetFitter.fit(List.of(Section.of("Report", 1, 3)), tokens(3, 800),
+                    config(1_000, 0, 2));
+
+            assertEquals("u1:1-3 u1.1:1-1 u1.2:2-3", shape(result));
+            assertEquals(List.of("Report", "Report (part 1 of 2)", "Report (part 2 of 2)"),
+                    result.units().stream().map(DocumentUnit::title).toList());
+        }
 
         @Test
         @DisplayName("merges the last units until no more than maxUnits are left, and says so")
@@ -332,6 +382,38 @@ class UnitBudgetFitterTest {
         }
 
         @Test
+        @DisplayName("refuses an end beyond the range before it can wrap round to a later section's start")
+        void refusesAnEndThatWraps() {
+            var sections = List.of(Section.of("a", 1, Integer.MAX_VALUE), Section.of("b", Integer.MIN_VALUE, 5));
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> UnitBudgetFitter.fit(sections, tokens(5, 1), config(10_000, 0, 60)));
+        }
+
+        @Test
+        @DisplayName("refuses sections nested deeper than MAX_SECTION_DEPTH, and accepts that depth")
+        void boundsTheNesting() {
+            SplitConfig any = config(10_000, 0, 60);
+            assertThrows(IllegalArgumentException.class, () -> UnitBudgetFitter
+                    .fit(List.of(chain(100_000)), tokens(1, 1), any));
+            assertThrows(IllegalArgumentException.class, () -> UnitBudgetFitter
+                    .fit(List.of(chain(UnitBudgetFitter.MAX_SECTION_DEPTH + 1)), tokens(1, 1), any));
+            assertEquals("u1:1-1",
+                    shape(UnitBudgetFitter.fit(List.of(chain(UnitBudgetFitter.MAX_SECTION_DEPTH)), tokens(1, 1), any)));
+        }
+
+        /**
+         * A one-page section wrapped in one-part sections, {@code depth} levels in all.
+         */
+        private Section chain(int depth) {
+            Section section = Section.of("leaf", 1, 1);
+            for (int level = 1; level < depth; level++) {
+                section = new Section("level " + level, 1, 1, List.of(section));
+            }
+            return section;
+        }
+
+        @Test
         @DisplayName("treats a chapter with a single part as having none")
         void singlePartIsNoPart() {
             var sections = List.of(new Section("a", 1, 5, List.of(Section.of("only", 1, 5))));
@@ -413,8 +495,10 @@ class UnitBudgetFitterTest {
             if (!parts.isEmpty()) {
                 assertEquals(unit.firstPage(), parts.getFirst().firstPage(), context);
                 assertEquals(unit.lastPage(), parts.getLast().lastPage(), context);
-                assertEquals(unit.estimatedTokens(), parts.stream().mapToInt(DocumentUnit::estimatedTokens).sum(),
-                        context);
+                // The fitter saturates at Integer.MAX_VALUE; so does the sum it is checked
+                // against.
+                long sum = parts.stream().mapToLong(DocumentUnit::estimatedTokens).sum();
+                assertEquals(unit.estimatedTokens(), (int) Math.min(Integer.MAX_VALUE, sum), context);
             }
             if (unit.parentId() != null) {
                 assertTrue(byId.containsKey(unit.parentId()), context);

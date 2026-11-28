@@ -342,6 +342,48 @@ class PdfStructureExtractorTest {
     }
 
     @Nested
+    @DisplayName("measuring pages")
+    class Measuring {
+
+        private final SplitConfig onePagePerUnit = new SplitConfig(SplitStrategy.PAGES, 1, 100_000, 0, 1_000);
+
+        @Test
+        @DisplayName("a page cut inside an /ActualText span does not hand its replacement to the next page")
+        void aCutDoesNotLeakActualText() {
+            // Page 1 is cut at 10 glyphs, inside the span; page 2 is "Hello": 5 characters,
+            // 2 tokens.
+            var tight = new ExtractionLimits(10, 500, 5_000, 64, 64L * 1024 * 1024);
+            byte[] pdf = PdfFixtures.actualTextThenPlain(40, "R".repeat(60), "Hello");
+
+            DocumentManifest manifest = extractor.manifest(pdf, "ref-1", onePagePerUnit, tight);
+
+            assertEquals("u1:1-1 u2:2-2", shape(manifest));
+            assertEquals(2, manifest.units().get(1).estimatedTokens());
+        }
+
+        @Test
+        @DisplayName("counts a line break as one character on every host")
+        void lineBreaksAreOneCharacter() {
+            // "A", a line break, "BC": four characters with \n, one token; five with \r\n.
+            DocumentManifest manifest = extractor.manifest(PdfFixtures.twoLines("A", "BC"), "ref-1",
+                    onePagePerUnit, limits);
+
+            assertEquals(1, manifest.units().get(0).estimatedTokens());
+        }
+
+        @Test
+        @DisplayName("measures every page in one pass and still gives each its own estimate")
+        void eachPageItsOwnEstimate() {
+            DocumentManifest manifest = extractor.manifest(PdfFixtures.actualTextThenPlain(3, "XYZ", "Hello world"),
+                    "ref-1", onePagePerUnit, limits);
+
+            // Page 1: the span's replacement "XYZ" stands for its three glyphs; page 2: 11
+            // characters.
+            assertEquals(List.of(1, 3), manifest.units().stream().map(DocumentUnit::estimatedTokens).toList());
+        }
+    }
+
+    @Nested
     @DisplayName("stability")
     class Stability {
 

@@ -269,6 +269,9 @@ public class PdfStructureExtractor {
             if (sections == null) {
                 sections = pageWindows(pageCount, split.pagesPerUnit());
             }
+            // The periodic checks stop work early; this one stops a read the deadline
+            // (or an interrupt) overtook in its last step from returning a manifest.
+            requireBefore(deadline);
             return new Structure(sections, tokens, used, warnings);
         } catch (InvalidPasswordException e) {
             throw new UnreadableDocumentException("This PDF is encrypted. Upload a copy without a password.", e);
@@ -376,15 +379,14 @@ public class PdfStructureExtractor {
             throws IOException {
         int[] tokens = new int[pageCount];
         int measured = Math.min(pageCount, limits.maxParts());
-        var stripper = new BoundedTextStripper(deadline);
+        requireBefore(deadline);
+        // One pass over the page tree for all measured pages, each with its own glyph
+        // allowance (the stripper checks the deadline at every page and operator).
+        int[] characters = new BoundedTextStripper(deadline).measurePages(document, 1, measured,
+                limits.maxCharacters());
         long total = 0;
         for (int page = 1; page <= measured; page++) {
-            requireBefore(deadline);
-            stripper.setStartPage(page);
-            stripper.setEndPage(page);
-            stripper.allowGlyphs(limits.maxCharacters());
-            int characters = stripper.getText(document).strip().length();
-            tokens[page - 1] = (characters + 3) / 4;
+            tokens[page - 1] = (characters[page - 1] + 3) / 4;
             total += tokens[page - 1];
         }
         if (measured < pageCount) {
@@ -485,6 +487,10 @@ public class PdfStructureExtractor {
         private final Instant deadline;
         private final Set<String> warnings;
         private Map<String, COSBase> namedDestinations;
+        /**
+         * Name-tree entries examined so far, against {@link #MAX_NAMED_DESTINATIONS}.
+         */
+        private int namesExamined;
         private int unresolved;
 
         OutlineReader(PDDocument document, Map<COSDictionary, Integer> pageNumbers, int pageCount,
@@ -647,8 +653,11 @@ public class PdfStructureExtractor {
 
         /**
          * Every named destination: the {@code /Dests} name tree, then the older catalog
-         * {@code /Dests} dictionary. Read once, iteratively, each node once, up to
-         * {@link #MAX_NAMED_DESTINATIONS}.
+         * {@code /Dests} dictionary. Read once, iteratively, each node once. Every
+         * entry examined — a tree node, a {@code /Kids} entry, a name pair, a legacy
+         * key — is charged as it is examined, up to {@link #MAX_NAMED_DESTINATIONS},
+         * with the deadline checked at the same cadence for all of them; a node's
+         * {@code /Kids} are walked by a cursor, so a wide node is never queued whole.
          */
         private Map<String, COSBase> namedDestinations() {
             if (namedDestinations != null) {
@@ -656,58 +665,90 @@ public class PdfStructureExtractor {
             }
             namedDestinations = new HashMap<>();
             COSDictionary catalog = document.getDocumentCatalog().getCOSObject();
-            int visited = 0;
             COSDictionary names = catalog.getCOSDictionary(COSName.NAMES);
             COSDictionary tree = names == null ? null : names.getCOSDictionary(COSName.DESTS);
-            Set<COSDictionary> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-            Deque<COSDictionary> pending = new ArrayDeque<>();
-            if (tree != null) {
-                pending.push(tree);
-            }
-            while (!pending.isEmpty()) {
-                COSDictionary node = pending.pop();
-                if (!seen.add(node)) {
-                    continue;
+            final class Cursor {
+                final COSArray kids;
+                int next;
+
+                Cursor(COSDictionary node) {
+                    this.kids = node.getCOSArray(COSName.KIDS);
                 }
-                if (++visited > MAX_NAMED_DESTINATIONS) {
-                    warnings.add(WARNING_NAMES_TRUNCATED);
+            }
+            Set<COSDictionary> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            Deque<Cursor> stack = new ArrayDeque<>();
+            if (tree != null) {
+                if (!charge()) {
                     return namedDestinations;
                 }
-                if (visited % OBJECTS_PER_DEADLINE_CHECK == 0) {
-                    requireBefore(deadline);
+                seen.add(tree);
+                if (!readPairs(tree)) {
+                    return namedDestinations;
                 }
-                COSArray pairs = node.getCOSArray(COSName.NAMES);
-                if (pairs != null) {
-                    for (int i = 0; i + 1 < pairs.size(); i += 2) {
-                        if (++visited > MAX_NAMED_DESTINATIONS) {
-                            warnings.add(WARNING_NAMES_TRUNCATED);
-                            return namedDestinations;
-                        }
-                        if (pairs.getObject(i) instanceof COSString key) {
-                            namedDestinations.putIfAbsent(key.getString(), pairs.getObject(i + 1));
-                        }
-                    }
+                stack.push(new Cursor(tree));
+            }
+            while (!stack.isEmpty()) {
+                Cursor cursor = stack.peek();
+                if (cursor.kids == null || cursor.next >= cursor.kids.size()) {
+                    stack.pop();
+                    continue;
                 }
-                COSArray kids = node.getCOSArray(COSName.KIDS);
-                if (kids != null) {
-                    for (int i = kids.size() - 1; i >= 0; i--) {
-                        if (kids.getObject(i) instanceof COSDictionary kid) {
-                            pending.push(kid);
-                        }
+                if (!charge()) {
+                    return namedDestinations;
+                }
+                // Depth first in kid order, as before: a kid's names come before its
+                // next sibling's.
+                if (cursor.kids.getObject(cursor.next++) instanceof COSDictionary kid && seen.add(kid)) {
+                    if (!readPairs(kid)) {
+                        return namedDestinations;
                     }
+                    stack.push(new Cursor(kid));
                 }
             }
             COSDictionary legacy = catalog.getCOSDictionary(COSName.DESTS);
             if (legacy != null) {
                 for (COSName key : legacy.keySet()) {
-                    if (++visited > MAX_NAMED_DESTINATIONS) {
-                        warnings.add(WARNING_NAMES_TRUNCATED);
+                    if (!charge()) {
                         return namedDestinations;
                     }
                     namedDestinations.putIfAbsent(key.getName(), legacy.getDictionaryObject(key));
                 }
             }
             return namedDestinations;
+        }
+
+        /**
+         * A node's {@code /Names} pairs, each charged; false once the budget is spent.
+         */
+        private boolean readPairs(COSDictionary node) {
+            COSArray pairs = node.getCOSArray(COSName.NAMES);
+            if (pairs != null) {
+                for (int i = 0; i + 1 < pairs.size(); i += 2) {
+                    if (!charge()) {
+                        return false;
+                    }
+                    if (pairs.getObject(i) instanceof COSString key) {
+                        namedDestinations.putIfAbsent(key.getString(), pairs.getObject(i + 1));
+                    }
+                }
+            }
+            return true;
+        }
+
+        /**
+         * One more entry examined. False, with the warning, once more than
+         * {@link #MAX_NAMED_DESTINATIONS} have been; the deadline is checked every
+         * {@code OBJECTS_PER_DEADLINE_CHECK} entries.
+         */
+        private boolean charge() {
+            if (++namesExamined > MAX_NAMED_DESTINATIONS) {
+                warnings.add(WARNING_NAMES_TRUNCATED);
+                return false;
+            }
+            if (namesExamined % OBJECTS_PER_DEADLINE_CHECK == 0) {
+                requireBefore(deadline);
+            }
+            return true;
         }
     }
 }
