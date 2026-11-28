@@ -12,10 +12,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
@@ -407,6 +409,75 @@ class SelfUngatingGuardProtectionTest {
             assertNull(SelfUngatingGuard.refusalFromArguments("{\"q\":\"caf" + escaped('é') + " near " + escaped('t') + "own\"}",
                     resolved(null)));
             assertNull(SelfUngatingGuard.refusalFromArguments("not json at all", resolved(null)));
+        }
+    }
+
+    /**
+     * Built-in tools take their arguments through langchain4j, which retries a
+     * failed parse after stripping one pair of outer quotes, turning every
+     * backslash-quote into a quote and dropping trailing commas. Arguments in those
+     * shapes are not JSON, yet they execute; an escaped id or key inside them must
+     * be refused like the plain one.
+     */
+    @Nested
+    @DisplayName("arguments only langchain4j's fallback parse reads")
+    class Langchain4jFallbackShapes {
+
+        private static final String BACKSLASH = "" + (char) 92;
+
+        /** The JSON escape for {@code c}, as it appears in JSON text. */
+        private static String escaped(char c) {
+            return String.format(BACKSLASH + "u%04x", (int) c);
+        }
+
+        /**
+         * {@code json} as two shapes langchain4j repairs: every quote written as
+         * backslash-quote with no outer quotes, and the document wrapped in one pair of
+         * outer quotes with its inner quotes left bare.
+         */
+        private static List<String> shapes(String json) {
+            return List.of(json.replace("\"", BACKSLASH + "\""), "\"" + json + "\"");
+        }
+
+        @Test
+        @DisplayName("the acting agent's id, escaped, is refused in both shapes")
+        void escapedAgentIdIsRefused() {
+            // the last character escaped: an escaped first '6' would leave the 6 of its own
+            // hex digits in front of the rest, spelling the id in the raw text
+            int last = AGENT.length() - 1;
+            String json = "{\"agentId\":\"" + AGENT.substring(0, last) + escaped(AGENT.charAt(last)) + "\",\"action\":\"deploy\"}";
+            for (String args : shapes(json)) {
+                assertFalse(args.contains(AGENT), "the raw arguments must not already name the id: " + args);
+                assertEquals(SelfUngatingGuard.OWN_AGENT_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)), args);
+            }
+        }
+
+        @Test
+        @DisplayName("an escaped toolApprovals, toolCallGuardrails or hitlConfig key is refused in both shapes")
+        void escapedGateKeysAreRefused() {
+            String approvals = "{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/" + UNRELATED + "\",\"body\":{\"" + escaped('t')
+                    + "oolApprovals\":{\"requireApproval\":[]}}}";
+            String guardrails = "{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/" + UNRELATED + "\",\"body\":{\"" + escaped('t')
+                    + "oolCallGuardrails\":{}}}";
+            String hitl = "{\"agentId\":\"" + OTHER + "\",\"body\":{\"" + escaped('h') + "itlConfig\":null}}";
+            for (String args : shapes(approvals)) {
+                assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)), args);
+            }
+            for (String args : shapes(guardrails)) {
+                assertEquals(SelfUngatingGuard.GUARDRAIL_WRITE_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)), args);
+            }
+            for (String args : shapes(hitl)) {
+                assertEquals(SelfUngatingGuard.GATE_REMOVAL_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)), args);
+            }
+        }
+
+        @Test
+        @DisplayName("the same shapes naming another agent and no gate key still run")
+        void otherAgentStillRuns() {
+            String json = "{\"agentId\":\"" + escaped(OTHER.charAt(0)) + OTHER.substring(1) + "\",\"q\":\"weather\",}";
+            for (String args : shapes(json)) {
+                assertNull(SelfUngatingGuard.refusalFromArguments(args, resolved(null)), args);
+            }
         }
     }
 }

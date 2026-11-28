@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentCascadeService.CascadeException;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -82,7 +83,7 @@ class RestAgentStoreCascadeTest {
         accessGuard = mock(ResourceAccessGuard.class);
         store = new RestAgentStore(mock(IAgentStore.class), mock(IRestWorkflowStore.class), mock(IDocumentDescriptorStore.class),
                 mock(IJsonSchemaCreator.class), mock(IScheduleStore.class), mock(CapabilityRegistryService.class), mock(IDeploymentStore.class),
-                accessGuard, mock(AgentSigningService.class), mock(IAgentFactory.class), "default", cascadeService);
+                accessGuard, mock(AgentSigningService.class), mock(IAgentFactory.class), "default", cascadeService, mock(VaultGrantService.class));
     }
 
     private static AgentCascadeRequest request(String environment, Boolean redeploy, Boolean compatible) {

@@ -328,6 +328,26 @@ describe("useDeployWithGrants", () => {
     expect(putBody).toEqual({ allowedAgents: ["*"] });
     expect(calls).toEqual(["preflight", `put ${KEY}`, "deploy wait=true"]);
   });
+
+  it("does not offer 'allow every agent' when the flow says so (the operator's upgrade)", async () => {
+    serve();
+    function NoAllowAll() {
+      const { deploy } = useDeployWithGrants();
+      return (
+        <button
+          data-testid="go"
+          onClick={() => void deploy({ agentId: AGENT, agentName: "New Agent", version: 1, offerAllowAll: false })}
+        />
+      );
+    }
+    const user = userEvent.setup();
+    renderWithProviders(<NoAllowAll />);
+    await user.click(screen.getByTestId("go"));
+    await screen.findByTestId("grant-required-dialog");
+    // Adding this one agent is still offered; widening to everyone is not.
+    expect(screen.getByTestId("grant-required-confirm")).toBeInTheDocument();
+    expect(screen.queryByTestId("grant-required-allow-all")).not.toBeInTheDocument();
+  });
 });
 
 describe("useDeployWithGrants — query refresh", () => {

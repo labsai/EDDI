@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security.spaces;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -86,6 +87,30 @@ public record CallerSpaces(Set<String> selfPrincipals, Set<String> spaces, Set<S
      */
     public boolean isSelf(String ownerId) {
         return ownerId != null && !ownerId.isBlank() && selfPrincipals.contains(ownerId);
+    }
+
+    /**
+     * The team subjects of {@code caller} — every subject except the caller's own
+     * personal space — in the order the token listed them.
+     * <p>
+     * The one derivation of "the current token's teams": request code reaches it
+     * through {@code ResourceAccessGuard.currentTeamSubjects()}, and the snapshot a
+     * conversation turn carries to its worker threads
+     * ({@code CallerIdentity.teamSubjects()}) is taken with it at the request
+     * boundary. Two copies of this filter could disagree about who is in a team.
+     *
+     * @param caller
+     *            the caller's spaces, or {@code null}
+     * @return the team subjects; empty for {@code null} or an anonymous caller,
+     *         never {@code null}
+     */
+    public static List<String> teamSubjectsOf(CallerSpaces caller) {
+        if (caller == null) {
+            return List.of();
+        }
+        Set<String> personal = new LinkedHashSet<>();
+        caller.selfPrincipals().forEach(p -> personal.add(Subjects.personalSpace(p)));
+        return caller.subjects().stream().filter(subject -> !personal.contains(subject)).toList();
     }
 
     /** Whether this caller has any identity at all. */
