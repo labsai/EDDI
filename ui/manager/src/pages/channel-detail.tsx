@@ -273,10 +273,21 @@ export function ChannelDetailPage() {
    * reseed.
    */
   const seededFor = useRef<string | null>(null);
+  // The latest draft, readable after an await: a save compares it with what it sent.
+  const draftRef = useRef<ChannelIntegrationConfiguration | null>(null);
+  draftRef.current = draft;
+  // The route the form shows now, and how many times it has been seeded. A save
+  // records both when it is sent; if either moved before the reply (the guard
+  // lets a query-only navigation to another version through), the form now
+  // belongs to that other version and the reply must not touch it.
+  const routeRef = useRef(`${id}@${version}`);
+  routeRef.current = `${id}@${version}`;
+  const seedGeneration = useRef(0);
   useEffect(() => {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
       seededFor.current = key;
+      seedGeneration.current += 1;
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
@@ -316,15 +327,35 @@ export function ChannelDetailPage() {
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
     }
+    const sentDraft = JSON.stringify(draft);
+    const sentRoute = routeRef.current;
+    const sentGeneration = seedGeneration.current;
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: toSave });
+      // Navigated away while the PUT ran: the form and the URL show another
+      // version now. Its draft is not an edit to what was sent, so neither the
+      // version switch nor the baseline may follow this save.
+      const ownsForm =
+        routeRef.current === sentRoute && seedGeneration.current === sentGeneration;
+      if (!ownsForm) {
+        toast.success(t("channelDetail.saveSuccess", "Channel saved"));
+        toastChannelWarnings(result?.warnings ?? [], t);
+        return;
+      }
+      // The fields stay editable during the PUT. Whatever was typed meanwhile
+      // is not part of what was stored: it stays on screen, unsaved against the
+      // new baseline, instead of being reseeded away by the version switch.
+      const editedSinceSent = JSON.stringify(draftRef.current) !== sentDraft;
       // Update URL to new version so subsequent saves don't conflict
       const location = (result as { location?: string })?.location;
       if (location) {
         const { version: newVersion } = parseChannelResourceUri(location);
+        // Following this save's own version is the same document, not another
+        // one: mark it seeded so the effect above leaves the newer edit alone.
+        if (editedSinceSent) seededFor.current = `${id}@${newVersion}`;
         setSearchParams({ version: String(newVersion) }, { replace: true });
       }
-      if (toSave !== draft) setDraft(toSave);
+      if (!editedSinceSent && toSave !== draft) setDraft(toSave);
       setBaseline(JSON.stringify(toSave));
       toast.success(t("channelDetail.saveSuccess", "Channel saved"));
       toastChannelWarnings(result?.warnings ?? [], t);
