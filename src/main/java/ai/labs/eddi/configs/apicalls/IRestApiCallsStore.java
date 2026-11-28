@@ -88,7 +88,18 @@ public interface IRestApiCallsStore extends IRestVersionInfo {
                             @Parameter(name = "version", required = true, example = "1")
                             @QueryParam("version") Integer version,
                             @QueryParam("permanent")
-                            @DefaultValue("false") Boolean permanent);
+                            @DefaultValue("false") Boolean permanent,
+                            @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                            @QueryParam("force")
+                            @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteApiCalls} without {@code force}: refused while the resource is
+     * in use.
+     */
+    default Response deleteApiCalls(String id, Integer version, Boolean permanent) {
+        return deleteApiCalls(id, version, permanent, false);
+    }
 
     /**
      * Parse an OpenAPI document and return importable ApiCall configurations.

@@ -55,6 +55,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -305,6 +306,115 @@ class ConversationServiceHitlCoverageTest {
             verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
             verify(scheduleStore).deleteSchedulesByName(anyString());
             verifyNoInteractions(auditLedgerService);
+        }
+    }
+
+    // =========================================================================
+    // endConversationUnlessAwaitingHuman — compare-and-set end (agent delete)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("endConversationUnlessAwaitingHuman (the end that never resolves a pending approval)")
+    class ConditionalEnd {
+
+        @SuppressWarnings("unchecked")
+        private Map<String, IConversationMemory> inFlightConversations() throws Exception {
+            var field = ConversationService.class.getDeclaredField("inFlightConversations");
+            field.setAccessible(true);
+            return (Map<String, IConversationMemory>) field.get(conversationService);
+        }
+
+        @Test
+        @DisplayName("a READY conversation is ended by the conditional write, with its reason and the timeout disarmed")
+        void endsAReadyConversation() throws Exception {
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.READY);
+
+            assertTrue(conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationMemoryStore).setConversationEndReason(CONVERSATION_ID, "agent-deleted");
+            verify(scheduleStore).deleteSchedulesByName(anyString());
+        }
+
+        @Test
+        @DisplayName("a conversation awaiting a human is left alone: no state write, no audit, no bookmark clear")
+        void leavesAPausedConversation() throws Exception {
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            assertFalse(conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            verify(conversationMemoryStore, never()).endIfStateAndNotPaused(anyString(), any());
+            verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationMemoryStore, never()).clearHitlBookmark(anyString());
+            verifyNoInteractions(auditLedgerService);
+        }
+
+        /**
+         * The window the plain end leaves open: read IN_PROGRESS, the turn then commits
+         * its pause, and the unconditional state write ended the pending approval. The
+         * conditional write from IN_PROGRESS misses instead, the re-read sees the
+         * pause, and nothing is touched.
+         */
+        @Test
+        @DisplayName("a conversation that pauses between the read and the write is left paused")
+        void leavesAConversationThatPausedInTheWindow() throws Exception {
+            doReturn(ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN).when(conversationMemoryStore)
+                    .getConversationState(CONVERSATION_ID);
+            doReturn(false).when(conversationMemoryStore).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.IN_PROGRESS);
+
+            assertFalse(conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationMemoryStore, never()).setConversationEndReason(anyString(), any());
+            verify(conversationMemoryStore, never()).clearHitlBookmark(anyString());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verifyNoInteractions(auditLedgerService);
+        }
+
+        @Test
+        @DisplayName("a refusal with the state unchanged (a resume still holding the pause bookmark) leaves it alone, unsignalled")
+        void leavesAResumeInFlightAlone() throws Exception {
+            doReturn(ConversationState.IN_PROGRESS).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(false).when(conversationMemoryStore).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.IN_PROGRESS);
+            var inFlight = mock(IConversationMemory.class);
+            inFlightConversations().put(CONVERSATION_ID, inFlight);
+
+            assertFalse(conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            verify(inFlight, never()).setCancelled(anyBoolean());
+            verify(conversationMemoryStore, times(1)).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.IN_PROGRESS);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+        }
+
+        @Test
+        @DisplayName("the in-flight turn is signalled only after the end has won")
+        void signalsTheTurnOnlyAfterWinning() throws Exception {
+            doReturn(ConversationState.IN_PROGRESS).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.IN_PROGRESS);
+            var inFlight = mock(IConversationMemory.class);
+            inFlightConversations().put(CONVERSATION_ID, inFlight);
+
+            assertTrue(conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            var order = inOrder(conversationMemoryStore, inFlight);
+            order.verify(conversationMemoryStore).endIfStateAndNotPaused(CONVERSATION_ID, ConversationState.IN_PROGRESS);
+            order.verify(inFlight).setCancelled(true);
+        }
+
+        @Test
+        @DisplayName("a state that keeps changing under the conditional write fails the end instead of forcing it")
+        void givesUpWithoutForcing() throws Exception {
+            doReturn(ConversationState.READY, ConversationState.IN_PROGRESS, ConversationState.READY, ConversationState.IN_PROGRESS,
+                    ConversationState.READY, ConversationState.IN_PROGRESS, ConversationState.READY, ConversationState.IN_PROGRESS,
+                    ConversationState.READY, ConversationState.IN_PROGRESS).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(false).when(conversationMemoryStore).endIfStateAndNotPaused(eq(CONVERSATION_ID), any());
+
+            assertThrows(IllegalStateException.class,
+                    () -> conversationService.endConversationUnlessAwaitingHuman(CONVERSATION_ID, "admin-1", "agent-deleted"));
+
+            verify(conversationMemoryStore, times(ConversationService.CONDITIONAL_END_ATTEMPTS)).endIfStateAndNotPaused(eq(CONVERSATION_ID), any());
+            verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
         }
     }
 

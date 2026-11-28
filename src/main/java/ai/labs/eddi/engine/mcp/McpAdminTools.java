@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -48,6 +49,7 @@ import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -57,6 +59,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -361,24 +364,41 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources.")
+    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources. "
+            + "A deployed agent with open conversations is NOT deleted (the error says how many): set endAllActiveConversations=true "
+            + "to end them and delete it.")
     public String deleteAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "Permanently delete? (default: false)", required = false,
                                        defaultValue = "false") Boolean permanent,
                               @ToolArg(description = "Cascade-delete workflows and resources? (default: false)", required = false,
-                                       defaultValue = "false") Boolean cascade) {
+                                       defaultValue = "false") Boolean cascade,
+                              @ToolArg(description = "End the agent's open conversations and delete it anyway? (default: false)", required = false,
+                                       defaultValue = "false") Boolean endAllActiveConversations) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_agent"));
         try {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             boolean isCascade = cascade != null ? cascade : false;
-            Response response = getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade);
+            Response response = Boolean.TRUE.equals(endAllActiveConversations)
+                    ? getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade, true)
+                    : getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade);
+            if (response != null && response.getStatus() >= 300) {
+                return refusalJson(response);
+            }
             return resultJson("deleted",
                     Map.of("agentId", agentId, "version", ver, "permanent", isPermanent, "cascade", isCascade, "status", response.getStatus()));
+        } catch (WebApplicationException e) {
+            String refusal = inUseRefusal(e.getResponse());
+            return refusal != null ? refusal : toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         }
+    }
+
+    /** {@link #deleteAgent} without ending open conversations. */
+    public String deleteAgent(String agentId, Integer version, Boolean permanent, Boolean cascade) {
+        return deleteAgent(agentId, version, permanent, cascade, null);
     }
 
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
@@ -615,6 +635,8 @@ public class McpAdminTools {
 
     @Tool(name = "delete_resource", description = "Delete an EDDI resource configuration. "
             + "Soft-deletes by default; set permanent=true for permanent removal. "
+            + "A resource that a workflow (or, for workflows, an agent) still uses is NOT deleted: the error names the users; "
+            + "set force=true to delete it anyway. "
             + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', 'propertysetter', 'dictionaries'.")
     public String deleteResource(
                                  @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
@@ -622,7 +644,9 @@ public class McpAdminTools {
                                  @ToolArg(description = "Resource ID (required)") String resourceId,
                                  @ToolArg(description = "Current version number (required)") Integer version,
                                  @ToolArg(description = "Permanently delete? (default: false)", required = false,
-                                          defaultValue = "false") Boolean permanent) {
+                                          defaultValue = "false") Boolean permanent,
+                                 @ToolArg(description = "Delete even though a workflow still uses it? (default: false)", required = false,
+                                          defaultValue = "false") Boolean force) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_resource"));
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
@@ -632,13 +656,87 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             String type = resourceType.trim().toLowerCase();
-            Response response = deleteResourceByType(type, resourceId, ver, isPermanent);
+            Response response = deleteResourceByType(type, resourceId, ver, isPermanent, Boolean.TRUE.equals(force));
+            if (response != null && response.getStatus() >= 300) {
+                return refusalJson(response);
+            }
 
             return resultJson("deleted",
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
+        } catch (WebApplicationException e) {
+            String refusal = inUseRefusal(e.getResponse());
+            return refusal != null ? refusal : toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
         }
+    }
+
+    /**
+     * A delete the store answered with a refusal instead of throwing: the in-use
+     * guard's body when it is one, otherwise the status and the store's text —
+     * never the {@code "deleted"} result.
+     */
+    private String refusalJson(Response response) throws IOException {
+        String refusal = inUseRefusal(response);
+        return refusal != null ? refusal : responseJson(jsonSerialization, response);
+    }
+
+    /**
+     * The in-use guard's refusal of a delete ({@code RESOURCE_IN_USE},
+     * {@code AGENT_HAS_OPEN_CONVERSATIONS}, {@code IN_USE_CHECK_FAILED}) as a tool
+     * error that keeps its body: {@code error} and {@code errorCode}, then who uses
+     * the resource or how many conversations are open, and the {@code override}
+     * argument that deletes anyway. A status-only error would leave the caller with
+     * nothing to act on. {@code null} when the response is not such a refusal.
+     */
+    String inUseRefusal(Response response) {
+        Map<?, ?> body = bodyOf(response);
+        if (body == null || !(body.get("code") instanceof String code) || !IN_USE_CODES.contains(code)) {
+            return null;
+        }
+        var result = new LinkedHashMap<String, Object>();
+        result.put("error", body.get("error"));
+        result.put("errorCode", code);
+        body.forEach((key, value) -> {
+            if (!"error".equals(key) && !"code".equals(key)) {
+                result.put(String.valueOf(key), value);
+            }
+        });
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (IOException e) {
+            return errorJson(String.valueOf(body.get("error")), code, null);
+        }
+    }
+
+    private static final Set<String> IN_USE_CODES = Set.of(ResourceInUseGuard.CODE_IN_USE, ResourceInUseGuard.CODE_OPEN_CONVERSATIONS,
+            ResourceInUseGuard.CODE_CHECK_FAILED);
+
+    /**
+     * The JSON body of a refusal: the entity of a response built in this process,
+     * or read from a loopback HTTP response.
+     */
+    private static Map<?, ?> bodyOf(Response response) {
+        if (response == null) {
+            return null;
+        }
+        try {
+            if (response.getEntity() instanceof Map<?, ?> map) {
+                return map;
+            }
+        } catch (RuntimeException notReadable) {
+            // an inbound response whose entity was not buffered: read it below
+        }
+        try {
+            return response.readEntity(Map.class);
+        } catch (RuntimeException notJson) {
+            return null;
+        }
+    }
+
+    /** {@link #deleteResource} without {@code force}. */
+    public String deleteResource(String resourceType, String resourceId, Integer version, Boolean permanent) {
+        return deleteResource(resourceType, resourceId, version, permanent, null);
     }
 
     @Tool(name = "apply_agent_changes", description = "Batch-cascade multiple resource URI changes through "
@@ -846,15 +944,29 @@ public class McpAdminTools {
     /**
      * Dispatch resource delete to the correct REST store based on type.
      */
-    private Response deleteResourceByType(String type, String id, int version, boolean permanent) {
+    private Response deleteResourceByType(String type, String id, int version, boolean permanent, boolean force) {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
-            case "langchain" -> getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
-            case "httpcalls" -> getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
-            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent);
-            case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
-            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
-            case "dictionaries" -> getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
+            case "behavior" -> force
+                    ? getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent, true)
+                    : getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
+            case "langchain" -> force
+                    ? getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent, true)
+                    : getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
+            case "httpcalls" -> force
+                    ? getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent, true)
+                    : getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
+            case "mcpcalls" -> force
+                    ? getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent, true)
+                    : getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent);
+            case "output" -> force
+                    ? getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent, true)
+                    : getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
+            case "propertysetter" -> force
+                    ? getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent, true)
+                    : getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
+            case "dictionaries" -> force
+                    ? getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent, true)
+                    : getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };

@@ -298,6 +298,13 @@ class PostgresResourceStorageTest {
     }
 
     @Test
+    void containmentJsonPathAny_orsEveryValueInOneEscapedFilter() {
+        // One @? expression per query, so the same jsonb_path_ops GIN index serves it.
+        assertEquals("$.\"workflows\"[*] ? (@ == \"eddi://wf?version=1\" || @ == \"a\\\"b\")",
+                PostgresResourceStorage.toContainmentJsonPathAny("workflows", List.of("eddi://wf?version=1", "a\"b")));
+    }
+
+    @Test
     void findResourceIdsContaining_bindsTheJsonPathAsAParameter() throws Exception {
         when(resultSet.next()).thenReturn(false);
 

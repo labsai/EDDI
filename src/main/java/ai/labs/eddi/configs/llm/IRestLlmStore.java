@@ -79,12 +79,25 @@ public interface IRestLlmStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    @Operation(description = "Delete LLM config.")
+    @Operation(description = "Delete LLM config. A config that a workflow still uses is not deleted: 409 with code RESOURCE_IN_USE "
+            + "naming up to 10 workflows, unless the request carries force=true. The same rule applies to every workflow "
+            + "step resource (behavior, httpcalls, mcpcalls, output, property, dictionary, rag, parser).")
     Response deleteLlm(@PathParam("id") String id,
                        @Parameter(name = "version", required = true, example = "1")
                        @QueryParam("version") Integer version,
                        @QueryParam("permanent")
-                       @DefaultValue("false") Boolean permanent);
+                       @DefaultValue("false") Boolean permanent,
+                       @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                       @QueryParam("force")
+                       @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteLlm} without {@code force}: refused while the resource is in
+     * use.
+     */
+    default Response deleteLlm(String id, Integer version, Boolean permanent) {
+        return deleteLlm(id, version, permanent, false);
+    }
 
     @PATCH
     @Path("/{id}")

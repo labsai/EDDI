@@ -911,6 +911,35 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public List<IResourceStore.IResourceId> findResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        if (values.isEmpty()) {
+            return new LinkedList<>();
+        }
+        // One query on the same field the single-value form filters, so the same
+        // index (where one exists on the path) serves it.
+        Document filter = new Document(jsonPath, new Document("$in", new ArrayList<>(values)));
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
+        currentCollection.find(filter).projection(Projections.include(VERSION_FIELD))
+                .forEach(doc -> results.add(createResourceId(doc.getObjectId(ID_FIELD).toString(), doc.getInteger(VERSION_FIELD))));
+        return results;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findHistoryResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        if (values.isEmpty()) {
+            return new LinkedList<>();
+        }
+        Document filter = new Document(jsonPath, new Document("$in", new ArrayList<>(values)));
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
+        historyCollection.find(filter).projection(Projections.include(ID_FIELD)).forEach(doc -> {
+            if (doc.get(ID_FIELD) instanceof Document idDoc) {
+                results.add(createResourceId(idDoc.getObjectId(ID_FIELD).toString(), idDoc.getInteger(VERSION_FIELD)));
+            }
+        });
+        return results;
+    }
+
+    @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
         Document filter = new Document(jsonPath, new Document("$in", Collections.singletonList(value)));
 

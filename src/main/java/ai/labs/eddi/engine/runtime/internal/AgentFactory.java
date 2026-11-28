@@ -76,10 +76,13 @@ public class AgentFactory implements IAgentFactory {
 
     private static final Logger log = Logger.getLogger(AgentFactory.class);
 
+    private final MeterRegistry meterRegistry;
+
     @Inject
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
+        this.meterRegistry = meterRegistry;
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
         // DERIVED from the environment maps, not a parallel List<AgentId>.
         //
@@ -101,6 +104,15 @@ public class AgentFactory implements IAgentFactory {
         Gauge.builder("eddi_agents_deployed", environments, AgentFactory::countReadyAgents)
                 .description("Agents currently deployed and READY in this node's runtime registry")
                 .register(meterRegistry);
+        // Every reason registered at 0: a counter first created by its first failure
+        // starts at 1, and rate() shows no increase for a series' first sample.
+        for (String reason : DeploymentFailures.REASONS) {
+            try {
+                meterRegistry.counter("eddi.deployment.failed", "reason", reason);
+            } catch (RuntimeException metricsMustNotBlockStartup) {
+                log.debugf("Could not register the failed-deployment counter for %s: %s", reason, metricsMustNotBlockStartup.getMessage());
+            }
+        }
     }
 
     private static double countReadyAgents(Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments) {
@@ -312,6 +324,7 @@ public class AgentFactory implements IAgentFactory {
             var refused = createInProgressDummyAgent(agentId, version);
             refused.setDeploymentStatus(Deployment.Status.ERROR);
             refused.setDeploymentFailure(grantCheck.toFailure(agentId, version));
+            countFailedDeployment(DeploymentFailure.VAULT_GRANT_MISSING);
             agentEnvironment.replace(id, placeholder, refused);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -351,14 +364,14 @@ public class AgentFactory implements IAgentFactory {
             lintCompatibility((Agent) agent, agentId, version);
         } catch (ServiceException e) {
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
+            placeholder.setDeploymentFailure(failedDeployment(e, agentId, version));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
         } catch (IllegalAccessException e) {
             // The placeholder is still published; mark it ERROR so a retry is not
             // mistaken for a deployment still in flight.
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
+            placeholder.setDeploymentFailure(failedDeployment(e, agentId, version));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             throw new RuntimeException(e);
@@ -368,11 +381,31 @@ public class AgentFactory implements IAgentFactory {
             // this version answered "already in progress" and returned, and the only
             // way out was a restart.
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + sanitize(e.getMessage()), e);
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
+            placeholder.setDeploymentFailure(failedDeployment(e, agentId, version));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
             throw e;
+        }
+    }
+
+    /**
+     * The failure to record for a deployment that ended with {@code cause}: a
+     * reason code from a closed set and a fixed message (see
+     * {@link DeploymentFailures}), counted in {@code eddi.deployment.failed} by
+     * that code.
+     */
+    private DeploymentFailure failedDeployment(Throwable cause, String agentId, Integer version) {
+        DeploymentFailure failure = DeploymentFailures.failureOf(cause, agentId, version);
+        countFailedDeployment(failure.code());
+        return failure;
+    }
+
+    private void countFailedDeployment(String code) {
+        try {
+            meterRegistry.counter("eddi.deployment.failed", "reason", code).increment();
+        } catch (RuntimeException metricsMustNotMaskTheFailure) {
+            log.debugf("Could not count a failed deployment: %s", metricsMustNotMaskTheFailure.getMessage());
         }
     }
 

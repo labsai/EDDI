@@ -1141,6 +1141,64 @@ public class ConversationService implements IConversationService, UserErasurePar
         recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
     }
 
+    /** How often a conditional end retries a compare-and-set that lost a race. */
+    static final int CONDITIONAL_END_ATTEMPTS = 5;
+
+    @Override
+    public boolean endConversationUnlessAwaitingHuman(String conversationId, String endedBy, String endReason) {
+        long startTime = System.nanoTime();
+        for (int attempt = 0; attempt < CONDITIONAL_END_ATTEMPTS; attempt++) {
+            ConversationState current = conversationMemoryStore.getConversationState(conversationId);
+            if (current == null || current == ConversationState.ENDED || current == ConversationState.AWAITING_HUMAN) {
+                return false;
+            }
+            boolean ended;
+            try {
+                // The arbiter: lands only while the state is still the one just read and no
+                // pause bookmark is set, so a pause written in between makes it miss (the loop
+                // then sees the pause), and so does a resume still running on the approval.
+                ended = conversationMemoryStore.endIfStateAndNotPaused(conversationId, current);
+            } catch (ResourceStoreException e) {
+                throw new IllegalStateException("Could not end conversation " + conversationId, e);
+            }
+            if (!ended) {
+                if (conversationMemoryStore.getConversationState(conversationId) == current) {
+                    // The state did not move: what refused the end is a pause bookmark (a
+                    // resume in flight, or one that crashed). The approval is still pending.
+                    return false;
+                }
+                continue;
+            }
+            cacheConversationState(conversationId, ConversationState.ENDED);
+            // Only now, once the end has won: signalling a turn that went on to pause
+            // would make it discard a pause that is the stored state.
+            var inFlightMemory = inFlightConversations.get(conversationId);
+            if (inFlightMemory != null) {
+                inFlightMemory.setCancelled(true);
+            } else {
+                signalRemoteInFlight(conversationId);
+            }
+            if (endReason != null) {
+                try {
+                    conversationMemoryStore.setConversationEndReason(conversationId, endReason);
+                } catch (RuntimeException e) {
+                    LOGGER.warnf("Conversation %s ended, but its end reason '%s' could not be recorded: %s",
+                            sanitize(conversationId), sanitize(endReason), e.getMessage());
+                }
+            }
+            // As endConversation: a resume that flipped AWAITING_HUMAN to IN_PROGRESS
+            // before
+            // this end may have deferred its own timeout delete.
+            conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
+            disarmContinuations(conversationId);
+            recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
+            return true;
+        }
+        conversationStepRunner.refreshCachedState(conversationId);
+        throw new IllegalStateException("Conversation " + conversationId + " changed state " + CONDITIONAL_END_ATTEMPTS
+                + " times while being ended; not ended");
+    }
+
     /**
      * Environment-qualified twin of {@link #getConversationState(String)}; internal
      * and tests only.

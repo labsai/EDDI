@@ -32,6 +32,7 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -53,10 +54,12 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.WorkflowConfigSaveValidator;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.modules.llm.impl.LlmConfigSaveValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -206,6 +209,32 @@ public class UpgradeExecutor {
                                         Set<String> selectedSourceIds,
                                         List<String> workflowOrder,
                                         boolean compatible) {
+        // Configs from another instance or an older release keep importing: every
+        // write of this run, its compensations included, is the write of an existing
+        // configuration, so the stores' save-time checks only log. What they find is
+        // collected before each write (Outcome.addFindings) into the result's warnings.
+        return LenientConfigWrite.call(() -> runUpgrade(source, targetAgentId, selectedSourceIds, workflowOrder, compatible));
+    }
+
+    /**
+     * What the save-time checks find in a document about to be written: LLM
+     * configurations and workflows have them; every other type has none here.
+     */
+    private static List<String> saveFindings(Object content) {
+        if (content instanceof LlmConfiguration llm) {
+            return LlmConfigSaveValidator.problems(llm);
+        }
+        if (content instanceof WorkflowConfiguration workflow) {
+            return WorkflowConfigSaveValidator.problems(workflow);
+        }
+        return List.of();
+    }
+
+    private UpgradeResult runUpgrade(IResourceSource source,
+                                     String targetAgentId,
+                                     Set<String> selectedSourceIds,
+                                     List<String> workflowOrder,
+                                     boolean compatible) {
         var outcome = new Outcome();
         metrics.upgradeAttempted();
         try {
@@ -461,10 +490,22 @@ public class UpgradeExecutor {
             failures.add(new ResourceFailure(sourceId, resourceType, name, reason));
         }
 
+        /**
+         * What the stores' save-time checks find in the documents this run writes —
+         * they only log inside {@link LenientConfigWrite}, so they are collected here,
+         * before each write, and reported whether or not the agent moved.
+         */
+        private final List<String> findings = new ArrayList<>();
+
+        void addFindings(List<String> found) {
+            found.stream().filter(finding -> !findings.contains(finding)).forEach(findings::add);
+        }
+
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
+            List<String> reported = new ArrayList<>(agentUpdated ? warnings : List.of());
+            findings.stream().filter(finding -> !reported.contains(finding)).forEach(reported::add);
             return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
-                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null,
-                    agentUpdated ? warnings : List.of());
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null, reported);
         }
     }
 
@@ -977,6 +1018,7 @@ public class UpgradeExecutor {
                 // collection, whose search then runs without an isolation filter.
                 applyStorageRulesToNewRag(rag);
             }
+            outcome.addFindings(saveFindings(content));
             // The REST stores refuse a document carrying the read-redaction marker; this
             // direct create must too, for the five types whose reads produce it. A sync
             // source read through a non-admin peer credential carries it, and storing
@@ -1139,6 +1181,7 @@ public class UpgradeExecutor {
         ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
         try {
             String contentJson = restoreRedactedSecrets(source, source.contentJson(), targetContentJson);
+            outcome.addFindings(saveFindings(jsonSerialization.deserialize(contentJson, ops.configClass())));
             Integer version = targetVersion;
             Response resp;
             try {
@@ -1374,6 +1417,7 @@ public class UpgradeExecutor {
             }
 
             IWorkflowStore store = CDI.current().select(IWorkflowStore.class).get();
+            outcome.addFindings(WorkflowConfigSaveValidator.problems(config));
             IResourceId resourceId = store.create(config);
             URI createdUri = RestUtilities.createURI(IRestWorkflowStore.resourceURI, resourceId.getId(),
                     IRestWorkflowStore.versionQueryParam, resourceId.getVersion());
@@ -1484,6 +1528,7 @@ public class UpgradeExecutor {
             }
 
             if (changed) {
+                outcome.addFindings(WorkflowConfigSaveValidator.problems(configToWrite));
                 Response resp = workflowStore.updateWorkflow(workflowId, workflowVersion, configToWrite);
                 if (resp != null && resp.getStatus() == 200) {
                     // A workflow is the one resource a deployment resolves through its

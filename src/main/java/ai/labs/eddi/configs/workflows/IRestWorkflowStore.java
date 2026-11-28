@@ -126,11 +126,13 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
             + "The version must be the workflow's current one whenever cascade=true or permanent=true, otherwise the "
             + "request is refused with 409 before anything is deleted. An already soft-deleted workflow has no current "
             + "version to be stale against: permanent=true still purges its history, and the cascade is skipped rather "
-            + "than refused.")
+            + "than refused. A workflow an agent still lists is not deleted: 409 with code RESOURCE_IN_USE naming up to 10 "
+            + "agents, unless the request carries force=true (a permanent delete looks at every version).")
     @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")
     @APIResponse(responseCode = "404", description = "Workflow not found.")
     @APIResponse(responseCode = "409",
-                 description = "cascade=true or permanent=true against a version that is not the current one; nothing was deleted.")
+                 description = "cascade=true or permanent=true against a version that is not the current one, or an agent still "
+                         + "uses the workflow (JSON body: error, code RESOURCE_IN_USE, usedBy, usedByCount, override); nothing was deleted.")
     // @formatter:off
     Response deleteWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",
@@ -145,6 +147,16 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
                     + "dictionaries), each at its own current version. Extensions still referenced by another workflow "
                     + "are skipped, and cascaded resources are always soft-deleted even when permanent=true, so an "
                     + "extension shared at a different pinned version can be recovered. See X-Cascade-Skipped.")
-            @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+            @QueryParam("cascade") @DefaultValue("false") Boolean cascade,
+            @Parameter(name = "force", description = FORCE_DESCRIPTION)
+            @QueryParam("force") @DefaultValue("false") Boolean force);
     // @formatter:on
+
+    /**
+     * {@link #deleteWorkflow} without {@code force}: refused while an agent uses
+     * it.
+     */
+    default Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
+        return deleteWorkflow(id, version, permanent, cascade, false);
+    }
 }

@@ -1298,6 +1298,7 @@ call sites and the first 100 reasons get a tag of their own. Later ones are coun
 
 ```text
 eddi_agents_deployed                        # Currently deployed agents (gauge)
+eddi_deployment_failed_total{reason}        # Failed deployments by reason code: VAULT_GRANT_MISSING, STEP_TYPE_UNKNOWN, CONFIG_INVALID, REFERENCE_MISSING, DEPLOYMENT_FAILED
 ```
 
 ### Cluster Metrics

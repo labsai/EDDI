@@ -106,6 +106,25 @@ public interface IConversationService {
     void endConversation(String conversationId, String endedBy, String endReason);
 
     /**
+     * {@link #endConversation(String, String, String)}, unless the conversation is
+     * {@code AWAITING_HUMAN} at the moment its state is written: the write is a
+     * compare-and-set from the state just read, so a conversation that pauses for a
+     * human between that read and the write is left paused, its approval intact. It
+     * also refuses while the conversation still carries its pause bookmark (a
+     * resume of the approval running, or one that crashed), for the same reason.
+     * For callers that must not end a pending approval as a side effect (deleting
+     * an agent). A turn running when the end wins finds its pause commit refused,
+     * as for any end.
+     *
+     * @return {@code true} when this call ended the conversation; {@code false}
+     *         when it was left alone: awaiting a human (or a resume of that),
+     *         already ended, or unknown
+     * @throws IllegalStateException
+     *             when the state kept changing under the compare-and-set
+     */
+    boolean endConversationUnlessAwaitingHuman(String conversationId, String endedBy, String endReason);
+
+    /**
      * End reason for a conversation ended because the agent version it ran on was
      * taken out of service by an undeploy, with no compatible version to continue
      * on. Clients that start a fresh conversation for the user on an ended one can
@@ -119,6 +138,13 @@ public interface IConversationService {
      * admin bulk end of inactive conversations.
      */
     String END_REASON_IDLE = "idle";
+
+    /**
+     * End reason for a conversation ended because its agent was deleted with
+     * {@code endAllActiveConversations=true}. Unlike a retired version, there is no
+     * newer version of the assistant to start over with.
+     */
+    String END_REASON_AGENT_DELETED = "agent-deleted";
 
     /**
      * Read conversation log in text or structured format.

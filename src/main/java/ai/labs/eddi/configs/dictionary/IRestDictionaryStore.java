@@ -119,7 +119,18 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
                                      @Parameter(name = "version", required = true, example = "1")
                                      @QueryParam("version") Integer version,
                                      @QueryParam("permanent")
-                                     @DefaultValue("false") Boolean permanent);
+                                     @DefaultValue("false") Boolean permanent,
+                                     @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                                     @QueryParam("force")
+                                     @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteRegularDictionary} without {@code force}: refused while the
+     * resource is in use.
+     */
+    default Response deleteRegularDictionary(String id, Integer version, Boolean permanent) {
+        return deleteRegularDictionary(id, version, permanent, false);
+    }
 
     @PATCH
     @Path("/{id}")

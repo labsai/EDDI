@@ -107,6 +107,39 @@ class WorkflowStoreTest {
         assertNotNull(result);
     }
 
+    /**
+     * The runtime trims a padded {@code config.uri}, but the in-use lookup matches
+     * the stored value exactly: a padded reference was invisible to it and the
+     * resource it named could be deleted while in use. Stored trimmed, it matches.
+     */
+    @Test
+    @DisplayName("create — stores step and dictionary reference URIs without surrounding whitespace")
+    void createTrimsReferenceUris() throws Exception {
+        String llm = "eddi://ai.labs.llm/llmstore/llms/aabbccddeeff00112233aabb?version=1";
+        String dictionary = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/aabbccddeeff00112233aacc?version=1";
+        var mapper = new ObjectMapper();
+        WorkflowConfiguration config = mapper.readValue("""
+                {"workflowSteps":[
+                  {"type":"eddi://ai.labs.llm","config":{"uri":"  %s "}},
+                  {"type":"eddi://ai.labs.parser","extensions":{"dictionaries":[{"type":"eddi://ai.labs.parser.dictionaries.regular",
+                    "config":{"uri":"\\t%s"}}]}}]}
+                """.formatted(llm, dictionary), WorkflowConfiguration.class);
+
+        IResourceStorage.IResource<WorkflowConfiguration> resource = mock(IResourceStorage.IResource.class);
+        when(resource.getId()).thenReturn("wf-1");
+        when(resource.getVersion()).thenReturn(1);
+        when(resourceStorage.newResource(any())).thenReturn(resource);
+        when(resourceStorage.getCurrentVersion("wf-1")).thenReturn(1);
+
+        store.create(config);
+
+        var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(resourceStorage).newResource(stored.capture());
+        String json = mapper.writeValueAsString(stored.getValue());
+        assertTrue(json.contains("\"uri\":\"" + llm + "\""), json);
+        assertTrue(json.contains("\"uri\":\"" + dictionary + "\""), json);
+    }
+
     // ==================== read ====================
 
     @Test
@@ -367,5 +400,26 @@ class WorkflowStoreTest {
     void deleteAllPermanently() {
         store.deleteAllPermanently("wf-1");
         verify(resourceStorage).removeAllPermanently("wf-1");
+    }
+
+    /**
+     * The delete guard acts on this lookup, so it reads from the primary (see
+     * AgentStore.findAgentVersionsListing).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("findWorkflowVersionsReferencing reads from the primary, not the nearest member")
+    void findWorkflowVersionsReferencing_readsFromThePrimary() {
+        IResourceStorage<WorkflowConfiguration> primary = mock(IResourceStorage.class);
+        when(resourceStorage.primaryReads()).thenReturn(primary);
+        IResourceStore.IResourceId live = mock(IResourceStore.IResourceId.class);
+        when(primary.findResourceIdsContainingAny(anyString(), anyCollection())).thenReturn(List.of(live));
+        when(primary.findHistoryResourceIdsContainingAny(anyString(), anyCollection())).thenReturn(List.of());
+
+        var found = store.findWorkflowVersionsReferencing(List.of("eddi://ai.labs.llm/llmstore/llms/abc?version=1"));
+
+        assertFalse(found.live().isEmpty());
+        verify(resourceStorage, never()).findResourceIdsContainingAny(anyString(), anyCollection());
+        verify(resourceStorage, never()).findHistoryResourceIdsContainingAny(anyString(), anyCollection());
     }
 }

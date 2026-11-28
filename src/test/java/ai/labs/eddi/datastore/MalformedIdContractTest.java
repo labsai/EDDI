@@ -193,6 +193,7 @@ class MalformedIdContractTest {
         assertNull(store.getConversationState(id));
         assertNull(store.getRevision(id));
         assertFalse(store.compareAndSetState(id, ConversationState.READY, ConversationState.ENDED));
+        assertFalse(store.endIfStateAndNotPaused(id, ConversationState.READY));
         store.setConversationState(id, ConversationState.ENDED);
         store.setConversationEndReason(id, "test");
         store.clearHitlBookmark(id);

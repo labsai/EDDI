@@ -31,6 +31,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -160,7 +162,7 @@ class RestImportServiceUnresolvableReferenceTest {
                 IRuleSetStore.class, ruleSetStore,
                 ILlmStore.class, llmStore)) {
             Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
 
             assertEquals(201, response.getStatus(),
                     "an archive EDDI's own selective export wrote must import, not 400");
@@ -172,6 +174,74 @@ class RestImportServiceUnresolvableReferenceTest {
         assertEquals("eddi://ai.labs.behavior", steps.getFirst().getType().toString());
         // Creating the LLM anyway would have written a resource nothing references.
         verify(llmStore, never()).create(any(LlmConfiguration.class));
+    }
+
+    /**
+     * The default: an archive that names a configuration it does not carry is
+     * refused, listing every missing file, and nothing is written. Dropping the LLM
+     * step used to answer 201 for an agent that deploys READY and cannot answer.
+     */
+    @Test
+    @DisplayName("without allowIncomplete a create naming a missing config is refused with 422 listing it")
+    void refusesAnIncompleteArchiveByDefault() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.behavior","config":{"uri":"%s"}},
+                {"type":"eddi://ai.labs.llm","config":{"uri":"%s"}}
+                """.formatted(BEHAVIOR_URI, MISSING_LLM_URI), true);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("7777111122223333444455bb", 1));
+        var ruleSetStore = mock(IRuleSetStore.class);
+        when(ruleSetStore.create(any())).thenReturn(resourceId("1111111122223333444455cc", 1));
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IRuleSetStore.class, ruleSetStore)) {
+            var refused = assertThrows(WebApplicationException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+            assertEquals(422, refused.getResponse().getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) refused.getResponse().getEntity();
+            assertEquals("allowIncomplete=true", body.get("hint"));
+            var missing = (List<?>) body.get("missing");
+            assertEquals(1, missing.size(), "every missing reference is listed: " + missing);
+            assertTrue(missing.getFirst().toString().contains(MISSING_LLM_ID), missing.getFirst().toString());
+            assertTrue(missing.getFirst().toString().contains(".langchain.json") || missing.getFirst().toString().contains(".llm.json")
+                    || missing.getFirst().toString().contains("file in the archive"), missing.getFirst().toString());
+        }
+        verify(metrics).importFailed();
+        // S1: refused by the pre-scan, before the first write — not written and then
+        // rolled back.
+        verify(ruleSetStore, never()).create(any());
+        verify(workflowStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("with allowIncomplete the 201 lists what was dropped")
+    void allowIncompleteListsWhatWasDropped() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.behavior","config":{"uri":"%s"}},
+                {"type":"eddi://ai.labs.llm","config":{"uri":"%s"}}
+                """.formatted(BEHAVIOR_URI, MISSING_LLM_URI), true);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("7777111122223333444455bb", 1));
+        var ruleSetStore = mock(IRuleSetStore.class);
+        when(ruleSetStore.create(any())).thenReturn(resourceId("1111111122223333444455cc", 1));
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IRuleSetStore.class, ruleSetStore)) {
+            Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
+
+            assertEquals(201, response.getStatus());
+            assertEquals("1", response.getHeaderString(RestImportService.HEADER_IMPORT_WARNINGS));
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals(1, ((List<?>) body.get("dropped")).size());
+            assertTrue(body.get("warnings").toString().contains(MISSING_LLM_ID), body.get("warnings").toString());
+        }
     }
 
     /**
@@ -197,7 +267,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -235,7 +305,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IDictionaryStore.class, dictionaryStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -271,7 +341,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -309,7 +379,7 @@ class RestImportServiceUnresolvableReferenceTest {
         var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(), IWorkflowStore.class, workflowStore)) {
             Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
             assertEquals(201, response.getStatus());
         }
 
@@ -363,7 +433,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -397,7 +467,7 @@ class RestImportServiceUnresolvableReferenceTest {
 
         var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(), IWorkflowStore.class, workflowStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -435,7 +505,7 @@ class RestImportServiceUnresolvableReferenceTest {
         var thrown = assertThrows(BadRequestException.class, () -> {
             try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                     IWorkflowStore.class, mock(IWorkflowStore.class))) {
-                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
             }
         });
 
@@ -443,6 +513,57 @@ class RestImportServiceUnresolvableReferenceTest {
                 "the operator must be told which strategy can answer the reference, was: " + thrown.getMessage());
         assertTrue(thrown.getMessage().contains(MISSING_LLM_ID),
                 "the message must name the resource, was: " + thrown.getMessage());
+    }
+
+    /**
+     * Detection and pruning count depth the same way. A list at the depth limit
+     * whose missing entry sits one level deeper is out of reach for detection, and
+     * pruning used to re-check each element from depth 0: the entry was removed
+     * without a 422 or a dropped-reference warning, and the import succeeded with a
+     * smaller agent. It now meets the same refusal as any reference past the guard.
+     */
+    @Test
+    @DisplayName("a missing entry in a list at the depth limit is not pruned silently")
+    void entryBeyondTheGuardInAListIsNotPrunedSilently() throws Exception {
+        StringBuilder deepExtensions = new StringBuilder();
+        for (int i = 0; i < 10; i++) {
+            deepExtensions.append("{\"level").append(i).append("\":");
+        }
+        deepExtensions.append("[{\"uri\":\"").append(MISSING_LLM_URI).append("\"}]");
+        deepExtensions.append("}".repeat(10));
+
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.llm","extensions":%s}
+                """.formatted(deepExtensions), false);
+
+        var thrown = assertThrows(BadRequestException.class, () -> {
+            try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                    IWorkflowStore.class, mock(IWorkflowStore.class))) {
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
+            }
+        });
+        assertTrue(thrown.getMessage().contains(MISSING_LLM_ID), thrown.getMessage());
+    }
+
+    /**
+     * Only a string under {@code uri} is a node's own reference; a container under
+     * that key used to be skipped by detection but walked by pruning, so a missing
+     * reference inside it was removed without a 422.
+     */
+    @Test
+    @DisplayName("a missing reference inside a container under a uri key is reported, not pruned silently")
+    void missingReferenceUnderAContainerUriIsReported() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.llm","extensions":{"wrapper":{"uri":[{"uri":"%s"}]}}}
+                """.formatted(MISSING_LLM_URI), false);
+
+        var refused = assertThrows(WebApplicationException.class, () -> {
+            try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                    IWorkflowStore.class, mock(IWorkflowStore.class))) {
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            }
+        });
+        assertEquals(422, refused.getResponse().getStatus());
     }
 
     /**

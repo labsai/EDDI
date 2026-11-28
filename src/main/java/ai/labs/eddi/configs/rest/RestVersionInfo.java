@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.PageBounds;
@@ -316,8 +317,33 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
      * administrators, whom {@code seesEverything()} admits.
      */
     public Response delete(String id, Integer version, boolean permanent) {
+        return delete(id, version, permanent, false);
+    }
+
+    /**
+     * {@link #delete(String, Integer, boolean)} with the in-use guard's override.
+     *
+     * @param force
+     *            delete a workflow an agent lists, or a configuration a workflow
+     *            uses, anyway (the endpoint's {@code force} query parameter)
+     */
+    public Response delete(String id, Integer version, boolean permanent, boolean force) {
         accessGuard.requireAccess(id, AccessLevel.OWN, resourceTypeLabel);
         version = validateParameters(id, version);
+        if (permanent) {
+            // Before the in-use check, which needs the live version to be the one
+            // addressed (see below): a stale claim is refused with nothing touched.
+            requireCurrentVersion(id, version);
+        }
+        // 409 while an agent still lists this workflow or a workflow step still points
+        // at this configuration, unless force. Refused before anything is touched. A
+        // permanent delete removes every stored version, so all of them are checked,
+        // not only those up to the version the request names.
+        // The newest version is read only when the check will run (a guarded type, no
+        // force): a store error there must not fail a delete that never needed it.
+        boolean checked = !force && resourceURI != null && ResourceInUseGuard.isGuarded(resourceURI);
+        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, permanent && checked ? newestStoredVersion(id, version) : version, permanent,
+                force);
 
         try {
             if (permanent) {
@@ -327,8 +353,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
                 // &permanent=true from a stale tab erase a resource that is at v2,
                 // with no 409 anywhere, which is precisely the check the soft path
                 // gets for free from HistorizedResourceStore.delete. Refuse the stale
-                // claim before anything is destroyed.
-                requireCurrentVersion(id, version);
+                // claim before anything is destroyed (checked above, before the in-use
+                // check).
                 resourceStore.deleteAllPermanently(id);
                 // Flagged at the DESCRIPTOR's current version, not at the version the
                 // request addressed: descriptors outlive the resource (see below), so
@@ -383,6 +409,24 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         }
         if (!current.getVersion().equals(version)) {
             throw RestUtilities.createConflictException(resourceURI, current);
+        }
+    }
+
+    /**
+     * The newest version of {@code id} the store holds, a soft-deleted one
+     * included: what {@code deleteAllPermanently} would remove up to. After a soft
+     * delete the history can hold versions above the one a request names.
+     * {@code null} when nothing is stored (nothing to check);
+     * {@code addressedVersion} for a store that cannot say.
+     */
+    Integer newestStoredVersion(String id, Integer addressedVersion) {
+        if (!(resourceStore instanceof AbstractResourceStore<?> store)) {
+            return addressedVersion;
+        }
+        try {
+            return store.getNewestVersionIncludingDeleted(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
         }
     }
 

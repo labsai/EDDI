@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rest;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -448,5 +449,38 @@ class RestVersionInfoTest {
         verify(documentDescriptorStore, never()).readDescriptor(anyString(), any());
         assertFalse(liveDescriptor.isDeleted(),
                 "a refused delete must leave the descriptor exactly as it found it");
+    }
+
+    /**
+     * A permanent delete removes every stored version, so the in-use check must
+     * reach the newest one. After v3 was soft-deleted the history holds v1..v3, and
+     * {@code DELETE ?version=1&permanent=true} is allowed through (no live
+     * version): bounding the check by the requested version looked at v1 only and
+     * let a v2 an agent pins be erased.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void newestStoredVersion_isTheStoresNewestVersionIncludingDeletedOnes() throws Exception {
+        AbstractResourceStore<Object> store = mock(AbstractResourceStore.class);
+        when(store.getNewestVersionIncludingDeleted(TEST_ID)).thenReturn(3);
+        var info = new RestVersionInfo<>(RESOURCE_URI, store, documentDescriptorStore, accessGuard);
+
+        assertEquals(3, info.newestStoredVersion(TEST_ID, 1));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void newestStoredVersion_isNullWhenNothingIsStored() throws Exception {
+        AbstractResourceStore<Object> store = mock(AbstractResourceStore.class);
+        when(store.getNewestVersionIncludingDeleted(TEST_ID)).thenThrow(new ResourceNotFoundException("gone"));
+        var info = new RestVersionInfo<>(RESOURCE_URI, store, documentDescriptorStore, accessGuard);
+
+        assertNull(info.newestStoredVersion(TEST_ID, Integer.MAX_VALUE),
+                "nothing stored means nothing to check, not a check of every version up to the one requested");
+    }
+
+    @Test
+    void newestStoredVersion_fallsBackToTheAddressedVersionForAStoreThatCannotSay() {
+        assertEquals(4, restVersionInfo.newestStoredVersion(TEST_ID, 4));
     }
 }

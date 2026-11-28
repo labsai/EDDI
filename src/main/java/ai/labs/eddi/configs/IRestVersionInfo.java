@@ -36,6 +36,15 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 public interface IRestVersionInfo {
     String versionQueryParam = "?version=";
 
+    /**
+     * Text of the {@code force} parameter of the delete endpoints the in-use guard
+     * protects.
+     */
+    String FORCE_DESCRIPTION = "Delete although it is in use. Without it (default false) a workflow that a current or deployed agent "
+            + "version lists, or a configuration that a workflow uses (directly, or through an older workflow version a current or "
+            + "deployed agent pins), is refused with 409 and code RESOURCE_IN_USE, and a delete whose in-use check could not run is "
+            + "refused with 503 and code IN_USE_CHECK_FAILED. Agents using it then fail to deploy or answer.";
+
     @POST
     @Path("/{id}/currentversion")
     @RolesAllowed({"eddi-admin", "eddi-editor"})

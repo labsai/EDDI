@@ -137,8 +137,8 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     }
 
     @Override
-    public Response deleteMcpCalls(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+    public Response deleteMcpCalls(String id, Integer version, Boolean permanent, Boolean force) {
+        return restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
     }
 
     @Override

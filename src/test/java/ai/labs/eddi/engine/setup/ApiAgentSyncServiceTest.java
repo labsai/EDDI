@@ -25,6 +25,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
@@ -102,10 +104,12 @@ class ApiAgentSyncServiceTest {
     private LlmConfiguration llm;
     private ApiAgentSyncService service;
     private ISecretProvider secretProvider;
+    private IRestInterfaceFactory factory;
+    private AgentSetupService setup;
 
     @BeforeEach
     void setUp() throws Exception {
-        var factory = mock(IRestInterfaceFactory.class);
+        factory = mock(IRestInterfaceFactory.class);
         agentStore = mock(IRestAgentStore.class);
         workflowStore = mock(IRestWorkflowStore.class);
         apiCallsStore = mock(IRestApiCallsStore.class);
@@ -115,7 +119,7 @@ class ApiAgentSyncServiceTest {
         when(factory.get(IRestApiCallsStore.class)).thenReturn(apiCallsStore);
         when(factory.get(IRestLlmStore.class)).thenReturn(llmStore);
         secretProvider = mock(ISecretProvider.class);
-        var setup = new AgentSetupService(factory, mock(IRestAgentAdministration.class), secretProvider, "http://localhost:11434");
+        setup = new AgentSetupService(factory, mock(IRestAgentAdministration.class), secretProvider, "http://localhost:11434");
         service = new ApiAgentSyncService(factory, setup);
 
         // The state a setup-api call with SPEC_V1 leaves behind.
@@ -172,6 +176,49 @@ class ApiAgentSyncServiceTest {
         verify(llmStore, never()).updateLlm(anyString(), anyInt(), any());
         verify(workflowStore, never()).updateWorkflow(anyString(), anyInt(), any());
         verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), anyBoolean());
+    }
+
+    /**
+     * The LLM config and the workflow are rewritten through the REST beans in this
+     * process (so the save-time checks can only warn), which skips
+     * {@code DocumentDescriptorFilter}: over HTTP it moves a resource's descriptor
+     * to the version a PUT wrote. Without the move done here the synced agent
+     * pointed at versions whose descriptor still named the old one.
+     */
+    @Test
+    @DisplayName("an in-process rewrite moves the LLM config's and the workflow's descriptors to the versions it wrote")
+    void inProcessRewriteAdvancesTheDescriptors() throws Exception {
+        var descriptors = mock(IDocumentDescriptorStore.class);
+        var llmDescriptor = new DocumentDescriptor();
+        llmDescriptor.setResource(URI.create(LLM_LOC));
+        var workflowDescriptor = new DocumentDescriptor();
+        workflowDescriptor.setResource(URI.create(WORKFLOW_LOC));
+        when(descriptors.readDescriptor(LLM_ID, 1)).thenReturn(llmDescriptor);
+        when(descriptors.readDescriptor(WORKFLOW_ID, 1)).thenReturn(workflowDescriptor);
+        var inProcess = new ApiAgentSyncService(factory, setup) {
+            @Override
+            @SuppressWarnings("unchecked")
+            <S> S inProcessBean(Class<S> type) {
+                if (type == IRestLlmStore.class) {
+                    return (S) llmStore;
+                }
+                if (type == IRestWorkflowStore.class) {
+                    return (S) workflowStore;
+                }
+                if (type == IDocumentDescriptorStore.class) {
+                    return (S) descriptors;
+                }
+                throw new IllegalStateException("no bean " + type);
+            }
+        };
+
+        inProcess.sync(AGENT_ID, request(SPEC_V2, null, null));
+
+        verify(descriptors).updateDescriptor(eq(LLM_ID), eq(1), eq(llmDescriptor));
+        assertEquals(URI.create("eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=2"), llmDescriptor.getResource());
+        verify(descriptors).updateDescriptor(eq(WORKFLOW_ID), eq(1), eq(workflowDescriptor));
+        assertEquals(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=2"),
+                workflowDescriptor.getResource());
     }
 
     @Test

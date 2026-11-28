@@ -37,6 +37,7 @@ import ai.labs.eddi.backup.model.ExportPreview;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,7 @@ import org.mockito.Mock;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.file.Files;
@@ -235,6 +237,73 @@ class RestExportServiceExtendedBranchTest {
                     "a snippet this agent never references must stay out of the archive");
         }
 
+        /**
+         * The sweep reads every snippet in the caller's scope and filters by name
+         * afterwards. An unrelated snippet whose read fails used to abort the whole
+         * export; it is skipped once every snippet the agent uses was written.
+         */
+        @Test
+        @DisplayName("an unrelated snippet that cannot be read does not fail the export")
+        void unrelatedUnreadableSnippetIsSkipped() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+
+            String greetingId = "aabbccddeeff112233445566";
+            String farewellId = "665544332211ffeeddccbbaa";
+            DocumentDescriptor greeting = new DocumentDescriptor();
+            greeting.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + greetingId + "?version=1"));
+            DocumentDescriptor farewell = new DocumentDescriptor();
+            farewell.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + farewellId + "?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
+                    .thenReturn(List.of(greeting, farewell));
+            PromptSnippet snippet = new PromptSnippet();
+            snippet.setName("greeting");
+            when(snippetStore.read(greetingId, 1)).thenReturn(snippet);
+            when(snippetStore.read(farewellId, 1)).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenReturn("{}");
+
+            Path agentPath = Files.createTempDirectory("test-snippets");
+            method.invoke(exportService, agentPath, new LinkedHashSet<>(Set.of("greeting")), null);
+
+            assertTrue(Files.exists(agentPath.resolve("snippets").resolve(greetingId + ".snippet.json")),
+                    "the snippet the agent uses is in the archive");
+        }
+
+        @Test
+        @DisplayName("a snippet the agent may use that cannot be read still fails the export")
+        void unreadableReferencedSnippetFailsTheExport() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+
+            String greetingId = "aabbccddeeff112233445566";
+            DocumentDescriptor greeting = new DocumentDescriptor();
+            greeting.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + greetingId + "?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
+                    .thenReturn(List.of(greeting));
+            when(snippetStore.read(greetingId, 1)).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+
+            var failure = assertThrows(InvocationTargetException.class,
+                    () -> method.invoke(exportService, Files.createTempDirectory("test-snippets"), new LinkedHashSet<>(Set.of("greeting")),
+                            null));
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
+        }
+
+        @Test
+        @DisplayName("an empty snippet selection reads nothing, so an unreadable snippet cannot fail the export")
+        void emptySnippetSelectionReadsNothing() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+            when(snippetStore.read(anyString(), any())).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), new LinkedHashSet<>(Set.of("greeting")), Set.of());
+
+            verify(documentDescriptorStore, never()).readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), anyBoolean(), any());
+        }
+
         @Test
         @DisplayName("ResourceNotFoundException on snippet read is handled gracefully")
         void snippetResourceNotFound() throws Exception {
@@ -257,13 +326,13 @@ class RestExportServiceExtendedBranchTest {
 
         /**
          * The listing itself failing is the wider case: a snippet store that will not
-         * answer at all costs the snippets and nothing else. The export the operator
-         * asked for is an agent, and it still has to produce one — and no half-built
-         * {@code snippets/} directory to make the archive look like it carried some.
+         * answer at all fails the export (E9) — an archive without the snippets the
+         * agent's prompts use restores as an agent that answers differently — and
+         * leaves no half-built {@code snippets/} directory behind.
          */
         @Test
-        @DisplayName("a snippet listing that will not answer costs the snippets, not the export")
-        void snippetListingFailureIsNotFatal() throws Exception {
+        @DisplayName("a snippet listing that will not answer fails the export instead of silently leaving the snippets out (E9)")
+        void snippetListingFailureFailsTheExport() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
                     "exportSnippets", Path.class, Set.class, Set.class);
             method.setAccessible(true);
@@ -277,7 +346,9 @@ class RestExportServiceExtendedBranchTest {
             names.add("greeting");
             Path agentPath = Files.createTempDirectory("test-snippets");
 
-            method.invoke(exportService, agentPath, names, null);
+            var failure = assertThrows(InvocationTargetException.class,
+                    () -> method.invoke(exportService, agentPath, names, null));
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
 
             assertFalse(Files.exists(agentPath.resolve("snippets")),
                     "a listing that never answered must not leave a snippets directory suggesting it did");
@@ -340,7 +411,7 @@ class RestExportServiceExtendedBranchTest {
         }
 
         @Test
-        @DisplayName("schedule export exception is handled gracefully")
+        @DisplayName("a schedule export that fails fails the export instead of leaving the schedules out (E9)")
         void scheduleExportException() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
                     "exportSchedules", String.class, Path.class, Set.class);
@@ -349,9 +420,9 @@ class RestExportServiceExtendedBranchTest {
             when(scheduleStore.readSchedulesByAgentId("agent1"))
                     .thenThrow(new RuntimeException("DB error"));
 
-            // Should not throw
-            assertDoesNotThrow(() -> method.invoke(exportService, "agent1",
-                    Files.createTempDirectory("test-sched"), null));
+            var failure = assertThrows(InvocationTargetException.class,
+                    () -> method.invoke(exportService, "agent1", Files.createTempDirectory("test-sched"), null));
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
         }
 
         @Test

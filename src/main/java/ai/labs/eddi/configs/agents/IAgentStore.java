@@ -6,8 +6,10 @@ package ai.labs.eddi.configs.agents;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.ReferringVersions;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -42,4 +44,16 @@ public interface IAgentStore extends IResourceStore<AgentConfiguration> {
 
     List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer workflowVersion, boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
+    /**
+     * The agent versions, live and historical, whose {@code workflows} list any of
+     * {@code workflowUris} exactly ({@code ...?version=<n>}). Ids only — nothing is
+     * read — in two indexed queries per {@value #REFERENCE_QUERY_CHUNK} URIs
+     * (MongoDB: the {@code workflows} field; PostgreSQL: the {@code jsonb_path_ops}
+     * GIN index on {@code resources.data} and {@code resources_history.data}).
+     */
+    ReferringVersions findAgentVersionsListing(Collection<String> workflowUris);
+
+    /** How many URIs one reverse-lookup query carries. */
+    int REFERENCE_QUERY_CHUNK = 50;
 }

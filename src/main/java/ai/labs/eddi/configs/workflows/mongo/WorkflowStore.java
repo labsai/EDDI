@@ -7,12 +7,15 @@ package ai.labs.eddi.configs.workflows.mongo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.WorkflowConfigSaveValidator;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.ReferringVersions;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -22,10 +25,14 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -72,6 +79,8 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     @Override
     public IResourceStore.IResourceId create(WorkflowConfiguration workflowConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        WorkflowConfigSaveValidator.validate(workflowConfiguration);
+        trimReferenceUris(workflowConfiguration);
         return super.create(workflowConfiguration);
     }
 
@@ -80,6 +89,8 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     public Integer update(String id, Integer version, WorkflowConfiguration workflowConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        WorkflowConfigSaveValidator.validate(workflowConfiguration);
+        trimReferenceUris(workflowConfiguration);
         return super.update(id, version, workflowConfiguration);
     }
 
@@ -133,6 +144,80 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             }
         }
         return ret;
+    }
+
+    /**
+     * Stores the two reference fields the reverse lookup queries
+     * ({@link #WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD},
+     * {@link #WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD}) without
+     * surrounding whitespace. The save check and the runtime
+     * ({@code ResourceUris.require}) both trim a padded {@code config.uri}, but the
+     * lookup is an exact match on the stored value: a padded reference was
+     * invisible to it, and the in-use guard let the resource it named be deleted.
+     */
+    static void trimReferenceUris(WorkflowConfiguration workflow) {
+        if (workflow == null || workflow.getWorkflowSteps() == null) {
+            return;
+        }
+        for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+            if (step == null) {
+                continue;
+            }
+            step.setConfig(withTrimmedUri(step.getConfig()));
+            if (step.getExtensions() != null && step.getExtensions().get("dictionaries") instanceof List<?> dictionaries) {
+                List<Object> trimmed = new ArrayList<>(dictionaries.size());
+                boolean changed = false;
+                for (Object entry : dictionaries) {
+                    Object next = entry;
+                    if (entry instanceof Map<?, ?> dictionary && dictionary.get("config") instanceof Map<?, ?> config) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> typed = (Map<String, Object>) config;
+                        Map<String, Object> newConfig = withTrimmedUri(typed);
+                        if (newConfig != config) {
+                            Map<Object, Object> copy = new LinkedHashMap<>(dictionary);
+                            copy.put("config", newConfig);
+                            next = copy;
+                            changed = true;
+                        }
+                    }
+                    trimmed.add(next);
+                }
+                if (changed) {
+                    Map<String, Object> extensions = new LinkedHashMap<>(step.getExtensions());
+                    extensions.put("dictionaries", trimmed);
+                    step.setExtensions(extensions);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code config} itself when its uri needs no trimming, else a trimmed copy.
+     */
+    private static Map<String, Object> withTrimmedUri(Map<String, Object> config) {
+        if (config == null || !(config.get("uri") instanceof String uri) || uri.equals(uri.trim())) {
+            return config;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>(config);
+        copy.put("uri", uri.trim());
+        return copy;
+    }
+
+    @Override
+    public ReferringVersions findWorkflowVersionsReferencing(Collection<String> resourceUris) {
+        List<IResourceStore.IResourceId> live = new ArrayList<>();
+        List<IResourceStore.IResourceId> historical = new ArrayList<>();
+        List<String> uris = new ArrayList<>(new LinkedHashSet<>(resourceUris));
+        // From the primary, for the reason AgentStore.findAgentVersionsListing gives.
+        var storage = resourceStorage.primaryReads();
+        for (int from = 0; from < uris.size(); from += IAgentStore.REFERENCE_QUERY_CHUNK) {
+            List<String> chunk = uris.subList(from, Math.min(uris.size(), from + IAgentStore.REFERENCE_QUERY_CHUNK));
+            for (String field : List.of(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD)) {
+                live.addAll(storage.findResourceIdsContainingAny(field, chunk));
+                historical.addAll(storage.findHistoryResourceIdsContainingAny(field, chunk));
+            }
+        }
+        return new ReferringVersions(live, historical);
     }
 
     /** Where a reverse lookup for one resource URI starts. */

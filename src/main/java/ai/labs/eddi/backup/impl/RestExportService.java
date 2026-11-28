@@ -54,6 +54,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -378,7 +380,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // dictionary pass runs — a parser whose dictionaries stayed behind
                 // reaches the target pointing at ids that only exist on this instance.
                 Map<IResourceId, String> parserConfigs = convertConfigsToString(
-                        readExistingConfigs(parserStore, discovered(workflowConfigString, PARSER_URI_PATTERN, vettedIds)));
+                        readExistingConfigs(parserStore, discovered(workflowConfigString, PARSER_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, parserConfigs, PARSER_EXT, selectedIds);
 
                 // The workflow's dictionaries must exist, as every extension it names
@@ -390,35 +392,35 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         readConfigs(regularDictionaryStore, workflowDictionaryUris));
                 dictionaries.putAll(readExistingConfigs(regularDictionaryStore,
                         requireViewOnUnvetted(parserOnlyUris(parserConfigs, workflowDictionaryUris, DICTIONARY_URI_PATTERN), vettedIds)));
-                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(dictionaries);
+                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(dictionaries, selectedIds);
                 writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
-                        readConfigs(behaviorStore, discovered(workflowConfigString, BEHAVIOR_URI_PATTERN, vettedIds)));
+                        readConfigs(behaviorStore, discovered(workflowConfigString, BEHAVIOR_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, behaviorConfigs, BEHAVIOR_EXT, selectedIds);
 
                 Map<IResourceId, String> httpCallsConfigs = convertConfigsToString(
-                        readConfigs(httpCallsStore, discovered(workflowConfigString, HTTPCALLS_URI_PATTERN, vettedIds)));
+                        readConfigs(httpCallsStore, discovered(workflowConfigString, HTTPCALLS_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, httpCallsConfigs, HTTPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> llmConfigs = convertConfigsToString(
-                        readConfigs(llmStore, discovered(workflowConfigString, LANGCHAIN_URI_PATTERN, vettedIds)));
+                        readConfigs(llmStore, discovered(workflowConfigString, LANGCHAIN_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, llmConfigs, LLM_EXT, selectedIds);
 
                 Map<IResourceId, String> propertyConfigs = convertConfigsToString(
-                        readConfigs(propertySetterStore, discovered(workflowConfigString, PROPERTY_URI_PATTERN, vettedIds)));
+                        readConfigs(propertySetterStore, discovered(workflowConfigString, PROPERTY_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, propertyConfigs, PROPERTY_EXT, selectedIds);
 
                 Map<IResourceId, String> outputConfigs = convertConfigsToString(
-                        readConfigs(outputStore, discovered(workflowConfigString, OUTPUT_URI_PATTERN, vettedIds)));
+                        readConfigs(outputStore, discovered(workflowConfigString, OUTPUT_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, outputConfigs, OUTPUT_EXT, selectedIds);
 
                 Map<IResourceId, String> mcpConfigs = convertConfigsToString(
-                        readConfigs(mcpCallsStore, discovered(workflowConfigString, MCPCALLS_URI_PATTERN, vettedIds)));
+                        readConfigs(mcpCallsStore, discovered(workflowConfigString, MCPCALLS_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, mcpConfigs, MCPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> ragConfigs = convertConfigsToString(
-                        readConfigs(ragStore, discovered(workflowConfigString, RAG_URI_PATTERN, vettedIds)));
+                        readConfigs(ragStore, discovered(workflowConfigString, RAG_URI_PATTERN, vettedIds)), selectedIds);
                 writeSelectedConfigs(workflowPath, ragConfigs, RAG_EXT, selectedIds);
 
                 // Collect serialized configs for snippet reference scanning
@@ -825,16 +827,63 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     private Map<IResourceId, String> convertConfigsToString(Map<IResourceId, ?> configurationMap) {
-        return configurationMap.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
+        return convertConfigsToString(configurationMap, null);
+    }
+
+    /**
+     * @param selectedIds
+     *            the caller's selection, or {@code null} for a full export. A
+     *            configuration the selection leaves out is not written, so one that
+     *            cannot be serialized is dropped with a warning instead of failing
+     *            the export; a selected one (or any, in a full export) still fails
+     *            it.
+     */
+    private Map<IResourceId, String> convertConfigsToString(Map<IResourceId, ?> configurationMap, Set<String> selectedIds) {
+        Map<IResourceId, String> converted = new LinkedHashMap<>();
+        for (Map.Entry<IResourceId, ?> e : configurationMap.entrySet()) {
             try {
                 String json = jsonSerialization.serialize(e.getValue());
                 // Scrub secrets before export (defense-in-depth)
-                return secretScrubber.scrubJson(json);
+                converted.put(e.getKey(), secretScrubber.scrubJson(json));
             } catch (IOException ex) {
+                if (selectedIds != null && !selectedIds.contains(e.getKey().getId())) {
+                    LOGGER.warnf("Configuration %s could not be serialized; it is not selected for export, so it is left out: %s",
+                            LogSanitizer.sanitize(e.getKey().getId()), ex.getMessage());
+                    continue;
+                }
+                // An empty string used to go into the archive as the config's content.
                 LOGGER.error(ex.getLocalizedMessage(), ex);
-                return "";
+                // The stored document itself cannot be written out: a data problem with
+                // that resource, not a server fault.
+                throw exportIncomplete("the configuration " + e.getKey().getId() + ", which could not be serialized", 422);
             }
-        }));
+        }
+        return converted;
+    }
+
+    /**
+     * The failure of an export that could not include something: a 500 (a store or
+     * file system failure).
+     */
+    static WebApplicationException exportIncomplete(String what) {
+        return exportIncomplete(what, Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
+    }
+
+    /**
+     * The failure of an export that could not include something. The archive is not
+     * produced at all: a ZIP that looks complete and is not restores as an agent
+     * that cannot answer. The message is stable and carries no exception text; the
+     * cause is in the log.
+     *
+     * @param status
+     *            422 when a stored resource is the problem (the message names it),
+     *            500 for a store or file system failure
+     */
+    static WebApplicationException exportIncomplete(String what, int status) {
+        String message = "Export failed: the archive could not include " + what + ", so no archive was produced. "
+                + "See the server log for the cause.";
+        return new WebApplicationException(message, Response.status(status).entity(Map.of("error", message)).type(MediaType.APPLICATION_JSON)
+                .build());
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
@@ -845,10 +894,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 deleteFileIfExists(filePath);
                 try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
                     writer.write(value);
-                    writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
                 }
-            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            } catch (IOException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
+                throw exportIncomplete("the " + fileExtension + " configuration " + resourceId.getId());
+            }
+            try {
+                writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // The descriptor is the config's name and description, not its content:
+                // a config without one (a row lost, a document written around the API)
+                // still exports, as it always did, and imports under a generated name.
+                LOGGER.warnf("Exporting %s configuration %s without a descriptor: none was found", fileExtension,
+                        LogSanitizer.sanitize(resourceId.getId()));
+            } catch (IOException | IResourceStore.ResourceStoreException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                throw exportIncomplete("the descriptor of the " + fileExtension + " configuration " + resourceId.getId());
             }
         });
     }
@@ -1128,7 +1189,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      *            none — see {@link #parseTypedSelection(String)}
      */
     private void exportSnippets(Path agentPath, Set<String> referencedNames, Set<String> selectedSnippetIds) {
-        if (referencedNames.isEmpty()) {
+        // An empty selection asks for no snippets: nothing to read, so nothing to fail.
+        if (referencedNames.isEmpty() || selectedSnippetIds != null && selectedSnippetIds.isEmpty()) {
             return;
         }
 
@@ -1148,6 +1210,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             Path snippetsDir = Files.createDirectories(Paths.get(agentPath.toString(), "snippets"));
             int exportedCount = 0;
+            // A snippet that cannot be read fails the export only when it may be one the
+            // agent uses: the sweep reads every snippet in the scope, most of them
+            // unrelated, and one of those failing must not abort the backup.
+            List<URI> unreadable = new ArrayList<>();
+            Set<String> accountedNames = new HashSet<>();
             for (DocumentDescriptor descriptor : descriptors) {
                 // VIEW, as GET /snippetstore requires: the listing scope admits a
                 // snippet shared for USE only, whose text must not leave in an archive.
@@ -1160,7 +1227,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     if (resourceId == null)
                         continue;
 
-                    PromptSnippet snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
+                    PromptSnippet snippet;
+                    try {
+                        snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
+                    } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                        LOGGER.warnf("Could not read snippet %s while exporting: %s", resourceUri, e.getMessage());
+                        unreadable.add(resourceUri);
+                        continue;
+                    }
                     if (snippet == null || snippet.getName() == null)
                         continue;
 
@@ -1176,6 +1250,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     // ...and, when the caller expressed a snippet selection, only
                     // those it kept.
                     if (selectedSnippetIds != null && !selectedSnippetIds.contains(resourceId.getId())) {
+                        accountedNames.add(snippet.getName());
                         continue;
                     }
 
@@ -1196,16 +1271,26 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         // Same reason as writeDocumentDescriptor: ownership does not travel.
                         writer.write(jsonSerialization.serialize(DescriptorAccess.stripOwnership(copyForExport(descriptor))));
                     }
+                    accountedNames.add(snippet.getName());
                     exportedCount++;
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     LOGGER.debugf("Snippet descriptor references missing resource: %s", descriptor.getResource());
                 }
             }
+            // Every referenced name exported (or deselected): the unreadable ones were not
+            // the agent's. Otherwise one of them may be, and the archive would lack it.
+            if (!unreadable.isEmpty() && !accountedNames.containsAll(referencedNames)) {
+                LOGGER.errorf("Could not read snippet(s) %s, and the agent's snippets %s were not all found", unreadable, referencedNames);
+                throw exportIncomplete("the prompt snippets the agent uses");
+            }
             if (exportedCount > 0) {
                 LOGGER.infof("Exported %d snippet(s) (referenced: %s)", exportedCount, referencedNames);
             }
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to export snippets: %s", e.getMessage());
+            LOGGER.errorf(e, "Failed to export snippets: %s", e.getMessage());
+            throw exportIncomplete("the prompt snippets the agent uses");
         }
     }
 
@@ -1395,8 +1480,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 }
             }
             LOGGER.infof("Exported %d schedule(s) for Agent %s", exported, agentId);
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
+            LOGGER.errorf(e, "Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
+            throw exportIncomplete("the agent's schedules");
         }
     }
 }
