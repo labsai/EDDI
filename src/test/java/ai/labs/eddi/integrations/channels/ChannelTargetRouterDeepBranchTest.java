@@ -598,6 +598,18 @@ class ChannelTargetRouterDeepBranchTest {
             assertEquals("xoxb-l", router.getBotTokenForTarget("slack", "agent-l", null));
         }
 
+        @Test
+        @DisplayName("getBotTokenForTarget: a legacy connector with a group serves the group, not its agentId")
+        void legacyConnectorWithAGroupServesTheGroup() throws Exception {
+            setField(router, "integrationMap", Map.of("slack:C2", app("app-b", "agent-a", Map.of("botToken", "xoxb-b"))));
+            setField(router, "legacyMap", Map.of("C1", new LegacyTarget("agent-a", "xoxb-l", "secret", "group-g")));
+
+            assertEquals("xoxb-b", router.getBotTokenForTarget("slack", "agent-a", null),
+                    "the connector routes to its group, so it does not compete for the agent");
+            assertEquals("xoxb-l", router.getBotTokenForTarget("slack", "group-g", null),
+                    "the group keeps its genuine match");
+        }
+
         /**
          * S5: the app without a usable token was skipped, so the other app's token
          * became "unambiguous" — and an approval outcome for app A's DM went out with

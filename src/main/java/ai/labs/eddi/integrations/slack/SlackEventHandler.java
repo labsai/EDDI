@@ -760,6 +760,12 @@ public class SlackEventHandler {
                 // nothing is posted (nobody asked), nothing is locked. What the turn
                 // spends from here on is charged when it ends, below.
                 stillRunning = e.pending();
+                if (e.conversationId() != null && !e.conversationId().equals(conversationId)) {
+                    // The turn that timed out is the re-send to a fresh conversation —
+                    // the first had ended. Charge that one, measured from zero.
+                    conversationId = e.conversationId();
+                    costBefore = OptionalDouble.of(0.0);
+                }
                 LOGGER.warnf("[OBSERVE] Target '%s' was still answering in channel %s after the late-answer window "
                         + "— nothing posted", sanitize(target.getName()), sanitize(channelId));
             } catch (Exception e) {
@@ -942,14 +948,17 @@ public class SlackEventHandler {
             throws Exception {
         announceReplacement(thread, channelId, threadTs, botToken);
         String endedId = thread.conversationId();
-        EndedRecovery lateRecovery = remainingMillis -> resendInFreshConversation(resolved, agentId, user, intent, endedId,
-                channelId, threadTs, message, botToken, LateWait.block(remainingMillis - requestTimeoutMillis()));
+        EndedRecovery lateRecovery = remainingMillis -> {
+            requireTimeLeft(remainingMillis);
+            return resendInFreshConversation(resolved, agentId, user, intent, endedId, channelId, threadTs, message,
+                    botToken, LateWait.within(remainingMillis)).delivered();
+        };
         try {
             sendAndDeliver(resolved, endedId, agentId, channelId, threadTs, message, botToken, wait, lateRecovery);
             return endedId;
         } catch (IConversationService.ConversationEndedException e) {
             return resendInFreshConversation(resolved, agentId, user, intent, endedId, channelId, threadTs, message,
-                    botToken, wait);
+                    botToken, wait).conversationId();
         }
     }
 
@@ -957,17 +966,18 @@ public class SlackEventHandler {
      * Give the thread a fresh conversation in place of an ended one and send the
      * message there. A second end in a row propagates.
      *
-     * @return the fresh conversation
+     * @return the fresh conversation, and whether Slack accepted its answer
      */
-    private String resendInFreshConversation(ResolvedTarget resolved, String agentId, SlackUser user, String intent,
-                                             String endedId, String channelId, String threadTs, String message,
-                                             String botToken, LateWait wait)
+    private Sent resendInFreshConversation(ResolvedTarget resolved, String agentId, SlackUser user, String intent,
+                                           String endedId, String channelId, String threadTs, String message,
+                                           String botToken, LateWait wait)
             throws Exception {
         ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, endedId, endReasonOf(endedId),
                 resolved);
         announceReplacement(fresh, channelId, threadTs, botToken);
-        sendAndDeliver(resolved, fresh.conversationId(), agentId, channelId, threadTs, message, botToken, wait, null);
-        return fresh.conversationId();
+        boolean delivered = sendAndDeliver(resolved, fresh.conversationId(), agentId, channelId, threadTs, message, botToken,
+                wait, null);
+        return new Sent(fresh.conversationId(), delivered);
     }
 
     private long requestTimeoutMillis() {
@@ -986,11 +996,25 @@ public class SlackEventHandler {
      *            — an observer, which nobody addressed, and the re-send of a late
      *            answer, which must not defer a second time
      */
-    record LateWait(boolean defer, long extraMillis) {
-        static final LateWait DEFER = new LateWait(true, 0);
+    record LateWait(boolean defer, long extraMillis, long budgetMillis) {
+        static final LateWait DEFER = new LateWait(true, 0, -1);
 
         static LateWait block(long extraMillis) {
-            return new LateWait(false, Math.max(0, extraMillis));
+            return new LateWait(false, Math.max(0, extraMillis), -1);
+        }
+
+        /**
+         * Wait at most {@code remainingMillis} in all, the first wait included — the
+         * re-send of a deferred turn, which has only what is left of the late-answer
+         * window, however long the request timeout is.
+         */
+        static LateWait within(long remainingMillis) {
+            return new LateWait(false, 0, Math.max(0, remainingMillis));
+        }
+
+        /** The first wait: the request timeout, or less when a budget is set. */
+        long firstWaitMillis(long requestTimeoutMillis) {
+            return budgetMillis < 0 ? requestTimeoutMillis : Math.min(requestTimeoutMillis, budgetMillis);
         }
     }
 
@@ -1001,7 +1025,26 @@ public class SlackEventHandler {
      */
     @FunctionalInterface
     private interface EndedRecovery {
-        void resend(long remainingMillis) throws Exception;
+        /** @return whether Slack accepted the re-sent turn's answer */
+        boolean resend(long remainingMillis) throws Exception;
+    }
+
+    /**
+     * A re-send with no time left in the window is not made: no fresh conversation,
+     * no turn whose answer could never be posted. Reported as the window running
+     * out.
+     */
+    private static void requireTimeLeft(long remainingMillis) throws TurnTimeoutException {
+        if (remainingMillis <= 0) {
+            throw new TurnTimeoutException("the late-answer window has run out", null, null);
+        }
+    }
+
+    /**
+     * A message sent to a conversation, and whether Slack accepted what it
+     * produced.
+     */
+    private record Sent(String conversationId, boolean delivered) {
     }
 
     /**
@@ -1030,10 +1073,13 @@ public class SlackEventHandler {
      * approval notification with Approve/Reject buttons.</li>
      * <li>Otherwise post the response normally.</li>
      * </ul>
+     *
+     * @return whether Slack accepted the outcome; {@code true} for a turn handed to
+     *         the late-answer path, which counts its own delivery
      */
-    private void sendAndDeliver(ResolvedTarget resolved, String conversationId, String agentId,
-                                String channelId, String threadTs, String message, String botToken, LateWait wait,
-                                EndedRecovery lateRecovery)
+    private boolean sendAndDeliver(ResolvedTarget resolved, String conversationId, String agentId,
+                                   String channelId, String threadTs, String message, String botToken, LateWait wait,
+                                   EndedRecovery lateRecovery)
             throws Exception {
         SimpleConversationMemorySnapshot snapshot;
         try {
@@ -1041,49 +1087,51 @@ public class SlackEventHandler {
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // The conversation is already paused — input was NOT consumed. Never
             // surface the generic error message.
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            boolean delivered = postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
             // H8: a CONVERSATION_START (init-turn) pause happens inside
             // getOrCreateConversation → startConversation, so no approval card was
             // ever posted for it. If we have not notified for this pause yet, post
             // the approval card now (idempotent via the persisted approval record).
             notifyApprovers(resolved, conversationId, agentId, loadHitlBookmark(conversationId));
-            return;
+            return delivered;
         } catch (TurnTimeoutException e) {
             // The wait gave up, the turn did not: the answer is posted when it ends —
             // the same outcome handling as in time, the approval card included. A
             // blocking caller has already waited its extra time in sendAndWait.
             if (wait.defer() && deferToLateAnswer(e.pending(), channelId, threadTs, botToken, (late, remainingMillis) -> {
                 try {
-                    deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, late);
+                    return deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, late);
                 } catch (IConversationService.ConversationEndedException ended) {
                     if (lateRecovery == null) {
                         throw ended;
                     }
-                    lateRecovery.resend(remainingMillis);
+                    return lateRecovery.resend(remainingMillis);
                 }
             })) {
-                return;
+                return true;
             }
             throw e;
         }
-        deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, snapshot);
+        return deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, snapshot);
     }
 
     /**
      * Post what a turn produced — the answer, or the notice for a turn that was
      * dropped or paused — and, for a pause, the approval card. Shared by the normal
      * path and by a turn that completes after the wait gave up.
+     *
+     * @return whether Slack accepted the post that carries the outcome — every
+     *         chunk of the answer, or the notice
      */
-    private void deliverOutcome(ResolvedTarget resolved, String conversationId, String agentId, String channelId,
-                                String threadTs, String botToken, SimpleConversationMemorySnapshot snapshot)
+    private boolean deliverOutcome(ResolvedTarget resolved, String conversationId, String agentId, String channelId,
+                                   String threadTs, String botToken, SimpleConversationMemorySnapshot snapshot)
             throws Exception {
         // A queued-say skip (pause/busy committed by a prior turn) surfaces here as
         // the STILL_AWAITING marker — the input was dropped, not this turn pausing.
         // Post the "still awaiting" notice and do NOT re-notify approvers (no second
         // approval card for the same pending pause).
         if (snapshot == SKIPPED_STILL_AWAITING) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
-            return;
+            return postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         }
         // Ended while the turn was queued: the same situation as say() refusing an
         // ended conversation, so it is reported the same way and the caller gives
@@ -1094,8 +1142,7 @@ public class SlackEventHandler {
         // A skip for a non-active conversation (busy/interrupted) — the message was
         // dropped; tell the user rather than replaying a stale turn.
         if (snapshot == SKIPPED_NOT_ACTIVE) {
-            postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
-            return;
+            return postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
         }
 
         boolean paused = snapshot != null
@@ -1110,14 +1157,15 @@ public class SlackEventHandler {
             // card — the say callback can fire before the bookmark is stored (H10),
             // so a naive re-read returns the previous turn's null pause fields.
             var bookmark = loadHitlBookmark(conversationId);
+            boolean delivered = true;
             if (response != null && !response.startsWith("_")) {
-                postMessageChunked(channelId, threadTs, response, botToken);
+                delivered = postMessageChunked(channelId, threadTs, response, botToken);
             }
-            postMessage(channelId, threadTs, buildPauseNotice(bookmark), botToken);
+            delivered &= postMessage(channelId, threadTs, buildPauseNotice(bookmark), botToken);
             notifyApprovers(resolved, conversationId, agentId, bookmark);
-        } else {
-            postMessageChunked(channelId, threadTs, response, botToken);
+            return delivered;
         }
+        return postMessageChunked(channelId, threadTs, response, botToken);
     }
 
     /**
@@ -1522,8 +1570,11 @@ public class SlackEventHandler {
         ThreadConversation thread = openThreadConversation(agentId, user, intent, route);
         announceReplacement(thread, channelId, threadTs, botToken);
         String endedId = thread.conversationId();
-        EndedRecovery lateRecovery = remainingMillis -> resendFollowUpInFreshConversation(agentId, user, intent, route, endedId,
-                channelId, threadTs, input, botToken, LateWait.block(remainingMillis - requestTimeoutMillis()));
+        EndedRecovery lateRecovery = remainingMillis -> {
+            requireTimeLeft(remainingMillis);
+            return resendFollowUpInFreshConversation(agentId, user, intent, route, endedId, channelId, threadTs, input,
+                    botToken, LateWait.within(remainingMillis));
+        };
         try {
             deliverFollowUp(endedId, channelId, threadTs, input, botToken, wait, lateRecovery);
         } catch (IConversationService.ConversationEndedException e) {
@@ -1533,13 +1584,13 @@ public class SlackEventHandler {
         }
     }
 
-    private void resendFollowUpInFreshConversation(String agentId, SlackUser user, String intent, ResolvedTarget route,
-                                                   String endedId, String channelId, String threadTs, String input,
-                                                   String botToken, LateWait wait)
+    private boolean resendFollowUpInFreshConversation(String agentId, SlackUser user, String intent, ResolvedTarget route,
+                                                      String endedId, String channelId, String threadTs, String input,
+                                                      String botToken, LateWait wait)
             throws Exception {
         ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, endedId, endReasonOf(endedId), route);
         announceReplacement(fresh, channelId, threadTs, botToken);
-        deliverFollowUp(fresh.conversationId(), channelId, threadTs, input, botToken, wait, null);
+        return deliverFollowUp(fresh.conversationId(), channelId, threadTs, input, botToken, wait, null);
     }
 
     /**
@@ -1548,62 +1599,63 @@ public class SlackEventHandler {
      * notification is sent — but the pause notice and "still awaiting" handling
      * still apply so the user is never left with a generic error.
      *
+     * @return whether Slack accepted the outcome ({@code true} for a turn handed to
+     *         the late-answer path)
      * @throws IConversationService.ConversationEndedException
      *             if the conversation has ended, so the caller can replace it
      */
-    private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
-                                 String botToken, LateWait wait, EndedRecovery lateRecovery)
+    private boolean deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
+                                    String botToken, LateWait wait, EndedRecovery lateRecovery)
             throws Exception {
         SimpleConversationMemorySnapshot snapshot;
         try {
             snapshot = sendAndWait(conversationId, enrichedInput, wait);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
-            return;
+            return postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         } catch (TurnTimeoutException e) {
             // The wait gave up, the turn did not: the answer is posted when it ends.
             if (wait.defer() && deferToLateAnswer(e.pending(), channelId, threadTs, botToken, (late, remainingMillis) -> {
                 try {
-                    deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, late);
+                    return deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, late);
                 } catch (IConversationService.ConversationEndedException ended) {
                     if (lateRecovery == null) {
                         throw ended;
                     }
-                    lateRecovery.resend(remainingMillis);
+                    return lateRecovery.resend(remainingMillis);
                 }
             })) {
-                return;
+                return true;
             }
             throw e;
         }
-        deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, snapshot);
+        return deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, snapshot);
     }
 
-    private void deliverFollowUpOutcome(String conversationId, String channelId, String threadTs, String botToken,
-                                        SimpleConversationMemorySnapshot snapshot)
+    /** @return whether Slack accepted the post that carries the outcome */
+    private boolean deliverFollowUpOutcome(String conversationId, String channelId, String threadTs, String botToken,
+                                           SimpleConversationMemorySnapshot snapshot)
             throws Exception {
         if (snapshot == SKIPPED_STILL_AWAITING) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
-            return;
+            return postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         }
         if (snapshot == SKIPPED_ENDED) {
             throw new IConversationService.ConversationEndedException("Conversation has ended!");
         }
         if (snapshot == SKIPPED_NOT_ACTIVE) {
-            postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
-            return;
+            return postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
         }
         boolean paused = snapshot != null
                 && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
         String response = SlackHitlSupport.extractSlackResponseText(snapshot);
         if (paused) {
+            boolean delivered = true;
             if (response != null && !response.startsWith("_")) {
-                postMessageChunked(channelId, threadTs, response, botToken);
+                delivered = postMessageChunked(channelId, threadTs, response, botToken);
             }
-            postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
-        } else {
-            postMessageChunked(channelId, threadTs, response, botToken);
+            delivered &= postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
+            return delivered;
         }
+        return postMessageChunked(channelId, threadTs, response, botToken);
     }
 
     /**
@@ -1952,40 +2004,54 @@ public class SlackEventHandler {
                 });
 
         try {
-            return responseFuture.get(slackConfig.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
+            return responseFuture.get(wait.firstWaitMillis(requestTimeoutMillis()), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            if (!wait.defer() && wait.extraMillis() > 0) {
+            long extraMillis = wait.budgetMillis() < 0
+                    ? wait.extraMillis()
+                    : Math.max(0, wait.budgetMillis() - requestTimeoutMillis());
+            if (!wait.defer() && extraMillis > 0) {
                 // A blocking caller keeps waiting here, on its own virtual thread, and
                 // posts nothing meanwhile.
                 try {
-                    return responseFuture.get(wait.extraMillis(), TimeUnit.MILLISECONDS);
+                    return responseFuture.get(extraMillis, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException stillRunning) {
-                    throw new TurnTimeoutException(stillRunning.getMessage(), responseFuture);
+                    throw new TurnTimeoutException(stillRunning.getMessage(), conversationId, responseFuture);
                 }
             }
             // The turn is still running. The caller may keep waiting for it (see
             // deferToLateAnswer), so the future travels with the exception.
-            throw new TurnTimeoutException(e.getMessage(), responseFuture);
+            throw new TurnTimeoutException(e.getMessage(), conversationId, responseFuture);
         }
     }
 
     /**
      * The wait for a turn gave up, but the turn did not: {@link #pending()} is its
-     * outcome, still to come. Still a {@link TimeoutException}, so a caller that
-     * does not defer sees what it always saw.
+     * outcome, still to come, and {@link #conversationId()} the conversation the
+     * turn runs in — after a re-send not the one the caller opened. Still a
+     * {@link TimeoutException}, so a caller that does not defer sees what it always
+     * saw.
      */
     static final class TurnTimeoutException extends TimeoutException {
         private static final long serialVersionUID = 1L;
 
+        private final String conversationId;
         private final transient CompletableFuture<SimpleConversationMemorySnapshot> pending;
 
-        TurnTimeoutException(String message, CompletableFuture<SimpleConversationMemorySnapshot> pending) {
+        TurnTimeoutException(String message, String conversationId,
+                CompletableFuture<SimpleConversationMemorySnapshot> pending) {
             super(message);
+            this.conversationId = conversationId;
             this.pending = pending;
         }
 
+        /** {@code null} when no turn was sent at all (the window had run out). */
         CompletableFuture<SimpleConversationMemorySnapshot> pending() {
             return pending;
+        }
+
+        /** The conversation the turn was sent to, or {@code null} when none was. */
+        String conversationId() {
+            return conversationId;
         }
     }
 
@@ -1996,7 +2062,8 @@ public class SlackEventHandler {
      */
     @FunctionalInterface
     private interface LateDelivery {
-        void deliver(SimpleConversationMemorySnapshot snapshot, long remainingMillis) throws Exception;
+        /** @return whether Slack accepted the outcome */
+        boolean deliver(SimpleConversationMemorySnapshot snapshot, long remainingMillis) throws Exception;
     }
 
     /**
@@ -2067,8 +2134,16 @@ public class SlackEventHandler {
             return;
         }
         try {
-            delivery.deliver(snapshot, Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime())));
-            countLateAnswer("posted");
+            if (delivery.deliver(snapshot, Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime())))) {
+                countLateAnswer("posted");
+            } else {
+                // Slack refused it (ok:false) or a later chunk did not arrive. Not
+                // posted, and not retried: the chunks Slack took are in the thread, and
+                // a failure notice would be refused or read as the whole answer.
+                LOGGER.warnf("[SLACK] Slack did not accept the late answer in channel %s (or all of it)",
+                        sanitize(channelId));
+                countLateAnswer("failed");
+            }
         } catch (TurnTimeoutException e) {
             // The re-send of a turn whose conversation had ended ran out the window.
             LOGGER.warnf("[SLACK] The re-sent late turn was still running after the late-answer window (channel %s)",
@@ -2095,8 +2170,8 @@ public class SlackEventHandler {
      * @param botToken
      *            explicit bot token (if {@code null}, falls back to router lookup)
      */
-    private void postMessageChunked(String channelId, String threadTs, String text,
-                                    String botToken) {
+    private boolean postMessageChunked(String channelId, String threadTs, String text,
+                                       String botToken) {
         // The agent's reply is not EDDI's text: escaped so a "<!channel>" in it is
         // shown, not broadcast, and split after escaping — escaping can lengthen it —
         // without cutting an entity in half (SlackMrkdwn, shared with the group and
@@ -2105,9 +2180,10 @@ public class SlackEventHandler {
             if (!postMessage(channelId, threadTs, chunk, botToken)) {
                 // Not delivered even after the retries: the rest would arrive without
                 // this part, so stop here.
-                break;
+                return false;
             }
         }
+        return true;
     }
 
     /**
@@ -2292,7 +2368,9 @@ public class SlackEventHandler {
      * survive a restart and hold on every node. They are the replying user's own,
      * so after a restart a thread revives only for people who had already talked to
      * the bot in it; a colleague who had not must mention the bot once. The lock is
-     * written back when a channel-target mapping is found.</li>
+     * written back when a channel-target mapping is found. A channel-target mapping
+     * still keyed by the raw Slack id (written before ids were namespaced) counts
+     * too, so a legacy-shaped id costs a second read per target.</li>
      * </ol>
      * A user found to have none is remembered for {@link #NON_PARTICIPATION_TTL},
      * so the second and every further ignored reply of that user in that thread
@@ -2332,8 +2410,14 @@ public class SlackEventHandler {
                     continue;
                 }
                 try {
-                    if (userConversationStore.readUserConversation(threadIntent(channelId, target.getTargetId(), parentTs),
-                            eddiUserId) != null) {
+                    String intent = threadIntent(channelId, target.getTargetId(), parentTs);
+                    // The namespaced id first; then, for this exact intent only, a
+                    // mapping written before ids were namespaced — the one
+                    // openThreadConversation adopts and re-keys. Without it such a
+                    // thread would be ignored before it ever got the chance.
+                    if (userConversationStore.readUserConversation(intent, eddiUserId) != null
+                            || (SlackUserIdentity.isLegacySlackUserId(slackUserId)
+                                    && userConversationStore.readUserConversation(intent, slackUserId) != null)) {
                         channelTargetRouter.lockThreadTarget("slack", channelId, parentTs, target);
                         return Participation.WITHOUT_LOCK;
                     }

@@ -43,8 +43,11 @@ final class FakeSlackApi implements OutboundEngine {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** One call Slack received. */
-    record Call(String method, String authorization, JsonNode body) {
+    /**
+     * One call Slack received. {@code receivedNanos} is {@link System#nanoTime()}
+     * when the fake received it, so a test can measure the gap between two calls.
+     */
+    record Call(String method, String authorization, JsonNode body, long receivedNanos) {
         String channel() {
             return body.path("channel").asText(null);
         }
@@ -115,7 +118,7 @@ final class FakeSlackApi implements OutboundEngine {
         }
         String authorization = hop.headers().getOrDefault("Authorization", List.of()).stream().findFirst().orElse(null);
         JsonNode body = JSON.readTree(hop.body());
-        calls.add(new Call(method, authorization, body));
+        calls.add(new Call(method, authorization, body, System.nanoTime()));
         if (!METHODS.contains(method)) {
             throw new AssertionError("the client called an unknown Slack method: " + method);
         }

@@ -265,6 +265,28 @@ class SlackHitlResumeObserverTest {
         verify(router, never()).getBotTokenForTarget(any(), any(), any());
     }
 
+    /**
+     * The integration that owned the channel was removed while the approval was
+     * pending: the channel is no longer owned, but it is still a channel, not a DM.
+     * Another app serving the same agent must not post into it with its token.
+     */
+    @Test
+    void onResumeCompleted_channelWhoseIntegrationWasRemoved_doesNotBorrowAnotherAppsToken() throws Exception {
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-9");
+        mapping.setChannelSigner("integration:app-b");
+        when(userConversationStore.readUserConversationByConversationId("conv-9")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn(null);
+        when(router.isChannelOwned("slack", "C123")).thenReturn(false);
+        when(router.getBotTokenForSignerKey("slack", "integration:app-b")).thenReturn("xoxb-app-b");
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn("xoxb-app-b");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-9", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("x")));
+
+        verifyNoInteractions(slackApi);
+    }
+
     @Test
     void onResumeCompleted_slackShapedIntentNotOwnedByASlackUser_isNotPosted() throws Exception {
         // An editor's own trigger named after someone else's Slack channel: the

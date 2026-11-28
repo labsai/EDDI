@@ -173,6 +173,21 @@ class SlackThreadParticipationTest {
     }
 
     @Test
+    @DisplayName("a mapping written before namespacing (raw Slack id) still counts, and is re-keyed rather than ignored")
+    void threadWithOnlyALegacyMapping_isAnswered() throws Exception {
+        String intent = "channel:slack:" + CHANNEL + ":" + AGENT + ":100.1";
+        when(userConversationStore.readUserConversation(intent, "U0ALICE"))
+                .thenReturn(new UserConversation(intent, "U0ALICE", Deployment.Environment.production, AGENT, "conv-1"));
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(null, locked());
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "continuing"), BOT, origin());
+
+        verify(slackApi, timeout(2000)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
+        verify(router, timeout(2000).atLeastOnce()).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"), any(ChannelTarget.class));
+        assertEquals(0.0, meters.counter("eddi.slack.thread.replies.ignored").count());
+    }
+
+    @Test
     @DisplayName("a thread with a lock reads the lock once per reply: routing reuses the participation check's read")
     void threadWithLock_readsTheLockOnce() throws Exception {
         when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
@@ -189,15 +204,16 @@ class SlackThreadParticipationTest {
     @DisplayName("the second and later ignored replies of a user in a thread read no mapping from the database")
     void repeatedIgnoredReplies_readTheDatabaseOnce() throws Exception {
         handler.handleEventAsync(id(), threadReply("100.1", "100.5", "first"), BOT, origin());
-        verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
+        verify(userConversationStore, timeout(2000).times(3)).readUserConversation(anyString(), anyString());
         waitFor(() -> caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE).size() == 1);
 
         handler.handleEventAsync(id(), threadReply("100.1", "100.6", "second"), BOT, origin());
         handler.handleEventAsync(id(), threadReply("100.1", "100.7", "third"), BOT, origin());
 
-        // One read per channel target plus the follow-up mapping, for the first reply
-        // only.
-        verify(userConversationStore, after(700).times(2)).readUserConversation(anyString(), anyString());
+        // Two reads per channel target (the namespaced id, then the raw id of a
+        // mapping written before namespacing) plus the follow-up mapping, for the
+        // first reply only.
+        verify(userConversationStore, after(700).times(3)).readUserConversation(anyString(), anyString());
         verify(router, times(3)).resolveThreadTarget("slack", CHANNEL, "100.1");
         assertEquals(3.0, meters.counter("eddi.slack.thread.replies.ignored").count());
         assertEquals("slack-thread-nonparticipants", SlackEventHandler.NON_PARTICIPATION_CACHE);
@@ -214,14 +230,15 @@ class SlackThreadParticipationTest {
         verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
         handler.handleEventAsync(id(), threadReply("100.1", "100.6", "second"), BOT, origin());
 
-        verify(userConversationStore, timeout(2000).times(4)).readUserConversation(anyString(), anyString());
+        // The second reply reads again: namespaced id, raw id, follow-up.
+        verify(userConversationStore, timeout(2000).times(5)).readUserConversation(anyString(), anyString());
     }
 
     @Test
     @DisplayName("a user's non-participation is forgotten when a mapping for them in the thread is created")
     void newMappingForgetsNonParticipation() throws Exception {
         handler.handleEventAsync(id(), threadReply("100.1", "100.5", "first"), BOT, origin());
-        verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
+        verify(userConversationStore, timeout(2000).times(3)).readUserConversation(anyString(), anyString());
         waitFor(() -> caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE).size() == 1);
         var negatives = caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE);
 

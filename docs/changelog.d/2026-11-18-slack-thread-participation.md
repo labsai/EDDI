@@ -140,3 +140,31 @@ and a reply that opened with another person's mention was dropped.
   "taking longer".
 - A legacy connector DM whose signing secret is shared by connectors with different tokens gets no
   error or help notice.
+
+### Review follow-ups (CodeRabbit, 2026-11-26 review)
+
+- **Observer charge after a re-send**: `TurnTimeoutException` now carries the conversation the timed-out
+  turn ran in. An observer whose conversation had ended and whose re-sent turn outlived the window is
+  charged on the fresh conversation, measured from zero, instead of reading the ended one's spend twice.
+- **Late re-send keeps to the window**: the re-send of a deferred turn whose conversation had ended waits
+  at most what is left of the late-answer window (`LateWait.within`), the first wait included; with
+  nothing left, no fresh conversation is opened and the answer is counted `expired`. Before, the first
+  wait was always the full request timeout, so a request timeout longer than the window posted answers
+  after it.
+- **`outcome=posted` means Slack accepted it**: the delivery result travels back from
+  `postMessageChunked`; an answer Slack refused (`ok:false`), or only part of, is counted `failed`, and
+  nothing is replayed.
+- **Legacy raw-id mappings count as taking part**: the participation check also reads, for the exact
+  per-target thread intent only, a mapping still keyed by the raw Slack id (written before namespacing),
+  so such a thread revives and `openThreadConversation` re-keys it. A legacy-shaped id costs a second
+  read per target on the miss path ([`slack-integration.md`](../slack-integration.md) cost table).
+- **DM token fallback needs a DM**: `SlackHitlResumeObserver` borrows another app's token only for a
+  route whose channel id is a DM (`D…`). An ordinary channel whose integration was removed while the
+  approval was pending stays silent.
+- **Legacy connector matches its effective target**: `getBotTokenForTarget` counts a legacy connector
+  for its group when it has one, else its agent, as `toChannelTarget` routes it — a group connector no
+  longer makes its agent's DMs ambiguous.
+- Docs: the retry paragraph names the posts that retry (the event handler's text posts) and those that
+  do not; the cluster affinity paragraph matches "When the bot answers".
+- Tests: `FakeSlackApi.Call` records when each request arrived, so the Retry-After test measures the gap
+  between the two requests; the fresh-ts test compares the two returned timestamps.

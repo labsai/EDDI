@@ -1177,7 +1177,10 @@ public class ChannelTargetRouter {
         if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             for (var legacy : legacyMap.entrySet()) {
                 LegacyTarget connector = legacy.getValue();
-                if (!targetId.equals(connector.agentId()) && !targetId.equals(connector.groupId())) {
+                // The connector serves the target it routes to (toChannelTarget): its
+                // group when it has one, else its agent — never both, or a connector for
+                // group G would make every DM of agent A ambiguous.
+                if (!targetId.equals(connector.toChannelTarget().getTargetId())) {
                     continue;
                 }
                 if (connector.botToken() != null && !connector.botToken().isBlank()) {

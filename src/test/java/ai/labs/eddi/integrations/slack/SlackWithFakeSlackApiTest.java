@@ -44,6 +44,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -118,9 +120,12 @@ class SlackWithFakeSlackApiTest {
         void postMessageTsIsFresh() {
             var client = client(config(60, 3, 0));
 
-            assertNotNull(client.postMessage(AUTH, CHANNEL, null, "one"));
-            assertNotNull(client.postMessage(AUTH, CHANNEL, null, "two"));
+            String first = client.postMessage(AUTH, CHANNEL, null, "one");
+            String second = client.postMessage(AUTH, CHANNEL, null, "two");
 
+            assertNotNull(first);
+            assertNotNull(second);
+            assertNotEquals(first, second, "each post returns its own ts");
             assertEquals(List.of("one", "two"), slack.calls("chat.postMessage").stream().map(FakeSlackApi.Call::text).toList());
         }
 
@@ -314,13 +319,15 @@ class SlackWithFakeSlackApiTest {
             answersAtOnce("the answer");
             slack.nextRateLimited(1);
 
-            long start = System.nanoTime();
             mention("question two");
             waitFor(() -> slack.calls("chat.postMessage").size() >= 2);
-            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
 
-            assertEquals(2, slack.calls("chat.postMessage").size(), "one refused, one retry");
-            assertTrue(elapsedMillis >= 900, "the retry waited for Retry-After (1 s), not the 10 ms backoff: " + elapsedMillis);
+            var posts = slack.calls("chat.postMessage");
+            assertEquals(2, posts.size(), "one refused, one retry");
+            // Measured between the two requests as the fake received them, so a slow
+            // start of the handler task cannot stand in for the wait.
+            long gapMillis = TimeUnit.NANOSECONDS.toMillis(posts.get(1).receivedNanos() - posts.get(0).receivedNanos());
+            assertTrue(gapMillis >= 900, "the retry waited for Retry-After (1 s), not the 10 ms backoff: " + gapMillis);
         }
 
         // --- late answers ---
@@ -446,6 +453,51 @@ class SlackWithFakeSlackApiTest {
             assertEquals(2, postedTexts().size(), postedTexts().toString());
             assertTrue(postedTexts().get(1).contains("stopped waiting"), postedTexts().get(1));
             assertEquals(1.0, late("expired"));
+        }
+
+        @Test
+        @DisplayName("the re-sent turn's first wait is what is left of the window, not a fresh request timeout")
+        void resentTurnWaitsOnlyForTheRestOfTheWindow() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-1", URI.create("eddi://conv-1")))
+                    .thenReturn(new ConversationResult("conv-2", URI.create("eddi://conv-2")));
+            // A request timeout (3 s) longer than the late-answer window (1 s).
+            build(config(3, 1, 1));
+            holdsTheTurn();
+
+            mention("question on a dying conversation");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty()); // deferred: the notice is out
+            turns.getFirst().onSkipped(stateOnly(ConversationState.ENDED));
+            waitFor(() -> turns.size() == 2);
+            // Past the window, but inside a fresh 3 s request timeout.
+            Thread.sleep(1_800);
+            turns.get(1).onComplete(answer("an answer after the window"));
+            Thread.sleep(300);
+
+            assertFalse(postedTexts().contains("an answer after the window"), postedTexts().toString());
+            assertEquals(1.0, late("expired"));
+            assertEquals(0.0, late("posted"));
+        }
+
+        // --- a late answer Slack does not accept ---
+
+        @Test
+        @DisplayName("a late answer Slack refuses (ok:false) is counted as failed, not posted, and not replayed")
+        void lateAnswerRefusedBySlackIsCountedAsFailed() throws Exception {
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            mention("slow question");
+            waitFor(() -> !postedTexts().isEmpty());
+            waitFor(() -> pendingTurn.get() != null);
+            slack.nextError("channel_not_found");
+            pendingTurn.get().onComplete(answer("the late answer"));
+
+            waitFor(() -> late("failed") == 1.0);
+            assertEquals(0.0, late("posted"));
+            Thread.sleep(300);
+            assertEquals(2, slack.calls("chat.postMessage").size(), "the notice and the one refused answer — nothing replayed");
         }
 
         // --- a late pause ---
@@ -654,6 +706,35 @@ class SlackWithFakeSlackApiTest {
             assertTrue(postedTexts().isEmpty(), "nothing is posted for a turn nobody asked for: " + postedTexts());
             verify(router, never()).lockThreadTarget(any(), any(), any(), any());
             assertEquals(0.0, late("posted") + late("expired") + late("failed"), "observers do not take a late-answer slot");
+        }
+
+        @Test
+        @DisplayName("an observer whose conversation had ended: the re-sent turn that outlives the window is charged on the fresh conversation")
+        void observerResentTurnIsChargedToTheFreshConversation() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-1", URI.create("eddi://conv-1")))
+                    .thenReturn(new ConversationResult("conv-2", URI.create("eddi://conv-2")));
+            build(config(1, 1, 1));
+            holdsTheTurn();
+            observes();
+            Map<String, Double> costs = new ConcurrentHashMap<>(Map.of("conv-1", 0.05, "conv-2", 0.0));
+            when(toolCostTracker.getConversationCosts(anyString())).thenAnswer(inv -> {
+                var metrics = mock(ToolCostTracker.ConversationCostMetrics.class);
+                when(metrics.getTotalCost()).thenReturn(costs.getOrDefault((String) inv.getArgument(0), 0.0));
+                return metrics;
+            });
+
+            unaddressedMessage("the build is red again");
+            waitFor(() -> turns.size() == 1);
+            costs.put("conv-2", 0.10); // what the fresh conversation will have spent by the timeout
+            turns.getFirst().onSkipped(stateOnly(ConversationState.ENDED));
+            waitFor(() -> turns.size() == 2);
+            assertEquals(List.of("conv-1", "conv-2"), turnConversations);
+
+            verify(observeGate, timeout(5000)).addCost(eq("slack"), eq(CHANNEL), eq(observer), AdditionalMatchers.eq(0.10, 1e-9));
+            costs.put("conv-2", 0.35);
+            turns.get(1).onComplete(answer("too late to say"));
+            verify(observeGate, timeout(3000)).addCost(eq("slack"), eq(CHANNEL), eq(observer), AdditionalMatchers.eq(0.25, 1e-9));
         }
     }
 

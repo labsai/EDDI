@@ -108,7 +108,12 @@ public class SlackHitlResumeObserver {
         }
 
         String botToken = channelTargetRouter.getBotToken("slack", route.channelId());
-        if ((botToken == null || botToken.isBlank()) && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
+        // The fallback is for a DM only, and needs positive evidence that the route IS
+        // one: a Slack DM's conversation id starts with 'D'. An unowned channel may
+        // simply be one whose integration was removed while the approval was pending;
+        // another app serving the same agent must not post into it with its token.
+        if ((botToken == null || botToken.isBlank()) && isDirectMessageChannel(route.channelId())
+                && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
             botToken = dmBotToken(mapping, route, conversationId);
             if (botToken == null) {
                 return;
@@ -187,6 +192,16 @@ public class SlackHitlResumeObserver {
             return null;
         }
         return token;
+    }
+
+    /**
+     * Whether {@code channelId} is a direct message. Slack gives a DM's
+     * conversation an id starting with {@code D} (public channels {@code C},
+     * private channels and group DMs {@code G} or {@code C}); the stored route
+     * carries nothing else that says "DM".
+     */
+    static boolean isDirectMessageChannel(String channelId) {
+        return channelId != null && channelId.length() > 1 && channelId.charAt(0) == 'D';
     }
 
     private static boolean isError(SimpleConversationMemorySnapshot snapshot) {

@@ -277,7 +277,7 @@ What an unmentioned thread reply costs EDDI, per reply:
 | Reply | Work |
 |---|---|
 | In a thread the bot takes part in | One thread-lock read (a KV read in a cluster), then the turn |
-| Ignored, the first time for this person in this thread | One thread-lock read, a memory lookup, and one database read per target of the channel's integration plus one for a group follow-up |
+| Ignored, the first time for this person in this thread | One thread-lock read, a memory lookup, and one database read per target of the channel's integration plus one for a group follow-up — two per target for a Slack user id that may still own a mapping written before user ids were namespaced (the raw id is looked up too, so such a thread still revives) |
 | Ignored again, by the same person in the same thread within 5 minutes | One thread-lock read and a memory lookup — no database read |
 
 "This person has no part in this thread" is remembered on the node for 5 minutes (at most 10,000 entries); it is checked only after the lock, so a mention in the thread — on any node — takes effect at once, and it is forgotten on every node as soon as a conversation for that person and thread is started.
@@ -573,7 +573,7 @@ earlier with one gets approval cards without buttons until it is renamed). See
 
 ### Retry Logic
 
-All Slack API calls use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Failed messages are logged but don't crash the event handler.
+The text messages the **event handler** posts — answers, notices, the help text — use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Those two settings apply to nothing else: the other posts (listed below) make one attempt, so raising them does not recover, for example, the outcome of an approval that Slack refused. Failed messages are logged but don't crash the event handler.
 
 When Slack rate-limits a message the event handler posts (an answer, a notice, the help text — HTTP 429), EDDI waits for the `Retry-After` Slack names before the next attempt instead of its own shorter backoff — at most 30 seconds, so a worker is never parked for long; a longer request is waited out for 30 seconds and tried again. A `Retry-After` that is not a number of seconds is ignored. Approval cards, the messages of a group discussion and the outcome of a resumed approval are posted once and not retried after a 429.
 
@@ -619,7 +619,7 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 
 2. **Conversation State**: Conversations are stored in the database and every turn takes the conversation's cluster-wide lease, so any replica handles a follow-up message, in order.
 
-3. **Group Discussion Affinity**: A group discussion runs on the replica that received the trigger, and `SlackGroupDiscussionListener` streams from there directly to the Slack API. Follow-up context is cached on that replica: a follow-up routed to a different replica falls back to a standard conversation (no context injection, but no error). Routing follow-ups to the discussion's replica is not implemented.
+3. **Group Discussion Affinity**: A group discussion runs on the replica that received the trigger, and `SlackGroupDiscussionListener` streams from there directly to the Slack API. Follow-up context is cached on that replica, so an unmentioned reply under an agent's message that reaches a different replica is handled as described in [When the bot answers](#when-the-bot-answers): a person who has already followed up in that thread has a stored follow-up conversation, which is continued with the same agent; anyone else's first unmentioned reply there is ignored (that replica holds no group listener, no thread lock and no mapping for them) and they must mention the bot. Routing follow-ups to the discussion's replica is not implemented.
 
 4. **When NATS is unreachable**: deduplication degrades to the replica's own cache, so a Slack retry that lands on another replica may be answered twice; the rest keeps working as described in [Clustering](clustering.md).
 
