@@ -198,6 +198,61 @@ describe("OperatorPage — upgrading an out-of-date operator", () => {
     await waitFor(() => expect(calls.activate).toHaveLength(1));
   });
 
+  /**
+   * The regression this block exists for: operators whose instructions were cut
+   * down to fit 6.7.0's 100k setup-api cap carry `promptBodyIsDefault: false`,
+   * and the dialog used to preselect KEEP for them — so a click-through kept a
+   * shortened prompt and installed none of what the upgrade was for.
+   */
+  describe("instructions that are only a trimmed or older default", () => {
+    const scope = "read_write" as const;
+    /** Today's default with whole sections cut out, as an admin trimming for the cap did. */
+    function trimmedDefault(): string {
+      const lines = defaultOperatorPromptBody(scope).split("\n");
+      return lines.filter((_, i) => i % 3 !== 0).join("\n");
+    }
+    /** Lines from a real earlier shipped default that today's no longer has. */
+    const OLDER_DEFAULT_LINES = [
+      "deployment lists nothing. With workspaces enforced, `published` and",
+      "switch in the agent's page or the group's panel in the manager.",
+    ];
+
+    it("preselects Replace and says why when the text only removes lines", async () => {
+      serve(legacyConfig({ scope, promptBody: trimmedDefault(), promptBodyIsDefault: false, provisionedRevision: 1 }));
+      renderWithProviders(<OperatorPage />);
+      await userEvent.click(await screen.findByTestId("operator-upgrade-start"));
+
+      expect(await screen.findByTestId("operator-upgrade-use-default")).toBeChecked();
+      expect(screen.getByTestId("operator-upgrade-lineage")).toHaveAttribute("data-lineage", "only-removes");
+      expect(screen.queryByTestId("operator-upgrade-review")).not.toBeInTheDocument();
+      // A click-through installs the new default.
+      await userEvent.click(screen.getByRole("button", { name: /upgrade now/i }));
+      await waitFor(() => expect(calls.activate).toHaveLength(1));
+      expect((calls.activate[0] as ActivateParams).config.promptBody).toBe(defaultOperatorPromptBody(scope));
+    });
+
+    it("preselects Replace when the only additions are an earlier default's wording", async () => {
+      const body = `${OLDER_DEFAULT_LINES.join("\n")}\n${trimmedDefault()}`;
+      serve(legacyConfig({ scope, promptBody: body, promptBodyIsDefault: false, provisionedRevision: 1 }));
+      renderWithProviders(<OperatorPage />);
+      await userEvent.click(await screen.findByTestId("operator-upgrade-start"));
+
+      expect(await screen.findByTestId("operator-upgrade-use-default")).toBeChecked();
+      expect(screen.getByTestId("operator-upgrade-lineage")).toHaveAttribute("data-lineage", "older-default");
+    });
+
+    it("keeps Keep preselected when a single line is the admin's own", async () => {
+      const body = `${trimmedDefault()}\nAlways answer in French.`;
+      serve(legacyConfig({ scope, promptBody: body, promptBodyIsDefault: false, provisionedRevision: 1 }));
+      renderWithProviders(<OperatorPage />);
+      await userEvent.click(await screen.findByTestId("operator-upgrade-start"));
+
+      expect(await screen.findByTestId("operator-upgrade-keep-current")).toBeChecked();
+      expect(screen.getByTestId("operator-upgrade-lineage")).toHaveAttribute("data-lineage", "edited");
+      expect(screen.getByTestId("operator-upgrade-review")).toBeInTheDocument();
+    });
+  });
+
   it("opens the prefilled form when the key was plain text and cannot be reused", async () => {
     serve(legacyConfig({ credentialKey: null }));
     renderWithProviders(<OperatorPage />);

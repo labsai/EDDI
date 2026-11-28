@@ -20,6 +20,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
@@ -193,9 +194,22 @@ public class RestConversationStore implements IRestConversationStore {
      * Field-injected like the vault above, so constructing the resource directly
      * (tests) still works — {@link #purgeService()} then builds one over the same
      * collaborators.
+     * <p>
+     * That hand-built service gets {@link #erasureGuard}. It cannot be reached in
+     * the running application: the field is a plain {@code @Inject}, which CDI
+     * always satisfies or fails startup, so only a test that constructs this
+     * resource with {@code new} ever sees null.
      */
     @Inject
     ConversationPurgeService conversationPurgeService;
+
+    /**
+     * The erasure guarantee, handed to a {@link #purgeService()} built by hand. A
+     * test that constructs this resource with {@code new} and leaves it null gets a
+     * purge service that refuses every permanent delete, rather than one that
+     * deletes without the guarantee.
+     */
+    ErasureGuard erasureGuard;
 
     /**
      * Field-injected like the other late additions, so the unit tests that build
@@ -1208,24 +1222,19 @@ public class RestConversationStore implements IRestConversationStore {
         var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
         var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
 
+        // First decide what goes, then give all of it the erasure guarantee in one
+        // pass — one tombstone write and one drain barrier on every node, then the
+        // delete and verification of each conversation's async-written rows (alert
+        // events) — and only then delete. A conversation the guarantee could not be
+        // given for is kept, whole, for the next run, as a failed vault or dependent
+        // delete keeps it below. (An orphaned snapshot has no age to go by, so "ended
+        // long ago, nothing can still be queued" would not cover it.)
+        Map<String, ArchiveRetention> toDelete = new LinkedHashMap<>();
         for (var endedConversationId : endedConversationIds) {
             try {
                 var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, CONVERSATION_DESCRIPTOR_VERSION);
                 if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
-                    if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
-                        continue; // kept, with its secret references, for the next run
-                    }
-                    // The dependent data before anything that makes the conversation
-                    // findable: the descriptors and the snapshot are what the next run
-                    // (and a user erasure) find it by, so a failed delete keeps them.
-                    if (!deleteDependentDataForConversation(endedConversationId)) {
-                        continue;
-                    }
-                    deleteChannelMappingsForConversation(endedConversationId);
-                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
-                    conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
-                    conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    amountOfEndedConversations++;
+                    toDelete.put(endedConversationId, null);
                 }
             } catch (ResourceNotFoundException e) {
                 // No live descriptor. A soft-deleted conversation still has its
@@ -1235,10 +1244,38 @@ public class RestConversationStore implements IRestConversationStore {
                 // however recently it was active. Only a snapshot with no descriptor
                 // at all (live or archived) is an orphan to remove straight away.
                 var archive = archiveRetention(endedConversationId, deleteOlderThanThisDate);
+                if (archive != ArchiveRetention.WITHIN_RETENTION) {
+                    toDelete.put(endedConversationId, archive);
+                }
+            }
+        }
+        Map<String, String> notErased = purgeService().eraseAsyncWrittenData(toDelete.keySet());
+
+        for (var entry : toDelete.entrySet()) {
+            var endedConversationId = entry.getKey();
+            if (notErased.containsKey(endedConversationId)) {
+                continue; // kept for the next run; the reason was logged
+            }
+            var archive = entry.getValue();
+            if (archive == null) {
+                if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
+                    continue; // kept, with its secret references, for the next run
+                }
+                // The dependent data before anything that makes the conversation
+                // findable: the descriptors and the snapshot are what the next run
+                // (and a user erasure) find it by, so a failed delete keeps them.
+                if (!deleteDependentDataForConversation(endedConversationId)) {
+                    continue;
+                }
+                deleteChannelMappingsForConversation(endedConversationId);
+                documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                amountOfEndedConversations++;
+            } else {
                 // The vault slots go first: the snapshot about to be deleted holds the
                 // only references to them.
-                if (archive == ArchiveRetention.WITHIN_RETENTION || !deleteAutoVaultedSecretsForConversation(endedConversationId)
-                        || !deleteDependentDataForConversation(endedConversationId)) {
+                if (!deleteAutoVaultedSecretsForConversation(endedConversationId) || !deleteDependentDataForConversation(endedConversationId)) {
                     continue;
                 }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
@@ -1531,8 +1568,10 @@ public class RestConversationStore implements IRestConversationStore {
         if (conversationPurgeService != null) {
             return conversationPurgeService;
         }
-        return new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore, conversationService,
+        var handBuilt = new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore, conversationService,
                 autoVaultedSecretsInstance, attachmentStorageInstance);
+        handBuilt.useErasureGuard(erasureGuard);
+        return handBuilt;
     }
 
     /**

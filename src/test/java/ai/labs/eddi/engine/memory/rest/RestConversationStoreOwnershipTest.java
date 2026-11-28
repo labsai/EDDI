@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.engine.gdpr.erasure.TestErasureGuards;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceFilter;
@@ -145,9 +146,11 @@ class RestConversationStoreOwnershipTest {
         if (maintainer) {
             lenient().doReturn(true).when(guard).canReview(any());
         }
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     private RestConversationStore asOwner() {
@@ -315,6 +318,7 @@ class RestConversationStoreOwnershipTest {
         var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        store.erasureGuard = TestErasureGuards.withoutWriters();
 
         assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));
         verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
@@ -334,9 +338,11 @@ class RestConversationStoreOwnershipTest {
         lenient().when(identity.isAnonymous()).thenReturn(false);
         lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     private void legacySnapshotOwnedBy(String conversationId, String ownerId) throws Exception {
@@ -880,9 +886,11 @@ class RestConversationStoreOwnershipTest {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(true);
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(false), mock(IConversationDescriptorStore.class));
-        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+        var built = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        built.erasureGuard = TestErasureGuards.withoutWriters();
+        return built;
     }
 
     @Test
@@ -975,6 +983,7 @@ class RestConversationStoreOwnershipTest {
         var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
+        store.erasureGuard = TestErasureGuards.withoutWriters();
         firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", "anonymous-0a1b"), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = store.readConversationDescriptors(0, 20, null, null, null, null, null, null, true);
