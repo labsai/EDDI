@@ -74,11 +74,18 @@ class EmailTriggerModeSendsNothingTest {
     /** Composing outbound mail. */
     private static final Pattern COMPOSING = Pattern.compile("PlainTextMailRenderer|OutboundMail\\b");
     private static final Set<String> COMPOSING_ALLOWED = Set.of("EmailOwnerNotifier.java", "HitlEmailNotifier.java", "EmailReplyComposer.java",
-            "EmailReplySender.java");
+            "EmailReplySender.java",
+            // The sending-health self-test (v3 plan 6.5): one mail from the mailbox to
+            // itself, never to a sender.
+            "EmailSelfTest.java");
 
     /** Handing bytes to a channel transport. */
-    private static final Pattern TRANSPORT_SEND = Pattern.compile("transport\\.send\\s*\\(");
-    private static final Set<String> TRANSPORT_SEND_ALLOWED = Set.of("EmailReplySender.java");
+    private static final Pattern TRANSPORT_SEND = Pattern.compile("transport\\.send\\w*\\s*\\(");
+    /**
+     * The reply sender ({@code sendMail}) and the self-test ({@code sendSelfTest},
+     * to the mailbox itself only).
+     */
+    private static final Set<String> TRANSPORT_SEND_ALLOWED = Set.of("EmailReplySender.java", "EmailSelfTest.java");
 
     private static List<String> offenders(Pattern pattern, Set<String> allowed) throws IOException {
         List<String> offenders = new ArrayList<>();
@@ -149,6 +156,8 @@ class EmailTriggerModeSendsNothingTest {
         assertFalse(SMTP.matcher("SafeSocketConnector.Protocol.IMAP; MailTransport transport;").find());
         assertTrue(COMPOSING.matcher("new OutboundMail(from").find());
         assertTrue(TRANSPORT_SEND.matcher("transport.send(row.integrationId()").find());
+        assertTrue(TRANSPORT_SEND.matcher("transport.sendMail(row.integrationId()").find());
+        assertTrue(TRANSPORT_SEND.matcher("transport.sendSelfTest(integrationId").find());
         assertFalse(TRANSPORT_SEND.matcher("mailer.send(rendered").find());
     }
 }

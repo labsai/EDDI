@@ -556,7 +556,96 @@ public class ConnectionResolver {
             case STATIC -> staticCredential(connection, targetUrl);
             case BASIC -> basicCredential(connection, targetUrl);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE, OAUTH2_JWT_BEARER -> oauthCredential(connection, principalOverride);
+            // A signing key is never a header value: resolving one here would put the
+            // private key into an outbound request.
+            case SMIME_SIGNING -> throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is SMIME_SIGNING: it holds a mail signing certificate, which only an email "
+                            + "integration's transport may use (emailControl.smime.connection). It cannot authenticate an HTTP, MCP or "
+                            + "mail login.");
         };
+    }
+
+    /**
+     * The certificate and key material of an {@code SMIME_SIGNING} connection, as
+     * resolved from the vault. {@link #toString()} prints neither value.
+     *
+     * @param certificate
+     *            a base64 PKCS#12 keystore, or PEM text with the key and chain
+     * @param password
+     *            the keystore or key password, or null
+     */
+    public record SmimeMaterial(String connectionName, String certificate, String password) {
+        @Override
+        public String toString() {
+            return "SmimeMaterial[connection=" + connectionName + "]";
+        }
+    }
+
+    /**
+     * Resolves the signing material of an {@code SMIME_SIGNING} connection for mail
+     * submitted to {@code smtpOrigin} — the one path that may resolve this type.
+     * The connection's {@code baseUrlAllowlist} must name that SMTP origin, and the
+     * vault secrets behind it are held to their own {@code allowedHosts} with the
+     * relay as the destination, exactly as a mail login's password is.
+     *
+     * @throws ConnectionException
+     *             on every failure; never returns null
+     */
+    public SmimeMaterial resolveSmimeSigning(String reference, URI smtpOrigin) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            requireSmimeSigning(connection);
+            requireTargetAllowed(connection, smtpOrigin);
+            var smime = connection.getSmimeSigning();
+            String destination = smtpOrigin.toString();
+            String certificate = credentialReferenceResolver.resolveVaultBackedFor(smime.getCertificate(), destination, connection.getName(),
+                    "smimeSigning.certificate");
+            String password = smime.getPassword() == null || smime.getPassword().isBlank()
+                    ? null
+                    : credentialReferenceResolver.resolveVaultBackedFor(smime.getPassword(), destination, connection.getName(),
+                            "smimeSigning.password");
+            record(connection, "success", sample);
+            return new SmimeMaterial(connection.getName(), certificate, password);
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    /**
+     * Save-time check of a signing connection, without resolving any secret: it
+     * exists, is {@code SMIME_SIGNING} with a certificate reference, and its
+     * {@code baseUrlAllowlist} names {@code smtpOrigin}.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireSmimeSigningTarget(String reference, URI smtpOrigin) {
+        ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        requireSmimeSigning(connection);
+        requireTargetAllowed(connection, smtpOrigin);
+    }
+
+    private static void requireSmimeSigning(ConnectionConfiguration connection) {
+        if (connection.getAuthType() != AuthType.SMIME_SIGNING) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is " + connection.getAuthType() + ", not SMIME_SIGNING, so it holds no mail "
+                            + "signing certificate.");
+        }
+        if (connection.getSmimeSigning() == null || connection.getSmimeSigning().getCertificate() == null
+                || connection.getSmimeSigning().getCertificate().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is SMIME_SIGNING but has no smimeSigning.certificate. Re-save the connection "
+                            + "to apply the current validation rules.");
+        }
     }
 
     /**

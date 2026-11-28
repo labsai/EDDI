@@ -206,6 +206,44 @@ The Manager's **New connection** dialog offers both shapes as templates
 are JSON files under `ui/manager/src/lib/connection-presets/`, not code — a template
 only pre-fills the form, and the document it produces is validated like any other.
 
+### An S/MIME signing certificate
+
+`SMIME_SIGNING` is the one connection type that authenticates nothing over the network: it holds the certificate and
+private key an [email integration](email-integration.md#smime-signing) signs its outgoing mail with. Nothing is sent to
+a server — the key signs inside EDDI, and only the public certificate travels in the signature.
+
+```json
+{
+  "name": "agent-smime",
+  "authType": "SMIME_SIGNING",
+  "binding": "SERVICE",
+  "smimeSigning": {
+    "certificate": "${vault:agent-smime-p12}",
+    "password": "${vault:agent-smime-password}"
+  },
+  "baseUrlAllowlist": ["smtp://smtp.office365.com:587"]
+}
+```
+
+- `smimeSigning.certificate` is a `${vault:…}` reference to either a **PKCS#12 keystore, base64-encoded**, or **PEM
+  text** with the private key (PKCS#8, PKCS#1 or SEC1, optionally encrypted) followed by the certificate chain.
+  `smimeSigning.password` (optional, also a reference) unlocks the keystore or an encrypted key. Literals are refused,
+  as for every secret-bearing field.
+- `binding` is `SERVICE` only: the certificate belongs to a mailbox, and the email transport uses it outside any
+  conversation.
+- `baseUrlAllowlist` names the **SMTP relays** whose mail it may sign (`smtps://<host>` or `smtp://<host>:587`); an
+  http origin is refused. The vault secrets behind it are held to their own `allowedHosts` with that relay as the
+  destination, exactly as a mail login's password is. Agent grants (`allowedAgents`) do not apply: no agent resolves
+  this connection.
+- It is resolved **only** by the email transport (`emailControl.smime.connection`). Every other path —
+  `${connection:…}` in an HTTP call, an MCP server, a mail login, XOAUTH2 — refuses it with `UNSUPPORTED_PLACEMENT`,
+  so the key can never leave as a header.
+- Whether the certificate fits the mailbox (address, key usages, expiry, chain) is checked by the integration that names
+  it, at save time and daily — see [S/MIME signing](email-integration.md#smime-signing). Ship the intermediate
+  certificates with the leaf; the root may be left out (the usual `.p12` of an S/MIME-only CA): such a chain signs, with
+  a warning, because whether to trust the root is each recipient's decision. Prefer a **signing-only** certificate
+  (no `keyEncipherment`): EDDI cannot read mail encrypted to it.
+
 ### Per-end-user OAuth
 
 ```json

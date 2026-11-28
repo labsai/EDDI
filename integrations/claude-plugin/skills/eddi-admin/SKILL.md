@@ -195,7 +195,11 @@ audit trail → server log → the configuration that produced it. Follow
   true, to the mail's single Reply-To instead). Its credential is a
   connection name whose allowlist names the IMAP (and SMTP) origin, and the result's `warnings`
   (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
-  `email.honor-reply-to`) are worth relaying. Where a helpdesk already owns the mailbox, use a
+  `email.honor-reply-to`, `email.smime-no-certificate`, `email.smime-certificate-expiring`) are
+  worth relaying. Mail it sends is S/MIME-signed when `emailControl.smime.connection` names an
+  `SMIME_SIGNING` connection and signing is not switched off (`sign: false` sends it unsigned; `sign: "required"` holds mail rather than send it unsigned). To check
+  that the provider DKIM-signs the domain, run `run_email_self_test` (no token: start; then call it
+  again with the returned token for the findings). Where a helpdesk already owns the mailbox, use a
   `webhook` channel instead. `read_docs("email-integration")`.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are

@@ -181,6 +181,9 @@ public class ConnectionConfiguration {
 
     private OAuthConfig oauth;
 
+    /** The {@link AuthType#SMIME_SIGNING} block; null for every other type. */
+    private SmimeSigningConfig smimeSigning;
+
     /**
      * Origins this connection's credential may be sent to. A list because one
      * provider's credential legitimately spans hosts (Google:
@@ -229,15 +232,52 @@ public class ConnectionConfiguration {
         }
         if (authType == null) {
             throw new IllegalArgumentException(
-                    "authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS, OAUTH2_JWT_BEARER or OAUTH2_AUTHORIZATION_CODE).");
+                    "authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS, OAUTH2_JWT_BEARER, OAUTH2_AUTHORIZATION_CODE or "
+                            + "SMIME_SIGNING).");
         }
         validateBinding();
         validateUnverifiedPrincipalFlag();
         validateAllowlist();
         validateTimeout();
+        if (authType != AuthType.SMIME_SIGNING && smimeSigning != null) {
+            throw new IllegalArgumentException("smimeSigning belongs to authType SMIME_SIGNING; on a " + authType + " connection it would "
+                    + "never be used. Remove it.");
+        }
         switch (authType) {
             case STATIC, BASIC -> validateStaticAuth();
+            case SMIME_SIGNING -> validateSmimeSigning();
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE, OAUTH2_JWT_BEARER -> validateOAuth();
+        }
+    }
+
+    /**
+     * {@link AuthType#SMIME_SIGNING}: a {@code smimeSigning} block whose
+     * {@code certificate} is a vault reference and whose optional {@code password}
+     * is one too; no header, OAuth or BASIC field (they would read as load-bearing
+     * and never be used). The allowlist entries must be SMTP origins: signed mail
+     * is only ever submitted to a mail relay, so an http origin here could only be
+     * a mistake.
+     */
+    private void validateSmimeSigning() {
+        if (smimeSigning == null) {
+            throw new IllegalArgumentException("authType SMIME_SIGNING requires a smimeSigning block with certificate (a ${vault:…} "
+                    + "reference to a base64 PKCS#12 keystore, or to PEM text with the private key and the certificate chain) and, "
+                    + "optionally, password.");
+        }
+        requireReference(smimeSigning.getCertificate(), "smimeSigning.certificate");
+        if (smimeSigning.getPassword() != null && !smimeSigning.getPassword().isBlank()) {
+            requireReference(smimeSigning.getPassword(), "smimeSigning.password");
+        }
+        if (staticAuth != null || oauth != null) {
+            throw new IllegalArgumentException("authType SMIME_SIGNING takes only a smimeSigning block: a staticAuth or oauth block would "
+                    + "never be used. Remove it.");
+        }
+        for (String origin : baseUrlAllowlist) {
+            String scheme = URI.create(requireCanonicalAllowlistOrigin(origin, "baseUrlAllowlist")).getScheme();
+            if (!"smtp".equals(scheme) && !"smtps".equals(scheme)) {
+                throw new IllegalArgumentException("baseUrlAllowlist of an SMIME_SIGNING connection names the SMTP relays whose mail it may "
+                        + "sign (smtps://<host> or smtp://<host>:587); got: " + origin);
+            }
         }
     }
 
@@ -255,6 +295,10 @@ public class ConnectionConfiguration {
      * anywhere naming the cause.
      */
     private void validateBinding() {
+        if (authType == AuthType.SMIME_SIGNING && binding != Binding.SERVICE) {
+            throw new IllegalArgumentException("authType SMIME_SIGNING requires binding SERVICE. The certificate belongs to a mailbox, "
+                    + "not to the person a turn runs for, and it is used by the email transport outside any conversation.");
+        }
         if (authType == AuthType.OAUTH2_JWT_BEARER && binding != Binding.SERVICE) {
             throw new IllegalArgumentException("authType OAUTH2_JWT_BEARER requires binding SERVICE. The assertion is signed with one "
                     + "key that belongs to the deployment, so the token it buys is the same for everybody; acting as an individual "
@@ -1061,6 +1105,14 @@ public class ConnectionConfiguration {
 
     public void setOauth(OAuthConfig oauth) {
         this.oauth = oauth;
+    }
+
+    public SmimeSigningConfig getSmimeSigning() {
+        return smimeSigning;
+    }
+
+    public void setSmimeSigning(SmimeSigningConfig smimeSigning) {
+        this.smimeSigning = smimeSigning;
     }
 
     public List<String> getBaseUrlAllowlist() {

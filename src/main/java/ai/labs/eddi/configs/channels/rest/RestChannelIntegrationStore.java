@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -23,6 +24,7 @@ import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
 import ai.labs.eddi.integrations.channels.ChannelTypeDescriptor;
 import ai.labs.eddi.integrations.channels.ChannelTypeRegistry;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.EmailSelfTest;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -36,6 +38,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -470,11 +473,37 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 : Response.status(Response.Status.NOT_FOUND).build();
     }
 
+    @Override
+    public EmailSelfTestResult startEmailSelfTest(String id) {
+        ChannelIntegrationConfiguration current = requireEmailIntegrationForEdit(id);
+        try {
+            return emailSupport().startSelfTest(id, current);
+        } catch (EmailSelfTest.Refused e) {
+            if (e.rateLimited()) {
+                throw new WebApplicationException(e.getMessage(),
+                        Response.status(TOO_MANY_REQUESTS).header("Retry-After", "3600").entity(e.getMessage()).build());
+            }
+            throw new BadRequestException(e.getMessage());
+        }
+    }
+
+    @Override
+    public EmailSelfTestResult readEmailSelfTest(String id, String token) {
+        requireEmailIntegrationForEdit(id);
+        return emailSupport().readSelfTest(id, token).orElseThrow(() -> new NotFoundException("No self-test with this token for " + id + "."));
+    }
+
+    /** 429. */
+    private static final int TOO_MANY_REQUESTS = 429;
+
     /**
-     * The suppression list belongs to the integration: whoever may edit it may read
-     * and clear it. A channel that is not an email integration has none (404).
+     * The suppression list and the self-test belong to the integration: whoever may
+     * edit it may use them. A channel that is not an email integration has neither
+     * (404).
+     *
+     * @return the integration's current version
      */
-    private void requireEmailIntegrationForEdit(String id) {
+    private ChannelIntegrationConfiguration requireEmailIntegrationForEdit(String id) {
         restVersionInfo.requireEditAccess(id);
         ChannelIntegrationConfiguration current;
         try {
@@ -487,6 +516,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (!isEmail(current)) {
             throw new NotFoundException("Channel integration " + id + " is not an email integration.");
         }
+        return current;
     }
 
     @Override
@@ -595,6 +625,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
         if (WebhookChannelSettings.CHANNEL_TYPE.equals(descriptor.id())) {
             requireUsableWebhookSecret(config.getPlatformConfig());
+        }
+        boolean email = EmailChannelSettings.CHANNEL_TYPE.equals(descriptor.id());
+        if (!email && config.getEmailControl() != null) {
+            // emailControl holds email-only settings (S/MIME, sender and approval
+            // policies); on another channel type it would read as if it did something.
+            throw new BadRequestException("emailControl applies to email integrations only (channelType 'email'); remove it from this '"
+                    + channelType + "' integration.");
+        }
+        if (email) {
+            // The descriptor checked platformConfig alone; this adds the rules that read
+            // emailControl too.
+            List<String> emailErrors = EmailChannelSettings.validate(config);
+            if (!emailErrors.isEmpty()) {
+                throw new BadRequestException(String.join(" ", emailErrors));
+            }
         }
         if (channelCredentials != null) {
             List<String> connectionErrors = channelCredentials.validateForSave(descriptor, config.getPlatformConfig());

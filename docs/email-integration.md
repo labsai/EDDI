@@ -203,6 +203,15 @@ conversation integration, which always keeps a thread in one conversation.
 | `maxTurnsPerSenderPerDay` | `50` | Turns one sender address may start per UTC day; over it, the sender's further mail waits for the next day. `0` = no limit |
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
 | `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
+| `smtpHost` | *(none; required in conversation mode)* | The SMTP submission server. In trigger mode it is optional and used **only** for the [self-test](#sending-health-self-test): a trigger-mode integration still never replies. The connection's `baseUrlAllowlist` must then also name `smtp://<smtpHost>:587` or `smtps://<smtpHost>` |
+| `smtpPort` | `587` | `587` (STARTTLS, required — never a plaintext login) or `465` (TLS) |
+| `fromName` | *(none)* | Display name of the mail the integration sends; the address is `address`. At most 100 characters |
+
+Settings that a flat string map cannot hold — nested objects and lists — live in **`emailControl`**, an object next to
+`platformConfig` on the integration ([S/MIME signing](#smime-signing) is its first section; the sender, review and
+approval policies of later phases join it). It is valid on email integrations only (anywhere else: 400), its fields are
+all optional with the defaults below, and a typo in it is refused like an unknown key. It is stored with the integration
+in both datastores. Channel integrations are not part of a ZIP export, so it travels the way the integration does.
 
 Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
@@ -403,8 +412,10 @@ inbound sweep re-creates it.
 for a delivery report that applied to a reply), `eddi_email_poll_duration_seconds{…,outcome}`,
 `eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}` (`requeued`, `lost`, `done`,
 `failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`, `eddi_email_poll_marked_total{result}`, `eddi_email_dns_lookups_total` and the `eddi_email_ledger_pending` gauge (see [metrics.md](metrics.md) for the full list).
-Conversation mode adds `eddi_email_outbound_total{kind="reply",outcome}` (`sent`, `retry`, `failed`, `suppressed`,
-`throttled`, `refused`, `bounced`, `no_output`), `eddi_email_outbound_latency_seconds{kind="reply"}` and
+Conversation mode adds `eddi_email_outbound_total{kind="reply",outcome,signed}` (`sent`, `retry`, `failed`, `suppressed`,
+`throttled`, `refused`, `bounced`, `no_output`, `held` — S/MIME required and impossible; `signed` is `true` only for a
+message that left S/MIME-signed), the self-test's `eddi_email_outbound_total{kind="self_test"}`, the gauge
+`eddi_email_smime_certificate_days_left{integration}`, `eddi_email_outbound_latency_seconds{kind="reply"}` and
 `eddi_email_suppressions_total{reason}`. Described in [metrics.md](metrics.md), charted in the Full Metrics dashboard's
 Integrations row.
 
@@ -418,6 +429,109 @@ Integrations row.
 - A mail resubmitted after a crash needs the mail still in the polled or move folder, with a real Message-ID.
 - Up to `eddi.email.poll.max-messages-per-poll × 20` envelopes are listed per poll; a backlog of mail deferred
   beyond that waits until the deferred mail settles.
+
+## S/MIME signing
+
+Mail the integration sends through **its own SMTP relay** — replies, pause notices and the [self-test](#sending-health-self-test)
+— is S/MIME-signed by default once a signing certificate is configured: a clear-signed `multipart/signed` message
+(detached `application/pkcs7-signature`, SHA-256; RSA PKCS#1 v1.5 or ECDSA by the key's type). The recipient's mail
+client shows it as signed by the mailbox, the signature survives forwarding, and a client without S/MIME still shows the
+text. It is signed immediately before SMTP submission, after the body is final. Owner notices, digests and HITL
+notifications go through the deployment's system mailer and are **not** signed.
+
+The signed text part is always **quoted-printable** (or base64). Replies are `format=flowed`, which ends every
+soft-wrapped line in a space; sent as `7bit`, a relay that strips trailing whitespace would change the signed bytes
+and break the signature, and the part cannot be re-encoded after signing (RFC 1847). So EDDI re-encodes a `7bit` or
+`8bit` text part as quoted-printable before it signs: a trailing space travels as `=20` (RFC 3676 §4.2), and the
+recipient sees the same text.
+
+The signature carries **no `SMIMECapabilities`** attribute. That attribute tells a correspondent's client which
+encryption algorithms the signer can decrypt, and EDDI never decrypts mail: an encrypted reply would reach the agent as
+an unreadable attachment. A client can still encrypt to a certificate it collected from a signature, so prefer a
+**signing-only certificate** (key usage `digitalSignature`/`nonRepudiation`, without `keyEncipherment`), to which no
+client encrypts.
+
+```json
+{
+  "channelType": "email",
+  "platformConfig": { "mode": "conversation", "address": "agent@contoso.com", "smtpHost": "smtp.office365.com", "...": "..." },
+  "emailControl": { "smime": { "sign": "required", "connection": "agent-smime" } }
+}
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `emailControl.smime.sign` | `true` | `true`: sign when a signing connection is named; without one the mail goes out unsigned and the save warns `email.smime-no-certificate`, so upgrades and quick setups keep working. `"required"`: **never send unsigned** — a missing, expired, mismatched or unreadable certificate holds the outgoing mail (the ledger row waits with reason `smime_unavailable`, is tried again hourly without using up its attempts, and the owners are told once a day), and saving with an unusable certificate is refused. A reply still held `eddi.email.smime.max-hold` (default `72h`) after it was written is given up: `FAILED` with reason `smime_unavailable:expired`, an audit entry, and a final owner notice `smime_hold_expired` — it is never deleted silently by the ledger retention. `false`: never sign. Any other value is refused on a REST or MCP write; in a stored document (written by hand or a later version) it reads as `true`, with a WARN, so the integration still loads |
+| `emailControl.smime.connection` | *(none)* | Name of a connection of auth type [`SMIME_SIGNING`](connections.md#an-smime-signing-certificate) holding the certificate and key |
+
+Under `true`, a configured certificate that cannot sign (expired, say) does not stop mail: it goes out unsigned, the
+save warns `email.smime-certificate-unusable` and the daily check tells the owners.
+
+**The certificate** is a credential, so it lives on a connection, never in these settings. It must fit the mailbox,
+checked when the integration is saved and again every day (`eddi.email.smime.check-interval`, default `24h`):
+
+- an `rfc822Name` subject alternative name — or, without one, the subject's e-mail attribute — equals `address`
+  (compared normalised). A certificate for another address is refused under `required` and a warning otherwise;
+- key usage, when present, includes `digitalSignature` or `nonRepudiation` (either is enough, RFC 8550 §4.4.2);
+  extended key usage, when present, includes `emailProtection`;
+- it is valid now. Within 30 days of expiry the save warns `email.smime-certificate-expiring`, the owners get the notice
+  `certificate_expiring` once a day, and `eddi_email_smime_certificate_days_left{integration}` shows the days left;
+- its chain is sound. Best, it builds to a root in the JDK trust store. A bundle that builds from the leaf through
+  its intermediate(s) to a root that is **not** in the JDK trust store — shipped with the bundle, or absent from it, as
+  in the usual `.p12` of an S/MIME-only CA (leaf and intermediate, no root) — still signs, with the warning
+  `email.smime-untrusted-chain`. A chain is refused (`chain`) only when it is broken: a certificate whose issuer is in
+  the bundle does not verify with that issuer's key, or the leaf comes alone without the intermediates that lead to a
+  root. An expired, address-mismatched or wrong-usage leaf is refused whatever its chain.
+
+**What EDDI checks, and what it leaves to the recipient.** EDDI refuses only what makes a signature unusable for
+everyone: the address, the key usages, the validity dates and a chain whose signatures do not verify. It does not check
+revocation, and it does not decide whether a root is trustworthy — **trust is the recipient's decision**, made by their
+mail client and its trust store. A root that is not publicly trusted is a warning, never a refusal.
+
+OUT rows of the [message ledger](#the-message-ledger) record `signed: true|false` (never the signature), and
+`eddi_email_outbound_total` carries `signed="true|false"`.
+
+**How clients show it — unverified.** Whether Gmail (consumer and Workspace), Outlook desktop and web, Apple Mail and
+Thunderbird show a clear-signed message from a public-CA S/MIME certificate as signed, and whether any of them needs
+RSA-PSS, has not been checked against real clients yet; EDDI signs with PKCS#1 v1.5, which every S/MIME client
+supports. Gmail shows S/MIME signatures only on Workspace editions with S/MIME enabled.
+
+## Sending-health self-test
+
+DKIM is done by your mail provider for your domain, not by EDDI — but EDDI can tell you when it is not happening. A
+common case: a domain publishes the provider's DKIM key, but signing was never started, so the provider signs with its
+own stand-in domain and every receiver, EDDI included, treats the mail as unauthenticated
+(`unauthenticated:pass-unaligned`).
+
+`POST /channelstore/channels/{id}/email-self-test` (edit access; at most 5 per integration per clock hour (UTC), else 429 — counted
+atomically across the cluster by claiming one of the hour's slot rows in the ledger, so a fixed window: up to 10 can start across the turn of an hour) sends a
+short mail from the integration to its own `address` through its SMTP relay — trigger mode too, which never replies but
+may test its relay — signed as `emailControl.smime` says, and answers `{status: "waiting", token, expiresAt}`. The
+token is shown only in that answer; only its SHA-256 is stored. When the next poll reads the mail back, it is
+recognised **before** the own-address refusal, its result is recorded and it is settled as `self_test`: it never starts
+a turn. The token travels only in the `X-EDDI-Self-Test` header, never in the body, and the returned mail counts only
+when its `Message-ID` is the one the test was sent with, so a forged or quoting mail cannot write a result. A token is
+valid for 15 minutes and for one use — a replayed or forwarded copy, or an expired test, is refused like any other mail
+from the integration's own address. A relay that rewrites the `Message-ID` or drops unknown headers therefore makes
+the test expire rather than report.
+
+`GET /channelstore/channels/{id}/email-self-test/{token}` returns `status` (`waiting`, `done`, `expired`,
+`send_failed`), the raw `checks` and `findings` in plain words, for example:
+
+> Your provider signs as `labs-ai.20230601.gappssmtp.com`, not `labs.ai`: start DKIM authentication for `labs.ai` in
+> your provider's admin console.
+
+It reports the DKIM verdict and signing domain, DMARC alignment, whether the S/MIME signature verified — for this
+mailbox's certificate, and how far the chain the signature carries builds: `verified` (to a publicly trusted root,
+finding `smime.verified`), `verified_untrusted_root` (to a root outside the JDK trust store, finding
+`smime.untrusted-root`, a warning) or `chain_broken` (finding `smime.chain-broken`, a problem) — and whether the domain
+publishes DMARC (advice only). **Microsoft 365 does not DKIM-sign mail
+inside one organisation**, so there an unsigned result is reported as `inconclusive`, with the advice to test from
+outside. Start it with `POST /channelstore/channels/{id}/email-self-test` (and read the result with `GET` on the token it returns), or, from an MCP client, with `run_email_self_test`.
+
+On Windows, dnsjava without `eddi.email.dns.servers` uses every adapter's resolvers, including dead or disconnected
+ones, and DKIM lookups can then fail temporarily: the self-test then says the DKIM result is incomplete. Set
+`eddi.email.dns.servers` on such hosts.
 
 ## Conversation mode
 
@@ -473,9 +587,7 @@ Microsoft 365 tenant sends **unsigned** mail, which this mode refuses
 
 | Key | Default | Meaning |
 |---|---|---|
-| `smtpHost` | — (required) | The SMTP submission server |
-| `smtpPort` | `587` | `587` (STARTTLS, required — never a plaintext login) or `465` (TLS) |
-| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address`. At most 100 characters |
+| `smtpHost` | — (required) | The SMTP submission server ([common key](#every-key) since v3; required here) |
 | `replyTemplate` | `{output}` | Wraps the agent's answer: Qute, with `{output}` and the answered mail's `{mail.subject}`, `{mail.from}`, `{mail.fromName}`, `{mail.date}`. The answer and the subject are data — a `{…}` the model writes is printed, never evaluated. At most 4000 characters |
 | `aiDisclosure` | `This reply was written by an AI assistant.` | Appended after a blank line to every reply. **An empty value switches it off**, and the save warns (`email.ai-disclosure-disabled`): transparency rules such as Art. 50 of the EU AI Act ([eu-ai-act-compliance.md](eu-ai-act-compliance.md)) expect people to know they are talking to an AI. At most 500 characters |
 | `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |

@@ -1335,6 +1335,9 @@ public class ChannelTargetRouter {
         copy.setChannelType(src.getChannelType());
         copy.setDefaultTargetName(src.getDefaultTargetName());
         copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
+        if (src.getEmailControl() != null) {
+            copy.setEmailControl(src.getEmailControl().copy());
+        }
         if (src.getTargets() != null) {
             copy.setTargets(new ArrayList<>(src.getTargets()));
         }

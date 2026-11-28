@@ -6,12 +6,15 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
+import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
+import ai.labs.eddi.engine.mail.SmimeCertificateCheck;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +28,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -59,6 +63,14 @@ public class EmailChannelSupport {
     @Inject
     Instance<GdprPseudonymizer> pseudonymizer;
 
+    /** S/MIME signing (v3 phase C2); field-injected like {@link #suppressions}. */
+    @Inject
+    Instance<EmailSmimeSigning> smimeSigning;
+
+    /** The sending-health self-test (v3 plan §6.5). */
+    @Inject
+    Instance<EmailSelfTest> selfTest;
+
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
             EmailPollScheduler scheduler, EmailAgentToolsInspector toolsInspector) {
@@ -81,14 +93,17 @@ public class EmailChannelSupport {
      *             naming every rule that failed
      */
     public void validateAgainstDeployment(ChannelIntegrationConfiguration configuration, String excludeId) {
-        EmailChannelSettings settings = EmailChannelSettings.from(configuration.getPlatformConfig());
+        EmailChannelSettings settings = EmailChannelSettings.from(configuration);
         List<String> errors = new ArrayList<>();
         try {
             connector.resolve(settings.host(), settings.port(), SafeSocketConnector.Protocol.IMAP);
         } catch (SocketPolicyException e) {
             errors.add("platformConfig.host: " + e.getMessage());
         }
-        boolean replies = settings.replies();
+        // Conversation mode replies over SMTP; a trigger-mode integration with an
+        // smtpHost uses it for the self-test. Either way the relay and the login to it
+        // are checked here.
+        boolean replies = settings.replies() || settings.hasSmtp();
         if (replies) {
             // The reply relay is the author's choice exactly as the IMAP host is: the
             // author policy, never the operator one the system mailer uses.
@@ -112,6 +127,7 @@ public class EmailChannelSupport {
                 }
             }
         }
+        validateSmime(settings, errors);
         List<EmailIntegration> others;
         try {
             others = directory.scan();
@@ -133,10 +149,116 @@ public class EmailChannelSupport {
         }
     }
 
+    /**
+     * {@code emailControl.smime} against the deployment: the named connection
+     * exists, is {@code SMIME_SIGNING} and may sign for the SMTP relay; under
+     * {@code sign: required} its certificate must also be usable for the mailbox
+     * address (SAN, key usage, validity, chain) — otherwise the save is refused,
+     * because every outgoing mail would be held. Under {@code sign: true} a
+     * certificate problem is a warning ({@link #warnings}).
+     */
+    void validateSmime(EmailChannelSettings settings, List<String> errors) {
+        String connection = settings.smimeConnection();
+        if (connection == null || settings.smimeSign() == EmailControl.SignMode.FALSE) {
+            return;
+        }
+        if (settings.smtpOrigin() == null) {
+            errors.add("emailControl.smime.connection needs platformConfig.smtpHost: signing applies to mail sent through the "
+                    + "integration's SMTP relay.");
+            return;
+        }
+        if (connectionResolver == null || !connectionResolver.isResolvable()) {
+            return; // already reported for platformConfig.connection
+        }
+        try {
+            connectionResolver.get().requireSmimeSigningTarget("${connection:" + connection + "}", URI.create(settings.smtpOrigin()));
+        } catch (ConnectionException e) {
+            errors.add("emailControl.smime.connection: " + e.getMessage() + " An SMIME_SIGNING connection's baseUrlAllowlist must contain "
+                    + settings.smtpOrigin() + ".");
+            return;
+        } catch (IllegalArgumentException e) {
+            errors.add("emailControl.smime.connection: " + e.getMessage());
+            return;
+        }
+        if (settings.smimeSign() != EmailControl.SignMode.REQUIRED) {
+            return;
+        }
+        SmimeOutcome outcome = smimeOutcome(settings);
+        if (outcome.unavailable() != null) {
+            errors.add("emailControl.smime.sign is 'required', but the signing certificate cannot be used: " + outcome.unavailable() + ".");
+        } else if (outcome.result() != null && !outcome.result().usable()) {
+            errors.add("emailControl.smime.sign is 'required', but " + outcome.result().describe());
+        }
+    }
+
+    /** A certificate check, or why there is no certificate to check. */
+    record SmimeOutcome(SmimeCertificateCheck.Result result, String unavailable) {
+    }
+
+    /** The certificate check of {@code settings}, never throwing. */
+    SmimeOutcome smimeOutcome(EmailChannelSettings settings) {
+        if (smimeSigning == null || !smimeSigning.isResolvable()) {
+            return new SmimeOutcome(null, "S/MIME signing is not available on this node");
+        }
+        try {
+            return new SmimeOutcome(smimeSigning.get().check(settings), null);
+        } catch (EmailSmimeSigning.Unavailable e) {
+            return new SmimeOutcome(null, e.getMessage());
+        } catch (RuntimeException e) {
+            LOGGER.debugf("S/MIME certificate check failed: %s", e.getMessage());
+            return new SmimeOutcome(null, "the certificate could not be checked (" + e.getClass().getSimpleName() + ")");
+        }
+    }
+
+    /** The S/MIME warning codes of {@code settings}. */
+    List<String> smimeWarnings(EmailChannelSettings settings) {
+        List<String> warnings = new ArrayList<>();
+        if (settings.smimeConnection() == null || settings.smimeSign() == EmailControl.SignMode.FALSE || !settings.hasSmtp()) {
+            return warnings;
+        }
+        SmimeOutcome outcome = smimeOutcome(settings);
+        if (outcome.unavailable() != null || (outcome.result() != null && !outcome.result().usable())) {
+            warnings.add(EmailChannelSettings.WARNING_SMIME_CERTIFICATE_UNUSABLE);
+            return warnings;
+        }
+        if (outcome.result() != null) {
+            if (outcome.result().expiresSoon()) {
+                warnings.add(EmailChannelSettings.WARNING_SMIME_CERTIFICATE_EXPIRING);
+            }
+            if (outcome.result().chain().untrusted()) {
+                warnings.add(EmailChannelSettings.WARNING_SMIME_UNTRUSTED_CHAIN);
+            }
+        }
+        return warnings;
+    }
+
+    /**
+     * Starts the self-test of a saved integration.
+     *
+     * @throws EmailSelfTest.Refused
+     *             no SMTP relay, or the hourly limit
+     */
+    public EmailSelfTestResult startSelfTest(String integrationId, ChannelIntegrationConfiguration configuration) {
+        return requireSelfTest().start(integrationId, EmailChannelSettings.from(configuration));
+    }
+
+    /** The state of a self-test of {@code integrationId}. */
+    public Optional<EmailSelfTestResult> readSelfTest(String integrationId, String token) {
+        return requireSelfTest().read(integrationId, token);
+    }
+
+    private EmailSelfTest requireSelfTest() {
+        if (selfTest == null || !selfTest.isResolvable()) {
+            throw new ServiceUnavailableException("The email self-test is not available on this node.");
+        }
+        return selfTest.get();
+    }
+
     /** Stable warning codes for a saved email integration (never a refusal). */
     public List<String> warnings(ChannelIntegrationConfiguration configuration) {
-        EmailChannelSettings settings = EmailChannelSettings.from(configuration.getPlatformConfig());
+        EmailChannelSettings settings = EmailChannelSettings.from(configuration);
         List<String> warnings = new ArrayList<>(EmailChannelSettings.warnings(settings));
+        warnings.addAll(smimeWarnings(settings));
         if (warnings.contains(EmailChannelSettings.WARNING_OPEN_TRIGGER)) {
             LOGGER.warnf("Email integration '%s' accepts unauthenticated mail from any sender: anyone on the internet can make its agent "
                     + "run. Set a senderAllowlist, or requireAuthentication: true.", sanitize(configuration.getName()));
@@ -157,7 +279,7 @@ public class EmailChannelSupport {
     public void afterSave(String integrationId, ChannelIntegrationConfiguration configuration) {
         directory.invalidate();
         try {
-            scheduler.sync(integrationId, EmailChannelSettings.from(configuration.getPlatformConfig()));
+            scheduler.sync(integrationId, EmailChannelSettings.from(configuration));
         } catch (Exception e) {
             // The integration is stored; the sweep re-creates a missing schedule.
             LOGGER.errorf(e, "Email integration %s: its poll schedule could not be written; the inbound sweep will retry",

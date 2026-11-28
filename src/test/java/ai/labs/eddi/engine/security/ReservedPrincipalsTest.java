@@ -43,6 +43,9 @@ class ReservedPrincipalsTest {
      * ever built from it.
      */
     private static final Map<String, String> NOT_PRINCIPALS = Map.ofEntries(
+            Map.entry("self-test-slot:",
+                    "email self-test rate-limit slot idempotency key (EmailSelfTest.SLOT_PREFIX), a ledger key, not a principal"),
+            Map.entry("self-test:", "email self-test token hash used as a ledger sourceRef (EmailSelfTest), not a principal"),
             Map.entry("user:", "grant subject / attachment lock key (Subjects.USER_PREFIX encodes the principal)"),
             Map.entry("team:", "grant subject (Subjects.TEAM_PREFIX)"),
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),

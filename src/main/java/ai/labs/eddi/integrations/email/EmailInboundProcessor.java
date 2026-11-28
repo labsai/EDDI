@@ -179,6 +179,14 @@ public class EmailInboundProcessor {
     /** Names a refused mail's sender in the audit ledger. */
     private final GdprPseudonymizer pseudonymizer;
     private final EmailMetrics metrics;
+
+    /**
+     * Recognises the integration's own self-test mail. Field-injected so the
+     * constructor stays the one the tests use; absent, no mail is a self-test.
+     */
+    @Inject
+    Instance<EmailSelfTest> selfTest;
+
     private final Duration strandedAfter;
     private final Duration retention;
 
@@ -295,6 +303,21 @@ public class EmailInboundProcessor {
 
         // 5. Who sent it — or rather, whether the From can be believed.
         MailAuthentication authentication = authenticator.authenticate(raw, parsed, message.internalDate(), null);
+
+        // 5a. The integration's own sending-health self-test (v3 plan §6.5), before the
+        // temporary-verdict deferral (a DNS failure is one of the things it reports,
+        // and
+        // the test closes after 15 minutes) and before the own-address refusal:
+        // recorded
+        // and settled here, never a turn. A replayed or expired token is not recognised
+        // and meets the own-address refusal below.
+        if (selfTest != null && selfTest.isResolvable() && selfTest.get().recognize(id, settings, parsed, raw, authentication, now)) {
+            // REFUSED, not DONE: DONE counts as a turn (per-sender limits, thread lookup).
+            finish(row, State.REFUSED, EmailSelfTest.SETTLED_REASON, now);
+            count(ctx, EmailMetrics.SELF_TEST);
+            LOGGER.infof("Email integration %s: mail %s is its own self-test; settled without a turn", sanitize(id), row.id());
+            return Disposition.SETTLED;
+        }
         if (authentication.temporary() && !authentication.isAuthenticated() && row.createdAt().plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
             return defer(ctx, row, now.plus(RETRY_SHORT), "auth_temporary", EmailMetrics.DEFERRED, now);
         }

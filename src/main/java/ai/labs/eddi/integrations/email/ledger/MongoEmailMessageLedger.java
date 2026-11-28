@@ -65,6 +65,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_CREATED = "createdAt";
     static final String F_UPDATED = "updatedAt";
     static final String F_EXPIRES = "expiresAt";
+    /** OUT rows: whether the message left S/MIME-signed; absent when not known. */
+    static final String F_SIGNED = "signed";
 
     private final MongoCollection<Document> rows;
 
@@ -129,13 +131,30 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Instant now) {
+        return complete(id, claimToken, terminal, providerId, lastError, null, now);
+    }
+
+    @Override
+    public boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Boolean signed, Instant now) {
         if (!terminal.isTerminal()) {
             throw new IllegalArgumentException("complete() needs a terminal state, not " + terminal);
         }
-        var result = rows.updateOne(claimed(id, claimToken),
-                Updates.combine(Updates.set(F_STATE, terminal.name()), Updates.set(F_PROVIDER, IEmailMessageLedger.cap(providerId, MAX_PROVIDER_ID)),
-                        Updates.set(F_ERROR, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR)),
-                        Updates.set(F_CLAIM, null), Updates.set(F_UPDATED, Date.from(now))));
+        List<Bson> updates = new ArrayList<>(List.of(Updates.set(F_STATE, terminal.name()),
+                Updates.set(F_PROVIDER, IEmailMessageLedger.cap(providerId, MAX_PROVIDER_ID)),
+                Updates.set(F_ERROR, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR)), Updates.set(F_CLAIM, null),
+                Updates.set(F_UPDATED, Date.from(now))));
+        if (signed != null) {
+            updates.add(Updates.set(F_SIGNED, signed));
+        }
+        var result = rows.updateOne(claimed(id, claimToken), Updates.combine(updates));
+        return result.getModifiedCount() == 1;
+    }
+
+    @Override
+    public boolean hold(String id, String claimToken, Instant nextAttemptAt, String reason, Instant now) {
+        var result = rows.updateOne(claimed(id, claimToken), Updates.combine(Updates.set(F_NEXT, Date.from(nextAttemptAt)),
+                Updates.set(F_ERROR, IEmailMessageLedger.cap(reason, MAX_LAST_ERROR)), Updates.set(F_CLAIM, null), Updates.inc(F_ATTEMPTS, -1),
+                Updates.set(F_UPDATED, Date.from(now))));
         return result.getModifiedCount() == 1;
     }
 
@@ -267,7 +286,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_STATE, entry.state().name()).append(F_ATTEMPTS, entry.attempts()).append(F_NEXT, date(entry.nextAttemptAt()))
                 .append(F_CLAIM, entry.claimToken()).append(F_PROVIDER, IEmailMessageLedger.cap(entry.providerId(), MAX_PROVIDER_ID))
                 .append(F_ERROR, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR))
-                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()));
+                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()))
+                .append(F_SIGNED, entry.signed());
     }
 
     static LedgerEntry toEntry(Document document) {
@@ -277,7 +297,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 document.getString(F_SOURCE), document.getString(F_IDEMPOTENCY), document.getString(F_RECIPIENT),
                 State.valueOf(document.getString(F_STATE)), attempts == null ? 0 : attempts, instant(document.getDate(F_NEXT)),
                 document.getString(F_CLAIM), document.getString(F_PROVIDER), document.getString(F_ERROR), instant(document.getDate(F_CREATED)),
-                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)));
+                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)), document.getBoolean(F_SIGNED));
     }
 
     private static Date date(Instant instant) {

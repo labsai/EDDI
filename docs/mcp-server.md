@@ -22,7 +22,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (120)
+## Available Tools (121)
 
 ### Argument contract
 
@@ -316,6 +316,7 @@ See [GDPR / CCPA Compliance](gdpr-compliance.md) for data erasure, export, and r
 | `create_channel_integration`    | Create a new channel integration (Slack, Teams, etc.) with platform config and agent targets                    |
 | `update_channel_integration`    | Update an existing channel integration                                                                          |
 | `delete_channel_integration`    | Delete a channel integration (soft or permanent)                                                                |
+| `run_email_self_test`           | Start an email integration's sending-health self-test (no `token`), or read its result (`token`): DKIM, alignment, S/MIME, DMARC |
 
 See [Slack Integration](slack-integration.md) for Slack-specific setup and multi-agent thread discussions.
 
@@ -773,7 +774,7 @@ quarkus.mcp.server.support-langchain4j-annotations=false
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 120 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **HITL oversight** (`McpOversightTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`), the **alert inbox** (`McpAlertTools`), the **price catalog** (`McpPricingTools`), **team handoffs** (`McpTeamHandoffTools`) and **team budgets** (`McpTeamBudgetTools`), **team cadence** (`McpTeamCadenceTools`), **spend controls** (`McpSpendControlTools`) and the **secrets vault** (`McpVaultTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 121 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **HITL oversight** (`McpOversightTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`), the **alert inbox** (`McpAlertTools`), the **price catalog** (`McpPricingTools`), **team handoffs** (`McpTeamHandoffTools`) and **team budgets** (`McpTeamBudgetTools`), **team cadence** (`McpTeamCadenceTools`), **spend controls** (`McpSpendControlTools`) and the **secrets vault** (`McpVaultTools`).
 
 To add a new MCP tool, give it a role tier in `McpToolTiers.java`. The whitelist is that map's key set, so a tool is exposed exactly when it has a tier, and the tool's own role gate reads the same entry: `requireAnyRole(identity, authEnabled, McpToolTiers.of("<tool_name>"))`. A gate that names a tool with no entry throws on every call, so it fails closed. Then add the tool to the hand-written tier record in `McpRoleTierParityTest`, which has to match the map. A quarkus-MCP `@Tool` has no other invocation path, so a tool without a tier is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist, and `McpToolFilterCoverageTest` checks the other direction (no listed name without a tool), so CI catches a forgotten entry. `McpRoleTierParityTest` also checks that every gate reads its own tool name and is the first statement of its tool (the two GDPR tools, which open an audit try block, are the named exceptions).
 

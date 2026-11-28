@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.transport;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.engine.mail.MailSendException;
 
 import java.time.Instant;
@@ -101,6 +102,38 @@ public interface MailTransport {
      *             retry cannot change
      */
     default String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
+    }
+
+    /**
+     * What a submission produced: the relay's answer, and whether the message left
+     * S/MIME-signed ({@code emailControl.smime}).
+     */
+    record Sent(String providerResponse, boolean signed) {
+    }
+
+    /**
+     * {@link #send}, reporting whether the message was signed. A transport that
+     * signs overrides this. The default cannot sign: it sends what it is given,
+     * unsigned — except under {@code emailControl.smime.sign: required}, where it
+     * sends nothing and fails with a {@code SIGNING} error (not permanent, so the
+     * reply is held, exactly as when the certificate is missing).
+     */
+    default Sent sendMail(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        if (settings != null && settings.smimeSign() == EmailControl.SignMode.REQUIRED) {
+            throw new MailSendException(MailSendException.Category.SIGNING, false,
+                    "smime_unavailable: transport " + id() + " cannot S/MIME-sign, and emailControl.smime.sign is required.", null);
+        }
+        return new Sent(send(integrationId, settings, mime, recipient), false);
+    }
+
+    /**
+     * Submits the sending-health self-test (email channel v3 plan §6.5): one
+     * message from the mailbox to its own address, through its SMTP relay, signed
+     * as {@code emailControl.smime} says. Unlike {@link #send} it is allowed in
+     * trigger mode, which never replies but may test its relay.
+     */
+    default Sent sendSelfTest(String integrationId, EmailChannelSettings settings, byte[] mime) throws MailSendException {
         throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
     }
 

@@ -102,7 +102,15 @@ public interface IEmailMessageLedger {
          * A one-off notice to an integration's owners (a budget was reached), sent
          * once, never retried.
          */
-        NOTICE
+        NOTICE,
+        /**
+         * The sending-health self-test (email channel v3 plan §6.5): the mail an
+         * integration sends to its own address. {@code sourceRef} holds the SHA-256 of
+         * its single-use token (never the token); the row is {@code SENT} while the
+         * test is open and {@code DONE} once the mail came back, with the result in
+         * {@code lastError} (see {@code EmailSelfTestResult}).
+         */
+        SELF_TEST
     }
 
     /** Where a message is in its life. */
@@ -197,7 +205,18 @@ public interface IEmailMessageLedger {
      */
     record LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId, String sourceRef,
             String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken, String providerId,
-            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, Boolean signed) {
+
+        /**
+         * A row whose {@code signed} is not known (inbound rows, and every row written
+         * before v3 phase C2).
+         */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts,
+                    nextAttemptAt, claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, null);
+        }
 
         public LedgerEntry {
             Objects.requireNonNull(id, "id");
@@ -248,6 +267,23 @@ public interface IEmailMessageLedger {
      * @return whether the row was changed
      */
     boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Instant now);
+
+    /**
+     * {@link #complete}, recording whether the message left S/MIME-signed (OUT
+     * rows; v3 phase C2). Never the signature bytes.
+     */
+    boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Boolean signed, Instant now);
+
+    /**
+     * Releases a claimed {@code PENDING} row to wait until {@code nextAttemptAt}
+     * without spending an attempt: the claim's increment is given back. For mail
+     * held for a reason a retry cannot fix by itself — an S/MIME certificate that
+     * {@code sign: required} needs and that is missing or expired — so a held reply
+     * does not run out of attempts and fail while its owner renews the certificate.
+     *
+     * @return whether the claim still held the row
+     */
+    boolean hold(String id, String claimToken, Instant nextAttemptAt, String reason, Instant now);
 
     /**
      * Releases a claimed row for another attempt at {@code nextAttemptAt}, only if

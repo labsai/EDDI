@@ -75,7 +75,24 @@ public class EmailOwnerNotifier {
                                                 "a reply could not be delivered after its last attempt (or the relay refused it for good); check the "
                                                         + "email ledger rows of kind REPLY in state FAILED"), THREAD_THROTTLED("thread_throttled",
                                                                 "a thread reached maxRepliesPerThreadPerHour, so further replies in it are not sent "
-                                                                        + "until the hour has passed — possibly a mail loop");
+                                                                        + "until the hour has passed — possibly a mail loop"),
+        /** The S/MIME signing certificate expires within 30 days (v3 phase C2). */
+        CERTIFICATE_EXPIRING("certificate_expiring", "its S/MIME signing certificate (emailControl.smime.connection) expires within 30 "
+                + "days; renew it and update the SMIME_SIGNING connection before it does"),
+        /**
+         * Mail cannot be S/MIME-signed: under sign 'required' it is held, otherwise it
+         * goes out unsigned.
+         */
+        SMIME_UNAVAILABLE("smime_unavailable", "its mail cannot be S/MIME-signed (the certificate is missing, expired, does not match "
+                + "the mailbox address, or cannot be read). With emailControl.smime.sign 'required' outgoing mail is held until it is "
+                + "fixed; otherwise it goes out unsigned"),
+        /**
+         * A reply held for its S/MIME signature (sign 'required') reached
+         * {@code eddi.email.smime.max-hold} and was given up, unsent.
+         */
+        SMIME_HOLD_EXPIRED("smime_hold_expired", "a reply held because it could not be S/MIME-signed (emailControl.smime.sign "
+                + "'required') waited eddi.email.smime.max-hold and was given up, unsent; check the email ledger rows of kind REPLY in "
+                + "state FAILED with reason smime_unavailable:expired, and fix the signing certificate");
 
         private final String id;
         private final String text;
@@ -91,7 +108,12 @@ public class EmailOwnerNotifier {
 
         /** A reply was held back; mail intake goes on. */
         boolean isReplyProblem() {
-            return this == REPLY_FAILED || this == THREAD_THROTTLED;
+            return this == REPLY_FAILED || this == THREAD_THROTTLED || this == SMIME_HOLD_EXPIRED;
+        }
+
+        /** About the S/MIME certificate; mail intake goes on. */
+        boolean isSigningProblem() {
+            return this == CERTIFICATE_EXPIRING || this == SMIME_UNAVAILABLE;
         }
     }
 
@@ -140,7 +162,9 @@ public class EmailOwnerNotifier {
         if (!claimed) {
             return false;
         }
-        LOGGER.warnf(reason.isReplyProblem() ? "Email integration %s: %s." : "Email integration %s stopped taking mail: %s.", sanitize(integrationId),
+        LOGGER.warnf(
+                reason.isReplyProblem() || reason.isSigningProblem() ? "Email integration %s: %s." : "Email integration %s stopped taking mail: %s.",
+                sanitize(integrationId),
                 reason.text);
         if (mailer == null || !mailer.isEnabled() || settings == null || settings.ownerNotifyAddresses().isEmpty()) {
             return true;
@@ -168,7 +192,11 @@ public class EmailOwnerNotifier {
         String name = flatten(integrationName == null ? integrationId : integrationName);
         String subject;
         String text;
-        if (reason.isReplyProblem()) {
+        if (reason.isSigningProblem()) {
+            subject = "[EDDI] Email integration S/MIME certificate: " + name;
+            text = "The email integration '" + name + "' (" + integrationId + "): " + reason.text
+                    + ".\n\nMail keeps being processed. No content of any conversation is included here.\n";
+        } else if (reason.isReplyProblem()) {
             subject = "[EDDI] Email integration replies held back: " + name;
             text = "The email integration '" + name + "' (" + integrationId + ") did not send a reply: " + reason.text
                     + ".\n\nMail keeps being processed. No content of the conversation is included here.\n";
@@ -206,7 +234,7 @@ public class EmailOwnerNotifier {
 
     private void count(String outcome) {
         if (meterRegistry != null) {
-            meterRegistry.counter("eddi.email.outbound", "kind", "notice", "outcome", outcome).increment();
+            meterRegistry.counter("eddi.email.outbound", "kind", "notice", "outcome", outcome, "signed", "false").increment();
         }
     }
 

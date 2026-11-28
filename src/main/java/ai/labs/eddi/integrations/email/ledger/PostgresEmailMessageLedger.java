@@ -17,6 +17,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +42,15 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     static final String TABLE = "email_message_ledger";
 
     private static final String COLUMNS = "id, integration_id, kind, direction, message_id, conversation_id, source_ref, idempotency_key, "
-            + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at";
+            + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at, signed";
+
+    /**
+     * Columns added after the table was first created, each with
+     * {@code ADD COLUMN IF NOT EXISTS} so an existing table gains them on the next
+     * start. {@code signed}: whether an OUT row's message left S/MIME-signed (v3
+     * phase C2); null when not known.
+     */
+    private static final String[] ADDED_COLUMNS = {"ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS signed BOOLEAN"};
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS email_message_ledger (
@@ -100,6 +109,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            for (String column : ADDED_COLUMNS) {
+                statement.execute(column);
+            }
             for (String index : INDEXES) {
                 statement.execute(index);
             }
@@ -113,7 +125,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public boolean insertIfAbsent(LedgerEntry entry) {
         String sql = "INSERT INTO " + TABLE + " (" + COLUMNS
-                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
+                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
             statement.setString(i++, entry.id());
@@ -133,7 +145,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             statement.setString(i++, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR));
             statement.setTimestamp(i++, timestamp(entry.createdAt()));
             statement.setTimestamp(i++, timestamp(entry.updatedAt()));
-            statement.setTimestamp(i, timestamp(entry.expiresAt()));
+            statement.setTimestamp(i++, timestamp(entry.expiresAt()));
+            setBoolean(statement, i, entry.signed());
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write an email ledger row", e);
@@ -183,21 +196,52 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Instant now) {
+        return complete(id, claimToken, terminal, providerId, lastError, null, now);
+    }
+
+    @Override
+    public boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Boolean signed, Instant now) {
         if (!terminal.isTerminal()) {
             throw new IllegalArgumentException("complete() needs a terminal state, not " + terminal);
         }
-        String sql = "UPDATE " + TABLE + " SET state = ?, provider_id = ?, last_error = ?, claim_token = NULL, updated_at = ? "
-                + "WHERE id = ? AND state = 'PENDING' AND claim_token = ?";
+        // COALESCE keeps a known value when this call does not know one.
+        String sql = "UPDATE " + TABLE + " SET state = ?, provider_id = ?, last_error = ?, claim_token = NULL, updated_at = ?, "
+                + "signed = COALESCE(?, signed) WHERE id = ? AND state = 'PENDING' AND claim_token = ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, terminal.name());
             statement.setString(2, IEmailMessageLedger.cap(providerId, MAX_PROVIDER_ID));
             statement.setString(3, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR));
             statement.setTimestamp(4, timestamp(now));
-            statement.setString(5, id);
-            statement.setString(6, claimToken);
+            setBoolean(statement, 5, signed);
+            statement.setString(6, id);
+            statement.setString(7, claimToken);
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to complete an email ledger row", e);
+        }
+    }
+
+    @Override
+    public boolean hold(String id, String claimToken, Instant nextAttemptAt, String reason, Instant now) {
+        String sql = "UPDATE " + TABLE + " SET next_attempt_at = ?, last_error = ?, claim_token = NULL, attempts = GREATEST(attempts - 1, 0), "
+                + "updated_at = ? WHERE id = ? AND state = 'PENDING' AND claim_token = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, timestamp(nextAttemptAt));
+            statement.setString(2, IEmailMessageLedger.cap(reason, MAX_LAST_ERROR));
+            statement.setTimestamp(3, timestamp(now));
+            statement.setString(4, id);
+            statement.setString(5, claimToken);
+            return statement.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to hold an email ledger row", e);
+        }
+    }
+
+    private static void setBoolean(PreparedStatement statement, int index, Boolean value) throws SQLException {
+        if (value == null) {
+            statement.setNull(index, Types.BOOLEAN);
+        } else {
+            statement.setBoolean(index, value);
         }
     }
 
@@ -434,7 +478,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 rows.getString("source_ref"), rows.getString("idempotency_key"), rows.getString("recipient"), State.valueOf(rows.getString("state")),
                 rows.getInt("attempts"), instant(rows.getTimestamp("next_attempt_at")), rows.getString("claim_token"), rows.getString("provider_id"),
                 rows.getString("last_error"), instant(rows.getTimestamp("created_at")), instant(rows.getTimestamp("updated_at")),
-                instant(rows.getTimestamp("expires_at")));
+                instant(rows.getTimestamp("expires_at")), (Boolean) rows.getObject("signed"));
     }
 
     private static Timestamp timestamp(Instant instant) {

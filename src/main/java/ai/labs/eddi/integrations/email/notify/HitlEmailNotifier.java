@@ -195,7 +195,9 @@ public class HitlEmailNotifier {
     }
 
     private Counter outbound(String outcome) {
-        return meterRegistry.counter(METER_OUTBOUND, "kind", "notify", "outcome", outcome);
+        // System mail is not S/MIME-signed (v3 plan §15 Q3); the tag keeps one tag set
+        // per name.
+        return meterRegistry.counter(METER_OUTBOUND, "kind", "notify", "outcome", outcome, "signed", "false");
     }
 
     // --- The trigger ---------------------------------------------------------

@@ -29,6 +29,12 @@ public class MailSendException extends Exception {
         AUTHENTICATION,
         /** The relay refused the sender, a recipient or the message. */
         REJECTED,
+        /**
+         * The message could not be S/MIME-signed, or signing is required
+         * ({@code emailControl.smime.sign: required}) and no usable certificate is
+         * available. Never sent unsigned instead; the row waits.
+         */
+        SIGNING,
         /** Anything else. */
         OTHER
     }

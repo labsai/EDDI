@@ -134,7 +134,7 @@ public class EmailMailboxPoller {
             return new PollReport(false, "The integration no longer exists; its poll schedule was removed.");
         }
         EmailIntegration integration = found.get();
-        List<String> errors = EmailChannelSettings.validate(integration.configuration().getPlatformConfig());
+        List<String> errors = EmailChannelSettings.validate(integration.configuration());
         EmailChannelSettings settings = integration.settings();
         if (!errors.isEmpty() || settings.mode() == null) {
             LOGGER.errorf("Email integration %s is not polled: its configuration does not validate: %s", sanitize(integrationId),
