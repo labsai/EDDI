@@ -474,7 +474,7 @@ public class RagSourceIngestionService {
             }
             return new CronPreview(cron, null, fires, zone);
         } catch (IllegalStateException e) {
-            return new CronPreview(cron, "This cron never matches a date within the next two years", List.of(), zone);
+            return new CronPreview(cron, "This cron never matches a date", List.of(), zone);
         } catch (IllegalArgumentException e) {
             return new CronPreview(cron, e.getMessage(), List.of(), zone);
         }

@@ -217,8 +217,8 @@ class ConversationServiceStoreConflictTest {
         for (int attempt = 1; attempt <= 2; attempt++) {
             var input = new InputData("hello", Map.of());
             input.setIdempotencyKey("retry-key-1");
-            // The overload that admits a keyed turn (the environment/agent one runs it
-            // directly).
+            // The conversation-id overload; the environment/agent one admits a keyed
+            // turn through the same path.
             conversationService.say(CONVERSATION_ID, false, false, List.of(), input, false, mock(ConversationResponseHandler.class));
             verify(conversationCoordinator, times(attempt)).submitInOrder(eq(CONVERSATION_ID), captor.capture());
             captor.getValue().call();

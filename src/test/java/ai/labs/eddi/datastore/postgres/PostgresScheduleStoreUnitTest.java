@@ -1349,6 +1349,25 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(normalized.contains("ORDER BY next_fire ASC, id ASC LIMIT ?"), normalized);
     }
 
+    /**
+     * Dead-lettered rows keep {@code enabled=true} and their old {@code next_fire},
+     * so they sorted first in the due scan. The query names the exclusion that the
+     * partial index {@code idx_schedules_due_live} is built on, which is what lets
+     * the planner use it.
+     */
+    @Test
+    void findDueSchedules_neverLooksAtDeadLetteredRows() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        sut.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String normalized = sql.getValue().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("enabled = true AND fire_status <> 'DEAD_LETTERED' AND next_fire <= ?"), normalized);
+    }
+
     // ─── readAllSchedules ───────────────────────────────────────
 
     @Test
@@ -1705,6 +1724,71 @@ class PostgresScheduleStoreUnitTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("AND fire_id=?"), "the outcome write must be fenced: " + sql.getValue());
         verify(preparedStatement).setString(4, "sched-1_fire-a");
+    }
+
+    /**
+     * The no-next-fire reason is written by the fenced completion itself, never by
+     * a second UPDATE by id that could overwrite an operator's enable.
+     */
+    @Test
+    void markCompleted_withADisableReason_writesItInTheSameFencedStatement() throws Exception {
+        sut.markCompleted("sched-1", "sched-1_fire-a", null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("enabled=false") && sql.getValue().contains("disabled_reason=?"), sql.getValue());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the disable must be fenced with the completion: " + sql.getValue());
+        verify(preparedStatement).setString(2, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+        verify(preparedStatement).setString(4, "sched-1");
+        verify(preparedStatement).setString(5, "sched-1_fire-a");
+        verify(preparedStatement, times(1)).executeUpdate();
+    }
+
+    @Test
+    void markCompleted_oneShotWithoutAReason_leavesTheReasonColumnAlone() throws Exception {
+        sut.markCompleted("sched-1", "sched-1_fire-a", null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("disabled_reason"), sql.getValue());
+    }
+
+    @Test
+    void recordOccurrenceConversation_isConditionalOnTheRun_andReportsWhetherItWrote() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+
+        assertTrue(sut.recordOccurrenceConversation("sched-1", "sched-1@5000", "conv-a", null));
+        assertFalse(sut.recordOccurrenceConversation("sched-1", "sched-1@5000", "conv-b", "conv-old"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(2)).prepareStatement(sql.capture());
+        String q = sql.getValue();
+        assertTrue(q.startsWith("UPDATE eddi_schedules SET occurrence_run_id=?, occurrence_conversation_id=?, updated_at=?"), q);
+        assertTrue(q.contains("occurrence_run_id IS DISTINCT FROM ?") && q.contains("occurrence_conversation_id IS NOT DISTINCT FROM ?"), q);
+        assertFalse(q.contains("fire_status") || q.contains("enabled"), "nothing but the record: " + q);
+        verify(preparedStatement).setString(6, "conv-old");
+    }
+
+    @Test
+    void readSchedule_readsTheOccurrenceRecord_andAnOldRowHasNone() throws Exception {
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("occurrence_run_id")).thenReturn("sched-1@5000");
+        when(resultSet.getString("occurrence_conversation_id")).thenReturn("conv-7");
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+        assertEquals("sched-1@5000", result.getOccurrenceRunId());
+        assertEquals("conv-7", result.getOccurrenceConversationId());
+
+        when(resultSet.getString("occurrence_run_id")).thenReturn(null);
+        when(resultSet.getString("occurrence_conversation_id")).thenReturn(null);
+        assertNull(sut.readSchedule("sched-1").getOccurrenceConversationId());
+
+        ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(ddl.capture());
+        for (String column : List.of("occurrence_run_id", "occurrence_conversation_id")) {
+            assertTrue(ddl.getAllValues().stream().anyMatch(s -> s.contains("ADD COLUMN IF NOT EXISTS " + column)), column);
+        }
     }
 
     @Test

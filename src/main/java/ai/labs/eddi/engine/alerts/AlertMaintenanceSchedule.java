@@ -14,7 +14,11 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -22,9 +26,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 /**
  * Makes sure the {@code alerts-maintenance} system schedule exists: at startup,
  * and again whenever a rule is saved (so a schedule an administrator deleted
- * comes back as soon as alerts are used). Creating it is idempotent enough: two
- * nodes starting at once may both create one, and every step of the job is a
- * conditional write, so the second copy does no harm.
+ * comes back as soon as alerts are used). Two nodes starting at once may both
+ * create one; {@link #removeDuplicates} then deletes all but the oldest at
+ * startup.
  */
 @ApplicationScoped
 public class AlertMaintenanceSchedule {
@@ -45,6 +49,58 @@ public class AlertMaintenanceSchedule {
 
     void onStart(@Observes StartupEvent event) {
         ensure();
+        removeDuplicates();
+    }
+
+    private static int unhealthyRank(ScheduleConfiguration schedule) {
+        return schedule.isEnabled() && schedule.getFireStatus() != ScheduleConfiguration.FireStatus.DEAD_LETTERED ? 0 : 1;
+    }
+
+    /**
+     * Keeps exactly one marked maintenance schedule: an enabled, not dead-lettered
+     * one if any, then the oldest ({@code createdAt}, then id). Nodes that start at
+     * once can each create one — the REST API then refuses to delete the extra, as
+     * it does for the system schedule — and two copies would run every retry and
+     * digest pass twice. Every node applies the same rule, so they agree on the
+     * survivor and the deletes are idempotent. Not airtight: two nodes can each
+     * scan before the other's insert, leaving two copies until the next startup or
+     * the next time one is created. (A periodic pass would rescan every schedule
+     * each minute for a rare race, so there is none.) Never throws.
+     */
+    void removeDuplicates() {
+        if (!settings.enabled()) {
+            return;
+        }
+        try {
+            // Offset pages shift when a schedule is inserted mid-scan, so one can be read
+            // twice; keyed by id, a copy is never mistaken for its own duplicate.
+            Map<String, ScheduleConfiguration> found = new LinkedHashMap<>();
+            for (int offset = 0; offset < SCAN_LIMIT; offset += SCAN_PAGE) {
+                List<ScheduleConfiguration> page = scheduleStore.readAllSchedules(SCAN_PAGE, offset, true);
+                page.stream().filter(s -> AlertSchedules.isMaintenanceSchedule(s.getMetadata()))
+                        .forEach(s -> found.putIfAbsent(String.valueOf(s.getId()), s));
+                if (page.size() < SCAN_PAGE) {
+                    break;
+                }
+            }
+            if (found.size() < 2) {
+                return;
+            }
+            List<ScheduleConfiguration> marked = new ArrayList<>(found.values());
+            // The survivor is an enabled, not dead-lettered copy if there is one (a
+            // healthy younger copy must not be deleted for a disabled older one), then
+            // the oldest. Every node applies the same order, so they agree.
+            marked.sort(Comparator.comparingInt(AlertMaintenanceSchedule::unhealthyRank)
+                    .thenComparing(ScheduleConfiguration::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(ScheduleConfiguration::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+            for (ScheduleConfiguration duplicate : marked.subList(1, marked.size())) {
+                scheduleStore.deleteSchedule(duplicate.getId());
+                LOGGER.warnf("Removed a duplicate %s schedule (id %s); kept %s", AlertSchedules.SCHEDULE_NAME, sanitize(duplicate.getId()),
+                        sanitize(marked.get(0).getId()));
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not check for duplicate %s schedules: %s", AlertSchedules.SCHEDULE_NAME, e.getMessage());
+        }
     }
 
     /**
@@ -95,6 +151,8 @@ public class AlertMaintenanceSchedule {
             schedule.setMetadata(AlertSchedules.maintenanceMetadata());
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Created the %s system schedule (every %ds)", AlertSchedules.SCHEDULE_NAME, seconds);
+            // Whichever node creates last sees the others' copies and removes them.
+            removeDuplicates();
         } catch (Exception e) {
             LOGGER.warnf("Could not ensure the %s schedule — alert retries and digests wait until it exists: %s", AlertSchedules.SCHEDULE_NAME,
                     e.getMessage());

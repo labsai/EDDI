@@ -101,10 +101,22 @@ class OutputMatchHookTest {
         hook.onCleanTurn(memory);
 
         verify(memory).getAgentId();
+        verify(memory).getUserId();
         verifyNoMoreInteractions(memory);
         verify(cache).cachedOutputNeeds(AGENT);
         verifyNoMoreInteractions(cache);
         verifyNoInteractions(dispatcher, engine);
+    }
+
+    @Test
+    @DisplayName("a turn of an agent-test conversation never reaches the OUTPUT_MATCH rules")
+    void agentTestTurnsAreIgnored() {
+        IConversationMemory memory = memory(Map.of("escalate", true), "{\"a\":1}", List.of("x"));
+        when(memory.getUserId()).thenReturn("agent-test:run1:0:0");
+
+        hook.onCleanTurn(memory);
+
+        verifyNoInteractions(cache, dispatcher, engine);
     }
 
     @Test
@@ -152,6 +164,7 @@ class OutputMatchHookTest {
 
         verify(dispatcher, times(1)).submit(any());
         verify(memory).getAgentId();
+        verify(memory).getUserId();
         verifyNoMoreInteractions(memory);
         verifyNoInteractions(engine);
     }

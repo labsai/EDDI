@@ -10114,12 +10114,12 @@
         {
           "id": 79,
           "type": "timeseries",
-          "title": "Dead-lettered fires",
+          "title": "Dead-lettered fires and schedules without a next fire",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_schedule_fire_deadlettered_total` — retries exhausted; the trigger will not run again without intervention.",
+          "description": "`eddi_schedule_fire_deadlettered_total` — retries exhausted; the trigger will not run again without intervention. `eddi_schedule_nextfire_exhausted_total` — a cron had no next fire and its schedule was disabled with reason no-next-fire.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -10130,6 +10130,18 @@
             {
               "refId": "A",
               "expr": "sum(rate(eddi_schedule_fire_deadlettered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "dead-lettered fires",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_schedule_nextfire_exhausted_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "no next fire (disabled)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10175,13 +10187,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }
