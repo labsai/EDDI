@@ -134,3 +134,28 @@ docs: [`security.md`](../security.md#mail-sender-authentication--dkim-and-dmarc)
 ```decision-log
 | 2026-11-11 | An aligned DKIM pass vouches only for headers its signature wholly covers; Subject, Reply-To and To/Cc plus-tags steer only when covered, thread headers are read unsigned | Prepended Content-Type and unsigned Subject/To/Reply-To/References on a replayed signed mail ran as its author | Trusting every header of a signed mail; failing all mail with any unsigned header |
 ```
+
+### Review follow-ups (CodeRabbit, 2026-11-12 review)
+
+- **Every aligned signature is claimed**, even when the selected one covers the `Message-ID`: a copy that
+  verifies only under another signature, one that does not cover it, could otherwise carry a new
+  `Message-ID`, find no row and no marker, and run a second turn as the sender.
+- **Signature markers have a key space of their own** (`dkim-signature:<digest>`): the former
+  `<dkim.…@eddi.invalid>` is a valid Message-ID, so an ordinary mail could occupy a genuine mail's
+  marker and get it refused as a replay. The markers are new in this branch, so no stored one changes.
+- **An unsigned `Fwd:` Subject no longer keeps quoted history** that the integration strips: when the
+  aligned signature does not cover `Subject`, the body is read again as if the mail were not a forward
+  (`MimeMessageParser.parse(…, forwardSubjectKeepsHistory)`). A signed forward and unauthenticated mail
+  are unchanged.
+- **A refused aligned pass beside an aligned signature whose key lookup failed temporarily is
+  temporary**, so the mail waits for the retry (bounded by `MAX_TEMPORARY_DEFERRAL`) instead of being
+  refused for good.
+- **MIME**: the delimiter pre-count stops at the closing delimiter (Jakarta Mail ignores the epilogue),
+  so boundary-looking lines after it no longer refuse a one-part message; an HTML alternative cut at the
+  HTML limit is reported `HTML_TRUNCATED` and not as `ALTERNATIVES_DIVERGE`.
+- **Alert delivery rechecks the send lease after the Slack refusal lookup**, which can refresh the
+  channel router from the stores; with too little lease left the delivery is skipped and retried.
+- Kept, not changed: an unsigned `multipart/*` Content-Type subtype still selects how the parts are
+  read in the default (non-strict) mode. Every part is covered by the body hash, so only bytes the
+  signer signed can reach the agent; `eddi.email.dkim.require-signed-content-headers=true` refuses an
+  unsigned multipart Content-Type for deployments that want the reading pinned.

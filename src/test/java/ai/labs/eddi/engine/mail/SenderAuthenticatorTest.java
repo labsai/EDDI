@@ -693,6 +693,10 @@ class SenderAuthenticatorTest {
             assertEquals(Verdict.ALIGNED_PASS, reordered.verdict(), reordered.reason());
             assertEquals(2, original.signedHeaders().signatureDigests().size());
             assertEquals(original.signedHeaders().signatureDigests(), reordered.signedHeaders().signatureDigests());
+            // The remaining signature still authenticates and supplies its key: an empty
+            // list would satisfy containsAll and hide a broken pass.
+            assertEquals(Verdict.ALIGNED_PASS, dropped.verdict(), dropped.reason());
+            assertEquals(1, dropped.signedHeaders().signatureDigests().size());
             assertTrue(original.signedHeaders().signatureDigests().containsAll(dropped.signedHeaders().signatureDigests()));
         }
 
@@ -749,6 +753,22 @@ class SenderAuthenticatorTest {
 
             // An alignable signature's timeout still is temporary.
             assertTrue(authenticate(new FakeDns().timeout("sel._domainkey.example.com"), sign(standardMessage(), new Options())).temporary());
+        }
+
+        @Test
+        @DisplayName("a refused aligned pass beside an aligned signature whose key lookup timed out is temporary")
+        void refusalBesideATempfailIsTemporary() {
+            long now = DkimVerifierTest.NOW.getEpochSecond();
+            // Outer (checked first): sel2, whose key lookup times out. Inner: sel, which
+            // verifies but is refused (its t= is 30 days old).
+            FakeDns dns = keys().timeout("sel2._domainkey.example.com");
+            byte[] raw = sign(sign(standardMessage(), new Options().extraTags("t=" + (now - 30 * 86_400))), new Options().selector("sel2"));
+
+            MailAuthentication auth = authenticate(dns, raw);
+
+            assertEquals(Verdict.FAIL, auth.verdict(), auth.reason());
+            assertTrue(auth.signatures().stream().anyMatch(r -> r.outcome() == Outcome.TEMPERROR), auth.signatures().toString());
+            assertTrue(auth.temporary(), "a retry could let sel2 pass: " + auth.reason());
         }
 
         @Test

@@ -375,6 +375,10 @@ class MimeMessageParserTest {
     class Divergence {
 
         private InboundMail alternative(String plain, String html) throws MailParseException {
+            return alternative(plain, html, MailLimits.defaults());
+        }
+
+        private InboundMail alternative(String plain, String html, MailLimits limits) throws MailParseException {
             return parser().parse(message("""
                     From: a@example.com
                     Message-ID: <alt@example.com>
@@ -390,7 +394,17 @@ class MimeMessageParserTest {
 
                     <html><body>%s</body></html>
                     --alt--
-                    """.formatted(plain, html)), MailLimits.defaults(), true);
+                    """.formatted(plain, html)), limits, true);
+        }
+
+        @Test
+        @DisplayName("an HTML side cut at the HTML limit is reported truncated, not as diverging from the plain side")
+        void truncatedHtmlDoesNotDiverge() throws Exception {
+            String words = "Please pay invoice 77 by Friday and confirm the delivery address for the twelve pallets of copper wire";
+            InboundMail mail = alternative(words, "<p>" + words + "</p>", MailLimits.defaults().withMaxHtmlCharacters(30));
+
+            assertTrue(mail.anomalies().contains(MailAnomaly.HTML_TRUNCATED), mail.anomalies().toString());
+            assertFalse(mail.anomalies().contains(MailAnomaly.ALTERNATIVES_DIVERGE), mail.anomalies().toString());
         }
 
         @Test
@@ -655,6 +669,15 @@ class MimeMessageParserTest {
             byte[] content = "--x\r\na\r\n--x\r\nb\r\n--x--\r\n".getBytes();
             assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "x", 100));
             assertEquals(2, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "x", 2));
+        }
+
+        @Test
+        @DisplayName("the counter stops at the closing delimiter: boundary-looking lines in the epilogue are not parts")
+        void delimiterCountStopsAtTheClose() throws Exception {
+            byte[] content = "--b\r\na\r\n--b--\r\n".concat("--b\r".repeat(500)).getBytes(StandardCharsets.ISO_8859_1);
+            assertEquals(2, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "b", 100));
+            byte[] trailing = "--b\na\n--b--  \n--b\n--b\n".getBytes(StandardCharsets.ISO_8859_1);
+            assertEquals(2, MimeMessageParser.countDelimiters(new ByteArrayInputStream(trailing), "b", 100), "blanks after the close");
         }
 
         @Test

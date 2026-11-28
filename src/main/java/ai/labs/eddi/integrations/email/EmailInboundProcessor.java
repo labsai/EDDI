@@ -27,6 +27,7 @@ import ai.labs.eddi.engine.mail.MailLimits;
 import ai.labs.eddi.engine.mail.MailParseException;
 import ai.labs.eddi.engine.mail.MessageIds;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
+import ai.labs.eddi.engine.mail.QuoteStripper;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -258,9 +259,9 @@ public class EmailInboundProcessor {
 
         // 3. Parse. A refusal is recorded under the parser's own synthetic key.
         InboundMail parsed;
+        MailLimits limits = MailLimits.defaults().withMaxRawBytes(settings.maxMessageBytes()).withMaxHtmlCharacters(maxHtmlCharacters);
         try {
-            parsed = parser.parse(raw, MailLimits.defaults().withMaxRawBytes(settings.maxMessageBytes()).withMaxHtmlCharacters(maxHtmlCharacters),
-                    settings.stripQuotedHistory());
+            parsed = parser.parse(raw, limits, settings.stripQuotedHistory());
         } catch (MailParseException e) {
             boolean tooLarge = e.getReason() == MailParseException.Reason.TOO_LARGE || e.getReason() == MailParseException.Reason.HEADERS_TOO_LARGE;
             // Keyed by the envelope's Message-ID when there is one, so a re-poll settles
@@ -325,6 +326,19 @@ public class EmailInboundProcessor {
         // authenticated From (InboundMail#signedView). Thread headers are kept: a
         // continuation is bound to the conversation's own sender anyway.
         parsed = asReceived.signedView();
+        if (settings.stripQuotedHistory() && authenticated && authentication.signedHeaders().restricted()
+                && !authentication.signedHeaders().covers("subject") && QuoteStripper.isForwardSubject(asReceived.subject())) {
+            // The parse kept the quoted history because the Subject says "Fwd:" - a Subject
+            // the signature does not cover, which anyone holding the mail can rewrite. Read
+            // the body again as if it were not a forward.
+            try {
+                parsed = parser.parse(raw, limits, true, false).withAuthentication(authentication).signedView();
+            } catch (MailParseException e) {
+                // The same bytes parsed a moment ago; keep that reading.
+                LOGGER.debugf("Email integration %s: could not re-read a mail with an unsigned forward Subject: %s",
+                        sanitize(ctx.integrationId()), e.getReason());
+            }
+        }
         if (sender == null) {
             return refuse(ctx, row, "blocked:no_single_sender", EmailMetrics.BLOCKED, now);
         }
@@ -337,14 +351,20 @@ public class EmailInboundProcessor {
         if (!authenticated && settings.requireAuthentication()) {
             return refuse(ctx, row, "unauthenticated:" + verdictId(authentication), EmailMetrics.UNAUTHENTICATED, now);
         }
-        if (authenticated && (parsed.syntheticMessageId() || !authentication.signedHeaders().covers("message-id"))) {
+        boolean keyedOnSignedId = !parsed.syntheticMessageId() && authentication.signedHeaders().covers("message-id");
+        List<String> digests = authentication.signedHeaders().signatureDigests();
+        // Every verifying aligned signature is claimed, even when the selected one
+        // covers the Message-ID: another of them may not, and a copy verifying under
+        // only that one could carry a new Message-ID - no row, no marker, a second
+        // turn.
+        if (authenticated && (!keyedOnSignedId || digests != null && !digests.isEmpty())) {
             // The row is keyed on something a holder of this signed mail can change: an
             // unsigned Message-ID, or — when the mail has no usable Message-ID — a hash
             // of the raw bytes (an added unsigned header changes it, and so does adding
             // a Message-ID, whose absence the signature need not cover). A copy would
             // get a row of its own and run again as its author, so the signature
             // itself is the key too.
-            Disposition replayed = claimSignatures(ctx, row, authentication.signedHeaders().signatureDigests(), sender, now);
+            Disposition replayed = claimSignatures(ctx, row, digests, sender, now);
             if (replayed != null) {
                 return replayed;
             }
@@ -1057,11 +1077,14 @@ public class EmailInboundProcessor {
     static final String SIGNATURE_OWNER_PREFIX = "signature-of:";
 
     /**
-     * The ledger key of a DKIM signature: an id that no mail can carry (the
-     * {@code .invalid} TLD), derived from the signature.
+     * The ledger key of a DKIM signature. Not in the {@code <left@right>} form of a
+     * Message-ID ({@link MessageIds} accepts any domain, {@code .invalid} included,
+     * so a mail could carry {@code <dkim.x@eddi.invalid>} and occupy the marker),
+     * and not {@code sha256:}, the parser's synthetic key: no inbound mail can
+     * produce it.
      */
     static String signatureKey(String digest) {
-        return "<dkim." + digest + "@eddi.invalid>";
+        return "dkim-signature:" + digest;
     }
 
     private Disposition refuseUnread(IntegrationContext ctx, String key, MailboxMessage message, String reason, String outcome, Instant now) {

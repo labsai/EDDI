@@ -147,6 +147,20 @@ public class MimeMessageParser {
      *             when a limit is breached or the bytes are not a message
      */
     public InboundMail parse(byte[] raw, MailLimits limits, boolean stripQuotedHistory) throws MailParseException {
+        return parse(raw, limits, stripQuotedHistory, true);
+    }
+
+    /**
+     * As {@link #parse(byte[], MailLimits, boolean)}.
+     *
+     * @param forwardSubjectKeepsHistory
+     *            whether a forward's Subject ({@code Fwd:}) keeps the quoted
+     *            history as the content passed on. {@code false} for a mail whose
+     *            Subject the signature does not cover: an unsigned Subject must not
+     *            decide what reaches the agent.
+     */
+    public InboundMail parse(byte[] raw, MailLimits limits, boolean stripQuotedHistory, boolean forwardSubjectKeepsHistory)
+            throws MailParseException {
         MailLimits bounds = limits == null ? MailLimits.defaults() : limits;
         if (raw == null || raw.length == 0) {
             throw new MailParseException(MailParseException.Reason.MALFORMED, "The message is empty.");
@@ -205,7 +219,8 @@ public class MimeMessageParser {
 
         // A forward's "history" is the content being passed on, and Outlook marks it
         // exactly as it marks a reply's — so a forward is never stripped.
-        Body body = body(walk.root, bounds, stripQuotedHistory && !QuoteStripper.isForwardSubject(subject));
+        Body body = body(walk.root, bounds,
+                stripQuotedHistory && !(forwardSubjectKeepsHistory && QuoteStripper.isForwardSubject(subject)));
         DeliveryReport report = walk.reportType == null || walk.deliveryRecipients == null
                 ? null
                 : new DeliveryReport(walk.reportType, walk.reportingMta, walk.originalMessageId, walk.deliveryRecipients);
@@ -337,11 +352,14 @@ public class MimeMessageParser {
         final List<String> plain = new ArrayList<>();
         final List<String> html = new ArrayList<>();
         final List<MailAttachment> attachments = new ArrayList<>();
+        /** Some of {@link #html} was cut at the HTML budget. */
+        boolean htmlTruncated;
 
         void addAll(Collected other) {
             plain.addAll(other.plain);
             html.addAll(other.html);
             attachments.addAll(other.attachments);
+            htmlTruncated |= other.htmlTruncated;
         }
 
         boolean hasPlainText() {
@@ -526,7 +544,10 @@ public class MimeMessageParser {
                             .orElse(alternatives.isEmpty() ? null : alternatives.get(0)));
             Collected plainSide = alternatives.stream().filter(Collected::hasPlainText).findFirst().orElse(null);
             Collected htmlSide = alternatives.stream().filter(a -> !a.html.isEmpty()).findFirst().orElse(null);
-            if (plainSide != null && htmlSide != null && plainSide != htmlSide) {
+            // A truncated HTML side is a prefix of what the sender wrote: compared with the
+            // full plain text it would read as different renderings when they agree. The
+            // truncation is reported (HTML_TRUNCATED), the divergence is not claimed.
+            if (plainSide != null && htmlSide != null && plainSide != htmlSide && !htmlSide.htmlTruncated) {
                 // The agent reads the plain part; a person checking the mail sees the
                 // HTML. Compare what each audience gets — the HTML as rendered, hidden
                 // content removed.
@@ -571,7 +592,11 @@ public class MimeMessageParser {
                     }
                     into.plain.add(text);
                 } else {
-                    into.html.add(boundedHtml(decoded.text()));
+                    String bounded = boundedHtml(decoded.text());
+                    if (bounded.length() < decoded.text().length()) {
+                        into.htmlTruncated = true;
+                    }
+                    into.html.add(bounded);
                 }
                 return;
             }
@@ -839,6 +864,9 @@ public class MimeMessageParser {
         // line counts.
         int matched = 1;
         int state = DELIMITER_NONE;
+        // The delimiter on this line is the closing one ("--boundary--"): Jakarta Mail
+        // ignores the epilogue after it, so counting stops there.
+        boolean closing = false;
         byte[] buffer = new byte[8192];
         int read;
         while ((read = in.read(buffer)) > 0) {
@@ -850,18 +878,21 @@ public class MimeMessageParser {
                     if (lineEnd) {
                         boolean counts = state != DELIMITER_DASH;
                         state = DELIMITER_NONE;
-                        if (counts && ++count >= stopAfter) {
+                        if (counts && (++count >= stopAfter || closing)) {
                             return count;
                         }
+                        closing = false;
                     } else if (blank && state != DELIMITER_DASH) {
                         state = DELIMITER_TRAILING;
                     } else if (b == '-' && state == DELIMITER_AFTER) {
                         state = DELIMITER_DASH;
                     } else if (b == '-' && state == DELIMITER_DASH) {
                         state = DELIMITER_CLOSING;
+                        closing = true;
                     } else {
                         // Anything else on the line: a near-match, not a delimiter.
                         state = DELIMITER_NONE;
+                        closing = false;
                     }
                 }
                 byte c = b == '\r' ? (byte) '\n' : b;

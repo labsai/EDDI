@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.alerts;
 
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.Delivery;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.DeliveryStatus;
@@ -284,6 +288,27 @@ class AlertSendClaimTest {
             }
         };
         AlertEvent after = delivery.deliver(pendingRatingEvent(), rule).orElseThrow();
+        verify(senders, never()).send(any(), any());
+        assertNull(stored.claimToken, "released");
+        assertEquals(0, after.deliveries().get(0).attempts());
+    }
+
+    @Test
+    @DisplayName("the Slack refusal lookup used up the lease: the claim is released and nothing is sent")
+    void leaseUsedByTheRefusalLookup() throws Exception {
+        ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+        when(router.channelTargetsAgent(eq("slack"), eq("C0123ABC"), anyString())).thenAnswer(inv -> {
+            // A router refresh that read the stores slowly.
+            clock.now = NOW.plus(AlertDeliveryService.SEND_CLAIM_LEASE).minus(AlertSettings.defaults().webhookTimeout());
+            return true;
+        });
+        DeliveryTarget editorTarget = SLACK.withAdminAdmitted(false);
+        AlertRule editorRule = ratingRule(0.5, null, null, editorTarget);
+        delivery = new AlertDeliveryService(store, senders, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()), clock, router);
+
+        AlertEvent after = delivery.deliver(pendingRatingEvent(), editorRule).orElseThrow();
+
+        verify(router).channelTargetsAgent(eq("slack"), eq("C0123ABC"), anyString());
         verify(senders, never()).send(any(), any());
         assertNull(stored.claimToken, "released");
         assertEquals(0, after.deliveries().get(0).attempts());

@@ -143,6 +143,13 @@ public class AlertDeliveryService {
                 metrics.delivery(delivery.type(), "gave_up");
                 return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now, refusal, null);
             }
+            if (Duration.between(clock.instant(), until).compareTo(settings.webhookTimeout()) <= 0) {
+                // The refusal lookup can refresh the channel router from the stores and use
+                // up the lease: nothing downstream checks the claim again, so a send started
+                // now could outlive it and another node could send the event too. Retry
+                // later with a fresh claim.
+                return skipped(delivery, now);
+            }
             return send(current.get(), delivery, target, attempts, now);
         } finally {
             eventStore.releaseSend(event.id(), token);

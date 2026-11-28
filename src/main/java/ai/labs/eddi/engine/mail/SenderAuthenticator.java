@@ -316,7 +316,10 @@ public class SenderAuthenticator {
             }
         }
         if (refusal != null) {
-            return fail(refusal, false, results);
+            // An aligned signature whose key lookup failed temporarily could still pass on
+            // a retry: the mail waits for it (bounded by the caller's deferral cap) rather
+            // than being refused for good on the strength of the other signature.
+            return fail(refusal, anyTemporary, results);
         }
         return new MailAuthentication(Verdict.PASS_UNALIGNED, passing.get(0).domain(),
                 policy.temporaryFailure()

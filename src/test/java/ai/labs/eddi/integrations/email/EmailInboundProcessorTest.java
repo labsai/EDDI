@@ -396,6 +396,57 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("every aligned signature is claimed even when the selected one covers the Message-ID")
+        void signaturesClaimedWhenTheMessageIdIsSigned() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("from", "subject", "date", "message-id"), List.of(), List.of(), List.of("s1", "s2")));
+            processor.process(context(Map.of()), EmailTestMail.mail().polled(1), Instant.now());
+
+            // A copy that verifies only under the signature that does not cover the
+            // Message-ID, under a new Message-ID: no row, but the marker.
+            verdict = passCovering("s2", "from", "subject", "date");
+            EmailTestMail replay = EmailTestMail.mail().messageId("<other@attacker.example>");
+            processor.process(context(Map.of()), replay.polled(2), Instant.now());
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+        }
+
+        @Test
+        @DisplayName("a mail whose Message-ID looks like a signature marker cannot occupy it")
+        void messageIdCannotOccupyASignatureMarker() throws Exception {
+            verdict = passCovering("zz", "from", "subject", "date", "message-id");
+            processor.process(context(Map.of()), EmailTestMail.mail().messageId("<dkim.m1@eddi.invalid>").polled(1), Instant.now());
+
+            verdict = passCovering("m1", "from", "subject", "date");
+            EmailTestMail genuine = EmailTestMail.mail().messageId("<genuine@supplier.com>");
+            processor.process(context(Map.of()), genuine.polled(2), Instant.now());
+
+            verify(conversations, times(2)).startConversation(any(), anyString(), anyString(), any());
+            assertNotEquals("duplicate:replayed_signature", row(genuine).lastError());
+        }
+
+        @Test
+        @DisplayName("an unsigned Subject saying Fwd: does not keep quoted history the integration strips")
+        void unsignedForwardSubjectDoesNotKeepQuotedHistory() throws Exception {
+            String body = "Here is my answer.\r\n\r\nOn Mon, 1 Jan 2024 at 10:00, Bob <bob@example.com> wrote:\r\n"
+                    + "> SECRET-HISTORY line one\r\n> SECRET-HISTORY line two\r\n";
+            verdict = passCovering("f1", "from", "date", "message-id");
+            processor.process(context(Map.of(EmailChannelSettings.KEY_STRIP_QUOTED_HISTORY, "true")),
+                    EmailTestMail.mail().subject("Fwd: invoice").body(body).polled(1), Instant.now());
+
+            assertEquals(1, inputs.size());
+            assertTrue(inputs.get(0).getInput().contains("Here is my answer."), inputs.get(0).getInput());
+            assertFalse(inputs.get(0).getInput().contains("SECRET-HISTORY"), inputs.get(0).getInput());
+
+            // Signed, the Subject still marks a forward, whose history is the content.
+            verdict = passCovering("f2", "from", "subject", "date", "message-id");
+            processor.process(context(Map.of(EmailChannelSettings.KEY_STRIP_QUOTED_HISTORY, "true")),
+                    EmailTestMail.mail().messageId("<second@supplier.com>").subject("Fwd: invoice").body(body).polled(2), Instant.now());
+            assertTrue(inputs.get(1).getInput().contains("SECRET-HISTORY"), inputs.get(1).getInput());
+        }
+
+        @Test
         @DisplayName("a replay that drops one of two aligned signatures is still refused")
         void replayDroppingASignature() throws Exception {
             verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
@@ -694,6 +745,12 @@ class EmailInboundProcessorTest {
             processor.process(ctx, EmailTestMail.mail().messageId(root).polled(1), Instant.now());
             handlers.get(0).onComplete(snapshot(ConversationState.READY, 0));
 
+            // The reply is another mail, with a signature of its own: every aligned
+            // signature is claimed as a replay key, so one digest for both would read as
+            // a replay of the first.
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("mime-version", "date", "message-id", "subject", "from", "to", "cc", "reply-to"), List.of(),
+                            List.of(), "g2"));
             processor.process(ctx, EmailTestMail.mail().header("In-Reply-To: " + root).header("References: " + root).polled(2), Instant.now());
 
             assertEquals(List.of("conv-1", "conv-1"), sayConversations);
