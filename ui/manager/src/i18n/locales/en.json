@@ -220,7 +220,8 @@
       "forbidden": "You don't have permission to view this.",
       "notFound": "Not found — it may have been deleted."
     },
-    "rename": "Rename"
+    "rename": "Rename",
+    "versionLookupFailed": "Could not find the current version."
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -297,7 +298,10 @@
     "deployFailedIn": "Deployment failed in {{environment}}",
     "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
     "sortLoadingAll": "Loading every agent so the sort is complete…",
-    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page."
+    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page.",
+    "deleted": "{{name}} deleted",
+    "confirmDeleteNamed": "Delete {{name}}?",
+    "deleteReload": "Reload the current version"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -541,6 +545,7 @@
     "removeWorkflow": "Remove workflow from agent",
     "a2aAddSkill": "Add skill",
     "saveConflict": "This agent was changed elsewhere since you opened it. Your edits are kept: review them and save again.",
+    "saveWaitForVersion": "The latest version is still loading — save again in a moment.",
     "saveBeforeDeploy": "Save or discard your changes before deploying",
     "reviewChanges": "Review changes",
     "unsavedSections": "Sections with unsaved changes: {{count}}",
@@ -722,7 +727,11 @@
     "step_llm": "Model",
     "step_apispec": "API Spec",
     "step_features": "Features",
-    "step_review": "Review"
+    "step_review": "Review",
+    "providerResetNote": "Switching provider reset: {{fields}}. They belong to the previous provider; switch back and they return.",
+    "resetModel": "model name",
+    "resetApiKey": "API key",
+    "resetBaseUrl": "base URL"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -875,7 +884,10 @@
     "endReasonRetired": "Ended: the agent version was retired",
     "waitingForPause": "Waiting for the pause to be saved…",
     "searchTranscriptLabel": "Search the transcript",
-    "matchCount": "Matching steps: {{matches}}"
+    "matchCount": "Matching steps: {{matches}}",
+    "errorTitle": "This conversation is in an error state",
+    "errorNoDetail": "The engine recorded no reason for it. The server log of the failing turn has the details.",
+    "errorStep": "Step {{step}}"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -1005,7 +1017,12 @@
     "updateAgentAndSave": "Update agent and save",
     "keepEditing": "Keep editing",
     "discardChanges": "Discard changes",
-    "deployDone": "Deployed — the change is live"
+    "deployDone": "Deployed — the change is live",
+    "loadingEditor": "Loading editor…",
+    "saveErrorReason": "Not saved: {{reason}}",
+    "savedWithWarnings": "Saved, with warnings",
+    "documentCheckFailed": "This document has a shape the editor cannot check — fix it in the JSON tab before saving.",
+    "dismissWarnings": "Dismiss"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1676,7 +1693,11 @@
     "agentOpsFollowUpDesc": "Book, list and cancel one-off check-backs for the agent's own conversation or a fresh one. Every fire carries a cost ceiling.",
     "agentOpsMaxPending": "Waiting at once",
     "agentOpsHorizon": "Horizon (days, max 90)",
-    "agentOpsCostPerFire": "Cost ceiling per fire ($)"
+    "agentOpsCostPerFire": "Cost ceiling per fire ($)",
+    "temperatureBlocksSave": "The temperature must be a number, 0 or more — fix it before saving.",
+    "grPatternBlocksSave": "A regex-filter guardrail has an invalid pattern (line {{line}}) — fix it before saving.",
+    "grPatternInvalid": "Line {{line}} is not a valid regular expression: {{detail}}",
+    "grPatternUnchecked": "Line {{lines}} uses syntax this page cannot check. The server does not check patterns when it saves or deploys: a line it cannot compile is ignored at run time."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1998,7 +2019,9 @@
     "copied": "Log entry copied",
     "noMatches": "No loaded entries match your search.",
     "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
-    "searchLogsLabel": "Search the loaded log entries"
+    "searchLogsLabel": "Search the loaded log entries",
+    "filteredCountLoaded": "{{shown}} of {{total}} loaded entries",
+    "filterLoadedOnly": "The level filter and the counts cover only the entries loaded so far; older entries may still match. Load older entries to search further back."
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -2721,7 +2744,15 @@
       "title": "Test Retrieval",
       "saveFirst": "Save this knowledge base first to search it."
     },
-    "legacyIngestionNote": "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead."
+    "legacyIngestionNote": "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead.",
+    "statusTooLarge": "Failed: {{name}} is larger than {{max}} MB and was not read here. A Files source under Ingestion Sources takes larger files.",
+    "statusUploadRejected": "Failed: the server refused the upload ({{detail}})",
+    "reembedWarning": "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
+    "reembedWarningUnknown": "You changed {{what}}. If this knowledge base already holds documents — this page cannot tell, for example for text ingested by hand earlier — saving does not re-embed them, and searches may return poor or no matches until they are ingested again.",
+    "reembedProvider": "the embedding provider",
+    "reembedModel": "the embedding model",
+    "reembedDimension": "the vector dimension",
+    "reembedChunking": "the chunk settings"
   },
   "onboarding": {
     "welcome": {
@@ -3050,7 +3081,8 @@
     "discardEditsDescription": "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
     "discardEditsConfirm": "Discard",
     "keepEditing": "Keep editing",
-    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs."
+    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+    "inputDisabledNoMembers": "Add at least one member to this group to start a discussion"
   },
   "groupWizard": {
     "groupMemberHint": "This group will participate as a nested sub-group in the discussion.",
@@ -3516,7 +3548,8 @@
     "targetsCol": "Targets",
     "type": "Type",
     "unnamed": "Unnamed Channel",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Channel duplicated"
   },
   "channelDetail": {
     "saveSuccess": "Channel saved",
@@ -3567,7 +3600,11 @@
     "selectGroup": "Select a group…",
     "unknownGroup": "{{id}} (not found)",
     "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
-    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
+    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference.",
+    "triggerReserved": "\"help\" is reserved: the bot answers it with the list of targets, so it cannot be a trigger.",
+    "triggerDuplicate": "This trigger is already on this target.",
+    "channelIdEmpty": "Without a channel ID the router ignores this integration: no Slack message reaches it.",
+    "routerRefreshNote": "The message router picks up changes within about a minute."
   },
   "health": {
     "title": "Health",

@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../lib/copy-to-clipboard";
 import { ReviewNotice } from "./review-notice";
 import { useAgentReviewProfile } from "../../hooks/use-agent-review-profile";
 import { Fragment, useEffect, useId, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
@@ -1021,8 +1022,10 @@ export function ChatPanel({
               <Hash className="h-3 w-3" />
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(conversationId);
-                  toast.success(t("common.copied", "Copied!"));
+                  void copyToClipboard(conversationId).then((ok) => {
+                    if (ok) toast.success(t("common.copied", "Copied!"));
+                    else toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+                  });
                 }}
                 className="font-mono hover:text-foreground transition-colors truncate max-w-[120px]"
                 title={conversationId}

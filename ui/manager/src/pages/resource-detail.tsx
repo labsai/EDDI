@@ -28,6 +28,8 @@ import {
 } from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
 import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
+import { DOCUMENT_VALIDATORS } from "@/components/editors/document-validators";
+import { reportPartialSaveWarnings } from "@/lib/partial-save-warnings";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
@@ -207,6 +209,11 @@ export function ResourceDetailPage() {
 
   // Save feedback state
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // Warnings belong to the save that produced them, and to the resource it saved:
+  // another resource opened through the same route must not show them.
+  const [warningState, setWarningState] = useState<{ id: string | undefined; list: string[] } | undefined>(undefined);
+  const saveWarnings = warningState && warningState.id === id ? warningState.list : undefined;
+  const setSaveWarnings = useCallback((list: string[] | undefined) => setWarningState(list ? { id, list } : undefined), [id]);
 
   // Delete dialog state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -258,7 +265,10 @@ export function ResourceDetailPage() {
     if (partial.retryContext) {
       adoptCascadeContext(partial.retryContext);
     }
-  }, [adoptCascadeContext]);
+    // The resource version that exists came with warnings: keep them.
+    const warnings = reportPartialSaveWarnings(err, t);
+    if (warnings) setSaveWarnings(warnings);
+  }, [adoptCascadeContext, setSaveWarnings, t]);
 
   // All hooks are above — safe to do early returns below
 
@@ -300,6 +310,7 @@ export function ResourceDetailPage() {
     async (jsonString: string) => {
       if (currentVersion === undefined) return;
       setSaveSuccess(false);
+      setSaveWarnings(undefined);
       try {
         const parsed = JSON.parse(jsonString);
 
@@ -315,6 +326,7 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
+                setSaveWarnings(result.warnings);
                 const newAgentVersion = result.newAgentVersion;
                 setCascadeCompatible(false);
                 /*
@@ -397,6 +409,7 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: async (result) => {
+                setSaveWarnings(result.warnings);
                 toast.success(t("editor.saved"));
                 setSaveSuccess(true);
                 setPreviousResourceVersion(currentVersion);
@@ -428,7 +441,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, adoptCascadeContext, deployWithGrants, reportCascadeError]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, adoptCascadeContext, deployWithGrants, reportCascadeError, setSaveWarnings]
   );
 
   useEffect(() => {
@@ -441,6 +454,7 @@ export function ResourceDetailPage() {
   const handleSaveAndDeploy = useCallback(
     async (jsonString: string) => {
       if (!cascadeContext || !agentCtx || currentVersion === undefined) return;
+      setSaveWarnings(undefined);
       try {
         const parsed = JSON.parse(jsonString);
         await saveAndDeploy({
@@ -460,6 +474,8 @@ export function ResourceDetailPage() {
               // Save & Deploy shows the error's message as it stands.
               throw err instanceof CascadeReferenceError ? new Error(describeSaveError(err, t)) : err;
             }
+            // Save & Test answers with the same warnings as Save: keep them on screen.
+            setSaveWarnings(result.warnings);
             setCurrentVersion(result.newResourceVersion);
             setCascadeCompatible(false);
             // Update cascade context so next Save & Test uses correct versions
@@ -471,7 +487,7 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, adoptCascadeContext, t]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, adoptCascadeContext, t, setSaveWarnings]
   );
 
   const handleCascadeConfirm = useCallback(
@@ -780,10 +796,14 @@ export function ResourceDetailPage() {
             saveSuccess={saveSuccess}
             saveError={
               cascadeSave.isError
-                ? t("editor.saveError", "Failed to save")
+                ? t("editor.saveErrorReason", "Not saved: {{reason}}", {
+                    reason: describeSaveError(cascadeSave.error, t),
+                  })
                 : undefined
             }
+            saveWarnings={saveWarnings}
             renderFormEditor={EDITOR_MAP[type ?? ""]}
+            validateDocument={DOCUMENT_VALIDATORS[type ?? ""]}
             jsonSchema={jsonSchema}
             onCompare={() => setShowDiff(true)}
             onDraftChange={handleDraftChange}

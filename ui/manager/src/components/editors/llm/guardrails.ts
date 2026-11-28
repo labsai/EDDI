@@ -399,6 +399,191 @@ export function expressionProblems(g: GuardrailConfig): ExpressionProblem[] {
   return problems;
 }
 
+/** One line of a multi-pattern parameter that cannot be accepted as written. */
+export interface RegexLineProblem {
+  /** 1-based line number in the parameter. */
+  line: number;
+  /**
+   * `invalid`: the browser's engine rejects it and it uses no Java-only syntax,
+   * so the backend will reject it too. `unchecked`: it uses syntax only Java
+   * understands (or means something different there), which this page cannot
+   * judge — shown as a note, never blocking.
+   */
+  state: "invalid" | "unchecked";
+  /** The engine's own explanation, for `invalid`. */
+  detail?: string;
+}
+
+/**
+ * Syntax Java's `Pattern` accepts (or reads differently) that a JavaScript
+ * `RegExp` does not: possessive quantifiers, atomic groups, inline flags, quoting
+ * (`\Q…\E`), the `\A \z \Z \G \h \H \v \V \R \X \e \N{…}` anchors and escapes,
+ * Unicode and POSIX classes (`\p{…}`, `\pL`, `\p{javaLowerCase}` — literal text
+ * to a JavaScript `RegExp` without the `u` flag), `\x{…}` and `\b{g}`. Character
+ * classes (`usesJavaOnlyClassSyntax`), control escapes and quantifier placement
+ * (`usesJavaOnlySequenceSyntax`) are scanned separately.
+ */
+const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHvVRXe]|\\[pP]|\\N\{|\\x\{|\\b\{/;
+
+/**
+ * Whether a character class uses what only Java understands: a nested class
+ * (`[a-z[-+]]`, a union — JavaScript reads `[-+` as a backwards range and
+ * rejects it), an `&&` intersection, a `]` right after the opening `[` (a
+ * literal in Java, an empty class in JavaScript), or a character outside the
+ * Basic Multilingual Plane, written as itself or as a `\uD83D\uDE00` escape
+ * pair. Java reads such a character as one code point; JavaScript without the
+ * `u` flag reads its two surrogate halves, so a range like `[U+1F600-U+1F64F]` is a
+ * backwards range there and valid in Java.
+ */
+function usesJavaOnlyClassSyntax(source: string): boolean {
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") {
+      // `\Q…\E` quotes everything up to `\E`, brackets included.
+      if (source[i + 1] === "Q") return true;
+      if (inClass && source[i + 1] === "u" && /^[dD][89abAB][0-9a-fA-F]{2}$/.test(source.slice(i + 2, i + 6))) return true;
+      i++;
+      continue;
+    }
+    // A high surrogate: the first half of a character outside the BMP.
+    if (inClass && source.charCodeAt(i) >= 0xd800 && source.charCodeAt(i) <= 0xdbff) return true;
+    if (!inClass) {
+      if (c === "[") {
+        inClass = true;
+        let next = i + 1;
+        if (source[next] === "^") next++;
+        if (source[next] === "]") return true;
+      }
+      continue;
+    }
+    if (c === "[") return true;
+    if (c === "&" && source[i + 1] === "&") return true;
+    if (c === "]") inClass = false;
+  }
+  return false;
+}
+
+/**
+ * What Java accepts and a JavaScript `RegExp` (no `u` flag) rejects or reads
+ * differently, but only an escape- and class-aware scan can see. Each case was
+ * checked against `Pattern.compile(…, CASE_INSENSITIVE)` and `new RegExp(…, "i")`:
+ * - `\c` before anything but an ASCII letter (`\c[`, `\c(`, `[\c]]`): a control
+ *   escape in Java; in JavaScript a literal backslash and `c`, so the next
+ *   character is read as syntax (`\c[` opens a class that never closes).
+ * - a quantifier on an anchor or a lookbehind (`^*`, `$?`, `\B+`, `(?<=a)*`).
+ * - a `{n}` quantifier on a quantified atom (`a{2}{3}`, `a*{2}`, `a+?{2}`).
+ */
+function usesJavaOnlySequenceSyntax(source: string): boolean {
+  let inClass = false;
+  /** Per open group: whether it is a lookbehind. */
+  const groups: boolean[] = [];
+  /** What the next quantifier would apply to. */
+  let prev: "none" | "atom" | "assertion" | "quantifier" = "none";
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") {
+      const escaped = source[i + 1];
+      if (escaped === undefined) return false;
+      const after = source[i + 2];
+      if (escaped === "c" && after !== undefined && !/[A-Za-z]/.test(after)) return true;
+      i++;
+      if (!inClass) prev = escaped === "b" || escaped === "B" ? "assertion" : "atom";
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") {
+        inClass = false;
+        prev = "atom";
+      }
+      continue;
+    }
+    if (c === "[") {
+      inClass = true;
+      if (source[i + 1] === "^") i++;
+      // A `]` first in the class is a literal to Java (reported by the class scan).
+      if (source[i + 1] === "]") i++;
+      continue;
+    }
+    const brace = c === "{" && /\d/.test(source[i + 1] ?? "");
+    if (c === "*" || c === "+" || c === "?" || brace) {
+      if (prev === "assertion") return true;
+      if (prev === "quantifier") {
+        if (brace) return true;
+        // `?` makes it lazy, `+` possessive (scanned elsewhere); `**` fails in both.
+        continue;
+      }
+      if (brace) {
+        const close = source.indexOf("}", i);
+        if (close < 0) return false;
+        i = close;
+      }
+      prev = "quantifier";
+      continue;
+    }
+    if (c === "(") {
+      const lookbehind = source.startsWith("(?<=", i) || source.startsWith("(?<!", i);
+      groups.push(lookbehind);
+      // The `?` of a group prefix is not a quantifier.
+      if (source[i + 1] === "?") i++;
+      if (lookbehind) i += 2;
+      prev = "none";
+      continue;
+    }
+    if (c === ")") {
+      prev = groups.pop() ? "assertion" : "atom";
+      continue;
+    }
+    prev = c === "^" || c === "$" ? "assertion" : c === "|" ? "none" : "atom";
+  }
+  return false;
+}
+
+/** Whether a pattern uses syntax this page cannot judge the way Java will. */
+function usesJavaOnlySyntax(source: string): boolean {
+  return JAVA_ONLY_SYNTAX.test(source) || usesJavaOnlyClassSyntax(source) || usesJavaOnlySequenceSyntax(source);
+}
+
+/**
+ * Checks a regex-filter style `patterns` parameter line by line, the way the
+ * backend reads it (one pattern per line, blank lines skipped, each stripped,
+ * compiled case-insensitively as a Java `Pattern`).
+ *
+ * The browser compiles with `new RegExp`, which is close to Java for everyday
+ * patterns but not identical: a pattern JavaScript rejects that uses Java-only
+ * syntax is reported as `unchecked`, not `invalid`, and a pattern that compiles
+ * here can still be refused by Java — the server skips such a line at run time.
+ */
+export function regexPatternProblems(patterns: unknown): RegexLineProblem[] {
+  // The server reads parameters as text; a number in the JSON is its digits.
+  const text = typeof patterns === "string" ? patterns : patterns === undefined || patterns === null ? "" : String(patterns);
+  if (!text.trim()) return [];
+  const problems: RegexLineProblem[] = [];
+  text.split(/\r\n|\r|\n/).forEach((raw, i) => {
+    const source = raw.trim();
+    if (!source) return;
+    const javaOnly = usesJavaOnlySyntax(source);
+    try {
+      new RegExp(source, "i");
+      if (javaOnly) problems.push({ line: i + 1, state: "unchecked" });
+    } catch (e) {
+      if (javaOnly) problems.push({ line: i + 1, state: "unchecked" });
+      else problems.push({ line: i + 1, state: "invalid", detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  return problems;
+}
+
+/**
+ * Whether a guardrail's patterns must block Save: a regex-filter with a line the
+ * engine rejects. The backend ignores such a line at run time, so a blocking
+ * filter whose lines are all invalid screens nothing — it fails open.
+ */
+export function blockingRegexProblem(g: GuardrailConfig): RegexLineProblem | undefined {
+  if (g.type !== "regex-filter") return undefined;
+  return regexPatternProblems(g.parameters?.patterns).find((p) => p.state === "invalid");
+}
+
 /** One line for the list row: the parameters that say what this guardrail does. */
 export function summarizeGuardrail(g: GuardrailConfig): string {
   const p = g.parameters ?? {};

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
 import { server } from "@eddi/app-kit/test/mocks/server";
@@ -32,6 +33,36 @@ function renderChannelDetail(id = "ch1", version = 1, withToaster = false) {
     "/manage/channels/:id",
   );
 }
+
+describe("ChannelDetailPage — a bare link whose version lookup fails", () => {
+  it("shows the retry state instead of opening a version cached from an earlier visit", async () => {
+    // An earlier visit left version 2 in the cache; the lookup on this visit fails.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
+    queryClient.setQueryData(["channels", "ch1", "currentVersion"], 2);
+    let lookups = 0;
+    const versionsRead: (string | null)[] = [];
+    server.use(
+      http.get("*/channelstore/channels/:id/currentversion", () => {
+        lookups += 1;
+        return lookups === 1 ? new HttpResponse(null, { status: 500 }) : HttpResponse.json(3);
+      }),
+      http.get("*/channelstore/channels/:id", ({ request }) => {
+        versionsRead.push(new URL(request.url).searchParams.get("version"));
+        return undefined;
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage("/manage/channels/ch1", <ChannelDetailPage />, "/manage/channels/:id", queryClient);
+
+    const error = await screen.findByTestId("channel-version-error");
+    expect(versionsRead).toEqual([]);
+
+    await user.click(within(error).getByTestId("error-state-retry"));
+    await screen.findByTestId("save-channel-btn");
+    expect(versionsRead).toContain("3");
+    expect(versionsRead).not.toContain("2");
+  });
+});
 
 describe("ChannelDetailPage", () => {
   it("renders loading skeleton initially", () => {

@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+import { copyToClipboard } from "@eddi/app-kit/lib/copy-to-clipboard";
 import { useTranslation } from "react-i18next";
 import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ArrowDown, ChevronDown, ChevronUp, Check } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
@@ -381,12 +383,16 @@ export function DiscussionTranscript({
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
 
-  function handleCopySynthesis() {
+  async function handleCopySynthesis() {
     const parsed = effectiveSynthesis ? parseTranscriptContent(effectiveSynthesis) : null;
-    if (parsed) {
-      navigator.clipboard.writeText(parsed);
+    if (!parsed) return;
+    // "Copied" only once the clipboard has the text: over plain http the write
+    // fails, and the button used to say it worked anyway.
+    if (await copyToClipboard(parsed)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
     }
   }
 

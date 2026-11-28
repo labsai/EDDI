@@ -356,13 +356,31 @@ export function useUpdateAgentDescriptor() {
   });
 }
 
+/**
+ * What a delete refreshes on top of the agent caches (`agentKeys.all`): the other
+ * places that list agents. The chat pickers (deployed agents), the group member
+ * lists, the channel lists (which name their target agents) and the Studio. A
+ * deleted agent left in any of them is offered again until that cache goes stale.
+ */
+const AGENT_DELETE_EXTRA_INVALIDATIONS: readonly (readonly unknown[])[] = [
+  chatKeys.all,
+  ["groups"],
+  ["channels"],
+  ["studio", "descriptors"],
+];
+
 export function useDeleteAgent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, version }: { id: string; version: number }) =>
-      deleteAgent(id, version),
-    onSuccess: () => {
+    mutationFn: ({ id, version }: { id: string; version: number }) => deleteAgent(id, version),
+    onSuccess: (_result, { id }) => {
+      // The deleted agent's own entries go, rather than being refetched into a 404.
+      queryClient.removeQueries({ queryKey: agentKeys.detail(id) });
+      queryClient.removeQueries({ queryKey: agentKeys.descriptor(id) });
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      for (const queryKey of AGENT_DELETE_EXTRA_INVALIDATIONS) {
+        queryClient.invalidateQueries({ queryKey: [...queryKey] });
+      }
     },
   });
 }

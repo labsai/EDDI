@@ -104,8 +104,11 @@ export function GroupWorkspacePage() {
   // Same convention as the group detail page: the version rides on the URL.
   // Hardcoding 1 here read the group's FIRST version, so a renamed group showed
   // its original name in this page's header and back-link.
-  const version = Number(searchParams.get("version")) || 1;
-  const { data: groupConfig } = useGroup(groupId || "", version);
+  // A missing ?version resolves to the group's CURRENT version, never to 1 (a
+  // bare link then opened the first version and its back-link carried it on).
+  const version = useResolvedGroupVersion(groupId, searchParams.get("version"));
+  const versionQuery = version !== undefined ? `?version=${version}` : "";
+  const { data: groupConfig } = useGroup(version !== undefined ? groupId || "" : "", version);
   // Lessons are read and configured from the group's CURRENT version on the
   // backend, so whether to show them is too: a version-less link (read as
   // version 1) or a link to an older version hid the panel of a group that
@@ -270,7 +273,7 @@ export function GroupWorkspacePage() {
   if (isError || !workspace) {
     return (
       <div className="space-y-4">
-        <BackLink to={`/manage/groups/${groupId}?version=${version}`} label={t("groupWorkspace.backToGroup", "Back to group")} />
+        <BackLink to={`/manage/groups/${groupId}${versionQuery}`} label={t("groupWorkspace.backToGroup", "Back to group")} />
         <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       </div>
     );
@@ -283,7 +286,7 @@ export function GroupWorkspacePage() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <BackLink to={`/manage/groups/${groupId}?version=${version}`} label={groupConfig?.name || t("groupWorkspace.backToGroup", "Back to group")} />
+        <BackLink to={`/manage/groups/${groupId}${versionQuery}`} label={groupConfig?.name || t("groupWorkspace.backToGroup", "Back to group")} />
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
           <SquareKanban className="h-8 w-8 text-primary" />
           {t("groupWorkspace.title", "Standing Team Workspace")}

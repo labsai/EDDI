@@ -1,3 +1,4 @@
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { useState, useCallback, useMemo } from "react";
@@ -8,7 +9,6 @@ import {
   Plus,
   Trash2,
   Loader2,
-  X,
   Info,
   Copy,
   Pencil,
@@ -429,38 +429,17 @@ export function VariablesPage() {
       )}
 
       {/* ─── Create / Edit dialog ─── */}
-      {showDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={closeDialog}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") closeDialog();
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="variable-dialog-title"
-          >
-            <div className="flex items-center justify-between">
-              <h2
-                id="variable-dialog-title"
-                className="text-lg font-semibold text-foreground"
-              >
-                {editMode
-                  ? t("variables.editTitle", "Edit Variable")
-                  : t("variables.createTitle", "Add Global Variable")}
-              </h2>
-              <button
-                aria-label={t("common.close", "Close")}
-                onClick={closeDialog}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      <AccessibleDialog
+        open={showDialog}
+        onClose={closeDialog}
+        title={
+          editMode
+            ? t("variables.editTitle", "Edit Variable")
+            : t("variables.createTitle", "Add Global Variable")
+        }
+        testId="variable-dialog"
+      >
+        <div className="p-5">
 
             <div className="mt-4 space-y-4">
               {/* Key */}
@@ -595,9 +574,8 @@ export function VariablesPage() {
                 {t("variables.save", "Save Variable")}
               </button>
             </div>
-          </div>
         </div>
-      )}
+      </AccessibleDialog>
 
       {/* ─── Delete confirmation dialog ─── */}
       {/* Shared Radix dialog: focus moves in, Escape closes, Tab is trapped.

@@ -76,7 +76,15 @@ export function ChannelsPage() {
   };
 
   const handleDuplicate = (id: string, version: number) => {
-    duplicateMutation.mutate({ id, version });
+    // One copy per click: a second click while the first is running made a second copy.
+    if (duplicateMutation.isPending) return;
+    duplicateMutation.mutate(
+      { id, version },
+      {
+        onSuccess: () => toast.success(t("channels.duplicated", "Channel duplicated")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
   };
 
   const handleViewChange = (mode: ViewMode) => {

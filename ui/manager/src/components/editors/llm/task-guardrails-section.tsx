@@ -2,10 +2,12 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import { useReportInvalid } from "@eddi/app-kit/components/editors/editor-validity";
 import { GuardrailSheet } from "./guardrail-sheet";
 import {
   ACTION_TEXT,
   TYPE_TEXT,
+  blockingRegexProblem,
   effectiveAction,
   isKnownGuardrailType,
   newGuardrail,
@@ -45,6 +47,21 @@ export function TaskGuardrailsSection({ task, onChange, readOnly }: TaskSectionP
   const { t } = useTranslation();
   const [editing, setEditing] = useState<{ phase: ListPhase; index: number } | null>(null);
   const count = (task.inputGuardrails?.length ?? 0) + (task.outputGuardrails?.length ?? 0);
+
+  // A regex-filter line the engine rejects is ignored at run time, so a blocking
+  // filter whose lines are all invalid screens nothing. Reported whether or not
+  // the sheet is open: closing it must not make the config saveable again.
+  const badPattern = [...(task.inputGuardrails ?? []), ...(task.outputGuardrails ?? [])]
+    .map(blockingRegexProblem)
+    .find(Boolean);
+  useReportInvalid(
+    badPattern
+      ? t("llmEditor.grPatternBlocksSave", "A regex-filter guardrail has an invalid pattern (line {{line}}) — fix it before saving.", {
+          line: badPattern.line,
+        })
+      : null,
+    "guardrail-pattern",
+  );
 
   const editedList = editing ? task[FIELD_OF[editing.phase]] : undefined;
   const edited = editing ? editedList?.[editing.index] : undefined;

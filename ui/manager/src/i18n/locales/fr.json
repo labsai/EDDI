@@ -220,7 +220,8 @@
       "forbidden": "Vous n'avez pas l'autorisation de consulter ceci.",
       "notFound": "Introuvable — il a peut-être été supprimé."
     },
-    "rename": "Renommer"
+    "rename": "Renommer",
+    "versionLookupFailed": "Impossible de trouver la version actuelle."
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",
@@ -269,7 +270,10 @@
     "deployFailedIn": "Le déploiement a échoué en {{environment}}",
     "undeployCompatibleHint": "Les conversations qu’une version compatible déployée peut poursuivre ne sont pas terminées : elles y passent lors de leur prochain tour.",
     "sortLoadingAll": "Chargement de tous les agents pour un tri complet…",
-    "createNamingFailed": "Agent créé, mais son nom n'a pas pu être enregistré. Renommez-le depuis sa page."
+    "createNamingFailed": "Agent créé, mais son nom n'a pas pu être enregistré. Renommez-le depuis sa page.",
+    "deleted": "{{name}} supprimé",
+    "confirmDeleteNamed": "Supprimer {{name}} ?",
+    "deleteReload": "Recharger la version actuelle"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -513,6 +517,7 @@
     "removeWorkflow": "Retirer le workflow de l'agent",
     "a2aAddSkill": "Ajouter une compétence",
     "saveConflict": "Cet agent a été modifié ailleurs depuis son ouverture. Vos modifications sont conservées : vérifiez-les et enregistrez à nouveau.",
+    "saveWaitForVersion": "La dernière version est encore en cours de chargement — enregistrez à nouveau dans un instant.",
     "saveBeforeDeploy": "Enregistrez ou abandonnez vos modifications avant de déployer",
     "reviewChanges": "Vérifier les modifications",
     "unsavedSections": "Sections avec des modifications non enregistrées : {{count}}",
@@ -694,7 +699,11 @@
     "step_llm": "Modèle",
     "step_apispec": "Spécification d'API",
     "step_features": "Fonctionnalités",
-    "step_review": "Récapitulatif"
+    "step_review": "Récapitulatif",
+    "providerResetNote": "Le changement de fournisseur a réinitialisé : {{fields}}. Ils appartiennent au fournisseur précédent ; revenez en arrière pour les retrouver.",
+    "resetModel": "nom du modèle",
+    "resetApiKey": "clé API",
+    "resetBaseUrl": "URL de base"
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -856,7 +865,10 @@
     "endReasonRetired": "Terminée : la version de l’agent a été retirée",
     "waitingForPause": "En attente de l'enregistrement de la pause…",
     "searchTranscriptLabel": "Rechercher dans la transcription",
-    "matchCount": "Étapes correspondantes : {{matches}}"
+    "matchCount": "Étapes correspondantes : {{matches}}",
+    "errorTitle": "Cette conversation est en état d’erreur",
+    "errorNoDetail": "Le moteur n’a enregistré aucune raison. Le journal du serveur pour le tour en échec contient les détails.",
+    "errorStep": "Étape {{step}}"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -978,7 +990,12 @@
     "updateAgentAndSave": "Mettre à jour l'agent et enregistrer",
     "keepEditing": "Continuer à modifier",
     "discardChanges": "Abandonner les modifications",
-    "deployDone": "Déployé — la modification est active"
+    "deployDone": "Déployé — la modification est active",
+    "loadingEditor": "Chargement de l’éditeur…",
+    "saveErrorReason": "Non enregistré : {{reason}}",
+    "savedWithWarnings": "Enregistré, avec des avertissements",
+    "documentCheckFailed": "Ce document a une forme que l’éditeur ne peut pas vérifier — corrigez-le dans l’onglet JSON avant d’enregistrer.",
+    "dismissWarnings": "Fermer"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1653,7 +1670,11 @@
     "agentOpsFollowUpDesc": "Programmer, lister et annuler des rappels ponctuels pour la conversation de l'agent ou une nouvelle. Chaque déclenchement a un plafond de coût.",
     "agentOpsMaxPending": "En attente simultanément",
     "agentOpsHorizon": "Horizon (jours, max. 90)",
-    "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)"
+    "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)",
+    "temperatureBlocksSave": "La température doit être un nombre supérieur ou égal à 0 — corrigez-la avant d’enregistrer.",
+    "grPatternBlocksSave": "Un garde-fou regex-filter contient un motif invalide (ligne {{line}}) — corrigez-le avant d’enregistrer.",
+    "grPatternInvalid": "La ligne {{line}} n’est pas une expression régulière valide : {{detail}}",
+    "grPatternUnchecked": "La ligne {{lines}} utilise une syntaxe que cette page ne peut pas vérifier. Le serveur ne vérifie pas les motifs à l’enregistrement ni au déploiement : une ligne qu’il ne peut pas compiler est ignorée à l’exécution."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -1977,7 +1998,9 @@
     "copied": "Entrée de journal copiée",
     "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
     "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
-    "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
+    "searchLogsLabel": "Rechercher dans les entrées de journal chargées",
+    "filteredCountLoaded": "{{shown}} sur {{total}} entrées chargées",
+    "filterLoadedOnly": "Le filtre de niveau et les compteurs ne portent que sur les entrées déjà chargées ; des entrées plus anciennes peuvent aussi correspondre. Chargez des entrées plus anciennes pour chercher plus loin."
   },
   "secrets": {
     "loadError": "Impossible de charger les secrets",
@@ -2667,7 +2690,15 @@
       "title": "Tester la récupération",
       "saveFirst": "Enregistrez d'abord cette base de connaissances pour la rechercher."
     },
-    "legacyIngestionNote": "Pour du texte ponctuel. Les documents ajoutés ici ne peuvent plus être listés, mis à jour ni supprimés — pour les documents que vous maintiendrez, ajoutez plutôt une source Fichiers sous Sources d'ingestion."
+    "legacyIngestionNote": "Pour du texte ponctuel. Les documents ajoutés ici ne peuvent plus être listés, mis à jour ni supprimés — pour les documents que vous maintiendrez, ajoutez plutôt une source Fichiers sous Sources d'ingestion.",
+    "statusTooLarge": "Échec : {{name}} dépasse {{max}} Mo et n’a pas été lu ici. Une source Fichiers sous Sources d’ingestion accepte des fichiers plus volumineux.",
+    "statusUploadRejected": "Échec : le serveur a refusé l’envoi ({{detail}})",
+    "reembedWarning": "Cette base de connaissances contient déjà des documents ingérés, et vous avez modifié {{what}}. L’enregistrement ne les ré-intègre pas : les vecteurs stockés restent inchangés, les recherches peuvent donc donner de mauvais résultats ou aucun tant que les documents ne sont pas ingérés à nouveau (ou qu’une nouvelle base n’est pas créée).",
+    "reembedWarningUnknown": "Vous avez modifié {{what}}. Si cette base de connaissances contient déjà des documents — cette page ne peut pas le savoir, par exemple pour du texte ingéré à la main auparavant —, l’enregistrement ne les ré-encode pas, et les recherches peuvent renvoyer des résultats médiocres ou aucun tant qu’ils ne sont pas ingérés à nouveau.",
+    "reembedProvider": "le fournisseur d’embeddings",
+    "reembedModel": "le modèle d’embeddings",
+    "reembedDimension": "la dimension des vecteurs",
+    "reembedChunking": "les paramètres de découpage"
   },
   "onboarding": {
     "welcome": {
@@ -3027,7 +3058,8 @@
     "discardEditsDescription": "Une section de la configuration est encore en cours de modification. Fermer le panneau abandonne vos changements dans cette section.",
     "discardEditsConfirm": "Abandonner",
     "keepEditing": "Continuer la modification",
-    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours."
+    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours.",
+    "inputDisabledNoMembers": "Ajoutez au moins un membre à ce groupe pour démarrer une discussion"
   },
   "memories": {
     "title": "Mémoire utilisateur",
@@ -3507,7 +3539,8 @@
     "targetsCol": "Cibles",
     "type": "Type",
     "unnamed": "Canal sans nom",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Canal dupliqué"
   },
   "channelDetail": {
     "saveSuccess": "Canal enregistré",
@@ -3559,7 +3592,11 @@
     "selectGroup": "Choisir un groupe…",
     "unknownGroup": "{{id}} (introuvable)",
     "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
-    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
+    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence.",
+    "triggerReserved": "« help » est réservé : le bot y répond par la liste des cibles, il ne peut donc pas servir de déclencheur.",
+    "triggerDuplicate": "Ce déclencheur est déjà sur cette cible.",
+    "channelIdEmpty": "Sans identifiant de canal, le routeur ignore cette intégration : aucun message Slack ne l’atteint.",
+    "routerRefreshNote": "Le routeur de messages prend en compte les changements en une minute environ."
   },
   "health": {
     "title": "Santé",

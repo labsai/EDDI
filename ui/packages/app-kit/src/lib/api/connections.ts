@@ -299,6 +299,11 @@ export function getConnectionDescriptors(
   );
 }
 
+/** The connection's current (newest) version — `GET /connectionstore/connections/{id}/currentversion`. */
+export function getConnectionCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`${STORE}/${seg(id)}/currentversion`);
+}
+
 export function getConnection(
   id: string,
   version?: number,

@@ -220,7 +220,8 @@
       "forbidden": "これを表示する権限がありません。",
       "notFound": "見つかりません。削除された可能性があります。"
     },
-    "rename": "名前を変更"
+    "rename": "名前を変更",
+    "versionLookupFailed": "現在のバージョンが見つかりませんでした。"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -268,7 +269,10 @@
     "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
     "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。",
     "sortLoadingAll": "並べ替えを完全にするため、すべてのエージェントを読み込んでいます…",
-    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。"
+    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。",
+    "deleted": "{{name}} を削除しました",
+    "confirmDeleteNamed": "{{name}} を削除しますか？",
+    "deleteReload": "現在のバージョンを再読み込み"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -512,6 +516,7 @@
     "removeWorkflow": "エージェントからワークフローを削除",
     "a2aAddSkill": "スキルを追加",
     "saveConflict": "開いた後にこのエージェントが別の場所で変更されました。編集内容は保持されています。確認してから再度保存してください。",
+    "saveWaitForVersion": "最新バージョンをまだ読み込んでいます。少ししてからもう一度保存してください。",
     "saveBeforeDeploy": "デプロイする前に変更を保存または破棄してください",
     "reviewChanges": "変更を確認",
     "unsavedSections": "未保存の変更があるセクション: {{count}}",
@@ -693,7 +698,11 @@
     "step_llm": "モデル",
     "step_apispec": "API 仕様",
     "step_features": "機能",
-    "step_review": "確認"
+    "step_review": "確認",
+    "providerResetNote": "プロバイダーを切り替えたため {{fields}} をリセットしました。以前のプロバイダーの値なので、戻すと復元されます。",
+    "resetModel": "モデル名",
+    "resetApiKey": "API キー",
+    "resetBaseUrl": "ベース URL"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -846,7 +855,10 @@
     "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
     "waitingForPause": "一時停止の保存を待っています…",
     "searchTranscriptLabel": "トランスクリプトを検索",
-    "matchCount": "一致したステップ: {{matches}}"
+    "matchCount": "一致したステップ: {{matches}}",
+    "errorTitle": "この会話はエラー状態です",
+    "errorNoDetail": "エンジンは理由を記録していません。失敗したターンのサーバーログに詳細があります。",
+    "errorStep": "ステップ {{step}}"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -964,7 +976,12 @@
     "updateAgentAndSave": "エージェントを更新して保存",
     "keepEditing": "編集を続ける",
     "discardChanges": "変更を破棄",
-    "deployDone": "デプロイしました — 変更が反映されています"
+    "deployDone": "デプロイしました — 変更が反映されています",
+    "loadingEditor": "エディターを読み込んでいます…",
+    "saveErrorReason": "保存されませんでした: {{reason}}",
+    "savedWithWarnings": "保存しました（警告あり）",
+    "documentCheckFailed": "このドキュメントはエディターで確認できない形をしています。保存する前に JSON タブで修正してください。",
+    "dismissWarnings": "閉じる"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1635,7 +1652,11 @@
     "agentOpsFollowUpDesc": "エージェント自身の会話または新しい会話向けに、1回限りのフォローアップを予約・一覧・キャンセルします。各実行にはコスト上限があります。",
     "agentOpsMaxPending": "同時に待機できる数",
     "agentOpsHorizon": "期間（日、最大90）",
-    "agentOpsCostPerFire": "実行あたりのコスト上限（$）"
+    "agentOpsCostPerFire": "実行あたりのコスト上限（$）",
+    "temperatureBlocksSave": "temperature は 0 以上の数値にしてください。保存する前に修正してください。",
+    "grPatternBlocksSave": "regex-filter ガードレールに無効なパターンがあります（{{line}} 行目）。保存する前に修正してください。",
+    "grPatternInvalid": "{{line}} 行目は有効な正規表現ではありません: {{detail}}",
+    "grPatternUnchecked": "{{lines}} 行目はこのページでは検証できない構文を使っています。サーバーは保存時にもデプロイ時にもパターンを検証しません。コンパイルできない行は実行時に無視されます。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1957,7 +1978,9 @@
     "noMatchesHint": "検索の対象はここに読み込み済みのエントリのみです。さらに過去を調べるには、古いエントリを読み込むか、フィルターを調整してください。",
     "searchLogsLabel": "読み込み済みのログエントリを検索",
     "errorCount_one": "エラー {{count}} 件",
-    "warnCount_one": "警告 {{count}} 件"
+    "warnCount_one": "警告 {{count}} 件",
+    "filteredCountLoaded": "読み込み済み {{total}} 件中 {{shown}} 件",
+    "filterLoadedOnly": "レベルフィルターと件数は、これまでに読み込んだ項目だけが対象です。より古い項目も一致する可能性があります。さらに遡って検索するには古い項目を読み込んでください。"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -2639,7 +2662,15 @@
       "title": "検索をテスト",
       "saveFirst": "検索するには、まずこのナレッジベースを保存してください。"
     },
-    "legacyIngestionNote": "一度きりのテキスト用です。ここで追加したドキュメントは後から一覧表示・更新・削除できません。継続して管理するドキュメントは、代わりに「取り込みソース」でファイルソースを追加してください。"
+    "legacyIngestionNote": "一度きりのテキスト用です。ここで追加したドキュメントは後から一覧表示・更新・削除できません。継続して管理するドキュメントは、代わりに「取り込みソース」でファイルソースを追加してください。",
+    "statusTooLarge": "失敗: {{name}} は {{max}} MB を超えているため、ここでは読み込まれませんでした。取り込みソースのファイルソースならより大きなファイルを扱えます。",
+    "statusUploadRejected": "失敗: サーバーがアップロードを拒否しました（{{detail}}）",
+    "reembedWarning": "このナレッジベースには取り込み済みのドキュメントがあり、{{what}}を変更しました。保存しても再埋め込みは行われません。保存済みのベクトルはそのままなので、ドキュメントを再取り込みする（または新しいナレッジベースを作成する）まで、検索結果が悪くなるか得られない可能性があります。",
+    "reembedWarningUnknown": "{{what}}を変更しました。このナレッジベースにすでにドキュメントがある場合（このページでは判断できません。たとえば以前に手動で取り込んだテキストなど）、保存しても再埋め込みされず、再度取り込むまで検索結果が不十分になるか何も返らない可能性があります。",
+    "reembedProvider": "埋め込みプロバイダー",
+    "reembedModel": "埋め込みモデル",
+    "reembedDimension": "ベクトルの次元数",
+    "reembedChunking": "チャンク設定"
   },
   "onboarding": {
     "welcome": {
@@ -2997,7 +3028,8 @@
     "discardEditsDescription": "設定のセクションがまだ編集中です。パネルを閉じると、そこでの変更は破棄されます。",
     "discardEditsConfirm": "破棄",
     "keepEditing": "編集を続ける",
-    "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。"
+    "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+    "inputDisabledNoMembers": "ディスカッションを始めるには、このグループにメンバーを 1 人以上追加してください"
   },
   "memories": {
     "title": "ユーザーメモリ",
@@ -3475,7 +3507,8 @@
     "targetsCol": "ターゲット",
     "type": "タイプ",
     "unnamed": "名前なしチャネル",
-    "version": "バージョン"
+    "version": "バージョン",
+    "duplicated": "チャネルを複製しました"
   },
   "channelDetail": {
     "saveSuccess": "チャンネルを保存しました",
@@ -3526,7 +3559,11 @@
     "selectGroup": "グループを選択…",
     "unknownGroup": "{{id}}（見つかりません）",
     "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
-    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。",
+    "triggerReserved": "「help」は予約語です。ボットは対象の一覧で応答するため、トリガーにはできません。",
+    "triggerDuplicate": "このトリガーはすでにこの対象にあります。",
+    "channelIdEmpty": "チャンネル ID がないと、ルーターはこの連携を無視します。Slack のメッセージは届きません。",
+    "routerRefreshNote": "メッセージルーターは約 1 分以内に変更を反映します。"
   },
   "health": {
     "title": "健全性",

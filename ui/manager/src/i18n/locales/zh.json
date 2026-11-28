@@ -220,7 +220,8 @@
       "forbidden": "您无权查看此内容。",
       "notFound": "未找到——可能已被删除。"
     },
-    "rename": "重命名"
+    "rename": "重命名",
+    "versionLookupFailed": "找不到当前版本。"
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -268,7 +269,10 @@
     "deployFailedIn": "在 {{environment}} 中部署失败",
     "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。",
     "sortLoadingAll": "正在加载所有智能体，以便完整排序…",
-    "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。"
+    "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。",
+    "deleted": "已删除 {{name}}",
+    "confirmDeleteNamed": "删除 {{name}}？",
+    "deleteReload": "重新加载当前版本"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -512,6 +516,7 @@
     "removeWorkflow": "从智能体中移除工作流",
     "a2aAddSkill": "添加技能",
     "saveConflict": "自你打开后，此智能体已在别处被修改。你的编辑已保留：请检查后再次保存。",
+    "saveWaitForVersion": "最新版本仍在加载——请稍后再保存。",
     "saveBeforeDeploy": "部署前请保存或放弃你的更改",
     "reviewChanges": "查看更改",
     "unsavedSections": "有未保存更改的部分：{{count}}",
@@ -693,7 +698,11 @@
     "step_llm": "模型",
     "step_apispec": "API 规范",
     "step_features": "功能",
-    "step_review": "检查"
+    "step_review": "检查",
+    "providerResetNote": "切换提供商已重置：{{fields}}。它们属于之前的提供商，切换回去即可恢复。",
+    "resetModel": "模型名称",
+    "resetApiKey": "API 密钥",
+    "resetBaseUrl": "基础 URL"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -846,7 +855,10 @@
     "endReasonRetired": "已结束：该智能体版本已被停用",
     "waitingForPause": "正在等待暂停状态保存…",
     "searchTranscriptLabel": "搜索对话记录",
-    "matchCount": "匹配的步骤：{{matches}}"
+    "matchCount": "匹配的步骤：{{matches}}",
+    "errorTitle": "此对话处于错误状态",
+    "errorNoDetail": "引擎没有记录原因。失败回合的服务器日志中有详细信息。",
+    "errorStep": "步骤 {{step}}"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -964,7 +976,12 @@
     "updateAgentAndSave": "更新智能体并保存",
     "keepEditing": "继续编辑",
     "discardChanges": "放弃更改",
-    "deployDone": "已部署 — 更改已生效"
+    "deployDone": "已部署 — 更改已生效",
+    "loadingEditor": "正在加载编辑器…",
+    "saveErrorReason": "未保存：{{reason}}",
+    "savedWithWarnings": "已保存，但有警告",
+    "documentCheckFailed": "此文档的结构无法由编辑器检查——请先在 JSON 选项卡中修正再保存。",
+    "dismissWarnings": "关闭"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1635,7 +1652,11 @@
     "agentOpsFollowUpDesc": "为智能体自己的对话或新对话预约、列出和取消一次性回访。每次触发都有费用上限。",
     "agentOpsMaxPending": "同时等待数量",
     "agentOpsHorizon": "时间范围（天，最多 90）",
-    "agentOpsCostPerFire": "每次触发的费用上限（$）"
+    "agentOpsCostPerFire": "每次触发的费用上限（$）",
+    "temperatureBlocksSave": "温度必须是不小于 0 的数字——请先修正再保存。",
+    "grPatternBlocksSave": "regex-filter 护栏中有无效的模式（第 {{line}} 行）——请先修正再保存。",
+    "grPatternInvalid": "第 {{line}} 行不是有效的正则表达式：{{detail}}",
+    "grPatternUnchecked": "第 {{lines}} 行使用了本页面无法检查的语法。服务器在保存或部署时不会检查模式：它无法编译的行会在运行时被忽略。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1957,7 +1978,9 @@
     "noMatchesHint": "搜索仅覆盖此处已加载的条目。请加载更早的条目或调整筛选条件以查看更早的内容。",
     "searchLogsLabel": "搜索已加载的日志条目",
     "errorCount_one": "{{count}} 个错误",
-    "warnCount_one": "{{count}} 个警告"
+    "warnCount_one": "{{count}} 个警告",
+    "filteredCountLoaded": "已加载的 {{total}} 条中的 {{shown}} 条",
+    "filterLoadedOnly": "级别过滤和计数仅涵盖目前已加载的条目；更早的条目仍可能匹配。请加载更早的条目以向前搜索。"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -2639,7 +2662,15 @@
       "title": "测试检索",
       "saveFirst": "请先保存此知识库再进行搜索。"
     },
-    "legacyIngestionNote": "用于一次性文本。在此添加的文档之后无法列出、更新或删除——对于需要维护的文档，请改为在“摄取来源”下添加一个文件来源。"
+    "legacyIngestionNote": "用于一次性文本。在此添加的文档之后无法列出、更新或删除——对于需要维护的文档，请改为在“摄取来源”下添加一个文件来源。",
+    "statusTooLarge": "失败：{{name}} 大于 {{max}} MB，此处未读取。“摄取源”下的文件源可接收更大的文件。",
+    "statusUploadRejected": "失败：服务器拒绝了上传（{{detail}}）",
+    "reembedWarning": "此知识库已有摄取的文档，而你修改了{{what}}。保存不会重新嵌入这些文档：已存储的向量保持不变，因此在重新摄取文档（或创建新的知识库）之前，搜索可能结果很差或没有结果。",
+    "reembedWarningUnknown": "你更改了{{what}}。如果此知识库已包含文档（本页面无法判断，例如之前手动导入的文本），保存不会重新嵌入它们，在重新导入之前，搜索可能返回较差的结果或没有结果。",
+    "reembedProvider": "嵌入提供商",
+    "reembedModel": "嵌入模型",
+    "reembedDimension": "向量维度",
+    "reembedChunking": "分块设置"
   },
   "onboarding": {
     "welcome": {
@@ -2997,7 +3028,8 @@
     "discardEditsDescription": "配置中的某一部分仍在编辑。关闭面板会放弃你在其中所做的更改。",
     "discardEditsConfirm": "放弃",
     "keepEditing": "继续编辑",
-    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。"
+    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。",
+    "inputDisabledNoMembers": "请至少为该群组添加一名成员以开始讨论"
   },
   "memories": {
     "title": "用户记忆",
@@ -3475,7 +3507,8 @@
     "targetsCol": "目标",
     "type": "类型",
     "unnamed": "未命名频道",
-    "version": "版本"
+    "version": "版本",
+    "duplicated": "已复制频道"
   },
   "channelDetail": {
     "saveSuccess": "频道已保存",
@@ -3526,7 +3559,11 @@
     "selectGroup": "选择群组…",
     "unknownGroup": "{{id}}（未找到）",
     "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
-    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
+    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。",
+    "triggerReserved": "“help”是保留词：机器人会用目标列表回应它，因此不能用作触发词。",
+    "triggerDuplicate": "此触发词已在该目标上。",
+    "channelIdEmpty": "没有频道 ID，路由器会忽略此集成：没有任何 Slack 消息会到达它。",
+    "routerRefreshNote": "消息路由器会在大约一分钟内应用更改。"
   },
   "health": {
     "title": "健康度",

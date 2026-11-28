@@ -286,12 +286,18 @@ function LiveTab() {
     URL.revokeObjectURL(url);
   }, [filteredEntries]);
 
-  // Auto-scroll to bottom (newest last — standard log tail UX)
+  // Auto-scroll to bottom (newest last — standard log tail UX).
+  //
+  // Keyed on the newest visible line, not on how many lines there are: the view
+  // is capped, so once it is full a new line pushes the oldest out and the count
+  // never changes again — the effect stopped firing and the tail stopped
+  // following. `entries` is newest first.
+  const newestKey = filteredEntries.length > 0 ? logEntryKey(filteredEntries[0]!) : "";
   useEffect(() => {
     if (autoScroll && scrollRef.current && !paused) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [entries.length, autoScroll, paused]);
+  }, [newestKey, autoScroll, paused]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -422,6 +428,7 @@ function LiveTab() {
       {/* Log entries */}
       <div
         ref={scrollRef}
+        data-testid="live-log-scroll"
         className="flex-1 overflow-auto rounded-xl border border-border bg-card"
         onScroll={(e) => {
           // Disable auto-scroll if user scrolls away from bottom
@@ -794,8 +801,16 @@ function HistoryTab() {
       <div className="mt-2 text-end text-xs text-muted-foreground">
         {logs &&
           (filteredLogs.length !== logs.length
-            ? t("logs.filteredCount", "{{shown}} of {{total}} entries", { shown: filteredLogs.length, total: logs.length })
+            ? t("logs.filteredCountLoaded", "{{shown}} of {{total}} loaded entries", { shown: filteredLogs.length, total: logs.length })
             : t("logs.entryCount", "{{count}} entries", { count: logs.length }))}
+        {logs && hasMore && (levelFilter || textSearch.trim()) && (
+          <p className="mt-0.5" data-testid="history-filter-scope-note">
+            {t(
+              "logs.filterLoadedOnly",
+              "The level filter and the counts cover only the entries loaded so far; older entries may still match. Load older entries to search further back.",
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

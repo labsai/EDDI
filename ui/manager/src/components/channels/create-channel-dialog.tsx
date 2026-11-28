@@ -1,8 +1,9 @@
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useTranslation } from "react-i18next";
-import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
+import { ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
@@ -127,24 +128,16 @@ export function CreateChannelDialog({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onKeyDown={(e) => {
-        // A child that handled Escape (the secret picker's list or its
-        // portalled "Add Secret" modal) marks it with preventDefault.
-        if (e.key === "Escape" && !e.defaultPrevented) dismiss();
-      }}
+    // The shared dialog: focus trap, Escape (a child that handled it marks it with
+    // preventDefault and is left alone) and focus return.
+    <AccessibleDialog
+      open
+      onClose={dismiss}
+      title={t("channels.createTitle", "Create Channel Integration")}
+      testId="create-channel-dialog"
+      maxWidth="max-w-lg"
     >
-      <div className="fixed inset-0 bg-black/50" onClick={dismiss} />
-      <div className="relative z-50 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="create-channel-title">
-        {/* Header */}
-        <div className="flex items-center gap-2 mb-4">
-          <Cable className="h-5 w-5 text-primary" />
-          <h2 id="create-channel-title" className="text-lg font-semibold">
-            {t("channels.createTitle", "Create Channel Integration")}
-          </h2>
-        </div>
-
+      <div className="p-5">
         <StepDots total={STEPS.length} current={stepIndex} />
 
         <div className="space-y-4 min-h-[200px]">
@@ -270,6 +263,6 @@ export function CreateChannelDialog({
           )}
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

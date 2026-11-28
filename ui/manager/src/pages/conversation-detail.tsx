@@ -45,6 +45,7 @@ import {
   displayUserInput,
   extractAgentSwitch,
   extractAgentVersion,
+  extractTaskErrors,
   END_REASON_AGENT_VERSION_RETIRED,
 } from "@eddi/app-kit/lib/api/conversations";
 import { AgentSwitchNotice } from "@eddi/app-kit/components/conversations/agent-switch-notice";
@@ -179,10 +180,14 @@ export function ConversationDetailPage() {
           navigate(listPath);
         },
         onError: (err) => toast.error(getErrorMessage(err)),
+        // Closed when the delete has finished, not when it was asked for: the
+        // dialog going away at once left a second click free to ask again (a 404).
+        onSettled: () => {
+          setShowDeleteDialog(false);
+          setDeletePermanent(false);
+        },
       }
     );
-    setShowDeleteDialog(false);
-    setDeletePermanent(false);
   }
 
   function handleExportMarkdown() {
@@ -352,6 +357,12 @@ export function ConversationDetailPage() {
           <Clock className="h-4 w-4 shrink-0 animate-pulse text-warn-500" aria-hidden="true" />
           {t("conversationDetail.waitingForPause", "Waiting for the pause to be saved…")}
         </div>
+      )}
+
+      {/* Why the conversation is in ERROR: the failed tasks' own messages. The badge
+          alone said that something failed and nothing about what. */}
+      {state === "ERROR" && (
+        <TaskErrorsNotice outputs={conversation.conversationOutputs} />
       )}
 
       {/* HITL Approval Banner */}
@@ -588,6 +599,43 @@ function useListPath(): string {
   return typeof from === "string" && from.startsWith("/manage/conversations")
     ? from
     : "/manage/conversations";
+}
+
+/** The `taskErrors` each step's output carries, one line per failed task, newest step last. */
+function TaskErrorsNotice({ outputs }: { outputs: ConversationOutput[] | undefined }) {
+  const { t } = useTranslation();
+  const failures = (outputs ?? [])
+    .map((output, index) => ({ step: index + 1, text: extractTaskErrors(output) }))
+    .filter((f): f is { step: number; text: string } => f.text !== null);
+  return (
+    <div
+      role="alert"
+      className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground"
+      data-testid="conversation-error-notice"
+    >
+      <p className="flex items-center gap-2 font-medium text-destructive">
+        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {t("conversationDetail.errorTitle", "This conversation is in an error state")}
+      </p>
+      {failures.length === 0 ? (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="conversation-error-no-detail">
+          {t("conversationDetail.errorNoDetail", "The engine recorded no reason for it. The server log of the failing turn has the details.")}
+        </p>
+      ) : (
+        <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+          {failures.map((f) => (
+            <li key={f.step} data-testid={`conversation-error-step-${f.step}`}>
+              <span className="font-medium text-foreground">
+                {t("conversationDetail.errorStep", "Step {{step}}", { step: f.step })}
+              </span>
+              {": "}
+              <span className="whitespace-pre-wrap break-words">{f.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function BackLink() {

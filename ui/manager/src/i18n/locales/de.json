@@ -220,7 +220,8 @@
       "forbidden": "Sie haben keine Berechtigung, dies anzuzeigen.",
       "notFound": "Nicht gefunden – möglicherweise wurde es gelöscht."
     },
-    "rename": "Umbenennen"
+    "rename": "Umbenennen",
+    "versionLookupFailed": "Die aktuelle Version konnte nicht ermittelt werden."
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -268,7 +269,10 @@
     "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
     "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr.",
     "sortLoadingAll": "Alle Agents werden geladen, damit die Sortierung vollständig ist…",
-    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um."
+    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um.",
+    "deleted": "{{name}} gelöscht",
+    "confirmDeleteNamed": "{{name}} löschen?",
+    "deleteReload": "Aktuelle Version neu laden"
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -512,6 +516,7 @@
     "removeWorkflow": "Workflow vom Agent entfernen",
     "a2aAddSkill": "Skill hinzufügen",
     "saveConflict": "Dieser Agent wurde seit dem Öffnen an anderer Stelle geändert. Ihre Änderungen bleiben erhalten: prüfen Sie sie und speichern Sie erneut.",
+    "saveWaitForVersion": "Die neueste Version wird noch geladen – speichere gleich noch einmal.",
     "saveBeforeDeploy": "Speichern oder verwerfen Sie Ihre Änderungen vor dem Deployment",
     "reviewChanges": "Änderungen prüfen",
     "unsavedSections": "Abschnitte mit ungespeicherten Änderungen: {{count}}",
@@ -693,7 +698,11 @@
     "step_llm": "Modell",
     "step_apispec": "API-Spezifikation",
     "step_features": "Funktionen",
-    "step_review": "Überprüfen"
+    "step_review": "Überprüfen",
+    "providerResetNote": "Der Anbieterwechsel hat zurückgesetzt: {{fields}}. Sie gehören zum vorherigen Anbieter; wechseln Sie zurück, dann sind sie wieder da.",
+    "resetModel": "Modellname",
+    "resetApiKey": "API-Schlüssel",
+    "resetBaseUrl": "Basis-URL"
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -846,7 +855,10 @@
     "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
     "waitingForPause": "Warten, bis die Pause gespeichert ist…",
     "searchTranscriptLabel": "Im Verlauf suchen",
-    "matchCount": "Passende Schritte: {{matches}}"
+    "matchCount": "Passende Schritte: {{matches}}",
+    "errorTitle": "Diese Konversation befindet sich in einem Fehlerzustand",
+    "errorNoDetail": "Die Engine hat dafür keinen Grund aufgezeichnet. Das Server-Log des fehlgeschlagenen Schritts enthält die Details.",
+    "errorStep": "Schritt {{step}}"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -964,7 +976,12 @@
     "updateAgentAndSave": "Agent aktualisieren und speichern",
     "keepEditing": "Weiter bearbeiten",
     "discardChanges": "Änderungen verwerfen",
-    "deployDone": "Bereitgestellt — die Änderung ist aktiv"
+    "deployDone": "Bereitgestellt — die Änderung ist aktiv",
+    "loadingEditor": "Editor wird geladen …",
+    "saveErrorReason": "Nicht gespeichert: {{reason}}",
+    "savedWithWarnings": "Gespeichert, mit Warnungen",
+    "documentCheckFailed": "Dieses Dokument hat eine Form, die der Editor nicht prüfen kann – korrigiere es im JSON-Tab, bevor du speicherst.",
+    "dismissWarnings": "Schließen"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1635,7 +1652,11 @@
     "agentOpsFollowUpDesc": "Einmalige Wiedervorlagen für die eigene Unterhaltung des Agenten oder eine neue buchen, auflisten und stornieren. Jeder Lauf hat eine Kostenobergrenze.",
     "agentOpsMaxPending": "Gleichzeitig wartend",
     "agentOpsHorizon": "Horizont (Tage, max. 90)",
-    "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)"
+    "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)",
+    "temperatureBlocksSave": "Die Temperatur muss eine Zahl ab 0 sein – bitte vor dem Speichern korrigieren.",
+    "grPatternBlocksSave": "Ein Regex-Filter-Guardrail hat ein ungültiges Muster (Zeile {{line}}) – vor dem Speichern korrigieren.",
+    "grPatternInvalid": "Zeile {{line}} ist kein gültiger regulärer Ausdruck: {{detail}}",
+    "grPatternUnchecked": "Zeile {{lines}} verwendet Syntax, die diese Seite nicht prüfen kann. Der Server prüft Muster weder beim Speichern noch beim Deployment: Eine Zeile, die er nicht kompilieren kann, wird zur Laufzeit ignoriert."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1957,7 +1978,9 @@
     "copied": "Log-Eintrag kopiert",
     "noMatches": "Keine geladenen Einträge entsprechen Ihrer Suche.",
     "noMatchesHint": "Die Suche umfasst nur die hier bereits geladenen Einträge. Laden Sie ältere Einträge oder passen Sie die Filter an, um weiter zurückzusuchen.",
-    "searchLogsLabel": "Geladene Log-Einträge durchsuchen"
+    "searchLogsLabel": "Geladene Log-Einträge durchsuchen",
+    "filteredCountLoaded": "{{shown}} von {{total}} geladenen Einträgen",
+    "filterLoadedOnly": "Der Level-Filter und die Zähler beziehen sich nur auf die bisher geladenen Einträge; ältere Einträge können trotzdem passen. Laden Sie ältere Einträge, um weiter zurückzusuchen."
   },
   "secrets": {
     "loadError": "Secrets konnten nicht geladen werden",
@@ -2639,7 +2662,15 @@
       "title": "Retrieval testen",
       "saveFirst": "Speichern Sie diese Wissensbasis zuerst, um sie zu durchsuchen."
     },
-    "legacyIngestionNote": "Für einmalige Texte. Hier hinzugefügte Dokumente können später weder aufgelistet, aktualisiert noch entfernt werden – für Dokumente, die Sie pflegen werden, fügen Sie stattdessen unter Aufnahmequellen eine Dateien-Quelle hinzu."
+    "legacyIngestionNote": "Für einmalige Texte. Hier hinzugefügte Dokumente können später weder aufgelistet, aktualisiert noch entfernt werden – für Dokumente, die Sie pflegen werden, fügen Sie stattdessen unter Aufnahmequellen eine Dateien-Quelle hinzu.",
+    "statusTooLarge": "Fehlgeschlagen: {{name}} ist größer als {{max}} MB und wurde hier nicht gelesen. Eine Dateiquelle unter Ingestion-Quellen nimmt größere Dateien an.",
+    "statusUploadRejected": "Fehlgeschlagen: Der Server hat den Upload abgelehnt ({{detail}})",
+    "reembedWarning": "Diese Wissensbasis enthält bereits eingelesene Dokumente, und Sie haben {{what}} geändert. Beim Speichern werden sie nicht neu eingebettet: Die gespeicherten Vektoren bleiben unverändert, daher liefern Suchen möglicherweise schlechte oder keine Treffer, bis die Dokumente erneut eingelesen werden (oder eine neue Wissensbasis angelegt wird).",
+    "reembedWarningUnknown": "Du hast {{what}} geändert. Falls diese Wissensdatenbank bereits Dokumente enthält – diese Seite kann das nicht erkennen, etwa bei früher von Hand eingespieltem Text –, werden sie beim Speichern nicht neu eingebettet, und Suchen liefern möglicherweise schlechte oder keine Treffer, bis sie erneut eingespielt werden.",
+    "reembedProvider": "den Embedding-Anbieter",
+    "reembedModel": "das Embedding-Modell",
+    "reembedDimension": "die Vektordimension",
+    "reembedChunking": "die Chunk-Einstellungen"
   },
   "onboarding": {
     "welcome": {
@@ -2997,7 +3028,8 @@
     "discardEditsDescription": "Ein Abschnitt der Konfiguration wird noch bearbeitet. Wenn Sie das Panel schließen, gehen Ihre Änderungen dort verloren.",
     "discardEditsConfirm": "Verwerfen",
     "keepEditing": "Weiter bearbeiten",
-    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft."
+    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft.",
+    "inputDisabledNoMembers": "Fügen Sie dieser Gruppe mindestens ein Mitglied hinzu, um eine Diskussion zu starten"
   },
   "groupWizard": {
     "groupMemberHint": "Diese Gruppe nimmt als verschachtelte Untergruppe an der Diskussion teil.",
@@ -3475,7 +3507,8 @@
     "targetsCol": "Ziele",
     "type": "Typ",
     "unnamed": "Unbenannter Kanal",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Kanal dupliziert"
   },
   "channelDetail": {
     "saveSuccess": "Kanal gespeichert",
@@ -3526,7 +3559,11 @@
     "selectGroup": "Gruppe auswählen …",
     "unknownGroup": "{{id}} (nicht gefunden)",
     "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
-    "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
+    "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen.",
+    "triggerReserved": "„help“ ist reserviert: Der Bot beantwortet es mit der Liste der Ziele und kann daher kein Trigger sein.",
+    "triggerDuplicate": "Dieser Trigger ist bei diesem Ziel bereits vorhanden.",
+    "channelIdEmpty": "Ohne Kanal-ID ignoriert der Router diese Integration: Keine Slack-Nachricht erreicht sie.",
+    "routerRefreshNote": "Der Nachrichten-Router übernimmt Änderungen innerhalb von etwa einer Minute."
   },
   "health": {
     "title": "Gesundheit",

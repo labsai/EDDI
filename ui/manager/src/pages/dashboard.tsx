@@ -42,7 +42,7 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@eddi/app-kit/lib/api/conversations";
-import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
+import { useAgentNames } from "@/hooks/use-agent-names";
 import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
 import { useAttentionCount } from "@/hooks/use-ratings";
 import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
@@ -97,23 +97,14 @@ export function DashboardPage() {
   const coordinatorForbidden =
     !canSeeAdminHealth || (isApiError(coordinatorError) && (coordinatorError.status === 401 || coordinatorError.status === 403));
   const vaultForbidden = !canSeeAdminHealth || vaultHealth?.forbidden === true;
-  const { data: agentDescriptors = [] } = useAgentDescriptors(50);
+  // Every agent's name, not the first page's: with more than 50 agents the
+  // recent conversations of the rest read "Unnamed Agent".
+  const { names: agentNameMap } = useAgentNames();
 
   const recentAgents = useMemo(
     () => recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [],
     [recentAgentsRaw],
   );
-
-  // Build a lookup map: agentId → agent name (latest version)
-  const agentNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    if (agentDescriptors.length > 0) {
-      for (const a of groupAgentsByName(agentDescriptors)) {
-        if (a.name) map.set(a.id, a.name);
-      }
-    }
-    return map;
-  }, [agentDescriptors]);
 
   // Auto-trigger dashboard onboarding chapter on first visit
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);

@@ -327,7 +327,9 @@
     "runSkipConflict": "{{codes}} também está na lista de ignorados, então esta instrução nunca é executada com ele.",
     "httpCodeFilterSkipSet": "Um \"Executar nos códigos\" vazio usa 200, 201; um \"Ignorar nos códigos\" vazio não ignora nada.",
     "useDefaultSkipCodes": "Usar lista de ignorados padrão",
-    "scope": "Escopo"
+    "scope": "Escopo",
+    "retryIdempotency": "{{method}} não é idempotente: uma requisição repetida pode já ter sido processada (pedido, cobrança ou mensagem duplicados). Ative novas tentativas apenas se o endpoint ignorar repetições, por exemplo com uma chave de idempotência.",
+    "bodyEscapeHelp": "Os valores são inseridos como estão, a menos que o servidor esteja configurado para escapá-los; assim, um valor com aspas pode sair de uma string JSON. Para escapar você mesmo, envolva-o em json:serialize sem aspas ao redor, por exemplo {json:serialize(memory.current.input)}."
   },
   "llmEditor": {
     "unknownType": "{{type}} (personalizado)"
@@ -914,7 +916,11 @@
     "restricted_other": "Restrita a {{count}} agentes",
     "restrictedTooltip": "Autorizada para: {{agents}}",
     "notGrantedAdmin": "Este agente ainda não tem acesso a esta chave. Será pedido que o adicione ao implantar.",
-    "notGrantedNonAdmin": "Este agente ainda não tem acesso a esta chave. Peça a um administrador que a autorize antes de implantar."
+    "notGrantedNonAdmin": "Este agente ainda não tem acesso a esta chave. Peça a um administrador que a autorize antes de implantar.",
+    "createAllAgents": "Este campo não sabe a qual agente pertence, então o segredo é criado para todos os agentes. Restrinja depois em Segredos.",
+    "literalNudge": "Isso parece um segredo digitado em texto simples. Ele seria salvo na configuração, no histórico de versões e nas exportações. Armazene-o no cofre e use uma referência.",
+    "literalStoreInVault": "Armazenar no cofre",
+    "literalKeepPlain": "Manter como texto simples"
   },
   "Workforce": {
     "advisor": {

@@ -1,3 +1,5 @@
+import { conflictDetails, type ConflictDetails } from "@eddi/app-kit/lib/conflict-details";
+import { DeleteAgentDialog } from "@/components/agents/delete-agent-dialog";
 import { CatalogListingToggle } from "@eddi/app-kit/components/shared/catalog-listing-toggle";
 import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
@@ -141,6 +143,8 @@ export function AgentDetailPage() {
    */
   const [rebaseFrom, setRebaseFrom] = useState<Agent | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  /** What the server said still depends on the agent, when it refused the delete (409). */
+  const [deleteConflict, setDeleteConflict] = useState<ConflictDetails | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   // Undeploy confirmation — tracks which environment is being undeployed plus
   // the two destructive query options (default OFF).
@@ -345,6 +349,12 @@ export function AgentDetailPage() {
     if (!draft || !isDirty) return true;
     // Every save path comes through here — the buttons, the shortcut and the
     // leave-page guard — so this is the one place that can refuse them all.
+    if (configPending) {
+      // The version being loaded is the one the save would address, while the
+      // draft still sits on the previous one: wait until its edits are carried over.
+      toast.error(t("agentDetail.saveWaitForVersion", "The latest version is still loading — save again in a moment."));
+      return false;
+    }
     if (ceilingInvalid) {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
       return false;
@@ -405,6 +415,7 @@ export function AgentDetailPage() {
   }, [
     draft,
     isDirty,
+    configPending,
     agent,
     updateAgentMutation,
     id,
@@ -503,18 +514,31 @@ export function AgentDetailPage() {
     );
   }
 
+  function closeDeleteDialog(open: boolean) {
+    setShowDeleteDialog(open);
+    if (!open) {
+      setDeleteConflict(null);
+    }
+  }
+
   function handleDelete() {
     deleteMutation.mutate(
       { id: id!, version: resolvedVersion },
       {
         onSuccess: () => {
-          toast.success(t("common.delete") + " ✓");
-          setShowDeleteDialog(false);
+          toast.success(t("agents.deleted", "{{name}} deleted", { name: agentDisplayName }));
+          closeDeleteDialog(false);
           // Gone: unsaved edits are moot, and `isDirty` has not re-rendered yet.
           allowNextNavigation();
           navigate("/manage/agents");
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
+        onError: (err) => {
+          // A 409 is the server saying something still uses the agent: keep the
+          // dialog open and show what, instead of a bare toast.
+          const conflict = conflictDetails(err);
+          if (conflict) setDeleteConflict(conflict);
+          else toast.error(getErrorMessage(err));
+        },
       }
     );
   }
@@ -1445,15 +1469,25 @@ export function AgentDetailPage() {
       </AlertDialog>
 
       {/* Delete confirmation dialog */}
-      <AlertDialog
+      <DeleteAgentDialog
         open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        title={t("agents.confirmDelete")}
-        description={t("agents.confirmDeleteDescription", "This action cannot be undone. The agent and all its data will be permanently removed.")}
-        confirmLabel={t("common.delete")}
-        cancelLabel={t("common.cancel")}
-        onConfirm={handleDelete}
+        onOpenChange={closeDeleteDialog}
+        agentName={agentDisplayName}
+        conflict={deleteConflict}
         isPending={deleteMutation.isPending}
+        onConfirm={handleDelete}
+        onReload={() => {
+          // A refused delete is usually a stale version: read the current one
+          // instead of sending the same request again.
+          closeDeleteDialog(false);
+          // An open draft was built on the version on screen. Carry its edits
+          // onto the newer one (as after a save conflict) — kept as it is, the
+          // next Save would write the old version's other blocks over the newer
+          // version's changes.
+          if (agent && isDirty) setRebaseFrom(agent);
+          setVersion(undefined);
+          void refetchVersions();
+        }}
       />
 
       {/* Export dialog */}
