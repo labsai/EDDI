@@ -35,6 +35,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -340,6 +341,57 @@ class RestAgentStoreTest {
             assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
             verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an agent-originated update that the oversight guard refuses writes nothing")
+        void agentOriginatedOversightChangeIsRefusedBeforeAnyWrite() throws Exception {
+            AgentCallOversightGuard oversightGuard = mock(AgentCallOversightGuard.class);
+            doThrow(new ForbiddenException("oversight")).when(oversightGuard).requireNoOversightChange(eq(AGENT_ID), any(), any());
+            restAgentStore.oversightGuard = oversightGuard;
+
+            assertThrows(ForbiddenException.class, () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG1_ID), false));
+
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            verifyNoInteractions(capabilityRegistryService);
+        }
+
+        @Test
+        @DisplayName("version 0 is resolved to the current version before the oversight guard reads the stored agent")
+        void oversightGuardReadsTheResolvedVersion() throws Exception {
+            AgentCallOversightGuard oversightGuard = mock(AgentCallOversightGuard.class);
+            AtomicBoolean storedAgentRead = new AtomicBoolean();
+            doAnswer(invocation -> {
+                ((AgentCallOversightGuard.StoredAgent) invocation.getArgument(2)).read();
+                storedAgentRead.set(true);
+                return null;
+            }).when(oversightGuard).requireNoOversightChange(eq(AGENT_ID), any(), any());
+            restAgentStore.oversightGuard = oversightGuard;
+
+            restAgentStore.updateAgent(AGENT_ID, 0, referencing(PKG1_ID), false);
+
+            assertTrue(storedAgentRead.get(), "the guard's stored-agent callback ran");
+            // read(AGENT_ID, 1) also serves the dynamicOrigin lookup; the point is that
+            // nothing asks the store for the literal version 0.
+            verify(AgentStore, atLeastOnce()).read(AGENT_ID, 1);
+            verify(AgentStore, never()).read(AGENT_ID, 0);
+        }
+
+        @Test
+        @DisplayName("version 0 is resolved once: the oversight check and the write target the same version even if a new one lands between")
+        void oversightCheckAndWriteUseOneResolvedVersion() throws Exception {
+            // The current version moves from 1 to 2 after the first lookup — a human saving
+            // in between. Both the check and the write must stay on the first answer.
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1), resourceId(AGENT_ID, 2));
+            AgentCallOversightGuard oversightGuard = mock(AgentCallOversightGuard.class);
+            doAnswer(invocation -> ((AgentCallOversightGuard.StoredAgent) invocation.getArgument(2)).read())
+                    .when(oversightGuard).requireNoOversightChange(eq(AGENT_ID), any(), any());
+            restAgentStore.oversightGuard = oversightGuard;
+
+            restAgentStore.updateAgent(AGENT_ID, 0, referencing(PKG1_ID), false);
+
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), any(), anyBoolean());
+            verify(AgentStore, never()).update(eq(AGENT_ID), eq(2), any(), anyBoolean());
         }
 
         @Test

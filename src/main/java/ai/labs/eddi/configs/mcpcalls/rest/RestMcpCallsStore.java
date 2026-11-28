@@ -289,7 +289,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                 tempConfig.setApiKey(apiKey);
             }
 
-            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig));
+            // probeTools, not discoverTools: the URL is the caller's choice, so the
+            // client is built for this call and closed after it rather than cached.
+            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.probeTools(List.of(tempConfig));
 
             // A configuration the manager refused outright (blocked address, bad
             // transport, malformed URL) contributes no tools and throws nothing, so it
@@ -302,6 +304,17 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                         .findFirst()
                         .orElse("the MCP server configuration is invalid");
                 return badRequest(reason);
+            }
+
+            // A listing that failed — refused, stopped at a bound, the circuit open, a
+            // credential missing — is recorded as a failure, not thrown. Returning 200
+            // with no tools made it indistinguishable from a server that has none.
+            var failure = result.failures().stream().findFirst();
+            if (failure.isPresent() && result.toolSpecs().isEmpty()) {
+                return Response.status(Response.Status.BAD_GATEWAY)
+                        .entity(Map.of("error",
+                                "Failed to list tools from the MCP server (" + failure.get().kind() + ") — see server logs for details"))
+                        .build();
             }
 
             // Convert to a simple JSON-serializable list of tool info

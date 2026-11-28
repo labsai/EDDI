@@ -15,6 +15,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -76,6 +77,20 @@ public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
         this(principalClaim, System::nanoTime);
     }
 
+    /**
+     * {@code eddi.openai-compat.default-user}: the owner of anonymous {@code /v1}
+     * conversations. The shipped value is in {@link ReservedPrincipals#NAMES}; a
+     * configured one is refused here. Field-injected so the constructors keep their
+     * shape.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.openai-compat.default-user", defaultValue = "openai-anonymous")
+    String openAiDefaultUser = "openai-anonymous";
+
+    private boolean isOpenAiDefaultUser(String name) {
+        return openAiDefaultUser != null && !openAiDefaultUser.isBlank() && name.strip().equalsIgnoreCase(openAiDefaultUser.strip());
+    }
+
     NamelessPrincipalAugmentor(Optional<String> principalClaim, LongSupplier nanoClock) {
         this.principalClaim = principalClaim;
         this.nanoClock = nanoClock;
@@ -89,6 +104,12 @@ public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
         String name = OwnershipValidator.principalName(identity);
         if (name != null) {
             String reserved = ReservedPrincipals.reservedPartOf(name);
+            if (reserved == null && isOpenAiDefaultUser(name)) {
+                // The /v1 adapter's anonymous owner when it is configured to a non-shipped
+                // name: an account of that name would own every anonymous /v1 conversation on
+                // every endpoint, not only on /v1.
+                reserved = openAiDefaultUser.strip().toLowerCase(Locale.ROOT);
+            }
             if (reserved == null) {
                 return Uni.createFrom().item(identity);
             }

@@ -27,10 +27,12 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -43,6 +45,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.Callable;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Lifecycle task for deterministic (action-triggered) MCP tool calls.
@@ -125,6 +129,15 @@ public class McpCallsTask implements ILifecycleTask {
     @Inject
     CallerIdentityContext callerIdentityContext;
 
+    /**
+     * Whether a rule-triggered MCP result is screened for directive-shaped text
+     * before it is stored in memory. On by default; the switch exists for an
+     * operator whose MCP results legitimately carry chat-format markers.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.mcpcalls.result-screening.enabled", defaultValue = "true")
+    boolean resultScreeningEnabled = true;
+
     /** Re-gates suspended earned-autonomy categories; null in hand-built tests. */
     @Inject
     AutonomyOverlayService autonomyOverlay;
@@ -143,6 +156,75 @@ public class McpCallsTask implements ILifecycleTask {
     @Override
     public TaskId getId() {
         return TASK_ID;
+    }
+
+    /**
+     * A server URL for a log line: userinfo and credential-shaped query values
+     * redacted ({@code https://user:token@host} must not reach the log), then
+     * sanitized.
+     */
+    private static String forLog(String url) {
+        return sanitize(UriRedactor.redactUri(url));
+    }
+
+    /**
+     * The parsed result with every string value — at any depth — passed through
+     * {@link RemoteTextGovernor#redactResultDirectives}. Keys and the shape are
+     * kept; a container is copied only when something in it changed.
+     */
+    private static Object screenDecoded(Object value, String callName, String toolName) {
+        Object screened = screenValue(value, 0);
+        if (screened != value) {
+            LOGGER.warnf("MCP call '%s' → tool '%s' returned directive-shaped content inside its JSON values — redacted before it is "
+                    + "stored in memory", sanitize(callName), sanitize(toolName));
+        }
+        return screened;
+    }
+
+    /**
+     * Deeper than any real result. A container at this depth is replaced by
+     * {@link RemoteTextGovernor#REDACTED} rather than left unscreened: its strings
+     * cannot be checked without recursing further, and the parser's nesting limit
+     * is the mapper's setting, not this screen's. Failing closed costs nothing a
+     * real result contains; refusing the whole result would also cost the rest.
+     */
+    private static final int MAX_SCREEN_DEPTH = 64;
+
+    private static Object screenValue(Object value, int depth) {
+        if (value instanceof String text) {
+            String redacted = RemoteTextGovernor.redactResultDirectives(text);
+            return redacted != null ? redacted : text;
+        }
+        if (depth >= MAX_SCREEN_DEPTH) {
+            return value instanceof Map<?, ?> || value instanceof List<?> ? RemoteTextGovernor.REDACTED : value;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = null;
+            for (var entry : map.entrySet()) {
+                Object screened = screenValue(entry.getValue(), depth + 1);
+                if (screened != entry.getValue() && copy == null) {
+                    copy = new LinkedHashMap<>(map);
+                }
+                if (copy != null) {
+                    copy.put(entry.getKey(), screened);
+                }
+            }
+            return copy != null ? copy : value;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = null;
+            for (int i = 0; i < list.size(); i++) {
+                Object screened = screenValue(list.get(i), depth + 1);
+                if (screened != list.get(i) && copy == null) {
+                    copy = new ArrayList<>(list);
+                }
+                if (copy != null) {
+                    copy.set(i, screened);
+                }
+            }
+            return copy != null ? copy : value;
+        }
+        return value;
     }
 
     @Override
@@ -177,7 +259,7 @@ public class McpCallsTask implements ILifecycleTask {
             mcpTools = mcpToolProviderManager.discoverTools(List.of(serverConfig));
 
             if (mcpTools == null || mcpTools.toolSpecs().isEmpty()) {
-                LOGGER.warnf("No tools discovered from MCP server '%s' — skipping", config.getMcpServerUrl());
+                LOGGER.warnf("No tools discovered from MCP server '%s' — skipping", forLog(config.getMcpServerUrl()));
                 return;
             }
 
@@ -218,15 +300,17 @@ public class McpCallsTask implements ILifecycleTask {
             // conversation whose calls are all answered by mocks — see execute)
             String toolName = mcpCall.getToolName();
             if (allowedToolNames != null && !allowedToolNames.contains(toolName)) {
-                LOGGER.warnf("MCP tool '%s' blocked by whitelist/blacklist for server '%s'", toolName, config.getMcpServerUrl());
+                LOGGER.warnf("MCP tool '%s' blocked by whitelist/blacklist for server '%s'", sanitize(toolName),
+                        forLog(config.getMcpServerUrl()));
                 return;
             }
 
             // 3. Find the executor
             ToolExecutor executor = mcpTools != null ? mcpTools.executors().get(toolName) : null;
             if (mcpTools != null && executor == null) {
-                LOGGER.warnf("MCP tool '%s' not found on server '%s'. Available: %s", toolName, config.getMcpServerUrl(),
-                        mcpTools.executors().keySet());
+                // The available names are the remote server's text.
+                LOGGER.warnf("MCP tool '%s' not found on server '%s'. Available: %s", sanitize(toolName), forLog(config.getMcpServerUrl()),
+                        sanitize(String.valueOf(mcpTools.executors().keySet())));
                 return;
             }
 
@@ -281,6 +365,23 @@ public class McpCallsTask implements ILifecycleTask {
                             "MCP call '" + callName + "'", new long[1], memory.getTurnDeadline());
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
 
+            // The LLM path screens every tool result for directive-shaped text before
+            // the model sees it; this door stored it raw, and a designer who templates
+            // {memory.current.mcpCalls...} into a prompt handed the remote server a
+            // prompt-injection channel. Redacted in place rather than wrapped in a
+            // provenance envelope: the stored value is data for templates (a parsed JSON
+            // object as often as not), and an envelope would change its shape. The
+            // redaction never touches a quote or a backslash, so JSON stays JSON. Run
+            // over the whole result, before the size cap below.
+            if (resultScreeningEnabled && mocked == null) {
+                String screened = RemoteTextGovernor.redactResultDirectives(toolResult);
+                if (screened != null) {
+                    LOGGER.warnf("MCP call '%s' → tool '%s' returned directive-shaped content — redacted before it is stored in memory",
+                            sanitize(callName), sanitize(toolName));
+                    toolResult = screened;
+                }
+            }
+
             // 6. Store result in memory
             if (mcpCall.getSaveResponse() != null && mcpCall.getSaveResponse() && toolResult != null) {
                 String responseObjectName = mcpCall.getResponseObjectName();
@@ -304,6 +405,12 @@ public class McpCallsTask implements ILifecycleTask {
                     // Try to parse as JSON, fallback to raw string
                     try {
                         responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
+                        // The raw-text screen above cannot see a directive spelled with JSON
+                        // escapes (Ignore…, ignore\nall…); decoding brings it back, so the
+                        // decoded strings are screened too before they reach memory.
+                        if (resultScreeningEnabled && mocked == null) {
+                            responseObject = screenDecoded(responseObject, callName, toolName);
+                        }
                     } catch (IOException e) {
                         responseObject = toolResult;
                     }
@@ -330,7 +437,7 @@ public class McpCallsTask implements ILifecycleTask {
             // Retry exhaustion or non-retryable error from RetryConfiguration
             // Store error data, then check continueOnError
             String errorCallName = mcpCall.getName() != null ? mcpCall.getName() : mcpCall.getToolName();
-            LOGGER.errorf(e, "MCP tool execution failed for '%s': %s", errorCallName, e.getMessage());
+            LOGGER.errorf(e, "MCP tool execution failed for '%s': %s", errorCallName, sanitize(e.getMessage()));
             String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             String truncated = errorMsg.length() > 500 ? errorMsg.substring(0, 500) : errorMsg;
             String errorObjName = (mcpCall.getResponseObjectName() != null

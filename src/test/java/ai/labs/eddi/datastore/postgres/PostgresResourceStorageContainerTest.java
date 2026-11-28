@@ -228,6 +228,29 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
     // ─── Delete vs. update (M-P5) and in-place history writes (M-P1) ───
 
     @Nested
+    @DisplayName("Version-checked update")
+    class VersionCheckedUpdate {
+
+        @Test
+        @DisplayName("an update based on v1 after another update committed v2 is refused, and v2 stays as it was")
+        void staleUpdateIsRefusedAndKeepsTheNewVersion() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // the first writer wins: v1 archived, v2 current
+            storage.storeHistoryAndUpdate(storage.newHistoryResourceFor(v1, false), storage.newResource(id, 2, Map.of("v", "winner")), 1);
+
+            // the second writer also read v1 and now arrives with different content
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage
+                    .storeHistoryAndUpdate(storage.newHistoryResourceFor(v1, false), storage.newResource(id, 2, Map.of("v", "stale")), 1));
+
+            assertEquals(2, storage.getCurrentVersion(id), "the committed update must not be replaced");
+            assertEquals("winner", storage.read(id, 2).getData().get("v"), "v2's content is the first writer's");
+            assertEquals(1, storage.readHistory(id, 1).getData().get("v"), "v1's history is untouched");
+        }
+    }
+
+    @Nested
     @DisplayName("Version-checked delete")
     class VersionCheckedDelete {
 

@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -84,6 +85,13 @@ public class RestAgentStore implements IRestAgentStore {
     private final VaultGrantService vaultGrantService;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
+
+    /**
+     * Refuses an agent-originated write that changes {@code hitlConfig.oversight}.
+     * Field-injected so the constructor keeps its shape; null in hand-built tests.
+     */
+    @Inject
+    AgentCallOversightGuard oversightGuard;
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -179,6 +187,16 @@ public class RestAgentStore implements IRestAgentStore {
         // able to use as an oracle for arbitrary workflow ids — and the signing-key
         // check asks the vault about this agent's key.
         restVersionInfo.requireEditAccess(id);
+        // An agent's own call (marked X-EDDI-Agent-Call) may not change any agent's
+        // oversight policy — sampled audit and earned autonomy are a human's to set.
+        // version 0 means "current". Resolved once, here, and used for the oversight
+        // check, the engine-owned fields and the write: resolving it again later let a
+        // version saved in between be checked against one version and overwritten as
+        // another.
+        Integer resolvedVersion = restVersionInfo.validateParameters(id, version);
+        if (oversightGuard != null) {
+            oversightGuard.requireNoOversightChange(id, agentConfiguration, () -> agentStore.read(id, resolvedVersion));
+        }
         // Engine-owned fields: keep what is stored, never what the body says, for
         // every caller — a person's PUT, an import merge, a sync, the cascade and
         // autonomy all arrive here.
@@ -191,12 +209,12 @@ public class RestAgentStore implements IRestAgentStore {
         // delete sizes its vault sweep from. It changes only through the admin-only
         // signing-key endpoints; an import or sync keeps this instance's identity
         // too, since its private keys are in this instance's vault.
-        AgentConfiguration stored = storedCurrentVersion(id);
+        AgentConfiguration stored = storedVersion(id, resolvedVersion);
         agentConfiguration.setDynamicOrigin(stored != null ? stored.getDynamicOrigin() : null);
         agentConfiguration.setIdentity(stored != null ? stored.getIdentity() : null);
         validateSecurityFlags(id, agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
-        Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
+        Response response = updateWithCompatibility(id, resolvedVersion, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
     }
@@ -319,6 +337,21 @@ public class RestAgentStore implements IRestAgentStore {
                 return null;
             }
             return agentStore.read(id, current.getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * As {@link #storedCurrentVersion}, for a version already resolved — so an
+     * update takes its engine-owned fields from the same version it checks and
+     * replaces.
+     */
+    private AgentConfiguration storedVersion(String id, Integer version) {
+        try {
+            return agentStore.read(id, version);
         } catch (IResourceStore.ResourceNotFoundException e) {
             return null;
         } catch (IResourceStore.ResourceStoreException e) {

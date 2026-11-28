@@ -282,7 +282,8 @@ class McpToolProviderManagerGovernanceTest {
             var registry = new SimpleMeterRegistry();
             var manager = withSchemaCaps(McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES, 1, registry);
             var spec = lookupWith(JsonObjectSchema.builder().addStringProperty("q", "The query").build());
-            int bytes = ToolSchemaGovernor.serializedBytes(spec.parameters());
+            // The name and description are charged along with the schema.
+            int bytes = ToolSchemaGovernor.serializedBytes(spec.parameters()) + spec.name().length() + spec.description().length();
             var budget = new ToolSchemaGovernor.ServerBudget(bytes);
 
             assertTrue(manager.governSchema(spec, "server", budget) != null, "the first tool fits exactly");

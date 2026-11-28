@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -69,6 +70,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -143,6 +145,17 @@ public class UpgradeExecutor {
         } else if (config != null) {
             config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
         }
+    }
+
+    /**
+     * Refuses an agent-originated upgrade that would change the target's
+     * {@code hitlConfig.oversight}. Null when built outside the container.
+     */
+    private AgentCallOversightGuard oversightGuard;
+
+    @Inject
+    void useOversightGuard(AgentCallOversightGuard guard) {
+        this.oversightGuard = guard;
     }
 
     @Inject
@@ -222,6 +235,9 @@ public class UpgradeExecutor {
             // secret scrubber replaced with ${vault:REDACTED} — see
             // restoreRedactedSecrets.
             ImportPreview preview = structuralMatcher.buildPreview(source, targetAgentId, true);
+            // Before anything is written, like the EDIT check above: an agent's own call
+            // may not change the target's oversight policy through a sync.
+            requireNoAgentOriginatedOversightChange(preview, targetAgentId, selectedSourceIds);
 
             List<WorkflowSourceData> sourceWorkflows = source.readWorkflows();
             List<SnippetSourceData> sourceSnippets = source.readSnippets();
@@ -423,6 +439,43 @@ public class UpgradeExecutor {
             LOGGER.errorf(e, "Upgrade failed for target agent %s", LogSanitizer.sanitize(targetAgentId));
             throw new RuntimeException("Upgrade failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Refuses (403) an upgrade carrying {@code X-EDDI-Agent-Call} whose agent
+     * settings would change the target's {@code hitlConfig.oversight}. The agent
+     * write at the end goes through {@code RestAgentStore.updateAgent}, which
+     * refuses it as well — but only after workflows and extensions have been
+     * written; checked here, nothing is. Both an UPDATE and a CONFLICT are checked,
+     * since either may be adopted.
+     */
+    void requireNoAgentOriginatedOversightChange(ImportPreview preview, String targetAgentId, Set<String> selectedSourceIds)
+            throws IOException {
+        if (oversightGuard == null || !oversightGuard.isAgentOriginated() || preview == null || preview.resources() == null) {
+            return;
+        }
+        ResourceDiff agentDiff = preview.resources().stream().filter(diff -> "agent".equals(diff.resourceType())).findFirst().orElse(null);
+        if (agentDiff == null || agentDiff.sourceContent() == null || !isSelected(selectedSourceIds, agentDiff.sourceId())) {
+            return;
+        }
+        // Mirrors resolveConflict: a CONFLICT is adopted only when the caller names the
+        // agent explicitly; otherwise its settings stay as they are and there is
+        // nothing to refuse.
+        boolean adopted = agentDiff.action() == DiffAction.UPDATE || (agentDiff.action() == DiffAction.CONFLICT
+                && selectedSourceIds != null && selectedSourceIds.contains(agentDiff.sourceId()));
+        if (!adopted) {
+            return;
+        }
+        AgentConfiguration incoming = jsonSerialization.deserialize(agentDiff.sourceContent(), AgentConfiguration.class);
+        oversightGuard.requireNoOversightChange(targetAgentId, incoming, () -> {
+            Integer version = resolveLatestVersion(targetAgentId);
+            if (version == null) {
+                // Not "no stored agent": unknown. Thrown, so the guard refuses up front
+                // instead of comparing against nothing and letting resources be written.
+                throw new IllegalStateException("the current version of agent " + targetAgentId + " could not be established");
+            }
+            return agentStore.readAgent(targetAgentId, version);
+        });
     }
 
     /**
@@ -1770,10 +1823,33 @@ public class UpgradeExecutor {
                     + (resp == null ? "" : " (HTTP " + resp.getStatus() + ")")
                     + ", so the workflows and extensions written by this run are not deployed");
             return null;
+        } catch (ForbiddenException refused) {
+            return refusedAgentWrite(agentId, refused, outcome);
+        } catch (WebApplicationException e) {
+            // The oversight guard refuses with the JAX-RS ForbiddenException (a 403
+            // WebApplicationException), the access guard with Quarkus' (above).
+            if (e.getResponse() != null && e.getResponse().getStatus() == Response.Status.FORBIDDEN.getStatusCode()) {
+                return refusedAgentWrite(agentId, e, outcome);
+            }
+            LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
+            throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The agent write was refused (403) — an admin changed the target's oversight,
+     * say, after the preflight check. The workflows and extensions are written by
+     * then, so the caller gets the result that lists them as not deployed rather
+     * than a bare failure that hides them.
+     */
+    private static URI refusedAgentWrite(String agentId, RuntimeException refused, Outcome outcome) {
+        LOGGER.warnf("Agent config update of %s refused: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(refused.getMessage()));
+        outcome.failed(agentId, "agent", null, "the agent update was refused (" + refused.getMessage()
+                + "), so the workflows and extensions written by this run are not deployed");
+        return null;
     }
 
     /**
