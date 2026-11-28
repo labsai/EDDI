@@ -38,10 +38,9 @@ commit it on the *same branch* as the work.
 > **Do not edit `docs/changelog.md` by hand.** CI's **`Changelog Discipline`** job diffs that
 > file against the base and **fails the PR** if the diff adds more than it removes of: a `## `
 > heading (dated or not), a `---`/`===`-underlined heading, or a dated register row
-> `| YYYY-MM-DD |` — lines inside fenced code blocks do not count. Editing the header or
-> fixing a typo in a past entry nets to zero and is still fine — adding an *entry in place* is
-> the one thing it rejects, because every open PR inserting at the same point in the same file
-> is a conflict git cannot merge.
+> `| YYYY-MM-DD |` — lines inside fenced code blocks do not count, and neither do changes that
+> net to zero. What it detects is an *entry added in place*, because every open PR inserting at
+> the same point in the same file is a conflict git cannot merge.
 
 Inside the fragment, write exactly what used to go at the top of the live file — one or more
 `## <title> (YYYY-MM-DD)` entries — but give every relative link **one extra `../`**, since a
@@ -499,8 +498,9 @@ green. If it is red, the only PR that merges is the one that fixes or reverts th
 **3. The PR was tested against the `main` it merges into.** Branches are not required to be up
 to date, so two PRs that are each green can break `main` together — one renames a method, the
 other adds a caller of the old name. If `main` changed a file this PR touches or depends on
-since its last CI run (a renamed or removed symbol counts), merge `origin/main` into the
-branch and wait for CI again. To land several, first build `main` plus all of them together
+since its last CI run (a renamed or removed symbol counts), fetch it first
+(`git fetch origin main` — a stale local `origin/main` merges an older base than the SHA step 2
+checked), merge `origin/main` into the branch and wait for CI again. To land several, first build `main` plus all of them together
 and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
 
 **4. Merge one.** When `main` has a merge queue, only through it:

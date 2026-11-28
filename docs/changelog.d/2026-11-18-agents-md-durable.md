@@ -63,6 +63,17 @@ Drift fixed in the other agent-instruction files:
 - **§4's technical content was not rewritten.** It was reviewed line by line against the
   code on 2026-11-14 and is the durable part of the file.
 
+### Review follow-ups
+
+- `AGENTS.md` §1: `pom.xml` is the source for Java, Quarkus, the Node the UI build downloads
+  and every Maven dependency; the UIs' npm dependencies live in the workspace manifests under
+  `ui/` and `ui/package-lock.json`.
+- `AGENTS.md` §2 rule 4: the green-`main` prerequisite applies to every merge *other than*
+  the one PR that fixes or reverts the breakage, so the documented recovery can proceed.
+- `ship-pr`: the `Changelog Discipline` note describes what the check detects instead of
+  calling hand edits to `docs/changelog.md` fine; step 3 of the merge sequence fetches
+  `origin/main` before merging it into the branch.
+
 ### What's next
 
 - `ui/manager/AGENTS.md` (43 KB) has the same disease in a different form: phase and ticket

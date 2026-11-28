@@ -35,7 +35,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 > **The UIs are directories of this repository**, not separate repos; their imported histories are intact (`git log -- ui/manager`, `git log --follow` for Workforce files that began in the Manager). Maven builds all three into the jar — see Build & Test Commands.
 
-> **Versions live in `pom.xml`** (Java, Quarkus, Node, every dependency) — treat it as the single source of truth. This file deliberately does not restate versions, which drift. See §2 rule 7.
+> **Versions live in `pom.xml`** (Java, Quarkus, the Node the UI build downloads, every Maven dependency) — treat it as the single source of truth. The UIs' npm dependencies are the exception: they live in the workspace manifests under `ui/` and in `ui/package-lock.json`, so a frontend dependency change goes there. This file deliberately does not restate versions, which drift. See §2 rule 7.
 
 ### Key Architecture
 
@@ -100,7 +100,7 @@ The [CONTRIBUTING "Maven Command Reference"](CONTRIBUTING.md#maven-command-refer
    - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone** (see [Build & Test Commands](#build--test-commands)).
    - **Opening the PR, working its review comments to the end and merging** are written down step by step in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant. The three rules below are the ones it implements; they hold whether or not you read it.
    - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until CodeRabbit has reviewed the PR's **current head**, every one of its findings — nitpicks and review-body findings included — is fixed or answered on the PR, and every one of its threads is resolved. A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed** — wait and ask again, never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
-   - **Never merge into a red `main`** — except the one PR that fixes or reverts the breakage. A PR's green CI only proves it works against the `main` it was tested on, and branches are not required to be up to date, so two green PRs can break `main` together. Before every merge, the `CI/CD` run for `main`'s **current commit** must be finished and green ("not red yet" is not green); after merging, watch that commit's run and revert or fix before anything else merges.
+   - **Never merge into a red `main`** — except the one PR that fixes or reverts the breakage. A PR's green CI only proves it works against the `main` it was tested on, and branches are not required to be up to date, so two green PRs can break `main` together. Before every other merge, the `CI/CD` run for `main`'s **current commit** must be finished and green ("not red yet" is not green); after merging, watch that commit's run and revert or fix before anything else merges.
    - **Never merge PRs in bulk.** One at a time, through the merge queue when `main` has one, never with `--admin`. Before the next merge, merge `origin/main` into that PR's branch and let its CI pass again whenever `main` changed something the PR touches or depends on — a renamed or removed symbol included.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
