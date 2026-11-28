@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
 import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -38,11 +39,13 @@ import java.io.IOException;
  * (HITL approval notifications with Approve/Reject buttons)</li>
  * <li>{@code chat.update} — replace an existing message's text/blocks (used to
  * finalize an approval message once a reviewer decides)</li>
+ * <li>{@code views.open} — open an approval edit / reject-with-reason
+ * modal</li>
  * </ul>
  * <p>
  * Error handling policy:
  * <ul>
- * <li><b>Retryable failures</b> (network, HTTP 429/500/503) throw
+ * <li><b>Retryable failures</b> (network, HTTP 429/500/502/503/504) throw
  * {@link SlackDeliveryException} so callers can implement retry logic.</li>
  * <li><b>Non-retryable API failures</b> (e.g., {@code ok:false} with
  * {@code channel_not_found}) return {@code null} and log a warning.</li>
@@ -59,7 +62,7 @@ public class SlackWebApiClient {
      * vaulted token's {@code allowedHosts} against this destination before it
      * resolves it.
      */
-    public static final String SLACK_API_BASE = "https://slack.com/api/";
+    public static final String SLACK_API_BASE = SlackChannelType.API_BASE;
 
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
@@ -92,7 +95,7 @@ public class SlackWebApiClient {
      * @return the message timestamp (ts) on success, or null for non-retryable API
      *         errors
      * @throws SlackDeliveryException
-     *             on retryable failures (network, HTTP 429/500/503)
+     *             on retryable failures (network, HTTP 429/500/502/503/504)
      */
     public String postMessage(String authToken, String channelId, String threadTs, String text) {
         // Convert standard Markdown to Slack mrkdwn format
@@ -123,7 +126,7 @@ public class SlackWebApiClient {
      * @return the posted message's ts on success, or {@code null} on non-retryable
      *         API errors
      * @throws SlackDeliveryException
-     *             on retryable failures (network, HTTP 429/500/503)
+     *             on retryable failures (network, HTTP 429/500/502/503/504)
      */
     public String postBlocksMessage(String authToken, String channelId, String threadTs,
                                     List<?> blocks, String fallbackText) {
@@ -168,7 +171,7 @@ public class SlackWebApiClient {
      * @return {@code true} if the update succeeded, {@code false} on non-retryable
      *         API errors
      * @throws SlackDeliveryException
-     *             on retryable failures (network, HTTP 429/500/503)
+     *             on retryable failures (network, HTTP 429/500/502/503/504)
      */
     public boolean updateMessage(String authToken, String channelId, String ts,
                                  String text, List<?> blocks) {
@@ -188,7 +191,7 @@ public class SlackWebApiClient {
      *
      * @return {@code true} if Slack opened the view
      * @throws SlackDeliveryException
-     *             on retryable failures (network, HTTP 429/500/503)
+     *             on retryable failures (network, HTTP 429/500/502/503/504)
      * @since 6.7.0
      */
     public boolean openView(String authToken, String triggerId, Map<String, Object> view) {
@@ -201,13 +204,13 @@ public class SlackWebApiClient {
     /**
      * Send a JSON POST to a Slack Web API method and parse the response.
      * Centralizes retry classification and {@code ok:false} handling shared by
-     * {@code chat.postMessage} and {@code chat.update}.
+     * {@code chat.postMessage}, {@code chat.update} and {@code views.open}.
      *
      * @return the parsed response JSON on success ({@code ok:true}), or
      *         {@code null} on any non-retryable failure (HTTP != 200, {@code
      *         ok:false}, or an unexpected deterministic error)
      * @throws SlackDeliveryException
-     *             on retryable failures (network, HTTP 429/500/503)
+     *             on retryable failures (network, HTTP 429/500/502/503/504)
      */
     private JsonNode callSlackApi(String endpoint, String authToken, Map<String, Object> body) {
         try {

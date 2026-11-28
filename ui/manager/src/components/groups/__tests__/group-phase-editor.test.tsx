@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
-import { GroupPhaseEditor } from "@/components/groups/group-phase-editor";
-import type { AgentGroupConfiguration, DiscussionPhase } from "@/lib/api/groups";
+import { GroupPhaseEditor } from "@eddi/app-kit/components/groups/group-phase-editor";
+import type { AgentGroupConfiguration, DiscussionPhase } from "@eddi/app-kit/lib/api/groups";
 
 function phase(name: string, extra: Partial<DiscussionPhase> = {}): DiscussionPhase {
   return {

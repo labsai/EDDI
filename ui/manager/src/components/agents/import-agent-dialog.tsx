@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-backup";
 import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
 import { Button } from "@eddi/ui";
-import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { ResultWarnings } from "@/components/agents/result-warnings";
 import { parseResourceUri } from "@/lib/api/backup";

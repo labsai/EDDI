@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatActivity } from "../chat-activity";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 
 const T = Date.now();
 

@@ -66,7 +66,7 @@ public class McpTeamHandoffTools {
             + "came from (source team or agent, hop, filed when). Needs VIEW on the group. Use it to answer why a team did or did not "
             + "get a piece of work; the backlog itself is list_team_backlog.")
     public String listTeamHandoffs(@ToolArg(description = "The receiving group's id (required)") String groupId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_team_handoffs"));
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -87,7 +87,7 @@ public class McpTeamHandoffTools {
                                     @ToolArg(description = "Replacement description", required = false) String description,
                                     @ToolArg(description = "Replacement priority, 0..10", required = false) Integer priority,
                                     @ToolArg(description = "Note kept with the decision", required = false) String note) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("accept_team_handoff"));
         if (groupId == null || groupId.isBlank() || handoffId == null || handoffId.isBlank()) {
             return errorJson("groupId and handoffId are required", "BAD_REQUEST", null);
         }
@@ -107,7 +107,7 @@ public class McpTeamHandoffTools {
                                      @ToolArg(description = "Short machine-readable reason, e.g. out_of_scope or duplicate",
                                               required = false) String reasonCode,
                                      @ToolArg(description = "Note kept with the decision", required = false) String note) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("decline_team_handoff"));
         if (groupId == null || groupId.isBlank() || handoffId == null || handoffId.isBlank()) {
             return errorJson("groupId and handoffId are required", "BAD_REQUEST", null);
         }

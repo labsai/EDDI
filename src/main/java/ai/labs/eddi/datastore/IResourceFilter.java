@@ -87,6 +87,23 @@ public interface IResourceFilter {
     }
 
     /**
+     * As {@link Contains}, ignoring case: the field contains {@code text} as a
+     * literal substring, upper and lower case alike. MongoDB renders it as an
+     * escaped regex with the {@code i} option, PostgreSQL as an escaped
+     * {@code ILIKE '%…%'}. Nothing in {@code text} is a pattern on either backend.
+     * A document without the field does not match.
+     * <p>
+     * Written for a person's search box (the conversation search), where "rome"
+     * should find "Trip to Rome"; the descriptor listings keep the case-sensitive
+     * {@link Contains}.
+     *
+     * @param text
+     *            the literal text to find; not a pattern
+     */
+    record ContainsIgnoreCase(String text) {
+    }
+
+    /**
      * One condition on one field. A {@code String} filter is a regular expression
      * on both backends; any other value is compared for equality. Use
      * {@link #exact(String, String)} to compare a string for equality instead.

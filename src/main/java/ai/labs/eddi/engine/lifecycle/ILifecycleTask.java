@@ -73,7 +73,7 @@ import java.util.Map;
  *         String processed = process(input);
  *
  *         // 3. Write back to memory
- *         memory.getCurrentStep().storeData(dataFactory.createData("myResult", processed));
+ *         memory.getCurrentStep().storeData(new Data<>("myResult", processed));
  *     }
  * }
  * }</pre>
@@ -165,8 +165,7 @@ public interface ILifecycleTask {
      *     String result = processInput(userInput, config);
      *
      *     // Store result in memory
-     *     IData<String> data = dataFactory.createData("myResult", result);
-     *     memory.getCurrentStep().storeData(data);
+     *     memory.getCurrentStep().storeData(new Data<>("myResult", result));
      * }
      * }</pre>
      *

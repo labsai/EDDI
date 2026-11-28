@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import type { TranscriptEntry } from "@/lib/api/groups";
+import type { TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
 
 const baseEntry: TranscriptEntry = {
   speakerAgentId: "agent-001",

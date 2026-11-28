@@ -15,15 +15,24 @@ package ai.labs.eddi.engine.httpclient.outbound;
  */
 public enum Profile {
 
-    /** LLM tools, the crawler, OAuth token requests, attachment downloads. */
+    /**
+     * LLM tools, the crawler, OAuth token requests, attachment downloads and the
+     * other EDDI-owned calls (Slack, alerts, update check, A2A, OpenAPI spec
+     * fetch).
+     */
     DEFAULT("default", SsrfPolicy.STRICT, RedirectPolicy.follow(5, MethodRule.JDK_SAFE)),
 
-    /** Model providers and embedding endpoints (langchain4j). */
+    /**
+     * Model providers and embedding endpoints (langchain4j). Defined for them, but
+     * not yet used: the model builders still create their own client
+     * ({@code BoundedJdkHttpClient}) and send nothing through this profile.
+     */
     LLM_PROVIDER("llm-provider", SsrfPolicy.METADATA_ONLY, RedirectPolicy.follow(5, MethodRule.JDK_SAFE)),
 
     /**
-     * {@code httpcalls.json}. Redirects follow the Vert.x client's rules, and stop
-     * entirely when {@code eddi.security.ssrf-protection.enabled} is on — see
+     * {@code httpcalls.json}. Defined for it, but not yet used: those calls still
+     * go through the Vert.x client. Redirects follow the Vert.x client's rules, and
+     * stop entirely when {@code eddi.security.ssrf-protection.enabled} is on — see
      * {@link #defaultRedirects(SsrfPolicy)}.
      */
     APICALLS("apicalls", SsrfPolicy.FOLLOW_GLOBAL_FLAG, RedirectPolicy.follow(5, MethodRule.VERTX_COMPAT)),

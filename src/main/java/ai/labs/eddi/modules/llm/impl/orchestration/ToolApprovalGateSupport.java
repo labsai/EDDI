@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl.orchestration;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApproval;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -58,10 +59,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * they lived in the orchestrator only because that is where the loop is.
  * <p>
  * Almost every method is static, which is why the cluster was mechanical to
- * move: the two that are not ({@link #recordRuleMatches},
- * {@link #recordPauseCapGuard}) are instance methods purely so a test can
- * observe them, and both are best-effort emitters that swallow their own
- * exceptions — guard bookkeeping must never break the LLM loop.
+ * move: {@link #buildPendingBatch} is an instance method because it needs the
+ * transcript codec, and the best-effort emitters ({@link #recordRuleMatches},
+ * {@link #recordPauseCapGuard}, {@link #recordWriteApprovalDecision}) are
+ * instance methods purely so a test can observe them — they swallow their own
+ * exceptions, because guard bookkeeping must never break the LLM loop.
  * <p>
  * {@code AgentOrchestrator} keeps a thin declared delegator for each of these.
  * That is not tidiness: several characterization tests reach them through
@@ -246,7 +248,18 @@ public class ToolApprovalGateSupport {
      * every gated turn.
      */
     public static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals) {
-        boolean gateActive = effectiveToolApprovals != null
+        return normalizeToolCallIds(aiMessage, effectiveToolApprovals, false);
+    }
+
+    /**
+     * As {@link #normalizeToolCallIds(AiMessage, ToolApprovalsConfig)}, also
+     * minting ids when {@code mandatoryRulesPresent}: a call a mandatory-approval
+     * rule gates is gated whatever the patterns say, so it must be addressable even
+     * when the pattern gate is inert.
+     */
+    public static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals,
+                                                 boolean mandatoryRulesPresent) {
+        boolean gateActive = mandatoryRulesPresent || effectiveToolApprovals != null
                 && effectiveToolApprovals.getRequireApproval() != null
                 && !effectiveToolApprovals.getRequireApproval().isEmpty();
         if (!gateActive || !aiMessage.hasToolExecutionRequests()) {
@@ -400,6 +413,14 @@ public class ToolApprovalGateSupport {
             // on a batch should be able to tell which call brought it.
             var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
             call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
+            // A mandatory approval (MandatoryApprovalRule) rides on the call: the resume
+            // enforces its approver, and the approver is shown why it is asked.
+            MandatoryApproval mandatory = gateResult.mandatoryOf(req);
+            if (mandatory != null) {
+                call.setMandatoryReasonCode(mandatory.reasonCode());
+                call.setMandatoryApprover(mandatory.approver().name());
+                call.setMandatorySummary(mandatory.summaryForApprover());
+            }
             pinResolvedRequest(call, req, resolvers);
             calls.add(call);
         }

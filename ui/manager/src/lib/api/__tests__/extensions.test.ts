@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 import { describe, it, expect } from "vitest";
-import { RESOURCE_TYPE_ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "../../resource-type-icons";
-import { RESOURCE_TYPES } from "../resources";
+import { RESOURCE_TYPE_ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "@eddi/app-kit/lib/resource-type-icons";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 import {
   EXTENSION_TYPE_INFO,
   EXTENSION_TO_RESOURCE_SLUG,
@@ -13,7 +13,7 @@ import {
   getExtensionTypeConfig,
   getExtensionSortOrder,
   sortExtensionTypes,
-} from "../extensions";
+} from "@eddi/app-kit/lib/api/extensions";
 
 /**
  * These tests validate that the frontend extension registry and RESOURCE_TYPES

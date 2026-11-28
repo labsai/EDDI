@@ -69,7 +69,7 @@ public class McpPricingTools {
                                            required = false) String provider,
                                   @ToolArg(description = "Model name, e.g. gpt-4o-mini (with provider: resolve that model)",
                                            required = false) String model) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("read_model_prices"));
         boolean hasProvider = provider != null && !provider.isBlank();
         boolean hasModel = model != null && !model.isBlank();
         if (hasProvider != hasModel) {

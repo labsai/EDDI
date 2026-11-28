@@ -55,7 +55,7 @@ public class McpAgentTestTools {
                                 @ToolArg(description = "Agent version; omit for the current one", required = false) Integer agentVersion,
                                 @ToolArg(description = "Keep the test conversations for inspection (default false: they are deleted)",
                                          required = false) Boolean keepConversations) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("run_agent_tests"));
         try {
             return jsonSerialization.serialize(service.startRun(suiteId, suiteVersion, agentId, agentVersion,
                     Boolean.TRUE.equals(keepConversations)));
@@ -67,7 +67,7 @@ public class McpAgentTestTools {
     @Tool(name = "get_agent_test_run", description = "Read an agent test run: status, and per case and turn which expectations failed "
             + "with the actual value, the tools called, any unmocked tool calls, and the cost.")
     public String getAgentTestRun(@ToolArg(description = "Run id (required)") String runId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("get_agent_test_run"));
         try {
             return jsonSerialization.serialize(service.readRun(runId));
         } catch (Exception e) {
@@ -79,7 +79,7 @@ public class McpAgentTestTools {
             + "abandoned, and its test conversations are ended and deleted. Returns the record as it is now; poll get_agent_test_run "
             + "until status is CANCELLED. Only works on the node executing the run.")
     public String cancelAgentTestRun(@ToolArg(description = "Run id (required)") String runId) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("cancel_agent_test_run"));
         try {
             return jsonSerialization.serialize(service.cancelRun(runId));
         } catch (Exception e) {
@@ -91,7 +91,7 @@ public class McpAgentTestTools {
     public String listAgentTestRuns(@ToolArg(description = "Agent id (required)") String agentId,
                                     @ToolArg(description = "Page index, default 0", required = false) Integer index,
                                     @ToolArg(description = "Page size, default 20, max 100", required = false) Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_agent_test_runs"));
         try {
             return jsonSerialization.serialize(service.listRuns(agentId, index != null ? index : 0, limit != null ? limit : 20));
         } catch (Exception e) {

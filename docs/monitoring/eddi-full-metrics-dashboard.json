@@ -8266,6 +8266,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
+          "description": "`eddi_group_discussion_count_total` (started) and `eddi_group_discussion_failure_count_total` (failed with an error), plus `eddi_group_discussion_unanswered_total` by `outcome` — rounds that ended `NO_ANSWER` or `FAILED` instead of with an answer (the `reason` label says why: NO_MEMBER_ANSWERED, SYNTHESIS_FAILED, TURN_LIMIT_REACHED, ...). A steady unanswered rate means discussions complete without a usable result — usually members whose model fails.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -8294,6 +8295,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "failed"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (outcome, reason) (rate(eddi_group_discussion_unanswered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "unanswered: {{outcome}} ({{reason}})"
             }
           ],
           "fieldConfig": {
@@ -9225,12 +9237,12 @@
         {
           "id": 271,
           "type": "timeseries",
-          "title": "Unparseable VERIFY verdicts",
+          "title": "Unparseable / unanswered VERIFY verdicts",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_group_verify_unparseable_total` — verifier replies that could not be parsed; every task of that pass was auto-verified (fail-open). Should stay near zero: a steady rate means the moderator's model ignores the verdict format.",
+          "description": "`eddi_group_verify_unparseable_total` — verifier replies that could not be parsed; every task of that pass was auto-verified (fail-open). Should stay near zero: a steady rate means the moderator's model ignores the verdict format. `eddi_group_verify_unanswered_total` — VERIFY passes whose verifier did not answer at all (not deployed, skipped, failed, timed out); every task of that pass was failed, not verified, and goes to rework within `maxReworks` — unless the verifier was skipped (not deployed, a pause the group cannot honour): then no further rework round starts, since it would be skipped again. A steady rate means the verifier itself is broken.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -9246,7 +9258,19 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "unparseable (auto-verified)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_group_verify_unanswered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "verifier did not answer (failed)"
             }
           ],
           "fieldConfig": {
@@ -9286,9 +9310,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
@@ -12218,7 +12242,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_attachment_*_total` — multimodal attachment handling.",
+          "description": "`eddi_attachment_*_total` — multimodal attachment handling, and files shared between conversations (by path) or refused (by reason).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -12269,6 +12293,28 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "quota rejected: {{scope}}"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (path) (rate(eddi_attachment_shared_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "shared: {{path}}"
+            },
+            {
+              "refId": "F",
+              "expr": "sum by (reason) (rate(eddi_attachment_share_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "share refused: {{reason}}"
             }
           ],
           "fieldConfig": {
@@ -12874,6 +12920,104 @@
             }
           },
           "description": "Addresses added to an integration's suppression list per hour (a reply bounced permanently). Nothing is sent to them until an administrator clears the entry (POST /channelstore/channels/{id}/email-suppressions/clear)."
+        },
+        {
+          "id": 462,
+          "type": "timeseries",
+          "title": "Channel config refusals",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Saves refused (`eddi_channel_config_rejected_total`), undeclared `platformConfig` keys the router dropped from stored documents (`eddi_channel_config_keys_dropped_total`, once per document version and key) and sends whose connection could not be resolved (`eddi_channel_credential_refused_total`), by channel `type`. A dropped key means a document reached the store without save validation; a credential refusal means a connection changed after the integration was saved.",
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 88
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, reason) (rate(eddi_channel_config_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rejected {{type}} {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (type) (rate(eddi_channel_config_keys_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped key {{type}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (type, reason) (rate(eddi_channel_credential_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "credential refused {{type}} {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -19693,6 +19837,964 @@
           "fieldConfig": {
             "defaults": {
               "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 454,
+      "type": "row",
+      "title": "User event stream",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": [
+        {
+          "id": 455,
+          "type": "timeseries",
+          "title": "Open event streams",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_user_events_connections` — open `GET /me/events` streams, per node (one per browser tab). A drop to zero on one pod while the others hold steady is a pod whose streams were cut, not users leaving; a plateau at `eddi.user-events.max-connections` means new tabs are being refused (see the dropped and refused panel).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 41
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (instance) (eddi_user_events_connections{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 456,
+          "type": "timeseries",
+          "title": "Events delivered by kind",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_user_events_delivered_total` — user events written to a stream, by `kind` (`approval.pending`, `approval.decided`, `team.*`, `job.*`, `notification.created`). One event counts once per stream that received it, so a user with three tabs counts three times.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 41
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind) (rate(eddi_user_events_delivered_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 457,
+          "type": "timeseries",
+          "title": "Dropped and refused",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_user_events_dropped_total` — `slow_consumer`: a stream more than `eddi.user-events.buffer-size` frames behind was closed (its client reconnects); `dispatch_queue_full`: an event found the fan-out queue full and nobody on that node got it. `eddi_user_events_rejected_total` — streams refused with 429 at `user_limit` or `node_limit`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 48
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_user_events_dropped_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped — {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_user_events_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rejected — {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 458,
+          "type": "timeseries",
+          "title": "Cross-node relay (cluster mode)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_cluster_events_transient_published_total` — user events this node relayed to the other nodes over core NATS, by `type`; `eddi_cluster_events_transient_dropped_total` — relays dropped because NATS was unreachable. Transient events are never stored or queued, so a dropped one is not delivered to users whose streams are open on other nodes. Both stay at 0 on a single node (eddi.messaging.type=in-memory).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 48
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type) (rate(eddi_cluster_events_transient_published_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "published — {{type}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (type) (rate(eddi_cluster_events_transient_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped — {{type}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 459,
+      "type": "row",
+      "title": "Organizations",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "panels": [
+        {
+          "id": 460,
+          "type": "timeseries",
+          "title": "Org context fallbacks",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_org_context_fallback_total`: single-mode org lookups that found no org binding and used the `default` org, by `site` (the calling class and method). Expected to stay at 0. Anything above 0 is a code path that must be fixed before multi mode; it is harmless in single mode.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (site) (rate(eddi_org_context_fallback_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{site}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 461,
+          "type": "timeseries",
+          "title": "Platform-scope entries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_org_platform_scope_total`: entries into `OrgScope.platform`, the audited way to cross orgs (claim queries, migrations, platform admin views), by `reason`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_org_platform_scope_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 463,
+      "type": "row",
+      "title": "GDPR Erasure Guarantee",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "panels": [
+        {
+          "id": 464,
+          "type": "timeseries",
+          "title": "Erasure guarantee: guarded writes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Rates, per second: `eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — removal activity of this process (recorded, cleared, or `record_failed`, which should stay at zero); these counters restart at zero with the process, so their difference is not the backlog. `eddi_gdpr_guard_key_mismatch_total` must stay at zero: a rise means the tombstone key changed and every guarded write and erasure fails closed until it is resolved. Right axis: `eddi_gdpr_guard_pending_backlog` — the pending removals actually stored, for every node, as counted by the last five-minute maintenance pass; each one keeps erasures of its user or conversation failing until it is cleared. Empty until a node has run a pass.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 43
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_gdpr_guard_writes_skipped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "skipped {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (writer) (rate(eddi_gdpr_guard_self_deletions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "self-deleted {{writer}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (outcome) (rate(eddi_gdpr_guard_pending_removals_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "pending {{outcome}}"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_gdpr_guard_key_mismatch_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "key mismatch"
+            },
+            {
+              "refId": "E",
+              "expr": "max(eddi_gdpr_guard_pending_backlog{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "pending removals stored"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "E"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "stored"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 465,
+          "type": "timeseries",
+          "title": "Erasure guarantee: drain barrier",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Left axis, seconds: `eddi_gdpr_guard_drain_seconds` — how long erasures and permanent conversation deletes waited for this node's async writers to finish the work queued before the tombstones (max and mean). Empty, not zero, until a barrier has been measured: a latency has no honest value without one. Right axis, a count per interval: `eddi_gdpr_guard_drain_timeouts_total` by `writer` — barriers not passed within `eddi.gdpr.drain-timeout`; each one failed an erasure or a delete.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 43
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(eddi_gdpr_guard_drain_seconds_max{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "max wait"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_gdpr_guard_drain_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum(rate(eddi_gdpr_guard_drain_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "mean wait"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (writer) (increase(eddi_gdpr_guard_drain_timeouts_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timeouts {{writer}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no drain measured yet"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "C"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "timeouts"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 466,
+      "type": "row",
+      "title": "Agent Health",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "panels": [
+        {
+          "id": 467,
+          "type": "timeseries",
+          "title": "Agent Health turn rows",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_health_recorded_total` — Agent Health turn rows written, about one per conversation turn. `eddi_health_dropped_total` by `reason` — rows lost: `queue_full` (the health worker cannot keep up; raise `eddi.health.queue-capacity` or check datastore latency), `store_error` (writes fail) or `shutdown` (offered while the node was stopping) should stay at zero; `erased` and `orphaned` are rows withheld or removed because their user was erased or their conversation deleted (`erased`: by the GDPR erasure guarantee on the health worker; `orphaned`: by the daily orphan sweep, for purged agent-test conversations). Turns are never slowed by it.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_health_recorded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "recorded"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_health_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 468,
+          "type": "timeseries",
+          "title": "Agent Health queue depth",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_health_queue_depth` — turn rows waiting for the single health worker. It drains within seconds normally; a plateau near `eddi.health.queue-capacity` means writes are slow and rows are being dropped.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 44
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(eddi_health_queue_depth{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "queued"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
               "color": {
                 "mode": "palette-classic"
               },

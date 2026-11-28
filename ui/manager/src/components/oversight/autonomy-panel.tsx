@@ -3,15 +3,15 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { TierBadge } from "@/components/oversight/approval-analytics";
 import { percent } from "@/components/oversight/format";
-import { useMayUse } from "@/hooks/use-auth";
+import { useMayUse } from "@eddi/app-kit/hooks/use-auth";
 import { oversightErrorCode, useApplyRecommendation, useDismissRecommendation, useLiftSuspension } from "@/hooks/use-hitl-oversight";
-import { ROLE_ADMIN, ROLE_EDITOR } from "@/lib/roles";
-import { OVERSIGHT_LIMITS, type CategoryView } from "@/lib/api/hitl-oversight";
+import { ROLE_ADMIN, ROLE_EDITOR } from "@eddi/app-kit/lib/roles";
+import { OVERSIGHT_LIMITS, type CategoryView } from "@eddi/app-kit/lib/api/hitl-oversight";
 import type { UseQueryResult } from "@tanstack/react-query";
 
 /**

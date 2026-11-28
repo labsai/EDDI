@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
  * <p>
  * <b>Credentials are not migrated.</b> Long-term memories are loaded into every
  * future conversation as {@code properties}, so anything copied here reaches
- * template data, and from there prompts and outbound API calls. Two kinds of
+ * template data, and from there prompts and outbound API calls. Three kinds of
  * key are therefore left behind:
  * <ul>
  * <li>the keys in {@code eddi.migration.properties.skip-keys} — by default

@@ -45,8 +45,8 @@ public final class AuditHmac {
 
     /**
      * Marker identifying the v2 canonical form. No longer produced — see
-     * {@link #V3_PREFIX} — but still selected by {@link #verifyHmac} for rows
-     * written while v2 was current.
+     * {@link #V3_PREFIX} — but still selected by {@link #verify} for rows written
+     * while v2 was current.
      * <p>
      * The stored value carries the version because the two canonicalizers are not
      * interchangeable: verification must pick the one the entry was signed with. A
@@ -71,9 +71,9 @@ public final class AuditHmac {
 
     /**
      * Marker for the <strong>v4</strong> canonical form — the one
-     * {@link #computeHmac} writes today. v4 differs from v3 in exactly one place:
-     * the timestamp is signed as {@code epoch-millis}, not as the raw
-     * {@link Instant}.
+     * {@link #computeHmac(AuditEntry, byte[])} writes. The ledger itself signs with
+     * v5 today ({@link #V5_PREFIX}). v4 differs from v3 in exactly one place: the
+     * timestamp is signed as {@code epoch-millis}, not as the raw {@link Instant}.
      * <p>
      * That single field made tamper-evidence non-functional on both supported
      * backends. v3 signed {@code Instant.toString()} at whatever precision the JVM
@@ -364,18 +364,18 @@ public final class AuditHmac {
     }
 
     /**
-     * The canonical-form version a stored HMAC names: {@code "v4"}, {@code "v3"},
-     * {@code "v2"}, {@code "v1"} for a bare pre-tag digest, or {@code null} for an
-     * unsigned value.
+     * The canonical-form version a stored HMAC names: {@code "v5"}, {@code "v4"},
+     * {@code "v3"}, {@code "v2"}, {@code "v1"} for a bare pre-tag digest, or
+     * {@code null} for an unsigned value.
      * <p>
      * Exists for triage, not verification. A verify sweep reports both a freshly
      * tampered v4 row and an unrecoverable legacy row as INVALID, and those demand
      * opposite reactions: a v4 failure means something touched a row this release
      * wrote and is an alarm, while a pre-v4 failure is usually a row whose payload
      * held live Java objects when it was signed — a form nothing can reconstruct,
-     * so no recovery search will ever clear it. Without the version on the problem
-     * entry, an operator sweeping an old ledger cannot tell the expected residue
-     * from the emergency.
+     * so no recovery search will ever clear it. (v5 rows are held to the same
+     * standard as v4.) Without the version on the problem entry, an operator
+     * sweeping an old ledger cannot tell the expected residue from the emergency.
      */
     public static String versionOf(String storedHmac) {
         if (storedHmac == null || storedHmac.isBlank()) {
@@ -893,10 +893,10 @@ public final class AuditHmac {
      * hmac) for HMAC computation.
      * <p>
      * <strong>Frozen — v1.</strong> Every entry written before {@link #V2_PREFIX}
-     * existed carries a bare hex HMAC over exactly these bytes, and
-     * {@link #verifyHmac} still recomputes it for those rows. Changing this method
-     * by a single byte makes every historical ledger row read as tampered. New
-     * entries are signed with {@link #buildCanonicalStringV4}.
+     * existed carries a bare hex HMAC over exactly these bytes, and {@link #verify}
+     * still recomputes it for those rows. Changing this method by a single byte
+     * makes every historical ledger row read as tampered. New entries are signed
+     * with {@link #buildCanonicalStringV5}.
      */
     static String buildCanonicalString(AuditEntry entry) {
         StringBuilder sb = new StringBuilder(512);

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, isApiError, ApiClientError, getErrorMessage } from "@/lib/api-client";
-import { server } from "@/test/mocks/server";
+import { api, isApiError, ApiClientError, getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 // Pause MSW so our manual fetch mocks take priority
 beforeEach(() => {

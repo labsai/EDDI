@@ -1,10 +1,10 @@
-import { defineConfig, type ProxyOptions } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { readFileSync } from "node:fs";
-import type { ServerResponse } from "node:http";
-import { brandDefaults } from "./scripts/vite-plugin-brand.mjs";
+import { brandDefaults } from "../scripts/vite-plugin-brand.mjs";
+import { backendProxy } from "../scripts/vite-backend-proxy.mjs";
 
 /**
  * The EDDI version this Manager ships with, read from the repository's pom.xml —
@@ -30,60 +30,13 @@ function readPomVersion(): string {
 /**
  * The EDDI backend the dev server proxies to. `EDDI_BACKEND_URL` points it at
  * another instance (a second checkout on another port, a container) without
- * editing this file.
+ * editing this file. The proxy table is shared with Workforce
+ * (ui/scripts/vite-backend-proxy.mjs): both apps call the same API.
  */
 const BACKEND = process.env.EDDI_BACKEND_URL || "http://localhost:7070";
 
-/**
- * Wrap a proxy entry with an error handler so the dev server doesn't crash
- * when the backend is unavailable. Returns a 502 JSON response instead.
- */
-function withErrorHandler(opts: ProxyOptions): ProxyOptions {
-  const original = opts.configure;
-  return {
-    ...opts,
-    configure: (proxy, options) => {
-      original?.(proxy, options);
-      proxy.on("error", (err, _req, res) => {
-        // `res` can be a Socket (for WebSocket upgrades) — only respond if
-        // it's an actual ServerResponse that hasn't already sent headers.
-        if (res && "writeHead" in res && !(res as ServerResponse).headersSent) {
-          const sres = res as ServerResponse;
-          sres.writeHead(502, { "Content-Type": "application/json" });
-          sres.end(
-            JSON.stringify({
-              error: "Backend unavailable",
-              message: err.message,
-            }),
-          );
-        }
-      });
-    },
-  };
-}
-
-/** Shorthand: simple reverse-proxy to the backend with error handling. */
-function p(target = BACKEND): ProxyOptions {
-  return withErrorHandler({ target });
-}
-
-/** SSE-aware proxy that tears down the upstream socket on client abort. */
-function pSSE(target = BACKEND): ProxyOptions {
-  return withErrorHandler({
-    target,
-    configure: (proxy) => {
-      proxy.on("proxyReq", (_proxyReq, req) => {
-        if (req.socket) {
-          req.socket.on("close", () => {
-            if (_proxyReq.socket && !_proxyReq.socket.destroyed) {
-              _proxyReq.socket.destroy();
-            }
-          });
-        }
-      });
-    },
-  });
-}
+/** The EDDI logo (shared with Workforce, @eddi/app-kit) as the dev-server brand. */
+const LOGO = fileURLToPath(new URL("../packages/app-kit/src/assets/logo_eddi.png", import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -91,12 +44,12 @@ export default defineConfig({
     tailwindcss(),
     // The EDDI brand for `npm run dev` and MSW mock mode: fills the shells'
     // %BRAND_*% placeholders and serves /branding/*. Dev server only — EDDI
-    // renders both itself in production (scripts/vite-plugin-brand.mjs).
+    // renders both itself in production (ui/scripts/vite-plugin-brand.mjs).
     brandDefaults({
       assets: {
-        logo: fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
-        "logo-dark": fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
-        "og-image": fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
+        logo: LOGO,
+        "logo-dark": LOGO,
+        "og-image": LOGO,
         icon: fileURLToPath(new URL("./public/eddi-icon.svg", import.meta.url)),
         "favicon.ico": fileURLToPath(new URL("./public/eddi-icon.ico", import.meta.url)),
       },
@@ -105,6 +58,9 @@ export default defineConfig({
   define: {
     // The sidebar shows the version of the jar it ships in — see readPomVersion.
     __APP_VERSION__: JSON.stringify(process.env.EDDI_VERSION || readPomVersion()),
+    // Which app this bundle is, for the code it shares with Workforce
+    // (@eddi/app-kit, lib/app-paths.ts): a link to Workforce is a page load.
+    "import.meta.env.VITE_EDDI_APP": JSON.stringify("manager"),
   },
   resolve: {
     alias: {
@@ -127,20 +83,20 @@ export default defineConfig({
      */
     assetsInlineLimit: (filePath) => (/\.woff2?$/i.test(filePath) ? false : undefined),
     /**
-     * The three production shells, one shared bundle.
+     * The two production shells, one shared bundle.
      *
-     * EDDI serves `manage.html`, `welcome.html` and `workforce.html` from the jar by
-     * exact name (RestManagerResource, RestWelcomeResource, RestWorkforceResource),
-     * and `dist/` is copied into the jar by the Maven build (pom.xml, execution
-     * copy-ui-bundles). `index.html` is deliberately NOT an input: it is the
-     * dev-server entry only, and the backend keeps its own hand-written
-     * `index.html` redirect shell.
+     * EDDI serves `manage.html` and `welcome.html` from the jar by exact name
+     * (RestManagerResource, RestWelcomeResource), and `dist/` is copied into the
+     * jar by the Maven build (pom.xml, execution copy-ui-bundles). `index.html`
+     * is deliberately NOT an input: it is the dev-server entry only, and the
+     * backend keeps its own hand-written `index.html` redirect shell.
+     * `workforce.html` belongs to Workforce, which ui/workforce builds into a
+     * `dist/` of its own.
      */
     rolldownOptions: {
       input: {
         manage: fileURLToPath(new URL("./manage.html", import.meta.url)),
         welcome: fileURLToPath(new URL("./welcome.html", import.meta.url)),
-        workforce: fileURLToPath(new URL("./workforce.html", import.meta.url)),
       },
     },
   },
@@ -151,66 +107,6 @@ export default defineConfig({
     // Honour PORT so two worktrees can run dev servers side by side; 3000 stays
     // the default, which is what the proxy notes and docs assume.
     port: Number(process.env.PORT) || 3000,
-    proxy: {
-      "/agentstore": p(),
-      "/workflowstore": p(),
-      "/rulestore": p(),
-      "/dictionarystore": p(),
-      "/outputstore": p(),
-      "/apicallstore": p(),
-      "/llmstore": p(),
-      "/propertysetterstore": p(),
-      "/mcpcallsstore": p(),
-      "/ragstore": p(),
-      "/groupstore": p(),
-      // The /groups path includes /groups/{id}/conversations/stream SSE endpoint.
-      // Disable http-proxy buffering so the stream closes cleanly on abort.
-      "/groups": pSSE(),
-      "/logs": p(),
-      "/parserstore": p(),
-      "/extensionstore": p(),
-      "/conversationstore": p(),
-      "/conversations": p(),
-      "/userconversationstore": p(),
-      "/descriptorstore": p(),
-      "/secretstore": p(),
-      "/variablestore": p(),
-      "/auditstore": p(),
-      "/schedulestore": p(),
-      "/deploymentstore": p(),
-      "/propertiesstore": p(),
-      // Tool cost / history reads (the debugger's cost dashboard).
-      "/llm": p(),
-      // Called by the User Memory tab and the Workspaces screens; missing here, the
-      // dev server answered them with index.html (200, not JSON) and both pages
-      // showed only "Something went wrong" in dev mode.
-      "/usermemorystore": p(),
-      "/workspaces": p(),
-      "/spacestore": p(),
-      "/AgentTriggerStore": p(),
-      // SSE stream at /administration/logs/stream needs unbuffered proxy
-      "/administration": pSSE(),
-      "/snippetstore": p(),
-      "/admin": p(),
-      "/capabilities": p(),
-      "/.well-known": p(),
-      // The /agents path includes the /agents/{id}/stream SSE endpoint.
-      // We must disable http-proxy buffering so the stream closes cleanly.
-      "/agents": pSSE(),
-      "/llm/tools": p(),
-      "/backup": p(),
-      "/managerresource": p(),
-      "/managedagents": p(),
-      "/channelstore": p(),
-      "/connectionstore": p(),
-      // The per-user grant routes. Same-origin matters here beyond convenience:
-      // `POST /connections/{name}/authorize` is answered with a `Set-Cookie`
-      // nonce that the provider's callback has to carry back, and the proxy is
-      // what makes the dev server the same origin as the backend.
-      "/connections": p(),
-      "/integrations": p(),
-      "/mcp": p(),
-      "/openapi": p(),
-    },
+    proxy: backendProxy(BACKEND),
   },
 });

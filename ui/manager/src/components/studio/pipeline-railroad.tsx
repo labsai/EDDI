@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 import { stepResourceRef, useStepResourceNames } from "@/hooks/use-step-resource-names";
 import { Workflow } from "lucide-react";
-import { getExtensionIcon, getExtensionColor, getExtensionLabel } from "@/lib/api/extensions";
+import { getExtensionIcon, getExtensionColor, getExtensionLabel } from "@eddi/app-kit/lib/api/extensions";
 
 // ==================== Types ====================
 
