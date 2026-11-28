@@ -3993,8 +3993,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             try {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
-                CascadeConfigValidator.validate(llmConfiguration);
-                validateGuardrails(llmConfiguration);
+                try {
+                    CascadeConfigValidator.validate(llmConfiguration);
+                    validateGuardrails(llmConfiguration);
+                } catch (WorkflowConfigurationException e) {
+                    // The URI names the config's id and version.
+                    throw new WorkflowConfigurationException("LLM config " + uri + ": " + e.getMessage(), e);
+                }
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 validateAnswerMode(llmConfiguration);
@@ -4077,6 +4082,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         List<String> problems = new ArrayList<>();
         for (var task : llmConfiguration.tasks()) {
             String taskId = task.getId() != null ? task.getId() : "<unnamed>";
+            for (String problem : guardrailService.unknownTypeProblems("inputGuardrails", task.getInputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+            for (String problem : guardrailService.unknownTypeProblems("outputGuardrails", task.getOutputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
             for (String problem : guardrailService.validate("inputGuardrails", task.getInputGuardrails())) {
                 problems.add("task '" + taskId + "' " + problem);
             }

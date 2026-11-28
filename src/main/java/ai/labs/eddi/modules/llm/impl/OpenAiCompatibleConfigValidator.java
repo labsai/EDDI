@@ -50,7 +50,8 @@ final class OpenAiCompatibleConfigValidator {
                 for (CascadeStep step : cascade.getSteps()) {
                     if (step != null && OpenAiCompatibleEndpoint.isType(step.getType())) {
                         collect("LLM task '" + taskId + "' cascade step " + index,
-                                CascadingModelExecutor.mergeParams(task.getParameters(), step.getParameters()), problems);
+                                CascadingModelExecutor.mergeParams(task.getParameters(), step.getParameters(), task.getType(), step.getType()),
+                                problems);
                     }
                     index++;
                 }

@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 
@@ -73,11 +76,40 @@ class McpToolUtilsDescribeTest {
     }
 
     @Test
-    @DisplayName("errorJson(prefix, cause) keeps the prefix and adds the description")
-    void errorJsonCombinesBoth() {
-        String json = McpToolUtils.errorJson("Failed to create resource", new IllegalStateException("boom"));
+    @DisplayName("toolFailure keeps what failed, hides a server-side cause and gives a reference that is in the log")
+    void toolFailureHidesInternalText() {
+        String json = McpToolUtils.toolFailure(Logger.getLogger(McpToolUtilsDescribeTest.class), "create_resource",
+                "Failed to create resource", new IllegalStateException("mongodb://db-7.internal:27017 refused"));
 
         assertTrue(json.contains("Failed to create resource"));
-        assertTrue(json.contains("boom"));
+        assertTrue(json.contains("\"errorCode\":\"INTERNAL\""), json);
+        assertTrue(json.contains("reference"), json);
+        assertFalse(json.contains("db-7.internal"), json);
+    }
+    @Test
+    @DisplayName("an agent mismatch is described without the agent id stored with the conversation")
+    void agentMismatchDoesNotNameTheStoredAgent() {
+        var mismatch = new IConversationService.AgentMismatchException(
+                "conversationId: 'c1' does not belong to Agent with conversationId: 'a1'. (provided agentId='a1', agentId in ConversationMemory='other-tenant-agent')");
+
+        String said = McpToolUtils.safeMessage(mismatch, "fallback");
+
+        assertFalse(said.contains("other-tenant-agent"), said);
+        assertEquals("The conversation does not belong to the given agent", said);
+    }
+
+    @Test
+    @DisplayName("a schedule fire's thrown-failure text is reduced to its exception type; the executor's own sentences are kept")
+    void fireErrorKeepsTheTypeNotTheText() {
+        assertEquals("MongoTimeoutException (details in the server log)",
+                McpToolUtils.fireErrorForCaller("MongoTimeoutException: Timed out connecting to db-7.internal:27017"));
+        assertEquals("Conversation ended in state ERROR", McpToolUtils.fireErrorForCaller("Conversation ended in state ERROR"));
+        assertEquals("Turn skipped without consuming the input — conversation was in state ENDED",
+                McpToolUtils.fireErrorForCaller("Turn skipped without consuming the input — conversation was in state ENDED"));
+        assertEquals(null, McpToolUtils.fireErrorForCaller(null));
+
+        var log = new ScheduleFireLog("l", "s", "f", null, null, null, "FAILED", "i", "c", "IOException: /var/lib/eddi/x refused", 1, 0.0);
+        assertEquals("IOException (details in the server log)", McpToolUtils.fireLogForCaller(log).errorMessage());
+        assertEquals("FAILED", McpToolUtils.fireLogForCaller(log).status());
     }
 }

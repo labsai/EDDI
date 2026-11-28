@@ -6,19 +6,33 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
+import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.spendcontrol.SpendControlException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.ws.rs.ClientErrorException;
@@ -166,6 +180,141 @@ final class McpToolUtils {
     }
 
     /**
+     * The most characters of one tool result that reaches the caller's LLM context
+     * ({@value}): about 25,000 tokens. A result over it is cut and says so — see
+     * {@link #bounded}. Tools with their own paging arguments keep a smaller
+     * default of their own.
+     */
+    static final int MAX_RESULT_CHARS = 100_000;
+
+    /**
+     * The most conversation steps {@code read_conversation_log} returns by default.
+     */
+    static final int DEFAULT_LOG_STEPS = 50;
+
+    /** The most conversation steps {@code read_conversation_log} will return. */
+    static final int MAX_LOG_STEPS = 500;
+
+    /** The largest page a list-style tool returns, whatever limit was asked for. */
+    static final int MAX_PAGE_SIZE = 200;
+
+    /**
+     * A limit argument as a page size: {@code defaultSize} when absent or not
+     * positive, never above {@code maxSize}.
+     */
+    static int clampLimit(Integer requested, int defaultSize, int maxSize) {
+        if (requested == null || requested <= 0) {
+            return Math.min(defaultSize, maxSize);
+        }
+        return Math.min(requested, maxSize);
+    }
+
+    private static final ObjectMapper BOUNDS_MAPPER = new ObjectMapper();
+
+    /**
+     * A JSON object result within {@code maxChars}. A longer one is returned as
+     * valid JSON of its normal shape with the bulky lists shortened to their
+     * <em>newest</em> entries (the tail; the lists are oldest-first), never cutting
+     * inside a value: each list in {@code listFields} keeps the longest tail that
+     * lets the document fit, and the result gains {@code truncated: true},
+     * {@code totalChars}, {@code returnedChars}, {@code total<Field>} /
+     * {@code returned<Field>} per shortened list and {@code hint}. When no tail
+     * fits, the lists are emptied; a document that is still too large (one huge
+     * value) becomes just the {@code truncated} envelope with the counts and the
+     * hint.
+     *
+     * @param listFields
+     *            top-level array members that may be shortened, e.g.
+     *            {@code "conversationSteps"}
+     */
+    static String bounded(String json, int maxChars, String hint, String... listFields) {
+        if (json == null || json.length() <= maxChars) {
+            return json;
+        }
+        if (json.length() > MAX_BOUNDABLE_CHARS) {
+            // Too large to re-parse into a tree on a request thread (a tree costs several
+            // times the text): only the envelope, which says how to ask for less.
+            return envelope(json.length(), hint);
+        }
+        try {
+            JsonNode parsed = BOUNDS_MAPPER.readTree(json);
+            if (parsed instanceof ObjectNode root) {
+                Map<String, Integer> sizes = new LinkedHashMap<>();
+                for (String field : listFields) {
+                    if (root.get(field) instanceof ArrayNode list) {
+                        sizes.put(field, list.size());
+                    }
+                }
+                int largest = sizes.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+                for (int keep = largest / 2;; keep = keep / 2) {
+                    // A shallow copy: the members are shared, not copied — only the shortened
+                    // lists and the added fields are new, and nothing shared is modified.
+                    ObjectNode shortened = root.objectNode();
+                    shortened.setAll(root);
+                    for (var entry : sizes.entrySet()) {
+                        ArrayNode list = (ArrayNode) shortened.get(entry.getKey());
+                        int size = list.size();
+                        int from = Math.max(0, size - keep);
+                        ArrayNode tail = shortened.arrayNode();
+                        for (int i = from; i < size; i++) {
+                            tail.add(list.get(i));
+                        }
+                        shortened.set(entry.getKey(), tail);
+                        shortened.put("total" + capitalised(entry.getKey()), size);
+                        shortened.put("returned" + capitalised(entry.getKey()), tail.size());
+                    }
+                    shortened.put("truncated", true);
+                    shortened.put("totalChars", json.length());
+                    shortened.put("hint", hint);
+                    String candidate = BOUNDS_MAPPER.writeValueAsString(shortened);
+                    if (candidate.length() <= maxChars) {
+                        return candidate;
+                    }
+                    if (keep == 0) {
+                        break;
+                    }
+                }
+            }
+        } catch (JsonProcessingException e) {
+            // not an object we can shorten: the envelope below
+        }
+        return envelope(json.length(), hint);
+    }
+
+    /**
+     * The longest result {@link #bounded} shortens entry by entry
+     * ({@value} characters); a longer one gets only the envelope.
+     */
+    static final int MAX_BOUNDABLE_CHARS = 8_000_000;
+
+    private static String envelope(int totalChars, String hint) {
+        return "{\"truncated\":true,\"totalChars\":" + totalChars + ",\"hint\":\"" + escapeJsonString(hint) + "\"}";
+    }
+
+    private static String capitalised(String field) {
+        return Character.toUpperCase(field.charAt(0)) + field.substring(1);
+    }
+
+    /**
+     * A text result within {@code maxChars}, or its beginning cut at a line end
+     * (never inside a surrogate pair) followed by an explicit
+     * {@code [truncated: true …]} line with the hint.
+     */
+    static String boundedText(String text, int maxChars, String hint) {
+        if (text == null || text.length() <= maxChars) {
+            return text;
+        }
+        int cut = maxChars;
+        int lineEnd = text.lastIndexOf('\n', maxChars);
+        if (lineEnd > maxChars / 2) {
+            cut = lineEnd;
+        } else if (Character.isHighSurrogate(text.charAt(cut - 1))) {
+            cut--;
+        }
+        return text.substring(0, cut) + "\n[truncated: true — returned " + cut + " of " + text.length() + " characters. " + hint + "]";
+    }
+
+    /**
      * Build an error JSON response with proper escaping. Uses manual construction
      * to avoid serialization dependency in error paths.
      */
@@ -173,20 +322,11 @@ final class McpToolUtils {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
     }
 
-    /**
-     * Build an error JSON response describing a failure, from a caller-supplied
-     * prefix and the exception that caused it.
-     * <p>
-     * Prefer this over {@code errorJson(prefix + ": " + e.getMessage())}: plenty of
-     * exceptions carry no message, and the concatenation then renders literally as
-     * {@code "Failed to chat with agent: null"} — an error that says a call failed
-     * and nothing whatsoever about why. The class name is not a diagnosis either,
-     * but it is the difference between "something threw" and "a
-     * ResourceNotFoundException threw".
-     */
-    static String errorJson(String prefix, Throwable cause) {
-        return errorJson(prefix + ": " + describe(cause));
-    }
+    // There is deliberately no overload that takes a message prefix and an
+    // exception: it echoed any exception's text — a datastore or driver message —
+    // to the caller. A tool that catches an exception answers with toolFailure,
+    // which describes only what the caller caused and logs the rest under a
+    // reference id. McpToolErrorLeakScanTest keeps the overload from coming back.
 
     /**
      * The error a tool answers when its body throws, without leaking internals.
@@ -341,9 +481,43 @@ final class McpToolUtils {
         return new IllegalArgumentException(argument + " is not valid JSON" + where);
     }
 
+    /**
+     * What may be said about {@code e} to the caller: its message when it is a
+     * failure {@link #isCallerFacing} lets through, else {@code fallback}. The one
+     * way a tool puts an exception's text into a result; {@code
+     * McpToolErrorLeakScanTest} flags the raw {@code getMessage()} forms.
+     */
+    static String safeMessage(Throwable e, String fallback) {
+        return isCallerFacing(e) ? describe(e) : fallback;
+    }
+
+    /**
+     * A failure whose message a tool authored for its caller — a missing trigger,
+     * an empty reply — and that {@link #isCallerFacing} therefore lets through.
+     */
+    static final class CallerFacingException extends RuntimeException {
+
+        CallerFacingException(String message) {
+            super(message);
+        }
+    }
+
     /** Whether a failure is one the caller made and may be told about verbatim. */
     static boolean isCallerFacing(Throwable e) {
-        return e instanceof ClientErrorException || (e instanceof IllegalArgumentException && thrownByEddi(e))
+        return e instanceof ClientErrorException || (e instanceof IllegalArgumentException && thrownByEddi(e)) || e instanceof CallerFacingException
+        // The conversation service's own refusals ("Agent not deployed", the turn's
+        // conversation has ended, the input is too large): authored for the caller.
+                || e instanceof IConversationService.AgentNotReadyException || e instanceof IConversationService.AgentMismatchException
+                || e instanceof IConversationService.ConversationEndedException || e instanceof IConversationService.InputTooLargeException
+                || e instanceof IConversationService.ConversationNotFoundException
+                // Refusals EDDI raises itself, with text written for the caller: the setup
+                // wizard's validation, a cascade request that cannot be applied, a spend
+                // control refusal, a review validation, a malformed review argument, a quota
+                // refusal. Listed by type on purpose: a new exception is not caller-facing
+                // until someone decides it is.
+                || e instanceof AgentSetupService.AgentSetupException || e instanceof AgentCascadeService.CascadeException
+                || e instanceof SpendControlException || e instanceof ReviewRefusalException || e instanceof McpReviewArguments.BadArgument
+                || e instanceof QuotaRefusal || e instanceof MandatoryApprovalRefusedException
                 || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
                 // A discussion refusal the engine authored ("no phases are defined", the
                 // depth limit) — but not one that wraps an underlying failure, whose
@@ -388,6 +562,11 @@ final class McpToolUtils {
         if (cause == null) {
             return "unknown cause";
         }
+        if (cause instanceof IConversationService.AgentMismatchException) {
+            // Its message quotes the agent id stored with the conversation — which agent
+            // a conversation the caller named belongs to is not theirs to learn.
+            return "The conversation does not belong to the given agent";
+        }
         if (cause instanceof ClientErrorException clientError) {
             var response = clientError.getResponse();
             if (response != null && response.hasEntity() && response.getEntity() instanceof String entity && !entity.isBlank()) {
@@ -396,6 +575,37 @@ final class McpToolUtils {
         }
         String message = cause.getLocalizedMessage();
         return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * A schedule fire log's {@code errorMessage} as a tool may show it. The fire
+     * executor writes either a sentence of its own ("Conversation ended in state
+     * …") or, for a thrown failure, {@code "<ExceptionSimpleName>: <its message>"}
+     * — a driver's or provider's text, which a tool never repeats. That form keeps
+     * the exception type and loses the text; the full text stays in the fire log
+     * (REST) and the server log.
+     */
+    static String fireErrorForCaller(String errorMessage) {
+        if (errorMessage == null) {
+            return null;
+        }
+        int colon = errorMessage.indexOf(": ");
+        if (colon > 0) {
+            String head = errorMessage.substring(0, colon);
+            if (head.matches("[A-Z][A-Za-z0-9_$]*(Exception|Error|Throwable)")) {
+                return head + " (details in the server log)";
+            }
+        }
+        return errorMessage;
+    }
+
+    /** A fire log with its {@code errorMessage} as {@link #fireErrorForCaller}. */
+    static ScheduleFireLog fireLogForCaller(ScheduleFireLog log) {
+        if (log == null || log.errorMessage() == null) {
+            return log;
+        }
+        return new ScheduleFireLog(log.id(), log.scheduleId(), log.fireId(), log.fireTime(), log.startedAt(), log.completedAt(), log.status(),
+                log.instanceId(), log.conversationId(), fireErrorForCaller(log.errorMessage()), log.attemptNumber(), log.cost());
     }
 
     /**

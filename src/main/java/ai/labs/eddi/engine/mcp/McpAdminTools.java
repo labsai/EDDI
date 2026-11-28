@@ -77,6 +77,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
@@ -129,6 +130,7 @@ public class McpAdminTools {
 
     @Tool(name = "deploy_agent", description = "Deploy a Agent to an environment. The Agent must exist and have a valid configuration. "
             + "Returns the deployment status.")
+    @McpAudited(target = 0)
     public String deployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number to deploy (required)") Integer version,
                               @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
@@ -204,7 +206,7 @@ public class McpAdminTools {
                 // (and the model driving it) cannot self-correct from "check server logs"
                 // and will retry the deploy in a loop.
                 LOGGER.warn("MCP deploy_agent refused by quota layer for Agent " + agentId + ": " + e.getMessage());
-                return errorJson(e.getMessage());
+                return errorJson(safeMessage(e, "Deployment refused"));
             }
             LOGGER.error("MCP deploy_agent failed for Agent " + agentId, e);
             return errorJson("Failed to deploy agent. Check server logs for details.");
@@ -212,6 +214,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "undeploy_agent", description = "Undeploy a Agent from an environment. Optionally end all active conversations.")
+    @McpAudited(target = 0)
     public String undeployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                                 @ToolArg(description = "Version number to undeploy (required)") Integer version,
                                 @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
@@ -240,6 +243,7 @@ public class McpAdminTools {
             + "number of conversations: when the report says truncated, call again with after=<nextAfter>. After a real run, dry-run "
             + "again before undeploying an old version, and undeploy it only when it reports eligible 0; conversations skipped as busy, "
             + "awaitingHuman or inProgress still run on the old version.")
+    @McpAudited(target = 0)
     public String upgradeConversations(@ToolArg(description = "Agent ID (required)") String agentId,
                                        @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                                 defaultValue = "production") String environment,
@@ -261,10 +265,9 @@ public class McpAdminTools {
                 }
             }
             Response response = agentAdmin.upgradeConversations(env, agentId, dryRun, versions, limit, after);
-            if (response.getStatus() != 200) {
-                return errorJson(String.valueOf(response.getEntity()));
-            }
-            return jsonSerialization.serialize(response.getEntity());
+            // A refusal body is the resource's own (responseJson keeps its code and
+            // sentence); the entity is never stringified into the result.
+            return responseJson(jsonSerialization, response);
         } catch (NumberFormatException e) {
             return errorJson("fromVersions must be a comma separated list of version numbers");
         } catch (Exception e) {
@@ -384,6 +387,7 @@ public class McpAdminTools {
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
             + "For structural changes (adding/removing workflows, modifying resources), use the "
             + "individual resource tools (read_workflow, read_resource) and the REST API directly.")
+    @McpAudited(target = 0)
     public String updateAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "New Agent name (optional)", required = false) String name,
@@ -426,7 +430,8 @@ public class McpAdminTools {
                     result.put("environment", env.name());
                 } catch (Exception deployError) {
                     result.put("redeployed", false);
-                    result.put("deployError", "Redeployment failed: " + deployError.getMessage());
+                    LOGGER.warn("MCP update_agent: redeployment failed for Agent " + agentId, deployError);
+                    result.put("deployError", "Redeployment failed: " + safeMessage(deployError, "see the server log"));
                 }
             }
 
@@ -648,6 +653,7 @@ public class McpAdminTools {
             + "Each oldUri must be a reference the agent actually holds (a workflow step's resource or the workflow itself), "
             + "and newUri the same kind of resource with a version; otherwise nothing is written. Shared with the REST "
             + "endpoint POST /agentstore/agents/{id}/cascade.")
+    @McpAudited(target = 0)
     public String applyAgentChanges(@ToolArg(description = "Agent ID (required)") String agentId,
                                     @ToolArg(description = "Current Agent version (required)") Integer agentVersion,
                                     @ToolArg(description = "JSON array of URI mappings (required): [{\"oldUri\":\"eddi://...?version=1\",\"newUri\":\"eddi://...?version=2\"}, ...]") String resourceMappings,
@@ -680,9 +686,8 @@ public class McpAdminTools {
             var result = cascadeService.cascade(agentId, ver, mappings, Boolean.TRUE.equals(redeploy), parseEnvironment(environment),
                     Boolean.TRUE.equals(compatible));
             return resultJson("cascaded", result.toMap());
-        } catch (AgentCascadeService.CascadeException e) {
-            return errorJson(e.getMessage());
         } catch (Exception e) {
+            // A CascadeException is caller-facing (McpToolUtils.isCallerFacing): described.
             return toolFailure(LOGGER, "apply_agent_changes", "Failed to apply Agent changes", e);
         }
     }
@@ -767,7 +772,7 @@ public class McpAdminTools {
                     // Only a failure the caller can act on is described; a server-side
                     // one is logged, not echoed.
                     LOGGER.debugf(wfErr, "list_agent_resources could not read workflow %s", wfId);
-                    wfInfo.put("error", "Failed to read workflow" + (isCallerFacing(wfErr) ? ": " + describe(wfErr) : ""));
+                    wfInfo.put("error", "Failed to read workflow" + (isCallerFacing(wfErr) ? ": " + safeMessage(wfErr, "") : ""));
                 }
 
                 workflows.add(wfInfo);
@@ -1016,6 +1021,7 @@ public class McpAdminTools {
             + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
             + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")
+    @McpAudited(target = 0, subject = 8)
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON; HEARTBEAT whenever heartbeatIntervalSeconds is given)",
                                           required = false) String triggerType,
@@ -1179,7 +1185,7 @@ public class McpAdminTools {
             result.put("conversationStrategy", schedule.getConversationStrategy());
             result.put("environment", schedule.getEnvironment());
             result.put("maxCostPerFire", schedule.getMaxCostPerFire());
-            result.put("recentFires", fireLogs);
+            result.put("recentFires", fireLogs == null ? null : fireLogs.stream().map(McpToolUtils::fireLogForCaller).toList());
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             return toolFailure(LOGGER, "read_schedule", "Failed to read schedule", e);
@@ -1187,6 +1193,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "delete_schedule", description = "Delete a scheduled Agent trigger.")
+    @McpAudited(target = 0)
     public String deleteSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("delete_schedule"));
         if (scheduleId == null || scheduleId.isBlank())
@@ -1209,6 +1216,7 @@ public class McpAdminTools {
             + "a HITL approval timeout or a conversation's continuation never (CONFLICT), a schedule that cannot be claimed "
             + "right now (CONFLICT, with its state), and an ingestion, email-poll, team-cadence or lesson schedule without EDIT "
             + "on what it drives (FORBIDDEN). A fire past its bound answers TIMEOUT. Returns the fire result with conversation ID.")
+    @McpAudited(target = 0)
     public String fireScheduleNow(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("fire_schedule_now"));
         if (scheduleId == null || scheduleId.isBlank())
@@ -1234,7 +1242,7 @@ public class McpAdminTools {
                             ? (fireLog.completedAt().toEpochMilli() - fireLog.startedAt().toEpochMilli()) + "ms"
                             : null);
             if (fireLog.errorMessage() != null) {
-                result.put("error", fireLog.errorMessage());
+                result.put("error", fireErrorForCaller(fireLog.errorMessage()));
             }
             return resultJson("schedule_fired", result);
         } catch (Exception e) {
@@ -1244,6 +1252,7 @@ public class McpAdminTools {
 
     @Tool(name = "retry_failed_schedule", description = "Re-queue a dead-lettered schedule for another fire attempt. "
             + "Use after investigating and fixing the cause of failure.")
+    @McpAudited(target = 0)
     public String retryFailedSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("retry_failed_schedule"));
         if (scheduleId == null || scheduleId.isBlank())

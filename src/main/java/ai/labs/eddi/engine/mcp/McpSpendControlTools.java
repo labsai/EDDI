@@ -33,6 +33,7 @@ import java.util.Map;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.readCallerJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.safeMessage;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
@@ -59,6 +60,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpSpendControlTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSpendControlTools.class);
@@ -119,6 +121,7 @@ public class McpSpendControlTools {
             + "new price while unpriced calls are refused — is NOT applied: it is filed for an administrator's approval in the Manager "
             + "(result PROPOSED, with the changeId and why it loosens). Lowering a price is raising a budget: propose it only when "
             + "the person you act for asked for it. Each upserted entry needs a source link (http/https) to the provider's price page.")
+    @McpAudited
     public String updateModelPrices(@ToolArg(description = "The catalog revision you read (required)") Long expectedRevision,
                                     @ToolArg(description = "JSON array of entries to add or replace by provider+model, at most 50: "
                                             + "[{\"provider\":\"openai\",\"model\":\"gpt-4o-mini*\",\"inputPricePer1M\":0.15,"
@@ -148,7 +151,7 @@ public class McpSpendControlTools {
         } catch (SpendControlException e) {
             return refusal(e);
         } catch (IllegalArgumentException e) {
-            return errorJson(e.getMessage(), SpendControlException.BAD_REQUEST, null);
+            return errorJson(safeMessage(e, "The request was refused"), SpendControlException.BAD_REQUEST, null);
         } catch (Exception e) {
             return toolFailure(LOGGER, "update_model_prices", e);
         }
@@ -159,6 +162,7 @@ public class McpSpendControlTools {
             + "once (result APPLIED). Raising a limit, making it unlimited or disabling the quota is NOT applied: it is filed for an "
             + "administrator's approval in the Manager (result PROPOSED). A change with both parts is proposed as a whole. Raising a "
             + "budget is spending the user's money: propose it only when the person you act for asked for this amount.")
+    @McpAudited(target = 0)
     public String updateTenantQuota(@ToolArg(description = "Tenant id (default: the deployment's tenant)", required = false) String tenantId,
                                     @ToolArg(description = "The quota fingerprint you read (required)") String expectedFingerprint,
                                     @ToolArg(description = "Daily conversation limit, -1 = unlimited",
@@ -214,6 +218,7 @@ public class McpSpendControlTools {
 
     @Tool(name = "withdraw_spend_control_change", description = "Administrators only. Withdraw a pending price or quota change you "
             + "proposed yourself — nothing is applied. Someone else's change cannot be withdrawn here.")
+    @McpAudited(target = 0)
     public String withdrawSpendControlChange(@ToolArg(description = "The changeId (required)") String changeId,
                                              @ToolArg(description = "Why (required)") String reason) {
         requireAnyRole(identity, authEnabled, McpToolTiers.of("withdraw_spend_control_change"));
@@ -298,13 +303,13 @@ public class McpSpendControlTools {
 
     private String refusal(SpendControlException e) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", e.getMessage());
+        body.put("error", safeMessage(e, "The change was refused"));
         body.put("errorCode", e.code());
         body.putAll(e.details());
         try {
             return jsonSerialization.serialize(body);
         } catch (Exception serialization) {
-            return errorJson(e.getMessage(), e.code(), null);
+            return errorJson(safeMessage(e, "The change was refused"), e.code(), null);
         }
     }
 }

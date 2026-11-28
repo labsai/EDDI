@@ -100,7 +100,7 @@ class OpenAiCompatibleConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("a cascade step is checked with the task's parameters underneath, and the judge on its own")
+    @DisplayName("a cascade step of the task's own type is checked with the task's parameters underneath; one of another type is not, and the judge is on its own")
     void cascade() {
         var step = new CascadeStep();
         step.setType("openai-compatible");
@@ -108,12 +108,24 @@ class OpenAiCompatibleConfigValidatorTest {
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
         cascade.setSteps(List.of(step));
-        var task = task("openai", new HashMap<>(Map.of("apiKey", "k", "baseUrl", "http://vllm:8000/v1")));
+        var task = task("openai-compatible", new HashMap<>(Map.of("apiKey", "k", "baseUrl", "http://vllm:8000/v1", "modelName", "task-model")));
         task.setModelCascade(cascade);
 
         String message = failure(new LlmConfiguration(List.of(task)));
         assertTrue(message.contains("cascade step 0") && message.contains("'vision'"), message);
-        assertTrue(!message.contains("'baseUrl'"), "the task's baseUrl is merged under the step: " + message);
+        assertTrue(!message.contains("'baseUrl'"), "the task's baseUrl is merged under a step of the same type: " + message);
+
+        // A step of ANOTHER type never inherits the task's endpoint: it needs its own.
+        var crossTask = task("openai", new HashMap<>(Map.of("apiKey", "k", "baseUrl", "http://vllm:8000/v1")));
+        var crossStep = new CascadeStep();
+        crossStep.setType("openai-compatible");
+        crossStep.setParameters(Map.of("modelName", "step-model"));
+        var crossCascade = new ModelCascadeConfig();
+        crossCascade.setEnabled(true);
+        crossCascade.setSteps(List.of(crossStep));
+        crossTask.setModelCascade(crossCascade);
+        String crossMessage = failure(new LlmConfiguration(List.of(crossTask)));
+        assertTrue(crossMessage.contains("cascade step 0") && crossMessage.contains("'baseUrl'"), crossMessage);
 
         step.setParameters(Map.of("modelName", "step-model"));
         var judge = new JudgeModelConfig();

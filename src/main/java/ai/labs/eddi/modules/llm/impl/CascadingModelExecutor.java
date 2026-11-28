@@ -1113,7 +1113,10 @@ class CascadingModelExecutor {
         String rawType = step.getType() != null ? step.getType() : task.getType();
         String modelType = globalVariableResolver.resolveValue(rawType);
         // #8: template step param values (parity with task params), then merge.
-        Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects, memory, what));
+        // Credentials and endpoints are inherited only from a task of the same
+        // provider.
+        Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects, memory, what),
+                task.getType() != null ? globalVariableResolver.resolveValue(task.getType()) : null, modelType);
         return new StepModel(modelType, mergedParams);
     }
 
@@ -1625,9 +1628,33 @@ class CascadingModelExecutor {
      * Merge step parameters with task-level base params. Step params win.
      */
     static Map<String, String> mergeParams(Map<String, String> baseParams, Map<String, String> stepParams) {
+        return mergeParams(baseParams, stepParams, null, null);
+    }
+
+    /**
+     * Merge step parameters over the task's. When the step runs on a different
+     * provider type than the task, only the task's vendor-neutral parameters are
+     * inherited — an allow-list, {@link CascadeCredentialPolicy#mayCrossProviders};
+     * credentials, endpoints, headers and every account-bound or vendor-specific
+     * key stay behind: a secret restricted to one vendor's host must not be
+     * released to another vendor's. The step then has to bring its own
+     * ({@link CascadeConfigValidator} refuses it otherwise).
+     *
+     * @param taskType
+     *            the task's provider type; null together with a null
+     *            {@code stepType} means "same provider"
+     * @param stepType
+     *            the step's provider type; null or blank means the task's
+     */
+    static Map<String, String> mergeParams(Map<String, String> baseParams, Map<String, String> stepParams, String taskType, String stepType) {
         Map<String, String> merged = new HashMap<>();
         if (baseParams != null) {
-            merged.putAll(baseParams);
+            boolean inherit = CascadeCredentialPolicy.sameProvider(taskType, stepType);
+            baseParams.forEach((key, value) -> {
+                if (inherit || CascadeCredentialPolicy.mayCrossProviders(key)) {
+                    merged.put(key, value);
+                }
+            });
         }
         if (stepParams != null) {
             merged.putAll(stepParams);

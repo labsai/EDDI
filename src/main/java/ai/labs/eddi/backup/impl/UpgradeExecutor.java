@@ -28,6 +28,7 @@ import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -984,8 +985,9 @@ public class UpgradeExecutor {
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
             // Copied from the sync source, where it exists already: a ruleset among
-            // them keeps a retired condition config, with a WARN, as on deploy.
-            IResourceId created = ExistingRuleSetWrite.call(() -> store.create(content));
+            // them keeps a retired condition config, with a WARN, as on deploy, and the
+            // save-time LLM config checks only warn.
+            IResourceId created = ExistingRuleSetWrite.call(() -> LenientConfigWrite.call(() -> store.create(content)));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1059,7 +1061,7 @@ public class UpgradeExecutor {
             case "langchain" -> new ExtensionStoreOps<>(
                     LlmConfiguration.class,
                     ILlmStore.class,
-                    (id, version, config) -> getStore(IRestLlmStore.class).updateLlm(id, version, config),
+                    (id, version, config) -> LenientConfigWrite.call(() -> getStore(IRestLlmStore.class).updateLlm(id, version, config)),
                     IRestLlmStore.resourceURI,
                     IRestLlmStore.versionQueryParam);
             case "property" -> new ExtensionStoreOps<>(

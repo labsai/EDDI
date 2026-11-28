@@ -730,6 +730,24 @@ class LlmTaskGuardrailsTest {
     }
 
     @Test
+    @DisplayName("input and output guardrails: an unknown type is refused at deploy time, naming task, list, index and type")
+    void inputOutputUnknownType_refusedAtDeploy() {
+        var task = new LlmConfiguration.Task();
+        task.setId("main");
+        var input = new LlmConfiguration.GuardrailConfig();
+        input.setType("pii-redacton");
+        task.setInputGuardrails(List.of(input));
+        var output = new LlmConfiguration.GuardrailConfig();
+        output.setType("nope");
+        task.setOutputGuardrails(List.of(output));
+
+        var e = assertThrows(WorkflowConfigurationException.class, () -> llmTask.validateGuardrails(new LlmConfiguration(List.of(task))));
+
+        assertTrue(e.getMessage().contains("task 'main' inputGuardrails[0]: unknown guardrail type 'pii-redacton'; known types:"), e.getMessage());
+        assertTrue(e.getMessage().contains("task 'main' outputGuardrails[0]: unknown guardrail type 'nope'"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("reprompt (tool loop): only the final answer is re-asked over the tool transcript — the loop is not re-run")
     void outputReprompt_toolLoop() throws Exception {
         var chatModel = FaultInjectingChatModel.script(Step.text("unused"));

@@ -130,7 +130,7 @@ class McpConversationToolsTest {
         String result = tools.listAgents("production");
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Service down"));
+        assertFalse(result.contains("Service down"), "an internal failure is not echoed to the caller");
     }
 
     // --- listAgentConfigs ---
@@ -232,7 +232,8 @@ class McpConversationToolsTest {
         String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Connection lost"));
+        assertFalse(result.contains("Connection lost"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // --- chatWithAgent (composite) ---
@@ -347,7 +348,7 @@ class McpConversationToolsTest {
 
     @Test
     void readConversationLog_returnsText() throws Exception {
-        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull()))
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(50)))
                 .thenReturn(new IConversationService.ConversationLogResult("User: Hi\nAgent: Hello!", "text/plain"));
 
         String result = tools.readConversationLog(CONV_ID, null);
@@ -357,12 +358,12 @@ class McpConversationToolsTest {
 
     @Test
     void readConversationLog_handlesException() throws Exception {
-        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull())).thenThrow(new RuntimeException("Conversation not found"));
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(50))).thenThrow(new RuntimeException("Conversation not found"));
 
         String result = tools.readConversationLog(CONV_ID, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Conversation not found"));
+        assertFalse(result.contains("Conversation not found"), "an internal failure is not echoed to the caller");
     }
 
     // --- input validation ---
@@ -451,7 +452,7 @@ class McpConversationToolsTest {
         String result = tools.readAgentLogs(AGENT_ID, null, null, 10);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Ring buffer error"));
+        assertFalse(result.contains("Ring buffer error"), "an internal failure is not echoed to the caller");
     }
 
     // --- readAuditTrail ---
@@ -802,7 +803,7 @@ class McpConversationToolsTest {
         verify(userConversationStore, never()).deleteUserConversationIfMatches(any(), any(), any());
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Database connection timeout"));
+        assertFalse(result.contains("Database connection timeout"), "an internal failure is not echoed to the caller");
     }
 
     @Test

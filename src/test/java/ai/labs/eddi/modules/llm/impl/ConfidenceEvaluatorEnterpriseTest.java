@@ -73,10 +73,42 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("confidence is clamped to [0,1]")
-    void confidence_clamped() {
-        assertEquals(1.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 5.0}", null).confidence(), 0.001);
-        assertEquals(0.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": -2.0}", null).confidence(), 0.001);
+    @DisplayName("a whole number above 1 is a percentage; a fraction above 1, a negative, above 100 or a word escalates (answer kept)")
+    void confidence_outOfRange() {
+        // 5.0 is a whole number: 5% — the step escalates, it is not accepted as
+        // certain.
+        var five = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 5.0}", null);
+        assertEquals(0.05, five.confidence(), 0.001);
+        assertEquals("x", five.response());
+        for (String unusable : List.of("-2.0", "250", "1.5", "1.2", "\"high\"")) {
+            var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": " + unusable + "}", null);
+            assertEquals(0.0, r.confidence(), 0.001, unusable);
+            assertEquals("x", r.response(), unusable);
+        }
+        // the opt-in scores the unwrapped answer with the heuristic ("x" is short ->
+        // 0.3)
+        var heuristic = new HeuristicConfig();
+        heuristic.setFallbackWhenJudgeUnavailable(true);
+        assertEquals(0.3, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 250}", heuristic).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("an 85 means 85 percent, not certain")
+    void confidence_percentage() {
+        assertEquals(0.85, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 85}", null).confidence(), 0.001);
+        assertEquals(1.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 100}", null).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("malformed wrapper with an out-of-range confidence — the regex path gives the same answers")
+    void confidence_outOfRange_regexPath() {
+        // Missing comma: Jackson rejects it, the regex fallback reads the number.
+        var percent = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 85}", null);
+        assertEquals(0.85, percent.confidence(), 0.001);
+        var unusable = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 400}", null);
+        assertEquals(0.0, unusable.confidence(), 0.001);
+        assertEquals("x", unusable.response());
+        assertEquals(0.85, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": \"85%\"}", null).confidence(), 0.001);
     }
 
     @Test
@@ -173,10 +205,26 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("null judge — falls back to heuristic")
-    void judge_nullFallsBack() {
+    @DisplayName("no judge — fails towards escalation (0.0), not the heuristic's accepting default")
+    void judge_nullEscalates() {
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null, null);
+        assertEquals(0.0, r.confidence(), 0.001);
+        assertEquals("A confident, complete, well-formed answer to the user's question.", r.response());
+    }
+
+    @Test
+    @DisplayName("no judge — the heuristic only when the author opts in")
+    void judge_nullFallsBackWhenOptedIn() {
+        var heuristic = new HeuristicConfig();
+        heuristic.setFallbackWhenJudgeUnavailable(true);
+        EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null,
+                heuristic);
         assertEquals(0.8, r.confidence(), 0.001);
+
+        var explicitlyOff = new HeuristicConfig();
+        explicitlyOff.setFallbackWhenJudgeUnavailable(false);
+        assertEquals(0.0, ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null,
+                explicitlyOff).confidence(), 0.001);
     }
 
     @Test
@@ -249,21 +297,22 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("judge output without any JSON confidence — falls back to heuristic")
-    void judge_noConfidence_fallsBack() {
+    @DisplayName("judge output without any JSON confidence — escalates, the answer is kept")
+    void judge_noConfidence_escalates() {
         ChatModel judge = mock(ChatModel.class);
         when(judge.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("I think it's pretty good honestly.")).build());
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
-        assertEquals(0.8, r.confidence(), 0.001);
+        assertEquals(0.0, r.confidence(), 0.001);
+        assertEquals("A confident, complete answer to the user's question here.", r.response());
     }
 
     @Test
-    @DisplayName("judge that throws — falls back to heuristic")
-    void judge_throws_fallsBack() {
+    @DisplayName("judge that throws — escalates")
+    void judge_throws_escalates() {
         ChatModel judge = mock(ChatModel.class);
         when(judge.chat(anyList())).thenThrow(new RuntimeException("judge down"));
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
-        assertEquals(0.8, r.confidence(), 0.001);
+        assertEquals(0.0, r.confidence(), 0.001);
     }
 
     @Test

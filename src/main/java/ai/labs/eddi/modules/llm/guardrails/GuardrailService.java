@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -134,8 +135,12 @@ public class GuardrailService {
     /**
      * The configuration problems of these guardrails, as reported by each type's
      * {@link ContentGuardrail#validate}, prefixed with where the guardrail sits
-     * ({@code inputGuardrails[0]}). Unknown types are not problems here — they are
-     * skipped with a WARN at run time, so a config written for a newer EDDI loads.
+     * ({@code inputGuardrails[0]}). Unknown types are not problems here — the
+     * caller decides: input and output lists refuse them through
+     * {@link #unknownTypeProblems} (a mistyped type must not silently disable the
+     * protection), the tool-call list rejects them on its own. At run time an
+     * unknown type is still skipped with a WARN, as a last line for a document that
+     * got past both checks.
      */
     public List<String> validate(String listName, List<GuardrailConfig> configs) {
         List<String> problems = new ArrayList<>();
@@ -155,6 +160,30 @@ public class GuardrailService {
             String problem = guardrail.validate(config.getParameters());
             if (problem != null) {
                 problems.add(listName + "[" + i + "]: " + problem);
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * One problem per guardrail of this list whose type is missing or not
+     * registered, naming the list, the index, the type and the known types. A typo
+     * such as {@code pii-redacton} would otherwise deploy and silently run without
+     * the protection the author asked for.
+     */
+    public List<String> unknownTypeProblems(String listName, List<GuardrailConfig> configs) {
+        List<String> problems = new ArrayList<>();
+        if (configs == null) {
+            return problems;
+        }
+        for (int i = 0; i < configs.size(); i++) {
+            GuardrailConfig config = configs.get(i);
+            if (config == null) {
+                continue;
+            }
+            String type = config.getType();
+            if (type == null || !byType.containsKey(type)) {
+                problems.add(listName + "[" + i + "]: unknown guardrail type '" + type + "'; known types: " + new TreeSet<>(byType.keySet()));
             }
         }
         return problems;
