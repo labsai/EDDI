@@ -89,7 +89,10 @@ and the bearer rule (open PR #1338) were not touched.
   is no longer at the version the preview compared against. The preview itself resolves that
   version once (`StructuralMatcher.readTargetAgent`) and records the version the target was read
   at, so a change between reading the target and labelling the row cannot pair old content with
-  the new version number.
+  the new version number. The refusal no longer tells the operator to preview and upgrade again:
+  the workflow and extension versions the run already wrote stay while the agent keeps its old
+  references, so a re-run previews the old versions and its writes of those resources are
+  refused. The message now says that a re-run does not clear this.
 - The export's vault-reference exemption judged only the words beside a reference, so a
   symbol-only or non-ASCII literal (`!!!${vault:k}`) was exported while the read masked it. It now
   accepts only the scaffolding characters the read accepts.

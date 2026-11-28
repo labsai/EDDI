@@ -1710,9 +1710,21 @@ public class UpgradeExecutor {
                 // would silently undo whatever changed here since — a rotated key comes
                 // back as the old one, with no conflict anywhere, because the version
                 // passed to the store is the one resolved just now.
+                //
+                // The message deliberately does not promise that a re-run recovers.
+                // The workflow and extension versions written above stay in their
+                // stores while the agent keeps its old references, so a new preview
+                // names those old versions as its targets. The next upgrade then
+                // finds each store at a newer version that it did not write itself:
+                // an extension fails as changed since the preview (updateExtension),
+                // a workflow as a refused write.
                 outcome.failed(agentId, "agent", null, "the agent changed on this instance (v" + adoptedFromVersion + " → v"
-                        + currentVersion + ") after the upgrade compared against it, so its settings were not overwritten"
-                        + " and the workflows and extensions written by this run are not deployed; preview and upgrade again");
+                        + currentVersion + ") after the upgrade compared against it, so its settings were not overwritten."
+                        + " The workflow and extension versions this run wrote stay in their stores, but the agent still"
+                        + " references the earlier ones, so none of them is deployed. Upgrading again does not clear this:"
+                        + " a new preview still targets the earlier versions, and the next upgrade's writes of the"
+                        + " resources this run wrote are refused because each store now holds a newer version. Review the"
+                        + " agent and those resources here before syncing again");
                 return null;
             }
             // Unredacted: this document is written back, and an editor's redacted copy

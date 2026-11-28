@@ -348,6 +348,12 @@ class UpgradeExecutorSyncTest {
         verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), anyBoolean());
         assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("v5 → v6")),
                 result.failures().toString());
+        // A re-run cannot recover: the versions this run wrote stay, the agent keeps
+        // its old references, and the next preview sees them as local changes. The
+        // reason must say so rather than advise upgrading again.
+        String reason = result.failures().stream().filter(f -> "agent".equals(f.resourceType())).findFirst().orElseThrow().reason();
+        assertFalse(reason.contains("preview and upgrade again"), reason);
+        assertTrue(reason.contains("Upgrading again does not clear this"), reason);
     }
 
     /**
