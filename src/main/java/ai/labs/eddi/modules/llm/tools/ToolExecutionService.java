@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EscalationGuard;
 import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
@@ -353,6 +354,19 @@ public class ToolExecutionService {
 
         String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
+
+        // The escalation guard (email plan v3 §5.3), first and unconditionally: a turn
+        // a mail started never changes a channel integration or its senders, and never
+        // decides an approval. Every tool source passes through here — the LLM tool
+        // loop, the HITL resume loop, mcpcalls — so this is the boundary; the
+        // save-time check in EmailAgentToolsInspector is best effort on top of it.
+        Optional<String> escalation = EscalationGuard.refuseTool(toolName);
+        if (escalation.isPresent()) {
+            meterRegistry.counter("eddi.tool.execution.escalation_refused", "tool", toolName).increment();
+            LOGGER.warnf("Refused tool %s in conversation %s: the turn was started by an email", sanitize(toolName),
+                    sanitize(conversationId));
+            return "Error: " + escalation.get();
+        }
 
         // Caching additionally requires a scope tag to partition the entry by. When
         // one cannot be resolved the cache is skipped on both the read and the write

@@ -5925,7 +5925,9 @@
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
       "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
       "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
-      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta."
+      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta.",
+      "allowlistEmptied": "Salvo, mas a lista de permitidos agora está vazia: qualquer remetente pode fazer o agente agir, limitado apenas pela autenticação do remetente.",
+      "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5959,6 +5961,27 @@
     "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
     "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o {{productName}} não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
     "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
+  },
+  "emailSenders": {
+    "loading": "Carregando as listas de remetentes…",
+    "invalidEntry": "Use user@domain, *@domain ou *@*.domain.",
+    "onBothLists": "Esse remetente está na outra lista. Remova-o de lá primeiro.",
+    "saved": "Listas de remetentes salvas como versão {{version}}.",
+    "nothingChanged": "Nada mudou: essas entradas já estavam nesse estado.",
+    "conflict": "Alguém alterou esta integração nesse meio-tempo. As listas foram recarregadas; confira-as e aplique novamente.",
+    "emptyAllowlist": "Nenhum — todo remetente é permitido (sujeito à autenticação do remetente).",
+    "emptyBlocklist": "Nenhum.",
+    "keep": "Manter {{entry}}",
+    "remove": "Remover {{entry}}",
+    "addLabel": "Adicionar a {{list}}",
+    "add": "Adicionar",
+    "hint": "Prefira endereços exatos. Cada alteração aplicada é uma nova versão desta integração e fica registrada no log de auditoria com o motivo. Uma conversa iniciada por um e-mail nunca pode alterar estas listas.",
+    "saveFirst": "Salve ou descarte primeiro suas outras alterações; as listas de remetentes são aplicadas separadamente.",
+    "reason": "Por quê (para o log de auditoria)",
+    "reasonPlaceholder": "ex.: novo fornecedor, contrato 2026-114",
+    "confirmOpen": "Entendo: com uma lista de permitidos vazia, qualquer remetente pode fazer o agente agir.",
+    "apply": "Aplicar alterações de remetentes",
+    "discard": "Descartar"
   },
   "feedback": {
     "title": "Avaliações",

@@ -414,6 +414,25 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The origin taint of this conversation ({@code TurnOrigin#EMAIL}), or
+     * {@code null}: set when a mail, or a conversation a mail started, started or
+     * continued it, and never cleared. Persisted, like
+     * {@link #getResolutionProvenance()}, because the turns it restricts — a HITL
+     * resume, a self-continuation, a scheduled check-back — run long after the
+     * mail, on threads that know nothing about it.
+     */
+    default String getOrigin() {
+        return null;
+    }
+
+    /**
+     * Taints this conversation. Sticky: {@code null} never clears an origin already
+     * set.
+     */
+    default void setOrigin(String origin) {
+    }
+
+    /**
      * Agent-level tool-approval config carried onto memory at conversation start
      * (NOT persisted).
      */

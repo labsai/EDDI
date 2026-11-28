@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -48,6 +49,7 @@ import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -1428,6 +1430,10 @@ public class McpAdminTools {
                         + "(EU AI Act Art. 50 transparency)";
                 case "email.honor-reply-to" -> trimmed + ": replies go to the Reply-To, which DMARC does not authenticate — anyone who can "
                         + "send authenticated mail from an allowed domain chooses where the reply goes";
+                case "email.allowlist-emptied" -> trimmed + ": the allowlist is now empty, so every sender can make the agent run "
+                        + "(subject only to requireAuthentication)";
+                case "email.allowlist-broad" -> trimmed + ": an allowlist entry admits a whole public suffix (such as *@*.co.uk) or the "
+                        + "integration's own domain; prefer exact addresses";
                 default -> trimmed;
             });
         }
@@ -1460,5 +1466,108 @@ public class McpAdminTools {
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_channel_integration", "Failed to delete channel integration", e);
         }
+    }
+
+    @Tool(name = "list_email_senders", description = "Read the sender allowlist and blocklist of an email integration: "
+            + "{version, allow, block} of its current version. An empty allowlist allows every sender (subject to "
+            + "requireAuthentication). Pass the version to update_email_senders as expectedVersion.")
+    public String listEmailSenders(@ToolArg(description = "Email integration resource ID (required)") String integrationId) {
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("list_email_senders"));
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        try {
+            var view = getRestStore(IRestChannelIntegrationStore.class).readEmailSenders(integrationId);
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("version", view.version());
+            result.put("allow", view.allow());
+            result.put("block", view.block());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "list_email_senders", "Failed to read the sender lists", e);
+        }
+    }
+
+    @Tool(name = "update_email_senders", description = "Add or remove entries of an email integration's sender allowlist and "
+            + "blocklist without rewriting the integration. Every change creates a new version of the integration (history and "
+            + "rollback as for any save) and an audit entry with the reason. Prefer exact addresses (alice@partner.com) over "
+            + "domains (*@partner.com) and subdomain patterns (*@*.partner.com). Entries that change nothing are reported, not "
+            + "refused. A stale expectedVersion is refused with the current lists: read them again with list_email_senders. "
+            + "Removing the last allowlist entry opens the integration to every sender and needs confirmOpen true. Never callable "
+            + "from a conversation an email started.")
+    public String updateEmailSenders(
+                                     @ToolArg(description = "Email integration resource ID (required)") String integrationId,
+                                     @ToolArg(description = "The version list_email_senders returned (required)") Integer expectedVersion,
+                                     @ToolArg(description = "Comma-separated entries to add to the allowlist", required = false) String addAllow,
+                                     @ToolArg(description = "Comma-separated entries to add to the blocklist", required = false) String addBlock,
+                                     @ToolArg(description = "Comma-separated entries to remove from the allowlist",
+                                              required = false) String removeAllow,
+                                     @ToolArg(description = "Comma-separated entries to remove from the blocklist",
+                                              required = false) String removeBlock,
+                                     @ToolArg(description = "Why, for the audit trail", required = false) String reason,
+                                     @ToolArg(description = "true to allow removing the last allowlist entry (default: false)", required = false,
+                                              defaultValue = "false") Boolean confirmOpen) {
+        requireAnyRole(identity, authEnabled, McpToolTiers.of("update_email_senders"));
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        if (expectedVersion == null)
+            return errorJson("expectedVersion is required: read it with list_email_senders");
+        try {
+            var request = new EmailSenderLists.UpdateRequest(expectedVersion,
+                    new EmailSenderLists.Entries(commaSeparated(addAllow), commaSeparated(addBlock)),
+                    new EmailSenderLists.Entries(commaSeparated(removeAllow), commaSeparated(removeBlock)), reason,
+                    Boolean.TRUE.equals(confirmOpen));
+            Response response;
+            try {
+                response = getRestStore(IRestChannelIntegrationStore.class).updateEmailSenders(integrationId, request);
+            } catch (WebApplicationException refused) {
+                // A client that throws on a 4xx instead of handing the response back.
+                if (refused.getResponse() == null || refused.getResponse().getStatus() != Response.Status.CONFLICT.getStatusCode()) {
+                    throw refused;
+                }
+                response = refused.getResponse();
+            }
+            Object body = entityOf(response);
+            if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                return errorJson("expectedVersion " + expectedVersion + " is not the current version; nothing was changed. Read the "
+                        + "lists again with list_email_senders and retry. Current: " + jsonSerialization.serialize(body), "CONFLICT", null);
+            }
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("status", response.getStatus());
+            result.put("result", body);
+            putWarnings(result, response);
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "update_email_senders", "Failed to update the sender lists", e);
+        }
+    }
+
+    private static List<String> commaSeparated(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> entries = new ArrayList<>();
+        for (String part : value.split(",")) {
+            if (!part.isBlank()) {
+                entries.add(part.trim());
+            }
+        }
+        return entries;
+    }
+
+    /**
+     * The body of a response: read when it came over the loopback client, as built
+     * when it did not.
+     */
+    private static Object entityOf(Response response) {
+        try {
+            if (response.hasEntity()) {
+                return response.readEntity(Map.class);
+            }
+        } catch (RuntimeException e) {
+            // A server-built response (in-process, or a test): its entity is the object.
+        }
+        return response.getEntity();
     }
 }

@@ -84,6 +84,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -755,7 +756,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             // CALLER_SUPPLIED connection failed closed on turn 0 with a message
             // blaming a "scheduled run".
             CallerIdentity startCaller = callerIdentityContext == null ? null : callerIdentityContext.captureOrCurrent();
-            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller);
+            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller, TurnOrigin.fromContext(context));
 
             IConversation conversation;
             // Bound around the call, not merely recorded after it: a behavior rule can
@@ -778,6 +779,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             var conversationMemory = conversation.getConversationMemory();
             conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
+            conversationMemory.setOrigin(resolutionPrincipal.origin());
             // Settle point of the CONVERSATION_START turn, which runs inline and never
             // reaches admitTurn's completion callback (an LLM greeting costs too).
             meterTurnCost(conversationMemory);
@@ -1531,6 +1533,12 @@ public class ConversationService implements IConversationService, UserErasurePar
             throws Exception {
 
         long startTime = System.nanoTime();
+        // The origin taint (email plan v3 §5.3), read here on the submitting thread:
+        // a turn submitted from inside a tainted turn (a delegation continuing an
+        // existing conversation) or carrying the taint in its context taints the
+        // conversation it runs in, for good. The turn itself runs on another thread.
+        final String turnOrigin = TurnOrigin.combine(TurnOrigin.current(),
+                TurnOrigin.fromContext(inputData == null ? null : inputData.getContext()));
         // The request's arrival when the REST layer stamped it: time spent waiting
         // for a request thread counts against a turn deadline too.
         final long arrivalEpochMs = inputData != null && inputData.getRequestArrivalEpochMs() != null
@@ -1660,6 +1668,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                     throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
                 }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                memory.setOrigin(turnOrigin);
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
                 // A streamed turn reports its progress through the sink on memory, which
@@ -2890,17 +2899,21 @@ public class ConversationService implements IConversationService, UserErasurePar
      * since that surface authenticates a shared key rather than a person.</li>
      * </ul>
      */
-    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller) {
+    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller, String contextOrigin) {
         ResolutionPrincipal inherited = currentResolutionPrincipal();
+        // The origin taint, unlike the provenance, is inherited whatever the child's
+        // user id: it only restricts, and a delegate under another id is exactly the
+        // hop a mail-started turn would use to get around it (email plan v3 §5.3).
+        String origin = TurnOrigin.combine(TurnOrigin.current(), contextOrigin);
         if (inherited != null) {
             boolean sameSubject = conversationUserId != null && conversationUserId.equals(inherited.userId());
             return new ResolutionPrincipal(conversationUserId,
-                    sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED);
+                    sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin);
         }
         boolean verified = caller != null && caller.userId() != null && !caller.userId().isBlank()
                 && caller.userId().equals(conversationUserId);
         return new ResolutionPrincipal(conversationUserId,
-                verified ? ResolutionPrincipal.Provenance.VERIFIED : ResolutionPrincipal.Provenance.SELF_ASSERTED);
+                verified ? ResolutionPrincipal.Provenance.VERIFIED : ResolutionPrincipal.Provenance.SELF_ASSERTED, origin);
     }
 
     private ResolutionPrincipal currentResolutionPrincipal() {
@@ -2944,7 +2957,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (resolutionPrincipalContext == null) {
             return executeConversation;
         }
-        var principal = new ResolutionPrincipal(conversationMemory.getUserId(), conversationMemory.getResolutionProvenance());
+        var principal = new ResolutionPrincipal(conversationMemory.getUserId(), conversationMemory.getResolutionProvenance(),
+                conversationMemory.getOrigin());
         return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
     }
 
@@ -3154,6 +3168,14 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("environment", environment == null ? null : environment.toString());
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
+        // The email-origin taint this turn runs under, so a replay of it runs under the
+        // same one (email plan v3 section 5.3): the origin otherwise reaches the memory
+        // only when the turn builder runs, which a failed turn may never have reached.
+        String origin = TurnOrigin.combine(TurnOrigin.combine(TurnOrigin.current(),
+                TurnOrigin.fromContext(inputData == null ? null : inputData.getContext())), memory.getOrigin());
+        if (origin != null) {
+            turn.put("origin", origin);
+        }
         if (captureDeadLetterInput && inputData != null) {
             if (isSecretInput(inputData) || agent == null || agent.hasSecretPropertyInstructions()) {
                 // A turn the client flagged secretInput, or one addressed to an agent

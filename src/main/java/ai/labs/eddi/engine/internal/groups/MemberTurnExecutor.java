@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
@@ -769,6 +770,11 @@ public class MemberTurnExecutor {
         // STANDALONE dynamic-agent default — creation enabled though the group
         // forbids it.
         putDynamicAgentContext(gc, groupContext);
+        // A discussion a mail started taints every member conversation (email plan v3
+        // §5.3); the member's later turns read it from its own memory.
+        if (gc.getOrigin() != null) {
+            groupContext.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, gc.getOrigin()));
+        }
         var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
         String conversationId = result.conversationId();
         gc.getMemberConversationIds().put(convKey, conversationId);
@@ -1071,11 +1077,14 @@ public class MemberTurnExecutor {
             }
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
+            // The child discussion is created on this thread, which runs no turn: the
+            // parent's taint is bound for it explicitly.
             GroupConversation subConversation;
             int childTurns = claimedTurns != null ? claimedTurns : 0;
             try {
-                subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
-                        gc.getAttachments(), remainingBudget, gc.getId(), parentToken, claimedTurns);
+                subConversation = TurnOrigin.callWith(gc.getOrigin(),
+                        () -> groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
+                                gc.getAttachments(), remainingBudget, gc.getId(), parentToken, claimedTurns));
                 childTurns = subConversation.legTurnsUsed();
             } catch (GroupDepthExceededException | GroupMembersUnresolvableException
                     | GroupConversationService.NestedGroupNotFoundException e) {

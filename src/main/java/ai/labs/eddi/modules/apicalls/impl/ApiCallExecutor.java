@@ -12,6 +12,8 @@ import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EscalationGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
@@ -1769,6 +1771,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // constant contains an 'i', so no locale changes the result today. It would
         // the moment one did — "options" uppercases to "OPTİONS" under tr-TR.
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase(Locale.ROOT));
+        // The escalation guard (email plan v3 §5.3): a turn a mail started never
+        // writes to EDDI's own channel or approval endpoints, whatever the tool or
+        // rule that sends the request is called.
+        Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri);
+        if (escalation.isPresent()) {
+            throw new IllegalArgumentException(escalation.get());
+        }
         IRequest request = httpClient.newRequest(targetUri, method);
         // Bound the call in time and in size. Without these an httpcall can occupy the
         // conversation thread until the client's own fallback expires, and can pull an
@@ -1777,7 +1786,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // way into memory rather than failing the whole turn.
         request.setTimeout(resolveTimeout(call), TimeUnit.MILLISECONDS);
         request.setMaxResponseSize(resolveTransportResponseSize(call));
-        if (ssrfProtectionEnabled) {
+        if (ssrfProtectionEnabled || TurnOrigin.currentIsEmail() && EscalationGuard.isWrite(method.name())) {
+            // A tainted turn's writes are not followed through a redirect either: a 307
+            // keeps the method and the body, and the hop could name a guarded endpoint
+            // the check above never saw.
             request.setFollowRedirects(false);
         }
         if (!isNullOrEmpty(requestBody)) {

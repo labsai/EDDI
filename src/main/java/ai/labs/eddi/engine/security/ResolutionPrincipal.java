@@ -30,8 +30,30 @@ package ai.labs.eddi.engine.security;
  *            the conversation's user id, or {@code null} when the turn has none
  * @param provenance
  *            how that id came to be; {@code null} counts as not verified
+ * @param origin
+ *            the channel that taints the conversation this turn belongs to
+ *            ({@link TurnOrigin#EMAIL}), or {@code null}. It rides on the
+ *            principal because the principal is what every dispatch already
+ *            carries: bound per turn from stored memory, propagated to worker
+ *            threads, inherited by the conversations a turn starts. Unlike
+ *            {@link #provenance()} a child inherits it whatever its user id is:
+ *            the taint only narrows what a turn may do, so losing it is the
+ *            failure, never keeping it.
  */
-public record ResolutionPrincipal(String userId, Provenance provenance) {
+public record ResolutionPrincipal(String userId, Provenance provenance, String origin) {
+
+    /** A principal without an origin taint. */
+    public ResolutionPrincipal(String userId, Provenance provenance) {
+        this(userId, provenance, null);
+    }
+
+    /**
+     * Whether a mail started the conversation this turn belongs to, or one that
+     * started it ({@link TurnOrigin}).
+     */
+    public boolean isEmailOrigin() {
+        return TurnOrigin.EMAIL.equals(origin);
+    }
 
     /**
      * How much an identity is worth for a credential decision.

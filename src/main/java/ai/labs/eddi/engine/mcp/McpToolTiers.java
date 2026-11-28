@@ -92,7 +92,7 @@ final class McpToolTiers {
                 "create_resource", "delete_resource", "apply_agent_changes", "list_agent_resources", "list_agent_triggers",
                 "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger", "list_channel_integrations",
                 "read_channel_integration", "create_channel_integration", "update_channel_integration",
-                "delete_channel_integration",
+                "delete_channel_integration", "list_email_senders", "update_email_senders",
                 // McpGroupTools: group configuration, templates and the team backlog
                 "list_groups", "read_group", "create_group", "update_group", "delete_group", "add_team_task",
                 "list_team_backlog", "list_group_templates", "create_group_from_template",

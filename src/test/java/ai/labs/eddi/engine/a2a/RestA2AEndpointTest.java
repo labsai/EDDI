@@ -27,6 +27,7 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.SendRequest;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -333,6 +334,30 @@ class RestA2AEndpointTest {
         assertThrows(ForbiddenException.class, () -> endpoint.handleJsonRpc(AGENT_ID, null, request));
 
         verifyNoInteractions(taskHandler);
+    }
+
+    /**
+     * Email plan v3 §5.3: a peer EDDI sends the origin taint of the turn that
+     * called it; the handler starts and runs the conversation on this thread, so
+     * the taint is bound for both. Without the header nothing is bound.
+     */
+    @Test
+    void handleJsonRpc_send_bindsTheOriginTaintAPeerSent() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var seen = new ArrayList<String>();
+        when(taskHandler.send(eq(AGENT_ID), any(SendRequest.class))).thenAnswer(inv -> {
+            seen.add(String.valueOf(TurnOrigin.current()));
+            return completedTask("task-1");
+        });
+        var request = new JsonRpcRequest("2.0", "message/send",
+                Map.of("message", Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi")))), "req-1");
+
+        endpoint.handleJsonRpc(AGENT_ID, null, "email", request);
+        endpoint.handleJsonRpc(AGENT_ID, null, null, request);
+        endpoint.handleJsonRpc(AGENT_ID, null, "something-else", request);
+
+        assertEquals(List.of(TurnOrigin.EMAIL, "null", "null"), seen);
+        assertNull(TurnOrigin.current(), "the binding ends with the request");
     }
 
     @Test

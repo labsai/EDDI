@@ -150,6 +150,12 @@ public class ConversationMemorySnapshot {
      * it.
      */
     private ResolutionPrincipal.Provenance resolutionProvenance;
+    /**
+     * The origin taint ({@code TurnOrigin#EMAIL}) of the conversation, or
+     * {@code null}. Absent in documents written before it existed; an email
+     * conversation among those is still recognised by its user id.
+     */
+    private String origin;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     /**
@@ -608,6 +614,14 @@ public class ConversationMemorySnapshot {
 
     public void setResolutionProvenance(ResolutionPrincipal.Provenance resolutionProvenance) {
         this.resolutionProvenance = resolutionProvenance;
+    }
+
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
     }
 
     public Deployment.Environment getEnvironment() {

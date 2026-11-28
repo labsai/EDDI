@@ -198,6 +198,7 @@ eddi_tool_execution_failure_total           # Failed executions
 eddi_tool_execution_cached_total            # Cache-served executions
 eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
+eddi_tool_execution_escalation_refused_total  # Calls refused because an email-started turn tried to change a channel or decide an approval (tag: tool)
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
 eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
 eddi_tool_arguments_refused_total          # Calls refused before the approval gate because their arguments violate the tool's argumentSchema (tag: source)

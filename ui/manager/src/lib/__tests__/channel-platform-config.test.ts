@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { platformConfigForType } from "@/lib/channel-platform-config";
+import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
 
 const WEBHOOK = {
   signingSecret: "${vault:hook-secret}",
@@ -62,5 +62,52 @@ describe("platformConfigForType", () => {
     expect(platformConfigForType("email", "email", EMAIL)).toEqual(EMAIL);
     expect(platformConfigForType("teams", "slack", SLACK)).toEqual({});
     expect(platformConfigForType("webhook", "slack", null)).toEqual({});
+  });
+});
+
+describe("adoptStoredVersion", () => {
+  const cfg = (host: string, lists: string, name = "n") => ({
+    name,
+    platformConfig: { host, senderAllowlist: lists } as Record<string, string>,
+  });
+
+  it("takes every stored field, so another editor's change is not written back from an old snapshot", () => {
+    const merged = adoptStoredVersion(cfg("old", "a@x.com"), cfg("old", "a@x.com"), cfg("theirs", "b@x.com", "renamed"));
+    expect(merged).toEqual(cfg("theirs", "b@x.com", "renamed"));
+  });
+
+  it("keeps a field the user edited on this page, and still takes the stored lists", () => {
+    const merged = adoptStoredVersion(cfg("old", "a@x.com", "mine"), cfg("old", "a@x.com", "n"), cfg("old", "b@x.com", "n"));
+    expect(merged).toEqual(cfg("old", "b@x.com", "mine"));
+  });
+
+  it("keeps an edited platform key but never a stale sender list", () => {
+    const merged = adoptStoredVersion(cfg("mine", "a@x.com"), cfg("old", "a@x.com"), cfg("old", "b@x.com"));
+    expect(merged.platformConfig).toEqual({ host: "mine", senderAllowlist: "b@x.com" });
+  });
+
+  it("keeps a field the user cleared on this page cleared, instead of bringing the stored value back", () => {
+    const base = { name: "n", platformConfig: { host: "old", folder: "INBOX", senderAllowlist: "a@x.com" } as Record<string, string> };
+    const draft = { name: "n", platformConfig: { host: "old", senderAllowlist: "a@x.com" } as Record<string, string> };
+    const stored = { name: "n", platformConfig: { host: "old", folder: "INBOX", senderAllowlist: "b@x.com" } as Record<string, string> };
+    expect(adoptStoredVersion(draft, base, stored).platformConfig).toEqual({ host: "old", senderAllowlist: "b@x.com" });
+  });
+});
+
+describe("adoptStoredVersion routing", () => {
+  type Routed = { targets: { name: string }[]; defaultTargetName: string; platformConfig: Record<string, string> };
+  const routed = (names: string[], def: string): Routed => ({ targets: names.map((name) => ({ name })), defaultTargetName: def, platformConfig: {} });
+
+  it("keeps the user's targets and default together, so the default is always among the targets", () => {
+    // The user made B the default; the stored version removed B.
+    const merged = adoptStoredVersion(routed(["A", "B"], "B"), routed(["A", "B"], "A"), routed(["A"], "A"));
+    expect(merged.defaultTargetName).toBe("B");
+    expect(merged.targets.map((t) => t.name)).toContain("B");
+  });
+
+  it("takes the stored targets and default together when the user did not touch the routing", () => {
+    const merged = adoptStoredVersion(routed(["A", "B"], "A"), routed(["A", "B"], "A"), routed(["A"], "A"));
+    expect(merged.targets.map((t) => t.name)).toEqual(["A"]);
+    expect(merged.defaultTargetName).toBe("A");
   });
 });

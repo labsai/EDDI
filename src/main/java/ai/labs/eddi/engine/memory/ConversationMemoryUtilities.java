@@ -105,6 +105,7 @@ public class ConversationMemoryUtilities {
         // (not verified) and skipping the write would let a re-store silently keep a
         // provenance the live memory no longer claims.
         snapshot.setResolutionProvenance(conversationMemory.getResolutionProvenance());
+        snapshot.setOrigin(conversationMemory.getOrigin());
 
         if (conversationMemory.getConversationId() != null) {
             snapshot.setConversationId(conversationMemory.getConversationId());
@@ -181,6 +182,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setRevision(snapshot.getRevision());
         conversationMemory.setStoredFence(snapshot.getFence());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
+        conversationMemory.setOrigin(snapshot.getOrigin());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
         conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());

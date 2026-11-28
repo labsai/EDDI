@@ -65,3 +65,46 @@ export function platformConfigForType(
   }
   return next;
 }
+
+const SENDER_KEYS = ["senderAllowlist", "senderBlocklist"];
+
+/**
+ * The draft after the page adopts a newer stored version (the one a targeted
+ * sender-list change wrote). Every field takes its stored value — another
+ * editor's change to the host or the routing must not be written back from an
+ * old snapshot — except a field the user edited on this page since it was
+ * seeded (it differs from `base`). The sender lists always come from the store.
+ */
+export function adoptStoredVersion<
+  T extends { platformConfig: Record<string, string> },
+>(draft: T, base: T, stored: T): T {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const next: Record<string, unknown> = { ...stored };
+  // The routing is one unit: the targets and the default among them. Merged
+  // field by field they could name a default the targets no longer hold, so
+  // either the user's pair is kept whole, or the stored pair is.
+  const ROUTING = ["targets", "defaultTargetName"];
+  const routingEdited = ROUTING.some((key) => !same((draft as Record<string, unknown>)[key], (base as Record<string, unknown>)[key]));
+  for (const key of Object.keys(draft)) {
+    if (key === "platformConfig") continue;
+    const k = key as keyof T;
+    if (ROUTING.includes(key)) {
+      if (routingEdited) next[key] = draft[k];
+      continue;
+    }
+    if (!same(draft[k], base[k])) next[key] = draft[k];
+  }
+  const platformConfig: Record<string, string> = { ...stored.platformConfig };
+  // Over the union of both key sets: a key the user cleared on this page is in
+  // the base but not in the draft, and must not come back from the store.
+  const keys = new Set([...Object.keys(base.platformConfig), ...Object.keys(draft.platformConfig)]);
+  for (const key of keys) {
+    if (SENDER_KEYS.includes(key)) continue;
+    const mine = draft.platformConfig[key];
+    if (same(mine, base.platformConfig[key])) continue;
+    if (mine === undefined) delete platformConfig[key];
+    else platformConfig[key] = mine;
+  }
+  next.platformConfig = platformConfig;
+  return next as T;
+}

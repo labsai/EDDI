@@ -6,12 +6,17 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.mcpcalls.model.McpCall;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.security.EscalationGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -21,7 +26,9 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Finds the agents an email integration targets that can use tools without any
@@ -131,6 +138,138 @@ public class EmailAgentToolsInspector {
             }
         }
         return false;
+    }
+
+    /**
+     * The targets whose agent holds, by name, a tool or an HTTP call that a turn a
+     * mail started may never use ({@link EscalationGuard}): as
+     * {@code "<target>: <tool>"}. Refused at save time (email plan v3 §5.3).
+     * <p>
+     * <b>Best effort</b>, never the boundary — the runtime refusal is. It reads
+     * only what a configuration names: built-in tool and {@code tools} entries of
+     * the LLM tasks, {@code mcpcalls} whitelists and calls, and {@code httpcalls}
+     * method and path. It cannot see the tools an MCP server lists at runtime,
+     * skips GROUP targets and documents it cannot read, and does not run when the
+     * agent is changed after the integration was saved.
+     */
+    public List<String> targetsHoldingGuardedTools(List<ChannelTarget> targets) {
+        List<String> found = new ArrayList<>();
+        if (targets == null) {
+            return found;
+        }
+        for (ChannelTarget target : targets) {
+            if (target == null || target.getType() == ChannelTarget.TargetType.GROUP || target.getTargetId() == null) {
+                continue;
+            }
+            try {
+                for (String tool : guardedToolsOf(target.getTargetId())) {
+                    found.add(target.getName() + ": " + tool);
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Guarded-tool inspection skipped for agent %s: %s", LogSanitizer.sanitize(target.getTargetId()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        return found;
+    }
+
+    Set<String> guardedToolsOf(String agentId) throws Exception {
+        Set<String> found = new LinkedHashSet<>();
+        int version = agentStore.getCurrentResourceId(agentId).getVersion();
+        AgentConfiguration agent = agentStore.read(agentId, version);
+        if (agent == null || agent.getWorkflows() == null) {
+            return found;
+        }
+        for (URI workflowUri : agent.getWorkflows()) {
+            var workflowId = RestUtilities.extractResourceId(workflowUri);
+            if (workflowId == null || workflowId.getId() == null || workflowId.getVersion() == null) {
+                continue;
+            }
+            WorkflowConfiguration workflow = workflowStore.read(workflowId.getId(), workflowId.getVersion());
+            if (workflow == null || workflow.getWorkflowSteps() == null) {
+                continue;
+            }
+            for (var step : workflow.getWorkflowSteps()) {
+                URI uri = step.getConfig() != null && step.getConfig().get("uri") instanceof String value ? safeUri(value) : null;
+                if (uri == null || uri.getHost() == null) {
+                    continue;
+                }
+                try {
+                    switch (uri.getHost()) {
+                        case LLM_AUTHORITY -> guardedLlmTools(uri, found);
+                        case API_CALLS_AUTHORITY, HTTP_CALLS_AUTHORITY -> guardedHttpCalls(uri, found);
+                        case MCP_CALLS_AUTHORITY -> guardedMcpCalls(uri, found);
+                        default -> {
+                            // not relevant
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.debugf("Guarded-tool inspection skipped for %s: %s", LogSanitizer.sanitize(String.valueOf(uri)),
+                            LogSanitizer.sanitize(e.getMessage()));
+                }
+            }
+        }
+        return found;
+    }
+
+    private void guardedLlmTools(URI uri, Set<String> found) throws Exception {
+        LlmConfiguration llm = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+        if (llm == null || llm.tasks() == null) {
+            return;
+        }
+        for (LlmConfiguration.Task task : llm.tasks()) {
+            addGuarded(task.getBuiltInToolsWhitelist(), found);
+            addGuarded(task.getTools(), found);
+        }
+    }
+
+    private void guardedMcpCalls(URI uri, Set<String> found) throws Exception {
+        McpCallsConfiguration mcp = resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
+        if (mcp == null) {
+            return;
+        }
+        addGuarded(mcp.getToolsWhitelist(), found);
+        if (mcp.getMcpCalls() != null) {
+            for (McpCall call : mcp.getMcpCalls()) {
+                if (call != null && EscalationGuard.isGuardedTool(call.getToolName())) {
+                    found.add(call.getToolName());
+                }
+            }
+        }
+    }
+
+    private void guardedHttpCalls(URI uri, Set<String> found) throws Exception {
+        ApiCallsConfiguration calls = resourceClientLibrary.getResource(uri, ApiCallsConfiguration.class);
+        if (calls == null || calls.getHttpCalls() == null) {
+            return;
+        }
+        String base = calls.getTargetServerUrl() == null ? "" : calls.getTargetServerUrl();
+        for (ApiCall call : calls.getHttpCalls()) {
+            if (call == null || call.getRequest() == null) {
+                continue;
+            }
+            String path = call.getRequest().getPath() == null ? "" : call.getRequest().getPath();
+            String method = call.getRequest().getMethod();
+            if (EscalationGuard.isGuardedRequest(method, pathOf(base) + "/" + path)) {
+                found.add((call.getName() == null ? "httpcall" : call.getName()) + " (" + method + " " + path + ")");
+            }
+        }
+    }
+
+    private static String pathOf(String url) {
+        URI parsed = safeUri(url.replace("{", "%7B").replace("}", "%7D"));
+        return parsed == null || parsed.getRawPath() == null ? url : parsed.getRawPath();
+    }
+
+    private static void addGuarded(List<String> names, Set<String> found) {
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            if (EscalationGuard.isGuardedTool(name)) {
+                found.add(name);
+            }
+        }
     }
 
     private static URI safeUri(String value) {

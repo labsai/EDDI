@@ -147,6 +147,12 @@ const PATCHABLE_EXTENSION_STORES = ["llmstore/llms", "apicallstore/apicalls", "m
  * reads and deployment status are included.
  */
 export const READ_ENDPOINTS: readonly string[] = [
+  // An email integration's sender lists, with the version a change must name
+  // (email control plan v3 §5.4). Deliberately NOT `GET /channelstore/channels/{id}`:
+  // read by an administrator that returns the document as stored, a plaintext
+  // credential included. The descriptors give the operator the id from a name.
+  "GET /channelstore/channels/descriptors",
+  "GET /channelstore/channels/{id}/email-senders",
   // Agents
   "GET /agentstore/agents/descriptors",
   "GET /agentstore/agents/{id}",
@@ -640,6 +646,17 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // every other write (`http.patch:*`), and for llmstore only ever approvable
   // through gate-guard.ts.
   ...PATCHABLE_EXTENSION_STORES.map((store) => `PATCH /${store}/{id}`),
+  // The ONE channelstore write, by the email control plan v3 §5.4, which
+  // narrows the "channelstore writes stay excluded" rule of
+  // planning/operator-write-scope-plan.md to exactly this endpoint. It edits
+  // nothing but an email integration's sender allowlist and blocklist: it
+  // cannot touch targets, credentials, mode or any other key, it refuses a
+  // stale `expectedVersion` (409) instead of overwriting a concurrent edit,
+  // emptying the allowlist needs an explicit `confirmOpen`, and every change is
+  // a new, rollback-able version with an audit entry carrying the reason. Gated
+  // like every write (`http.post:*`). The whole-document channel PUT, create,
+  // duplicate and delete stay excluded.
+  "POST /channelstore/channels/{id}/email-senders",
 ] as const;
 
 /**

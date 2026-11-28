@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfig;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -166,6 +167,12 @@ public class FollowUpTools {
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put(METADATA_TYPE_KEY, METADATA_TYPE_VALUE);
             metadata.put(METADATA_BOOKED_BY, booker.agentId());
+            // A check-back booked by a mail-started turn stays tainted when it fires,
+            // in a new conversation too (email plan v3 §5.3).
+            String origin = TurnOrigin.current();
+            if (origin != null) {
+                metadata.put(TurnOrigin.CONTEXT_KEY, origin);
+            }
             if (ownConversation) {
                 schedule.setConversationStrategy("persistent");
                 schedule.setPersistentConversationId(booker.conversationId());
