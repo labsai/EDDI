@@ -520,6 +520,12 @@ export async function provisionOperator(
     // not the safety mechanism here, the HITL gate is — every write pauses for
     // approval no matter how many rounds remain.
     maxToolIterations: OPERATOR_MAX_TOOL_ITERATIONS,
+    // Every round of that loop resends the whole prompt and about a hundred
+    // generated tool definitions — roughly 70k tokens before any conversation.
+    // Within one turn both are identical from round to round, so caching them
+    // is the largest single cost lever. The backend applies it where the
+    // provider must be asked (anthropic) and leaves the rest alone.
+    promptCaching: true,
   });
   if (result.agentId && result.agentId !== "unknown") {
     const location = (result.resources as { agentLocation?: unknown } | undefined)?.agentLocation;

@@ -87,6 +87,7 @@
 
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
+  - [Agent Signing Keys](agent-signing.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
 - [Multi-Org Security — Threat Model (draft)](multi-org-security.md)
 - [End-User Catalog](catalog.md)
