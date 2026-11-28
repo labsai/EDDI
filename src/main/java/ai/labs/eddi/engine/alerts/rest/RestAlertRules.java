@@ -55,6 +55,13 @@ public class RestAlertRules implements IRestAlertRules {
     private final AlertSettings settings;
     private final Clock clock;
 
+    /**
+     * Bounds test sends per caller. Field-injected so the constructors stay the
+     * ones the tests use; null there, and then tests are not throttled.
+     */
+    @Inject
+    AlertTestThrottle testThrottle;
+
     @Inject
     public RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access,
             AlertSenders senders, AlertMaintenanceSchedule maintenanceSchedule, AlertSettings settings) {
@@ -103,6 +110,8 @@ public class RestAlertRules implements IRestAlertRules {
         AlertRule rule = assignTargetIds(forStorage(body), null);
         validate(rule);
         access.requireWritable(rule);
+        access.requireDeliverable(rule);
+        rule = access.withAdmission(rule);
         requireRuleCapacity(rule, null);
         Instant now = clock.instant();
         String caller = access.caller();
@@ -120,6 +129,7 @@ public class RestAlertRules implements IRestAlertRules {
         AlertRule rule = assignTargetIds(restoreUrls(forStorage(body), current), current);
         validate(rule);
         access.requireWritable(rule);
+        rule = admitted(rule, current);
         requireRuleCapacity(rule, current);
         String caller = access.caller();
         AlertRule updated = rule.withId(current.id()).withAudit(current.createdBy(), current.createdAt(), caller, clock.instant());
@@ -165,6 +175,11 @@ public class RestAlertRules implements IRestAlertRules {
         }
         validate(rule);
         access.requireWritable(rule);
+        access.requireDeliverable(rule);
+        if (testThrottle != null && !testThrottle.tryAcquire(access.caller())) {
+            throw AlertErrors.tooManyRequests(AlertErrors.TEST_THROTTLED,
+                    "At most " + testThrottle.maxPerMinute() + " test alerts per minute; try again shortly");
+        }
         String agentId = rule.scope().singleAgent();
         Instant now = clock.instant();
         String summary = "Test alert from rule \"" + rule.name() + "\" — sent from the Manager; nothing happened.";
@@ -181,6 +196,36 @@ public class RestAlertRules implements IRestAlertRules {
             }
         }
         return new TestResult(results);
+    }
+
+    /**
+     * An update's rule, its Slack targets checked and marked
+     * ({@link AlertAccess#withAdmission}). An enabled rule must be deliverable as a
+     * whole. A disabled one only for the Slack channels it adds: switching a rule
+     * off must stay possible after its channel has changed hands (the alternative
+     * would be deleting it), and a channel it already had keeps the mark it was
+     * saved with, so the rule's pending retries are judged as before.
+     */
+    private AlertRule admitted(AlertRule rule, AlertRule current) {
+        if (rule.enabled()) {
+            access.requireDeliverable(rule);
+            return access.withAdmission(rule);
+        }
+        Map<String, DeliveryTarget> kept = new HashMap<>();
+        for (DeliveryTarget target : current.delivery()) {
+            if (target != null && target.type() == DeliveryTarget.DeliveryType.SLACK) {
+                kept.putIfAbsent(target.channelId(), target);
+            }
+        }
+        List<DeliveryTarget> added = rule.delivery().stream()
+                .filter(t -> t == null || t.type() != DeliveryTarget.DeliveryType.SLACK || !kept.containsKey(t.channelId())).toList();
+        access.requireDeliverable(withDelivery(rule, added));
+        List<DeliveryTarget> marked = access.withAdmission(rule).delivery().stream()
+                .map(t -> t != null && t.type() == DeliveryTarget.DeliveryType.SLACK && kept.containsKey(t.channelId())
+                        ? t.withAdminAdmitted(kept.get(t.channelId()).adminAdmitted())
+                        : t)
+                .toList();
+        return withDelivery(rule, marked);
     }
 
     /**
