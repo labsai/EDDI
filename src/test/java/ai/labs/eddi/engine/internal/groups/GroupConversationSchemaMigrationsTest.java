@@ -80,6 +80,26 @@ class GroupConversationSchemaMigrationsTest {
         assertEquals(7, result.getInheritedMaxTurns(), "resuming on this version keeps the inherited cap");
     }
 
+    /**
+     * The two team-cadence fields riding v6: both survive the document's JSON round
+     * trip, and a document carrying them claims a version a released (v5) pod
+     * refuses.
+     */
+    @Test
+    void cadenceRunFields_surviveTheRoundTripAndClaimAVersionAboveFive() throws Exception {
+        var gc = gc(GroupConversation.CURRENT_SCHEMA_VERSION);
+        gc.setRequiresGroupLease(true);
+        gc.setState(GroupConversation.GroupConversationState.CLOSED);
+        gc.setClosedFromState(GroupConversation.GroupConversationState.COMPLETED);
+        var mapper = new ObjectMapper().findAndRegisterModules();
+
+        var read = mapper.readValue(mapper.writeValueAsString(gc), GroupConversation.class);
+
+        assertTrue(read.isRequiresGroupLease());
+        assertEquals(GroupConversation.GroupConversationState.COMPLETED, read.getClosedFromState());
+        assertTrue(read.getSchemaVersion() > 5, "a v5 pod must refuse a document carrying the cadence fields");
+    }
+
     @Test
     void prepareForResume_olderVersion_migratesForwardToCurrent() throws Exception {
         // A fixture "old" document — one artificial version below current. With no

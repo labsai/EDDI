@@ -85,6 +85,12 @@ class TeamCadenceClaimExpiryTest {
         gc.setState(state);
         when(conversationStore.read(GC_ID)).thenReturn(gc);
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(true);
+        // What the real cancel does to a discussion no leg is running: compare-and-set
+        // the stored state to CANCELLED. The reclaim re-reads it before writing back.
+        when(groupConversationService.cancelDiscussion(eq(GC_ID), any())).thenAnswer(inv -> {
+            gc.setState(GroupConversationState.CANCELLED);
+            return true;
+        });
     }
 
     @Test

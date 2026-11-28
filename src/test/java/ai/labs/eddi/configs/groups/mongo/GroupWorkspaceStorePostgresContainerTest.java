@@ -158,4 +158,22 @@ class GroupWorkspaceStorePostgresContainerTest extends PostgresTestBase {
         assertEquals(List.of("agent:a", "group:src-group"), back.originOf("task-1").lineage());
         assertTrue(back.isDeclinedSince("dk-declined", Instant.parse("2026-10-01T00:00:00Z")));
     }
+
+    @Test
+    @DisplayName("parked cadence runs survive a store round trip, and a document without them reads back empty")
+    void parkedRuns_roundTrip() throws Exception {
+        GroupWorkspace ws = store.readOrCreate(groupId);
+        assertTrue(ws.getParkedRuns().isEmpty());
+        var parked = new GroupWorkspace.ParkedRun("gc-paused", Instant.parse("2026-11-15T08:00:00Z"), List.of("t-1", "t-2"));
+        ws.setParkedRuns(List.of(parked));
+        ws.setRunningDiscussionId("gc-new");
+        ws.setPulledTaskIds(List.of("t-3"));
+        assertTrue(store.casRunningDiscussion(ws));
+
+        GroupWorkspace back = store.find(groupId);
+        assertEquals(List.of(parked), back.getParkedRuns());
+        assertEquals("gc-new", back.getRunningDiscussionId());
+        assertTrue(back.isHeldByRun("t-1"));
+        assertTrue(back.isHeldByRun("t-3"));
+    }
 }

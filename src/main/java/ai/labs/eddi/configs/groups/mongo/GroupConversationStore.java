@@ -166,6 +166,13 @@ public class GroupConversationStore implements IGroupConversationStore {
             return false;
         }
         gc.setState(newState);
+        // A close records what it closed: CLOSED is reached only from an ended state,
+        // and a team cadence run closed before its claim was settled is written back
+        // from that state (GroupConversation#getClosedFromState). Same write as the
+        // state, so no reader sees CLOSED without it.
+        if (newState == GroupConversation.GroupConversationState.CLOSED) {
+            gc.setClosedFromState(expectedState);
+        }
         gc.setLastModified(Instant.now());
         try {
             // Conditional write — the persisted state must STILL be expectedState. The

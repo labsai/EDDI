@@ -111,6 +111,9 @@ Two bounds to know about:
   the ceiling once and then runs every speaker, and a task-force wave runs all its tasks before the next check. So
   one discussion can overshoot by a whole parallel phase or wave; size the cap with that margin when a team uses
   them. Two discussions of the same team running at once each learn of the other's spend at their next charge.
+  A standing team with `hitlConfig.maxPausedCadenceRuns` set can have that many parked (paused) cadence runs plus
+  one working run; each one an approval resumes counts here like any other discussion of the team (see
+  [Standing Teams](group-conversations.md#standing-teams-i13)).
 - The cap and the tenant remainder are read at the start of a leg. An administrator raising the cap during a
   run takes effect from the next leg; the run's ceiling stays self-decrementing in between, so exposure is bounded.
 
