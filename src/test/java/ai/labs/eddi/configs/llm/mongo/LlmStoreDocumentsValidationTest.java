@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -82,6 +83,10 @@ class LlmStoreDocumentsValidationTest {
     void emptyBlockSaves() throws Exception {
         var task = new LlmConfiguration.Task();
         task.setId("t1");
+        // A task the save-time LLM checks accept, so only the documents block is under
+        // test.
+        task.setType("openai");
+        task.setParameters(Map.of("modelName", "gpt-4o"));
         task.setDocuments(new DocumentsConfig());
         var config = new LlmConfiguration(List.of(task));
         IResourceStorage.IResource<LlmConfiguration> resource = mock(IResourceStorage.IResource.class);
