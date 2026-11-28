@@ -5,6 +5,7 @@ import {
   type OperatorScope,
 } from "./tool-scopes";
 import {
+  buildOperatorSystemPrompt,
   defaultOperatorPromptBody,
   safetyPreambleForScope,
 } from "./system-prompt";
@@ -64,6 +65,13 @@ export function operatorProvisioningSource(): string {
       endpoints: endpointsForScope(scope),
       preamble: safetyPreambleForScope(scope, DEFAULT_BRAND.productName),
       defaultBody: defaultOperatorPromptBody(scope),
+      // The text provisioning actually sends: the same prompt after literal braces
+      // are escaped for Qute, so a change to that escaping reaches existing operators.
+      sentPrompt: buildOperatorSystemPrompt(
+        defaultOperatorPromptBody(scope),
+        scope,
+        DEFAULT_BRAND.productName,
+      ),
     })),
   });
 }

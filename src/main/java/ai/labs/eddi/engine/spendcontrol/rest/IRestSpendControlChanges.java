@@ -50,7 +50,8 @@ public interface IRestSpendControlChanges {
     @GET
     @Path("/{id}")
     @NoCache
-    @Operation(summary = "Read one spend-control change", description = "With the proposed document, what changes and which part loosens.")
+    @Operation(operationId = "readSpendControlChange", summary = "Read one spend-control change",
+               description = "With the proposed document, what changes and which part loosens.")
     Response read(@PathParam("id") String id);
 
     @POST
