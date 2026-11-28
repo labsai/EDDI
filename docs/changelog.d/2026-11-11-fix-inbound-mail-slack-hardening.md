@@ -30,7 +30,7 @@ victim's words; or deliver the signed mail again with an unsigned `Subject`, plu
   the reply recipient (`EmailReplyRecipients` sees no unsigned `Reply-To`). `In-Reply-To`, `References` and `Date` are
   kept unsigned: Gmail does not sign the thread headers, and a continuation is bound to the conversation's own
   authenticated sender anyway. A mail whose
-  `Message-ID` is unsigned is also deduplicated on its signature: a terminal marker row keyed `<dkim.<digest>@eddi.invalid>`,
+  `Message-ID` is unsigned is also deduplicated on its signature: a terminal marker row keyed `dkim-signature:<digest>`,
   so a copy under a new id is refused as `duplicate:replayed_signature`.
 - `Reply-To`, `Content-Type`, `Content-Transfer-Encoding` and `MIME-Version` joined the singleton headers whose
   duplicate fails authentication. `To`/`Cc` legitimately repeat, so their unsigned instances are ignored instead.
