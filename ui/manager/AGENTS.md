@@ -10,12 +10,13 @@
 
 ### Ecosystem
 
-The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
+The Manager, Workforce, the Chat UI and the backend are one repository, `labsai/EDDI`:
 
 | Location | Tech | Purpose |
 | --- | --- | --- |
 | **repo root** | Java 25, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline, integration tests (`src/test/java/**/*IT.java`) |
 | **`ui/manager`** (this) | React 19, Vite, Tailwind | Admin dashboard — agents, workflows, extensions, chat |
+| **[`ui/workforce`](../workforce/AGENTS.md)** | React 19, Vite, Tailwind | The end-user app (chats and agent teams), its own app beside this one |
 | **`ui/chat`** | React, TypeScript | Standalone chat widget |
 | **eddi-website** | Astro | Marketing site at eddi.technology |
 
@@ -49,12 +50,12 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 ### During Work
 
 - **Branch** per root rule 3 — never commit to `main`, branch from `origin/main`, name it `feat/…`/`fix/…` (never a tool-generated `claude/…` name).
-- **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
+- **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans more than one UI.
 - **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
 ### Dependencies: one npm workspace, one lockfile
 
-`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the
+`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, Workforce, the Chat UI and the
 shared packages under `ui/packages/` install from **one `ui/package-lock.json`** into
 `ui/node_modules`. There is no `ui/manager/package-lock.json` any more.
 
@@ -62,7 +63,7 @@ shared packages under `ui/packages/` install from **one `ui/package-lock.json`**
   (`npm run dev`, `test`, `build`, `lint`, ...), and `npx` finds the hoisted binaries.
 - **Change a dependency from `ui/` with `-w manager`**: `npm install <pkg> -w manager`
   updates `package.json` here and the root lock.
-  A version both apps use should stay the same in both `package.json` files, so it is
+  A version more than one app uses should stay the same in each `package.json`, so it is
   installed once (`lucide-react`, `react`, the lint and test toolchain).
 - **`overrides` live in `ui/package.json`.** npm ignores them in a workspace's own
   `package.json`.

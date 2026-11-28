@@ -23,6 +23,7 @@
 
 - **EDDI backend** (repository root) — Quarkus REST API under `/agents` (`POST /agents/{agentId}/start?environment=…`, then `/agents/{conversationId}`); the Maven build copies this widget into the jar, served at `/chat`
 - **EDDI Manager** (`ui/manager`) — Admin UI with embedded chat panel, shares API patterns
+- **EDDI Workforce** (`ui/workforce`) — the signed-in end-user app; it renders the same `@eddi/conversation` components
 
 ---
 
@@ -192,9 +193,9 @@ start five seconds for a token). Its contract for embedders is section 6 of
 `docs/chat-ui-embedding.md`.
 
 Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
-shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).
-Change a dependency from `ui/` with `npm install <pkg> -w chat`, keep a version the Manager also
-uses identical in both `package.json` files, and put any `overrides` in
+shares one `ui/package-lock.json` with the Manager, Workforce and `ui/packages/*` (`cd ui && npm ci`).
+Change a dependency from `ui/` with `npm install <pkg> -w chat`, keep a version another app also
+uses identical in each `package.json`, and put any `overrides` in
 `ui/package.json`. On Windows, run `npm run lockfile:check` in `ui/` afterwards — the
 `oxide-wasm32-wasi` trap described in `ui/manager/AGENTS.md` now applies to this lock too.
 
@@ -209,7 +210,7 @@ no CI at all), then builds and runs `npm run budget`. Run them all before pushin
 ## 5. Mandatory Workflow
 
 1. **Before work**: `git status`, read this file + the top of the root `docs/changelog.md` and anything pending in the root `docs/changelog.d/`
-2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates above.
+2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans more than one UI). Each commit must pass the gates above.
 3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT

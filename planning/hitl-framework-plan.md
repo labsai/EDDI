@@ -3,7 +3,7 @@
 > **Status: IMPLEMENTED** (changelog 2026-06-30, "HITL Framework", with the tool-level and MCP
 > follow-ups of July and August 2026). User documentation is [`docs/hitl.md`](../docs/hitl.md); this file
 > is kept as the design record and is not available work. Still not built: `toolApprovals.inGroupTurns:
-> INBOX` and `VoteConfig.tiePolicy: HUMAN_DECIDES`, both refused at save time (see AGENTS.md §3).
+> INBOX`, refused at save time (see AGENTS.md §3). (`VoteConfig.tiePolicy: HUMAN_DECIDES`, once listed here too, has shipped.)
 >
 > *Original status (before it shipped):* code-verified, implementation-ready. Line numbers and
 > constructor shapes below describe the code of that time and have drifted.
