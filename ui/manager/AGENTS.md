@@ -98,15 +98,17 @@ on Linux, so its lockfile PRs are not affected.
 ### Quality Gates
 
 There is no pre-commit hook (the husky + lint-staged hook did not survive the move into the
-EDDI monorepo). CI's `UI Manager Checks` job runs these on every PR into `main` that touches `ui/`
-(`ci.yml` runs on no other base branch), in this order — run them yourself before pushing:
+EDDI monorepo). CI runs these on every PR into `main` that touches `ui/` (`ci.yml` runs on no other base
+branch) — the first four in `UI Manager Checks`, the tests in three `UI Manager Unit (n/3)`
+shards whose coverage `UI Manager Unit Tests` merges and grades. Run them yourself before
+pushing:
 
 ```bash
 npm run audit:prod   # no known-vulnerable production dependency
 npm run lint         # ESLint over src/ and e2e/, --max-warnings 0
 npm run i18n:check   # no locale/code drift (see i18n below)
 npm run typecheck    # tsc -b — the full project, including tsconfig.e2e.json
-npm run test         # Vitest (CI adds --coverage)
+npm run test         # Vitest (CI shards it and grades coverage on the merge)
 ```
 
 `npm run build` (which includes `tsc -b`) should also pass. `UI Manager E2E (MSW)` runs the

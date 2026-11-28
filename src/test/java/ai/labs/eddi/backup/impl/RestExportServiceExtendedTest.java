@@ -50,6 +50,7 @@ import static org.mockito.Mockito.*;
  * Extended unit tests for {@link RestExportService} covering schedule export,
  * extension resource preview, error paths, and selective export filtering.
  */
+@SharedWorkingDirTmp
 class RestExportServiceExtendedTest {
 
     private IDocumentDescriptorStore documentDescriptorStore;

@@ -60,6 +60,7 @@ import static org.mockito.Mockito.when;
  * {@code ${caller:token}} author check, so the import applies the check itself
  * — and a refusal fails the import with the 403, not a 500.
  */
+@SharedWorkingDirTmp
 class RestImportServiceCallerTokenTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";

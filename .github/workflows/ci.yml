@@ -6,6 +6,13 @@ on:
     tags: ["[0-9]*"]
   pull_request:
     branches: [main]
+  # The merge queue: GitHub tests main + the queued PR(s) on a temporary
+  # gh-readonly-queue/main/... branch and merges only that tested commit. These runs
+  # take the full pipeline (detect-changes forces every filter, as for a tag) and
+  # publish nothing (every publishing job gates on event_name == 'push'). CI Gate
+  # is the check the queue waits for.
+  merge_group:
+    types: [checks_requested]
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
 # three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
@@ -57,8 +64,9 @@ jobs:
       - name: Check paths
         id: filter
         # Skipped on tag pushes — a release must run the FULL pipeline no matter
-        # what the tagged commit happens to touch (see "Resolve" below).
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        # what the tagged commit happens to touch (see "Resolve" below) — and on
+        # merge-queue runs, which are the last gate before main and run everything.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'merge_group' }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -279,7 +287,9 @@ jobs:
           # tag published REGARDLESS of test results. Forcing code=true here lets
           # docker rely on plain `needs` success instead, so a tag on a commit
           # with failing tests builds nothing.
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          # A merge-queue run takes the same branch: it is the last test before the
+          # commit lands on main, so it runs every job ("Check paths" is skipped).
+          if [[ "$GITHUB_REF" == refs/tags/* || "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "scripts=true" >> "$GITHUB_OUTPUT"
             echo "operator_docs=true" >> "$GITHUB_OUTPUT"
@@ -321,6 +331,9 @@ jobs:
           echo "- Backend changed: **${{ steps.result.outputs.backend }}**" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "- 🏷️ Tag push — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            echo "- 🚦 Merge queue — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ steps.result.outputs.code }}" = "false" ]; then
             echo "- ⏭️ Skipping build/test/docker (docs/licenses/config-only change)" >> "$GITHUB_STEP_SUMMARY"
@@ -1275,9 +1288,13 @@ jobs:
         # the UIs are built. They have their own ui-* jobs, and the image is built
         # once, by Build Image. The resource tests that read the SPA shells use the
         # stand-ins under src/test/resources.
-        run: ./mvnw clean test -DskipUi=true -B
+        # -Dsurefire.forkCount=3: the ~37k unit tests ran in one JVM on a 4-vCPU
+        # runner (13.5 min of pure test time). Three forks share the classes between
+        # them; tests that touch <working dir>/tmp are serialised across forks by
+        # @SharedWorkingDirTmp (see the surefire.forkCount property in pom.xml).
+        run: ./mvnw clean test -DskipUi=true -B -Dsurefire.forkCount=3
 
-      # Integration Tests restores this instead of running the unit tests again: the
+      # Coverage Gate restores this instead of running the unit tests again: the
       # merged 90/80 coverage gate needs their execution data, not a second run.
       - name: Upload unit-test coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1362,13 +1379,17 @@ jobs:
           out ""
           out "</details>"
           out ""
-          out "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage."
+          out "> ℹ️ Unit tests only. See the **Coverage Gate** job for merged UT+IT coverage."
 
   # ─── Job 2: Integration Tests ─────────────────────────────────
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-and-test, maven-cache]
+    # Deliberately NOT `needs: build-and-test`. It used to wait for Build & Test only
+    # to download the unit tests' coverage data for the merged gate, which put the
+    # two ~14-minute suites end to end on every backend change. The merged gate now
+    # runs in coverage-gate, which needs both, so the suites run side by side.
+    needs: [detect-changes, maven-cache]
     # Same split as build-and-test: on a pull request only a backend change runs the
     # Testcontainers suite; on push and on tags any code change does.
     if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
@@ -1391,9 +1412,70 @@ jobs:
           restore-keys: |
             maven-v1-${{ runner.os }}-
 
-      # Build & Test already ran the unit tests on this commit (this job `needs` it).
-      # Their coverage data and reports are restored instead of re-running ~20k tests,
-      # so the merged coverage gate below sees exactly what it saw before.
+      - name: Run integration tests
+        # -DskipUi=true: the ITs are API-level, and ContainerBaseIT's image needs no UI.
+        # -DskipUTs=true: Build & Test runs the unit tests on this commit in parallel.
+        # -Djacoco.haltOnFailure=false: `verify` still runs the merged-check
+        # execution here, but this job has no unit-test data (target/jacoco.exec), so
+        # it would grade integration-test coverage alone against the UT+IT threshold.
+        # So its "Rule violated ... covered ratio" WARNING in this log is expected and
+        # means nothing. The 90/80 gate is enforced in coverage-gate, on all three data files;
+        # BuildQualityGatesTest pins that it stays armed there.
+        run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Djacoco.haltOnFailure=false -Dquarkus.bootstrap.effective-model-builder=true -B
+        env:
+          MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: integration-test-results
+          path: target/failsafe-reports/
+          retention-days: 14
+
+      # Both agents' execution data: the failsafe JaCoCo agent (jacoco-it.exec) and
+      # quarkus-jacoco inside the @QuarkusTest application (jacoco-quarkus.exec).
+      - name: Upload integration-test coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: integration-test-coverage-data
+          path: |
+            target/jacoco-it.exec
+            target/jacoco-quarkus.exec
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── Job 2a: Coverage Gate ────────────────────────────────────
+  # The merged unit + integration JaCoCo gate (90% instructions / 80% branches,
+  # OpenSSF Gold). It used to run inside Integration Tests, which therefore had to
+  # wait for Build & Test; now both suites run in parallel and hand their execution
+  # data here. Nothing is re-run: the job compiles, merges and checks.
+  coverage-gate:
+    name: Coverage Gate
+    runs-on: ubuntu-latest
+    needs: [detect-changes, maven-cache, build-and-test, integration-test]
+    # Exactly integration-test's condition: the gate grades UT+IT data, so it runs
+    # where the ITs do (and Build & Test always runs when they do).
+    if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
+
       - name: Download unit-test coverage data
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1406,20 +1488,49 @@ jobs:
           name: test-results
           path: target/surefire-reports
 
-      - name: Run integration tests
-        # -DskipUi=true: the ITs are API-level, and ContainerBaseIT's image needs no UI.
-        # -DskipUTs=true: see the two steps above.
-        run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Dquarkus.bootstrap.effective-model-builder=true -B
-        env:
-          MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
+      - name: Download integration-test coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: integration-test-coverage-data
+          path: target
 
-      - name: Upload integration test results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - name: Download integration-test reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: integration-test-results
-          path: target/failsafe-reports/
-          retention-days: 14
+          path: target/failsafe-reports
+
+      # JaCoCo's merge and check goals skip with an info line when a data file is
+      # absent, so a renamed or empty artifact would turn the gate into a check of
+      # less data — or of nothing — that still reports green. Refuse to run without
+      # all three.
+      - name: Every execution-data file is present
+        run: |
+          set -euo pipefail
+          for f in target/jacoco.exec target/jacoco-it.exec target/jacoco-quarkus.exec; do
+            if [ ! -s "$f" ]; then
+              echo "::error::$f is missing or empty, so the merged coverage gate would grade incomplete data"
+              exit 1
+            fi
+            echo "$f: $(stat -c %s "$f") bytes"
+          done
+
+      # The merged-check execution carries <skip>${skipITs}</skip>, so
+      # -DskipITs=false is what arms it; nothing here may relax it
+      # (BuildQualityGatesTest pins this line). Classes come from this job's own
+      # compile: javac output is deterministic, and the unit and integration data
+      # were already merged against separately compiled classes before this job
+      # existed. A mismatch would lower coverage, so it fails closed. The style
+      # gates are skipped because Build & Test owns them.
+      - name: Merge coverage and enforce the 90/80 gate
+        run: ./mvnw compile jacoco:report@report jacoco:merge@merge-it jacoco:report@report-integration jacoco:merge@merge jacoco:report@merged-report jacoco:check@merged-check -DskipITs=false -DskipUi=true -Dformatter.skip=true -Dcheckstyle.skip=true -B
+
+      - name: The merged report was produced
+        run: |
+          if [ ! -s target/site/jacoco-merged/jacoco.csv ]; then
+            echo "::error::target/site/jacoco-merged/jacoco.csv is missing: the merged report did not run, so the gate graded nothing"
+            exit 1
+          fi
 
       - name: Upload integration coverage report
         if: always()
@@ -1648,11 +1759,8 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      # Includes openapi-contract.test.ts, which checks the MSW handlers against the
-      # committed OpenAPI snapshot. e2e-fullstack checks that snapshot against the
-      # backend built from this same commit.
-      - name: Unit tests with coverage
-        run: npx vitest run --coverage
+      # The Vitest suite runs in ui-manager-unit (three shards) and
+      # ui-manager-unit-merge (coverage thresholds), beside this job.
 
       # First-load budget (frontend unification plan, phase 0): the gzipped
       # scripts and stylesheets each HTML shell loads before any lazy chunk,
@@ -1662,6 +1770,108 @@ jobs:
 
       - name: Bundle budget
         run: npm run budget
+
+  # ─── UI Manager unit tests, sharded ─────────────────────────────
+  # The Manager's Vitest suite (~640 files) took 12–16 minutes in one job on a
+  # 4-vCPU runner. Three shards each run a third of the files and write a blob
+  # report; ui-manager-unit-merge combines them and enforces the coverage
+  # thresholds from vitest.config.ts on the MERGED coverage. A shard must not
+  # grade its own third of the coverage against those thresholds — it would fail
+  # every time — so the shards zero them on the command line and only the merge
+  # job, which has every test's coverage, applies them.
+  ui-manager-unit:
+    name: UI Manager Unit (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: ui/manager
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      # Includes openapi-contract.test.ts, which checks the MSW handlers against the
+      # committed OpenAPI snapshot. e2e-fullstack checks that snapshot against the
+      # backend built from this same commit. `default` keeps failures readable in
+      # this log; `blob` is what the merge job reads.
+      - name: Unit tests (shard ${{ matrix.shard }}/3)
+        run: >-
+          npx vitest run --shard=${{ matrix.shard }}/3 --reporter=default --reporter=blob --coverage
+          --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
+          --coverage.thresholds.functions=0 --coverage.thresholds.statements=0
+
+      # Vitest writes the blob to .vitest/blob/blob-<n>-3.json. A dot-directory is
+      # skipped by upload-artifact unless include-hidden-files is set.
+      - name: Upload the blob report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ui-manager-blob-${{ matrix.shard }}
+          path: ui/manager/.vitest/blob/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  ui-manager-unit-merge:
+    name: UI Manager Unit Tests
+    runs-on: ubuntu-latest
+    needs: [detect-changes, ui-manager-unit]
+    if: needs.detect-changes.outputs.ui == 'true'
+    defaults:
+      run:
+        working-directory: ui/manager
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      - name: Download the shards' blob reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ui-manager-blob-*
+          merge-multiple: true
+          path: ui/manager/.vitest/blob
+
+      # --merge-reports reads whatever blobs it finds: with one missing it would
+      # report — and grade coverage for — two thirds of the suite, and pass.
+      - name: Every shard reported
+        run: |
+          count=$(find .vitest/blob -maxdepth 1 -name 'blob-*-3.json' | wc -l)
+          if [ "$count" -ne 3 ]; then
+            echo "::error::expected 3 shard blob reports, found $count"
+            ls -la .vitest/blob || true
+            exit 1
+          fi
+
+      # Fails on a failed test in any shard and on merged coverage below the
+      # thresholds in vitest.config.ts (checked: a partial merge exits 1).
+      - name: Merge the shards and enforce coverage
+        run: npx vitest run --merge-reports --coverage
 
       - name: Upload coverage report
         if: ${{ !cancelled() }}
@@ -1891,7 +2101,7 @@ jobs:
   ui-gate:
     name: UI Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, ui-manager-checks, ui-manager-e2e, ui-workforce, ui-chat]
+    needs: [detect-changes, ui-manager-checks, ui-manager-unit, ui-manager-unit-merge, ui-manager-e2e, ui-workforce, ui-chat]
     if: always()
     steps:
       - name: Require UI success only when the UI changed
@@ -1899,6 +2109,8 @@ jobs:
           DETECT: ${{ needs.detect-changes.result }}
           CHANGED: ${{ needs.detect-changes.outputs.ui }}
           CHECKS: ${{ needs.ui-manager-checks.result }}
+          UNIT: ${{ needs.ui-manager-unit.result }}
+          UNIT_MERGE: ${{ needs.ui-manager-unit-merge.result }}
           E2E: ${{ needs.ui-manager-e2e.result }}
           WORKFORCE: ${{ needs.ui-workforce.result }}
           CHAT: ${{ needs.ui-chat.result }}
@@ -1908,14 +2120,14 @@ jobs:
             exit 1
           fi
           if [ "$CHANGED" = "true" ]; then
-            for result in "ui-manager-checks=$CHECKS" "ui-manager-e2e=$E2E" "ui-workforce=$WORKFORCE" "ui-chat=$CHAT"; do
+            for result in "ui-manager-checks=$CHECKS" "ui-manager-unit=$UNIT" "ui-manager-unit-merge=$UNIT_MERGE" "ui-manager-e2e=$E2E" "ui-workforce=$WORKFORCE" "ui-chat=$CHAT"; do
               if [ "${result#*=}" != "success" ]; then
                 echo "::error::the UI changed but $result"
                 exit 1
               fi
             done
           fi
-          echo "ui changed=$CHANGED, checks=$CHECKS, e2e=$E2E, workforce=$WORKFORCE, chat=$CHAT — gate satisfied"
+          echo "ui changed=$CHANGED, checks=$CHECKS, unit=$UNIT, unit-merge=$UNIT_MERGE, e2e=$E2E, workforce=$WORKFORCE, chat=$CHAT — gate satisfied"
 
   # ─── Job 2c: Trivy Filesystem Scan ─────────────────────────────
   trivy-scan:
@@ -1942,6 +2154,12 @@ jobs:
   gitleaks:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    # Any finding fails this job, on every event, and nothing downstream tolerates
+    # that: CI Gate and docker both require it to succeed. On a pull request and in
+    # the merge queue the scan uses main's config, so a change cannot allowlist its
+    # own finding. A fingerprint names a commit, and a squash merge or the queue
+    # rewrites the PR's commits, so fingerprints only ever cover findings in commits
+    # already on main; a new secret-shaped fixture has to be rewritten instead.
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1971,21 +2189,125 @@ jobs:
       # secret in the same pull request that introduces it. Taking both from
       # the base branch means a config change takes effect once it is merged
       # and reviewed, rather than while it is still being proposed.
+      #
+      # A merge-queue run restores both files from main as well, so a queued change
+      # cannot loosen the rules it is scanned with or allowlist its own finding.
+      #
+      # gitleaks reads history through `git log -p`, and a change can steer that
+      # with .gitattributes: `secrets.txt -diff` (or `binary`, or a textconv
+      # driver) prints "Binary files differ" instead of the content, so a secret in
+      # that file is never scanned. .git/info/attributes outranks every
+      # .gitattributes in the tree, so `* diff` there restores plain text diffs
+      # for all paths, whatever the change under scan says.
+      - name: Ignore .gitattributes for the scans
+        run: |
+          set -euo pipefail
+          attributes=$(git rev-parse --git-path info/attributes)
+          mkdir -p "$(dirname "$attributes")"
+          printf '* diff\n' >> "$attributes"
+
       - name: Take the gitleaks config from the base branch
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           for f in .gitleaksignore .gitleaks.toml; do
-            if git cat-file -e "$PR_BASE:$f" 2> /dev/null; then
-              git show "$PR_BASE:$f" > "$f"
+            if git cat-file -e "$BASE_SHA:$f" 2> /dev/null; then
+              git show "$BASE_SHA:$f" > "$f"
               echo "restored $f from the base branch"
             elif [ -e "$f" ]; then
               rm -f "$f"
-              echo "removed $f, which this pull request adds and the base branch does not have"
+              echo "removed $f, which this change adds and the base branch does not have"
             fi
           done
+
+      # What a change adds to .gitleaksignore is checked here, before it can reach
+      # main and start suppressing findings: every added line must be a
+      # commit:path:rule:line fingerprint (or blank, or a comment). gitleaks also
+      # honours entries without a commit, which would silence that finding in every
+      # future commit, so any other line fails the run. This step validates and
+      # never approves: a fingerprint does not make the scan below pass.
+      #
+      # The added lines are the head blob's lines that the base blob lacks, read with
+      # git cat-file. A diff would honour .gitattributes (`-diff`, `binary` or a
+      # textconv driver turn it into "Binary files differ", hiding every addition)
+      # and would need care with "+++" headers; comparing the blobs has neither
+      # problem. Every read fails closed: a blob that exists but cannot be read
+      # fails the step instead of reading as "no lines added".
+      - name: Validate the .gitleaksignore lines this change adds
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+          have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            # Against the merge-base, not the base tip: a line that landed on main
+            # after this branch was cut is not this change's addition.
+            BASE=$(git merge-base "$PR_BASE" "$PR_HEAD")
+            HEAD=$PR_HEAD
+          elif [ "$EVENT" = "merge_group" ]; then
+            BASE=$MG_BASE
+            HEAD=$MG_HEAD
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
+            BASE=$PUSH_BEFORE
+            HEAD=$PUSH_AFTER
+          else
+            echo "no usable base commit for this $EVENT, so there are no added lines to tell apart"
+            exit 0
+          fi
+          for sha in "$BASE" "$HEAD"; do
+            if ! have "$sha"; then
+              echo "::error::gitleaks: $sha is not in this checkout, so .gitleaksignore was not validated"
+              exit 1
+            fi
+          done
+
+          # The sorted, unique lines of .gitleaksignore at commit $1; nothing when the
+          # file is absent. A symlink would be validated as its link TARGET (the path
+          # string cat-file returns), not as the contents gitleaks then loads.
+          ignore_lines() {
+            local entry
+            entry=$(git ls-tree "$1" -- .gitleaksignore) || return 1
+            case "$entry" in
+              "") return 0 ;;
+              120000\ *) echo "::error::.gitleaksignore is a symbolic link; it must be a regular file" >&2; return 1 ;;
+              100644\ * | 100755\ *) ;;
+              *) echo "::error::.gitleaksignore is not a regular file: $entry" >&2; return 1 ;;
+            esac
+            git cat-file blob "$1:.gitleaksignore" | LC_ALL=C sort -u
+          }
+          # grep -v that fails on an error (exit 2) but not on "no line left" (exit 1).
+          # LC_ALL=C grep -a: in a UTF-8 locale GNU grep silently drops a line holding
+          # an invalid byte, so a commit-less entry for a Latin-1 file name would pass
+          # unvalidated while gitleaks still honours it.
+          drop_matching() {
+            local rc=0
+            LC_ALL=C grep -a -vE "$1" || rc=$?
+            [ "$rc" -le 1 ] || return "$rc"
+          }
+
+          BASE_LINES=$(ignore_lines "$BASE")
+          HEAD_LINES=$(ignore_lines "$HEAD")
+          ADDED=$(LC_ALL=C comm -13 <(printf '%s\n' "$BASE_LINES") <(printf '%s\n' "$HEAD_LINES"))
+          NOT_FINGERPRINTS=$(printf '%s\n' "$ADDED" \
+            | drop_matching '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
+            | drop_matching '^[[:space:]]*(#.*)?$')
+          if [ -n "$NOT_FINGERPRINTS" ]; then
+            echo "::error::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints:"
+            printf '%s\n' "$NOT_FINGERPRINTS"
+            exit 1
+          fi
+          echo "every line this change adds to .gitleaksignore is a commit-scoped fingerprint (or blank, or a comment)"
 
       # Scan only the commits this event introduces, which is what
       # gitleaks-action did. A full-depth scan reports 61 pre-existing findings
@@ -1999,6 +2321,8 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           ZERO=0000000000000000000000000000000000000000
@@ -2016,6 +2340,18 @@ jobs:
             done
             LOG_OPTS="--no-merges $PR_BASE..$PR_HEAD"
             echo "scanning pull request range $PR_BASE..$PR_HEAD"
+          elif [ "$EVENT" = "merge_group" ]; then
+            # The queue's commit(s) on top of main. Without this branch the run
+            # fell through to "scan the tip with --no-merges", which finds nothing
+            # when the tip is a merge commit. The config is main's (restored above).
+            for sha in "$MG_BASE" "$MG_HEAD"; do
+              if ! have "$sha"; then
+                echo "::error::gitleaks: $sha is not in this checkout, so the merge group was not scanned."
+                exit 1
+              fi
+            done
+            LOG_OPTS="--no-merges $MG_BASE..$MG_HEAD"
+            echo "scanning merge group range $MG_BASE..$MG_HEAD"
           elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
             LOG_OPTS="--no-merges $PUSH_BEFORE..$PUSH_AFTER"
             echo "scanning pushed range $PUSH_BEFORE..$PUSH_AFTER"
@@ -2026,6 +2362,7 @@ jobs:
             echo "no usable base commit for this $EVENT, scanning only $PUSH_AFTER"
           fi
 
+          # Any finding fails the job; nothing here or downstream excuses one.
           ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="$LOG_OPTS" .
 
   # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
@@ -2401,6 +2738,51 @@ jobs:
           if-no-files-found: error
           # Not 1: re-running a Friday pipeline on Monday must still find it.
           retention-days: 7
+
+  # ─── Job 3a-trivy: Image CVE scan ───────────────────────────────
+  # Trivy Filesystem Scan reads the checkout, not the packages installed in the
+  # image, and the only other image scan is the step in Docker Build & Push, which
+  # runs on push events only. A fixable HIGH or CRITICAL CVE in the image (a base
+  # layer, an OS package) therefore passed every pull request and the merge queue
+  # and failed only on main, after the merge. This job scans the exact image
+  # build-image produced, publishes nothing, and is a need of both ci-gate and
+  # docker, so a rejected image can neither merge nor ship. docker keeps its own
+  # scan as well: it re-reads the same bytes with the vulnerability DB of
+  # publishing time.
+  trivy-image:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-image]
+    if: needs.detect-changes.outputs.code == 'true'
+    steps:
+      - name: Checkout
+        # For .trivyignore only.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Download the image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: eddi-ci-image
+
+      - name: Load the image
+        run: |
+          set -euo pipefail
+          gunzip -c eddi-ci.tar.gz | docker load
+          rm eddi-ci.tar.gz
+
+      - name: Scan the image for vulnerabilities
+        # The same inputs as the scan in Docker Build & Push: BLOCKING, and only
+        # CVEs with an available fix can fail it. Remediation is the same too (a
+        # newer base-image digest, or a justified .trivyignore entry).
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:ci
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: table
+          trivyignores: .trivyignore
 
   # ─── Job 3a-openapi: OpenAPI snapshot ───────────────────────────
   # The Manager's MSW handlers are checked against a committed snapshot of EDDI's
@@ -2890,16 +3272,133 @@ jobs:
           fi
           echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                "e2e-fullstack=$E2E, e2e-auth=$AUTH, e2e-operator=$OPERATOR — gate satisfied"
 
+  # ─── Job 2z: CI Gate ────────────────────────────────────────────
+  # The one check that says "this commit may land": the required status check, and
+  # what the merge queue waits for. Before it existed only Build & Test and CodeQL
+  # were required, so a PR could merge with red integration tests, E2E or UI jobs.
+  #
+  # It needs every job docker needs (whatever blocks publishing blocks merging —
+  # BuildQualityGatesTest pins that) plus the cheap lints, whose own comments say a
+  # skip there merges a change nothing graded, and preflight-check: the Red Hat
+  # dry run on the PR's image, which would otherwise surface only as
+  # preflight-push failing on main after the image is already published. Changelog Discipline is left out:
+  # it is documented as reporting, not blocking (AGENTS.md §2 rule 8).
+  #
+  # always(), so it reports on every run — a skipped required check counts as
+  # passed — and grades the results itself:
+  #   1. nothing it needs failed or was cancelled — no exceptions;
+  #   2. every job the change REQUIRED ran and succeeded. On a pull request and a
+  #      push that is derived from detect-changes, with the same conditions the
+  #      jobs use; on a merge-queue run every job is required, so a regression in
+  #      the forced-true branch of detect-changes (filters empty, everything
+  #      skipped) fails here instead of merging untested code.
+  # Secret Scanning gets no tolerance either: it scans a pull request with main's
+  # gitleaks config, so a PR that adds a finding stays red here even when it also
+  # adds that finding's fingerprint to .gitleaksignore. That fingerprint names the
+  # PR's commit, which a squash merge or the queue rewrites, so it would not match
+  # on main either: the fixture has to be rewritten so it is not secret-shaped.
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, trivy-image, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate, preflight-check]
+    if: always()
+    steps:
+      - name: Require every job this change needed to pass
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          result() { jq -r --arg job "$1" '.[$job].result // "missing"' <<< "$NEEDS"; }
+          output() { jq -r --arg job "$1" --arg key "$2" '.[$job].outputs[$key] // ""' <<< "$NEEDS"; }
+          STATUS=0
+          fail() { echo "::error::$1"; STATUS=1; }
+
+          if [ "$(result detect-changes)" != "success" ]; then
+            echo "::error::detect-changes=$(result detect-changes), so which jobs had to run is unknown"
+            exit 1
+          fi
+          CODE=$(output detect-changes code)
+          BACKEND=$(output detect-changes backend)
+          OPERATOR_DOCS=$(output detect-changes operator_docs)
+          SCRIPTS=$(output detect-changes scripts)
+          RELEASE_POINTERS=$(output detect-changes release_pointers)
+          echo "event=$EVENT code=$CODE backend=$BACKEND operator_docs=$OPERATOR_DOCS scripts=$SCRIPTS release_pointers=$RELEASE_POINTERS"
+
+          # 1. Nothing failed or was cancelled — and on a merge-queue run nothing was
+          #    skipped either: every job is forced to run there, so a skip means an
+          #    upstream failed or the forcing broke. This holds for every need, not
+          #    only the ones step 2 names.
+          # Assigned first, so a jq failure stops the script (set -e) instead of
+          # becoming an empty loop that grades nothing.
+          JOBS=$(jq -r 'keys[]' <<< "$NEEDS")
+          if [ -z "$JOBS" ]; then
+            echo "::error::the needs context lists no jobs, so nothing was graded"
+            exit 1
+          fi
+          for job in $JOBS; do
+            r=$(result "$job")
+            # preflight-check is the one exception: a pull-request-only dry run (it
+            # asserts the bare pom version label that only a PR build carries), and
+            # the same Dockerfile was certified on the PR before it was queued.
+            if [ "$EVENT" = "merge_group" ] && [ "$r" = "skipped" ] && [ "$job" != "preflight-check" ]; then
+              fail "$job was skipped on a merge-queue run, where every job has to run"
+              continue
+            fi
+            case "$r" in
+              success | skipped) ;;
+              *) fail "$job=$r" ;;
+            esac
+          done
+
+          # 2. Every job the change required ran and passed.
+          either() { [ "$1" = "true" ] || [ "$2" = "true" ] && echo true || echo false; }
+          if [ "$EVENT" = "pull_request" ]; then
+            BUILD_AND_TEST=$(either "$BACKEND" "$OPERATOR_DOCS")
+            INTEGRATION=$([ "$CODE" = "true" ] && [ "$BACKEND" = "true" ] && echo true || echo false)
+          else
+            BUILD_AND_TEST=$CODE
+            INTEGRATION=$CODE
+          fi
+          require() {
+            local job=$1 required=$2
+            if [ "$EVENT" = "merge_group" ] || [ "$required" = "true" ]; then
+              local r
+              r=$(result "$job")
+              if [ "$r" != "success" ]; then
+                fail "$job had to run for this change but is $r"
+              fi
+            fi
+          }
+          for job in codeql codeql-ui gitleaks e2e-gate ui-gate; do require "$job" true; done
+          require build-and-test "$BUILD_AND_TEST"
+          require integration-test "$INTEGRATION"
+          require coverage-gate "$INTEGRATION"
+          for job in trivy-scan trivy-image build-image openapi-snapshot e2e-fullstack e2e-auth e2e-operator; do require "$job" "$CODE"; done
+          require shell-lint "$SCRIPTS"
+          require manifest-lint "$(either "$CODE" "$OPERATOR_DOCS")"
+          require release-pointers "$RELEASE_POINTERS"
+          # PR-only (see above): required on a pull request that changed code.
+          if [ "$EVENT" = "pull_request" ]; then require preflight-check "$CODE"; fi
+
+          if [ "$STATUS" -ne 0 ]; then
+            exit 1
+          fi
+          echo "CI Gate satisfied: $(jq -r 'to_entries | map("\(.key)=\(.value.result)") | join(", ")' <<< "$NEEDS")"
+
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
     # Every gate that must hold before anything is published is a `needs`:
     #   build-and-test    unit tests
-    #   integration-test  `mvnw verify` — the ONLY job that runs the JaCoCo
-    #                     90/80 coverage gate, so without it the threshold could
-    #                     never block a ship
+    #   integration-test  `mvnw verify` with the Testcontainers suite
+    #   coverage-gate     the ONLY job that enforces the JaCoCo 90/80 merged
+    #                     coverage gate, so without it the threshold could never
+    #                     block a ship
     #   trivy-scan        blocking filesystem CVE scan (exit-code 1)
+    #   trivy-image       blocking CVE scan of the built image, run on PRs and in
+    #                     the merge queue too (this job scans it again below)
     #   codeql            SAST build + analysis
     #   codeql-ui         SAST for ui/manager and ui/chat
     #   gitleaks          secret scanning
@@ -2917,7 +3416,7 @@ jobs:
     #                     names — so a job added to the gate cannot be forgotten
     #                     here
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, coverage-gate, trivy-scan, trivy-image, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged
@@ -3676,7 +4175,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
+      [detect-changes, build-and-test, integration-test, coverage-gate, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
 
     steps:
       - name: Send build notification
@@ -3696,6 +4195,14 @@ jobs:
             exit 0
           fi
 
+          # Merge-queue runs: GitHub reports a failed group on the PR itself and takes
+          # it out of the queue, and the push run on main after a merge notifies as
+          # before — a message per queue entry would only duplicate both.
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "### ⏭️ Merge-queue run — no Slack notification" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           # Skip notification for docs-only changes (all jobs skipped) — but always notify on tags
           if [ "${{ needs.detect-changes.outputs.code }}" = "false" ] && [[ "$GITHUB_REF" != refs/tags/* ]]; then
             echo "### ⏭️ Docs-only change — no build notification sent" >> "$GITHUB_STEP_SUMMARY"
@@ -3705,6 +4212,9 @@ jobs:
           # Determine overall status
           BUILD="${{ needs.build-and-test.result }}"
           IT="${{ needs.integration-test.result }}"
+          # The merged coverage gate moved out of Integration Tests into its own job;
+          # it reports under the same line, or a coverage shortfall would read "Passed".
+          if [ "${{ needs.coverage-gate.result }}" = "failure" ]; then IT="failure"; fi
           UI="${{ needs.ui-gate.result }}"
           IMAGE="${{ needs.build-image.result }}"
           E2E="${{ needs.e2e-fullstack.result }}"

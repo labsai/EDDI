@@ -46,6 +46,7 @@ import static org.mockito.Mockito.*;
  * executeSyncBatch), merge strategy paths, and parse helper edge cases.
  */
 @DisplayName("RestImportService — Branch Coverage")
+@SharedWorkingDirTmp
 class RestImportServiceBranchCoverageTest {
 
     private IZipArchive zipArchive;

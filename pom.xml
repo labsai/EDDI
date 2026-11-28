@@ -34,12 +34,20 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <quarkus-mcp-server.version>2.0.4</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
-        <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
-             unit-test coverage data Build & Test already produced (target/jacoco.exec)
-             instead of running ~20k unit tests a second time before the merged
-             coverage gate. It follows skipTests, so -DskipTests still skips both. -->
+        <!-- skipUTs skips surefire alone, so CI's Integration Tests job does not run
+             the ~37k unit tests a second time: Build & Test runs them beside it, and
+             CI's Coverage Gate job merges both jobs' JaCoCo data for the merged gate.
+             It follows skipTests, so -DskipTests still skips both. -->
         <skipTests>false</skipTests>
         <skipUTs>${skipTests}</skipUTs>
+        <!-- How many JVMs run the unit tests in parallel. 1 locally, where other
+             worktrees' builds share the machine; CI's Build & Test passes
+             -Dsurefire.forkCount=3 on its 4-vCPU runner. A dedicated property, not
+             surefire's own `forkCount`, because failsafe reads that one too and the
+             integration tests must stay in one JVM (fixed Quarkus test ports).
+             Tests that share <working dir>/tmp are serialised across forks by
+             @SharedWorkingDirTmp (src/test/java/ai/labs/eddi/backup/impl). -->
+        <surefire.forkCount>1</surefire.forkCount>
         <!-- The three UIs (ui/manager, ui/workforce, ui/chat) are built by Maven in
              prepare-package and copied into target/classes just before the jar is
              assembled. compile, test and quarkus:dev therefore never run npm, while
@@ -758,6 +766,7 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <skipTests>${skipUTs}</skipTests>
+                    <forkCount>${surefire.forkCount}</forkCount>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg.
                          The jdk.incubator.vector add-modules flag mirrors the container
                          image (src/main/docker/Dockerfile) and mise.toml, so the test JVM
@@ -766,8 +775,19 @@
                          fails the build rather than silently un-testing Jlama's SIMD
                          path. -->
                     <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector</argLine>
+                    <!-- **/*$* restores surefire's default exclude, which declaring
+                         <excludes> at all replaces. Without it every @Nested class whose
+                         name matches an include pattern (…$ReplayTests) is also scanned
+                         as a test class of its own. In one JVM the JUnit Platform folds
+                         that into its outer class, but with surefire.forkCount > 1 each
+                         class goes to a fork as its own request, so those nested tests
+                         ran twice, the console total counted them twice, and the outer
+                         and inner runs overwrote each other's TEST-*.xml (duplicated and
+                         lost testcases). @Nested classes still run, through their outer
+                         class. BuildQualityGatesTest pins this. -->
                     <excludes>
                         <exclude>**/*IT.java</exclude>
+                        <exclude>**/*$*</exclude>
                     </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
@@ -1038,8 +1058,10 @@
                          left jacoco.exec as the sole input and graded unit-test-only
                          coverage against a threshold that assumes both suites — so a
                          clean tree with every test green failed the build at 89%. The
-                         gate now runs exactly where the data it grades is produced: the
-                         CI integration job, which passes -DskipITs=false. -->
+                         gate runs only where both suites' data is at hand: CI's
+                         Coverage Gate job, which invokes jacoco:check@merged-check with
+                         -DskipITs=false (Integration Tests runs verify with
+                         -Djacoco.haltOnFailure=false, having no unit-test data). -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>

@@ -62,6 +62,7 @@ import static org.mockito.Mockito.when;
  * stated way rather than vanishing or carrying a lie.
  */
 @DisplayName("RestExportService — a preview built from stores that fail")
+@SharedWorkingDirTmp
 class RestExportServicePreviewResilienceTest {
 
     private static final String AGENT_ID = "aabbccddeeff112233445566";

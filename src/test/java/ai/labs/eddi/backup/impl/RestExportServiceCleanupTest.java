@@ -67,6 +67,7 @@ import static org.mockito.Mockito.when;
  * afterwards, and neither a concurrent export nor an unrelated file living in
  * {@code tmp/} is collateral damage.
  */
+@SharedWorkingDirTmp
 class RestExportServiceCleanupTest {
 
     private static final String AGENT_ID = "d12exportcleanupagent";

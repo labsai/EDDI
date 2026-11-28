@@ -82,6 +82,7 @@ import static org.mockito.Mockito.when;
  * deeper than the recursion guard — is left exactly where it is.
  */
 @DisplayName("RestImportService — unresolvable references on a create")
+@SharedWorkingDirTmp
 class RestImportServiceUnresolvableReferenceTest {
 
     private static final String AGENT_ORIGIN_ID = "aabb11112222333344445555";

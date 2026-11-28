@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  */
 @DisplayName("RestImportService — Uncovered Branch Coverage")
+@SharedWorkingDirTmp
 class RestImportServiceUncoveredBranchTest {
 
     private RestImportService service;

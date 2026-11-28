@@ -17,6 +17,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collection;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -318,6 +319,18 @@ class ConfigurationReferenceCoverageTest {
      * setting one is a silent no-op". Two real defects sat in that gap.
      */
     private static TreeMap<String, String> propertiesReadByJava(Path root) {
+        // Every test in this class asks for the same scan of ~1,900 source files, so
+        // it is done once per class. A copy is handed out: callers add to theirs.
+        synchronized (READ_BY_JAVA) {
+            return new TreeMap<>(READ_BY_JAVA.computeIfAbsent(root.toAbsolutePath().normalize(),
+                    ConfigurationReferenceCoverageTest::scanJavaSources));
+        }
+    }
+
+    /** {@link #propertiesReadByJava}, per repository root, computed once. */
+    private static final Map<Path, TreeMap<String, String>> READ_BY_JAVA = new HashMap<>();
+
+    private static TreeMap<String, String> scanJavaSources(Path root) {
         var found = new TreeMap<String, String>();
         var bodies = new LinkedHashMap<String, String>();
         for (Path file : javaSources(root.resolve(Path.of("src", "main", "java")))) {
@@ -362,10 +375,15 @@ class ConfigurationReferenceCoverageTest {
             Pattern hereUse = Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier)));
             // Qualified elsewhere: TIMEOUT_PROPERTY declared by two classes must not
             // let a use of A.TIMEOUT_PROPERTY vouch for B's.
-            Pattern elsewhereUse = Pattern.compile(
-                    String.format(CONFIG_USE, Pattern.quote(declaringClass + "." + identifier)));
+            String qualified = declaringClass + "." + identifier;
+            Pattern elsewhereUse = Pattern.compile(String.format(CONFIG_USE, Pattern.quote(qualified)));
+            // The pattern can only match where the literal `Class.IDENT` occurs, so a
+            // contains() check first is a necessary condition, not a shortcut: it
+            // changes no result, it only spares running the regex over the ~1,900
+            // sources that cannot match (most of this class's run time before).
             boolean used = hereUse.matcher(body).find()
-                    || allSources.stream().anyMatch(candidate -> elsewhereUse.matcher(candidate).find());
+                    || allSources.stream().anyMatch(candidate -> candidate.contains(qualified)
+                            && elsewhereUse.matcher(candidate).find());
             if (used) {
                 into.putIfAbsent(property, source);
             }

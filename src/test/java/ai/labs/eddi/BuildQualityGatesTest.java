@@ -38,6 +38,7 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -610,21 +611,229 @@ class BuildQualityGatesTest {
      * and the OpenSSF Gold 90/80 threshold is off everywhere, with every test still
      * green and nothing to see — which is the invisible-disabled-gate shape the
      * rest of this class exists to eliminate, reintroduced one layer up.
+     * <p>
+     * Since the gate moved out of Integration Tests into its own job, the line to
+     * pin is the explicit {@code jacoco:check@merged-check} invocation there. The
+     * integration-test job still runs {@code verify -DskipITs=false}, but with
+     * {@code -Djacoco.haltOnFailure=false} (it has no unit-test data), so a search
+     * for that pair alone — what this test used to do — would stay green with the
+     * gate disarmed. What is graded: exactly one invocation of the check, armed and
+     * not relaxed, in a job that waits for both suites, refuses to run on missing
+     * data, and that docker cannot publish without. And, as a second pin, the
+     * integration job's own {@code verify} still passes {@code -DskipITs=false}:
+     * without it that job runs no integration test and produces no IT data.
      */
     @Test
-    @DisplayName("a CI job actually passes the flag that arms the coverage gate")
+    @DisplayName("the merged coverage gate is armed in CI, fed by both suites, and blocks publishing")
     void theCoverageGateIsArmedByCi() throws Exception {
-        List<String> verifyInvocations = read(CI_WORKFLOW).lines()
+        // Only executable `run:` content counts. A comment that still names the goal
+        // (`# ./mvnw … jacoco:check@merged-check -DskipITs=false`) or a step name does
+        // not run it, and the merged report alone still writes jacoco.csv, so a raw
+        // text search would stay green with the check commented out.
+        Map<String, List<String>> invocations = executableRunLines(read(CI_WORKFLOW), "jacoco:check@merged-check");
+        List<String> checks = invocations.values().stream().flatMap(List::stream).toList();
+        assertEquals(1, checks.size(), CI_WORKFLOW + " must invoke jacoco:check@merged-check exactly once, in"
+                + " executable run: content — that invocation is the 90/80 gate. Found: " + invocations);
+        String gateJob = invocations.keySet().iterator().next();
+        assertEquals("coverage-gate", gateJob, "the merged-check invocation must run in coverage-gate");
+        String check = checks.get(0);
+        assertTrue(check.startsWith("./mvnw "),
+                "the merged-check goal must be an argument of ./mvnw in command position, not text an echo or"
+                        + " another command merely prints: " + check);
+        assertTrue(check.contains(SKIP_ITS_DISABLED),
+                "the merged-check invocation must pass " + SKIP_ITS_DISABLED + ": the execution carries"
+                        + " <skip>${skipITs}</skip>, so without it the gate skips itself. Found: " + check);
+        assertFalse(check.replace(" ", "").matches(".*\\|\\|(true|:).*"),
+                "the merged-check invocation must not swallow its own exit code with `|| true`/`|| :`: " + check);
+        for (String relaxation : List.of("haltOnFailure", "jacoco.skip", "skipTests")) {
+            assertFalse(check.contains(relaxation),
+                    "the merged-check invocation must not pass " + relaxation + ", which turns the gate into a"
+                            + " report: " + check);
+        }
+
+        Map<String, String> jobs = ciJobBlocks();
+        List<String> gateNeeds = ciJobNeeds(jobs.get(gateJob));
+        assertTrue(gateNeeds.containsAll(List.of("build-and-test", "integration-test")),
+                gateJob + " must need build-and-test and integration-test, whose execution data it merges: "
+                        + gateNeeds);
+        String gateBlock = jobs.get(gateJob);
+        assertFalse(gateBlock.contains("continue-on-error"),
+                gateJob + " must not use continue-on-error: it turns a failed coverage check into a green job");
+        for (String data : List.of("target/jacoco.exec", "target/jacoco-it.exec", "target/jacoco-quarkus.exec")) {
+            assertTrue(gateBlock.contains(data),
+                    gateJob + " must check that " + data + " is present before merging: JaCoCo skips a missing"
+                            + " file with an info line, so the gate would grade less data, or none, and pass");
+        }
+        assertTrue(gateBlock.contains("[ ! -s \"$f\" ]") && gateBlock.contains("target/site/jacoco-merged/jacoco.csv"),
+                gateJob + " must fail on an empty or missing data file and on a missing merged report");
+        assertTrue(ciJobNeeds(jobs.get("docker")).contains(gateJob),
+                "docker must need " + gateJob + ", or an image below the coverage threshold is still published");
+
+        // The integration job is what produces jacoco-it.exec and runs the
+        // Testcontainers suite at all: skipITs defaults to true, so without
+        // -DskipITs=false its verify runs no integration test, the coverage gate
+        // above would grade unit-test data only, and docker would publish untested.
+        String integrationJob = jobs.get("integration-test");
+        assertFalse(integrationJob.contains("continue-on-error"),
+                "integration-test must not use continue-on-error: it turns failing integration tests into a green job");
+        List<String> integrationVerify = integrationJob.lines()
                 .map(String::trim)
+                .filter(line -> !line.startsWith("#"))
                 .filter(line -> line.contains("mvnw verify"))
                 .toList();
+        assertEquals(1, integrationVerify.size(),
+                "integration-test must run exactly one `mvnw verify`. Found: " + integrationVerify);
+        String verify = integrationVerify.get(0);
+        assertTrue(verify.contains(SKIP_ITS_DISABLED),
+                "integration-test's `mvnw verify` must pass " + SKIP_ITS_DISABLED + ", or it runs no integration test"
+                        + " (skipITs defaults to true). Found: " + verify);
+        assertFalse(verify.replace(" ", "").matches(".*\\|\\|(true|:).*") || verify.contains("-DskipTests"),
+                "integration-test's `mvnw verify` must not swallow its exit code or pass -DskipTests: " + verify);
+    }
 
-        assertFalse(verifyInvocations.isEmpty(), CI_WORKFLOW + " runs no `mvnw verify` at all, so nothing reaches the"
-                + " verify-phase coverage gate");
-        assertTrue(verifyInvocations.stream().anyMatch(line -> line.contains(SKIP_ITS_DISABLED)),
-                "no `mvnw verify` in " + CI_WORKFLOW + " passes " + SKIP_ITS_DISABLED + ". The 90/80 jacoco gate"
-                        + " carries <skip>${skipITs}</skip>, so that flag is the ONLY thing that runs it anywhere."
-                        + " Found: " + verifyInvocations);
+    /**
+     * The regression case for {@link #executableRunLines}: the goal named only in a
+     * shell comment, a YAML comment or a step name is not an invocation, so the
+     * coverage-gate test above cannot be satisfied by a commented-out check.
+     */
+    @Test
+    @DisplayName("a merged-check goal that appears only in a comment is not counted as an invocation")
+    void aCommentedOutCoverageCheckIsNotAnInvocation() throws Exception {
+        String commentedOut = String.join(LINE_FEED,
+                "jobs:",
+                "  coverage-gate:",
+                "    steps:",
+                "      # ./mvnw jacoco:check@merged-check -DskipITs=false",
+                "      - name: Merge coverage and enforce the 90/80 gate (jacoco:check@merged-check)",
+                "        run: |",
+                "          # ./mvnw compile jacoco:check@merged-check -DskipITs=false -B",
+                "            # jacoco:check@merged-check",
+                "          ./mvnw compile # jacoco:check@merged-check -DskipITs=false",
+                "          ./mvnw compile jacoco:merge@merge jacoco:report@merged-report -DskipITs=false -B",
+                "");
+        assertEquals(Map.of(), executableRunLines(commentedOut, "jacoco:check@merged-check"),
+                "a goal named only in comments or a step name must not count as an invocation");
+
+        String armed = commentedOut.replace(
+                "jacoco:report@merged-report -DskipITs=false -B",
+                "jacoco:report@merged-report \\" + LINE_FEED + "            jacoco:check@merged-check -DskipITs=false -B");
+        assertEquals(
+                Map.of("coverage-gate", List.of("./mvnw compile jacoco:merge@merge jacoco:report@merged-report"
+                        + " jacoco:check@merged-check -DskipITs=false -B")),
+                executableRunLines(armed, "jacoco:check@merged-check"),
+                "a real invocation, backslash continuation included, must still be found as one command line");
+    }
+
+    /**
+     * Every command line of every job's {@code run:} steps that contains
+     * {@code needle}, keyed by job id. Only executable shell content is read: the
+     * workflow is parsed as YAML, so step names, keys and YAML comments are never
+     * seen; backslash continuations are joined into one command line; and lines
+     * that are shell comments, whole-line or trailing, are dropped.
+     */
+    private static Map<String, List<String>> executableRunLines(String workflow, String needle) throws IOException {
+        Map<String, List<String>> found = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> job : new YAMLMapper().readTree(workflow).path("jobs").properties()) {
+            for (JsonNode step : job.getValue().path("steps")) {
+                JsonNode run = step.get("run");
+                if (run == null || !run.isTextual()) {
+                    continue;
+                }
+                String joined = run.asText().replaceAll("[ \\t]*\\\\[ \\t]*\\r?\\n[ \\t]*", " ");
+                joined.lines()
+                        .map(String::strip)
+                        .filter(line -> !line.startsWith("#"))
+                        // A trailing comment: `#` after whitespace starts one in the shell.
+                        .map(line -> line.replaceFirst("\\s+#.*$", ""))
+                        .filter(line -> !line.isEmpty())
+                        .filter(line -> line.contains(needle))
+                        .forEach(line -> found.computeIfAbsent(job.getKey(), key -> new ArrayList<>()).add(line));
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Trivy Filesystem Scan reads the checkout, not the packages in the image, and
+     * the scan step in docker runs on push events only — so a fixable HIGH or
+     * CRITICAL CVE in the image used to pass every pull request and the merge queue
+     * and fail only on main, after the merge. trivy-image scans the image
+     * build-image produced on every change that builds one, blocking, and both
+     * docker and CI Gate need it; CI Gate also requires it to have run whenever the
+     * code changed, because a skipped need otherwise counts as passed.
+     */
+    @Test
+    @DisplayName("the built image is CVE-scanned, blocking, before a merge and not only before publishing")
+    void theBuiltImageIsScannedBeforeMerge() throws Exception {
+        JsonNode workflowJobs = new YAMLMapper().readTree(read(CI_WORKFLOW)).path("jobs");
+        JsonNode scanJob = workflowJobs.path("trivy-image");
+        assertTrue(scanJob.isObject(), CI_WORKFLOW + " must declare the trivy-image job");
+        assertFalse(scanJob.has("continue-on-error"),
+                "trivy-image must not use continue-on-error: it turns a CVE finding into a green job");
+        String condition = scanJob.path("if").asText();
+        assertFalse(condition.contains("event_name") || condition.contains("github.ref"),
+                "trivy-image must run on pull requests and in the merge queue, not only on pushes: " + condition);
+
+        List<JsonNode> scans = new ArrayList<>();
+        scanJob.path("steps").forEach(step -> {
+            if (step.path("uses").asText().startsWith("aquasecurity/trivy-action@")) {
+                scans.add(step);
+            }
+        });
+        assertEquals(1, scans.size(), "trivy-image must run exactly one Trivy step");
+        JsonNode scan = scans.get(0);
+        JsonNode with = scan.path("with");
+        assertFalse(scan.has("continue-on-error"), "the Trivy step must not use continue-on-error");
+        assertEquals("image", with.path("scan-type").asText(), "trivy-image must scan the image, not the checkout");
+        assertTrue(with.path("image-ref").asText().endsWith(":ci"),
+                "trivy-image must scan the image build-image produced (tagged :ci): " + with.path("image-ref"));
+        assertEquals("1", with.path("exit-code").asText(), "a finding must fail trivy-image (exit-code 1)");
+        assertEquals("CRITICAL,HIGH", with.path("severity").asText(),
+                "trivy-image must grade the same severities as the publish-time scan");
+
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(ciJobNeeds(jobs.get("trivy-image")).contains("build-image"),
+                "trivy-image must need build-image, whose artifact it scans");
+        assertTrue(ciJobNeeds(jobs.get("docker")).contains("trivy-image"),
+                "docker must need trivy-image, and so (by the CI Gate test) must ci-gate");
+        List<String> requiredWithCode = jobs.get("ci-gate").lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("for job in ") && line.endsWith("do require \"$job\" \"$CODE\"; done"))
+                .toList();
+        assertEquals(1, requiredWithCode.size(), "ci-gate must have one loop of jobs required when the code changed");
+        assertTrue(List.of(requiredWithCode.get(0).split(" ")).contains("trivy-image"),
+                "ci-gate must require trivy-image to succeed when the code changed, or a skipped scan passes: "
+                        + requiredWithCode.get(0));
+    }
+
+    /**
+     * Build &amp; Test runs surefire with {@code -Dsurefire.forkCount=3}. Declaring
+     * {@code <excludes>} replaces surefire's default {@code **}{@code /*$*}
+     * exclude, and without it every {@code @Nested} class whose name matches an
+     * include pattern was also sent to a fork as a class of its own: those tests
+     * ran twice, the console total counted them twice (41,178 against 37,823), and
+     * the outer and inner runs overwrote each other's {@code TEST-*.xml}, so the
+     * uploaded reports held duplicated testcases and lost 331 classes. In one JVM
+     * the JUnit Platform folds the duplicate selection away, which is why it only
+     * showed up once CI forked.
+     */
+    @Test
+    @DisplayName("surefire excludes inner classes, so forked runs execute and report each @Nested test once")
+    void surefireExcludesInnerClassesForForkedRuns() throws Exception {
+        Element surefire = buildPlugin(parse(POM), "maven-surefire-plugin");
+        Element configuration = child(surefire, "configuration").orElseThrow();
+        List<String> excludes = child(configuration, "excludes")
+                .map(excludesElement -> children(excludesElement, "exclude").stream()
+                        .map(e -> e.getTextContent().strip())
+                        .toList())
+                .orElse(List.of());
+        assertTrue(excludes.contains("**/*$*"),
+                "surefire's <excludes> must keep **/*$*: declaring <excludes> drops surefire's default inner-class"
+                        + " exclude, and with forkCount > 1 every matching @Nested class then runs a second time as a"
+                        + " test class of its own, double-counting the total and corrupting the XML reports. Found: "
+                        + excludes);
+        assertTrue(excludes.contains("**/*IT.java"),
+                "surefire must keep excluding **/*IT.java, which failsafe runs. Found: " + excludes);
     }
 
     /**
@@ -942,11 +1151,12 @@ class BuildQualityGatesTest {
 
     /**
      * The Integration Tests job skips surefire ({@code -DskipUTs=true}) because
-     * Build &amp; Test already ran the unit tests on the same commit. The merged
-     * coverage gate still needs their execution data: without
-     * {@code target/jacoco.exec} restored it would grade integration-test coverage
-     * alone against the 90/80 limits and fail every release, or — if the limits
-     * were ever relaxed to make that pass — stop measuring what it claims to.
+     * Build &amp; Test runs the unit tests on the same commit. The merged coverage
+     * gate (the Coverage Gate job) still needs their execution data: without
+     * {@code target/jacoco.exec} handed over it would grade integration-test
+     * coverage alone against the 90/80 limits and fail every release, or — if the
+     * limits were ever relaxed to make that pass — stop measuring what it claims
+     * to. The integration tests' own data takes the same route.
      */
     @Test
     @DisplayName("a CI job that skips the unit tests restores their coverage data for the merged gate")
@@ -956,10 +1166,13 @@ class BuildQualityGatesTest {
                 CI_WORKFLOW + " no longer passes -DskipUTs=true; if the unit tests run twice again on purpose, delete"
                         + " this test together with the unit-test-coverage-data hand-off");
         assertEquals(2, ci.split("name: unit-test-coverage-data", -1).length - 1,
-                "the unit-test coverage data must be uploaded by Build & Test and downloaded by the job that skips"
-                        + " the unit tests — exactly one of each");
+                "the unit-test coverage data must be uploaded by Build & Test and downloaded by the Coverage Gate"
+                        + " job — exactly one of each");
         assertTrue(ci.contains("path: target/jacoco.exec"),
                 "Build & Test must upload target/jacoco.exec, the file the `merge` execution reads");
+        assertEquals(2, ci.split("name: integration-test-coverage-data", -1).length - 1,
+                "the integration-test coverage data must be uploaded by Integration Tests and downloaded by the"
+                        + " Coverage Gate job — exactly one of each");
     }
 
     /**
@@ -1067,7 +1280,13 @@ class BuildQualityGatesTest {
                 needs.addAll(ciSplitNames(line.strip().substring(6)));
             } else if (inNeeds) {
                 String stripped = line.strip();
-                if (!stripped.startsWith("- ") && !stripped.startsWith("#")) {
+                if (stripped.startsWith("#")) {
+                    // A comment inside or after the list. Its words are not job names:
+                    // parsing them read docker's NOTE ("still built, pushed, tagged")
+                    // as needs on jobs called `pushed` and `tagged`.
+                    continue;
+                }
+                if (!stripped.startsWith("- ")) {
                     break;
                 }
                 needs.addAll(ciSplitNames(stripped.replaceFirst("^- ", "")));
@@ -1504,6 +1723,117 @@ class BuildQualityGatesTest {
         assertEquals(List.of(), missing,
                 "docker in " + CI_WORKFLOW + " must need these, or an image whose E2E tier failed is still pushed,"
                         + " tagged, signed and attested");
+    }
+
+    /**
+     * {@code ci-gate} is the required status check and what the merge queue waits
+     * for. Whatever stops {@code docker} from publishing has to stop a merge too,
+     * or a commit lands on main that main's own push run then refuses to ship; so
+     * its {@code needs} are graded against docker's own list rather than a copy
+     * here. It must run {@code always()}: GitHub treats a skipped required check as
+     * passed, so a gate that can be skipped is no gate. And it must not tolerate a
+     * skip on a merge-queue run, where every job is forced to run.
+     * <p>
+     * Nor a Secret Scanning failure. An earlier version of this branch excused one
+     * when the PR added fingerprints covering its own findings (and, on main and in
+     * the queue, let such fingerprints approve findings), so a PR adding a secret
+     * plus its own ignore entry could get a green gate and publish. On a pull
+     * request the scan uses main's config, so a PR cannot allowlist its own finding
+     * (and its commit-scoped fingerprint would not match the rewritten commit on
+     * main either); this test keeps it that way.
+     */
+    @Test
+    @DisplayName("CI Gate needs everything docker needs plus the lints, always runs, and is strict in the merge queue")
+    void ciGateBlocksWhateverBlocksPublishing() throws Exception {
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(jobs.containsKey("ci-gate") && jobs.containsKey("docker"),
+                CI_WORKFLOW + " no longer declares both ci-gate and docker, so this assertion grades nothing");
+
+        List<String> gateNeeds = ciJobNeeds(jobs.get("ci-gate"));
+        List<String> missing = new ArrayList<>(ciJobNeeds(jobs.get("docker")));
+        missing.addAll(List.of("shell-lint", "manifest-lint", "release-pointers", "preflight-check"));
+        missing.removeAll(gateNeeds);
+        assertEquals(List.of(), missing,
+                "ci-gate in " + CI_WORKFLOW + " must need these: each one blocks publishing (or is a lint whose skip"
+                        + " merges an ungraded change), so a merge that ignored it lands a commit main will not ship");
+
+        assertEquals("always()", ciJobCondition(jobs.get("ci-gate")).strip(),
+                "ci-gate must be `if: always()`: a skipped required check counts as passed");
+        String gate = jobs.get("ci-gate");
+        assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] && [ \"$r\" = \"skipped\" ]"),
+                "ci-gate must fail on ANY skipped need on a merge_group run, not only on the jobs it names one by"
+                        + " one: every job is forced to run there, so a skip means it was never graded");
+        // No Secret Scanning tolerance anywhere. A PR that adds a secret and its own
+        // .gitleaksignore fingerprint must not get a green CI Gate or publish: the
+        // gate grades gitleaks like every other need, and the job itself has no
+        // outputs, approval mapping or re-scan that could turn a finding green.
+        // Comment lines are dropped first (a block also carries the next job's
+        // header comment). Two lines legitimately name gitleaks: the needs list, and
+        // the list of jobs every change requires, which must keep it.
+        String requireAlways = "for job in codeql codeql-ui gitleaks e2e-gate ui-gate; do require \"$job\" true; done";
+        assertTrue(gate.contains(requireAlways),
+                "ci-gate must require Secret Scanning to succeed on every change: " + requireAlways);
+        String gateScript = gate.lines()
+                .filter(line -> !line.strip().startsWith("#") && !line.strip().startsWith("needs:"))
+                .filter(line -> !line.strip().equals(requireAlways))
+                .collect(Collectors.joining(LINE_FEED));
+        assertFalse(gateScript.contains("gitleaks"),
+                "ci-gate must not special-case Secret Scanning: a PR whose finding is covered by a fingerprint it adds"
+                        + " itself would get a green gate. Found a gitleaks reference in the ci-gate script");
+        String gitleaks = jobs.get("gitleaks");
+        String gitleaksCode = gitleaks.lines()
+                .filter(line -> !line.strip().startsWith("#"))
+                .collect(Collectors.joining(LINE_FEED));
+        for (String tolerance : List.of("outputs:", "GITHUB_OUTPUT", "APPROVAL_BASE", "APPROVED", "--exit-code 2",
+                "Re-scan with")) {
+            assertFalse(gitleaksCode.contains(tolerance),
+                    "the gitleaks job must fail on every finding, with nothing that approves one or reports a"
+                            + " finding as tolerable downstream. Found: " + tolerance);
+        }
+        assertTrue(gitleaksCode.contains("./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts=\"$LOG_OPTS\" ."),
+                "the scan must run with --exit-code 1 over this event's range, so any finding fails the job");
+        assertTrue(gitleaksCode.contains("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'")
+                && gitleaksCode.contains("for f in .gitleaksignore .gitleaks.toml; do"),
+                "pull-request and merge-queue runs must scan with main's .gitleaks.toml and .gitleaksignore, or a"
+                        + " change loosens the rules it is scanned with or allowlists its own finding");
+        assertTrue(gitleaksCode.contains("git cat-file blob \"$1:.gitleaksignore\" | LC_ALL=C sort -u")
+                && gitleaksCode.contains("ADDED=$(LC_ALL=C comm -13"),
+                "the .gitleaksignore validator must read blobs (git cat-file), which no .gitattributes setting can"
+                        + " alter, without hiding a read error behind 2>/dev/null");
+        assertTrue(gitleaksCode.contains("LC_ALL=C grep -a -vE \"$1\" || rc=$?")
+                && gitleaksCode.contains("[ \"$rc\" -le 1 ] || return \"$rc\""),
+                "the fingerprint validator must run grep as LC_ALL=C grep -a (in a UTF-8 locale grep drops a line with"
+                        + " an invalid byte) and fail on a grep error instead of reading it as `no line left`");
+        assertFalse(gitleaksCode.replace(" ", "").matches("(?s).*\\|\\|(true|:)(\\s|$).*"),
+                "the gitleaks job must fail closed: `|| true` / `|| :` turns a failed read, grep or scan into success");
+        assertFalse(gitleaksCode.contains("continue-on-error"),
+                "the gitleaks job must not use continue-on-error: it turns a finding into a green job");
+        List<String> stepConditions = gitleaksCode.lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("if:"))
+                .toList();
+        assertEquals(List.of("if: github.event_name == 'pull_request' || github.event_name == 'merge_group'"),
+                stepConditions,
+                "only the base-config restore may be conditional in the gitleaks job: a condition on the job, the"
+                        + " validation or the scan step lets an event pass unscanned");
+        assertTrue(gitleaksCode.contains("is a symbolic link; it must be a regular file")
+                && gitleaksCode.contains("is not a regular file"),
+                "the validator must refuse a symlinked (or otherwise non-regular) .gitleaksignore, which cat-file reads"
+                        + " as the link target");
+        assertTrue(gitleaksCode.contains("gains lines that are not commit:path:rule:line fingerprints")
+                && gitleaksCode.contains("'^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$'"),
+                "a .gitleaksignore line that is not a commit-scoped fingerprint must fail the run: gitleaks honours"
+                        + " commit-less entries, which would silence that finding in every future commit");
+        assertFalse(gitleaksCode.contains("git diff --no-color -U0"),
+                "added .gitleaksignore lines must come from comparing the two blobs' lines (git cat-file): a diff honours"
+                        + " .gitattributes, so `.gitleaksignore -diff` would hide every addition, and filtering +++ headers"
+                        + " drops an added '++path:rule:line' entry");
+        assertTrue(gitleaksCode.contains("attributes=$(git rev-parse --git-path info/attributes)")
+                && gitleaksCode.contains("printf '* diff\\n' >> \"$attributes\""),
+                "the scans must override .gitattributes (`* diff` in .git/info/attributes): a `-diff` or `binary`"
+                        + " attribute makes git log -p print \"Binary files differ\", so gitleaks never sees that file");
+        assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
+                CI_WORKFLOW + " no longer triggers on merge_group, so the merge queue would wait for checks forever");
     }
 
     /**

@@ -56,6 +56,7 @@ import static org.mockito.Mockito.*;
  * executeSync, listRemoteAgents, merge preview with workflows, snippet diffs,
  * and selected-resource filtering.
  */
+@SharedWorkingDirTmp
 class RestImportServiceExtendedTest {
 
     private IZipArchive zipArchive;

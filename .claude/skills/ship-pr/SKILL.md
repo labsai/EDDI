@@ -191,7 +191,7 @@ is advisory — which makes a red one *your* problem, not the button's. So:
   `operator_docs` is `docs/kubernetes.md`, `README.md`, `docs/security.md`. A PR touching any
   of those *must* run `Build & Test` — a skip there is a bug, not "fine". A PR touching only
   other `docs/*.md` legitimately skips `Build & Test`, `Integration Tests`, `Build Image`,
-  `Trivy Filesystem Scan`, `OpenAPI Snapshot`, `Preflight Dry-Run (PR)`, `Deployment
+  `Trivy Filesystem Scan`, `Trivy Image Scan`, `OpenAPI Snapshot`, `Preflight Dry-Run (PR)`, `Deployment
   Manifests`, `Shell Lint`, both E2E jobs and the UI jobs. `Docker Build & Push`, `Generate SBOM`, `Smoke Test`,
   `Preflight Verify (Pushed Image)`, `Red Hat Catalog Publish` and `GitHub Release` skip on
   every PR by design.
@@ -211,8 +211,10 @@ is advisory — which makes a red one *your* problem, not the button's. So:
 Known traps:
 
 - **Secret Scanning (gitleaks)** restores `.gitleaksignore` from the base branch, so a PR
-  cannot allowlist its own finding — the check stays red until merge. If it is a genuine
-  false positive, say so and let a human decide; do not chase it with commits.
+  cannot allowlist its own finding — the check, and with it `CI Gate`, stays red. A
+  fingerprint would not help after merge either: it names the PR's commit, which the squash
+  rewrites. Rewrite a secret-shaped fixture so it no longer matches; if it is a genuine false
+  positive that cannot be rewritten, say so and let a human decide; do not chase it with commits.
 - **Trivy** on a base-image CVE: find a newer digest for the same tag and update the
   `@sha256:` pin in `src/main/docker/Dockerfile`. `microdnf update` is the escape hatch;
   never remove the pin. **Both `FROM` lines carry the same pin** — move them together or
@@ -466,3 +468,46 @@ Report: what was fixed, what was pushed back on and why, what was left open for 
 what was deferred, whether CodeRabbit actually reviewed the current head or was rate
 limited, and the CI state you observed. Never claim a green run you did not read. **Do not
 merge** and do not enable auto-merge unless asked.
+
+## 7. Queueing — only when the user says so
+
+When `main` has a merge queue, "merge it" means "put it in the queue", and it still happens
+only on the user's word for a PR they name ("queue #1545"). Before running anything, check
+every item below on the PR's **current head**; if one fails, stop and report which, instead
+of queueing:
+
+1. **CodeRabbit reviewed the current head.** `gh pr checks <n> | grep -i coderabbit` must say
+   *Review completed* — `pass` alone is not enough, "rate limited" or "limit reached" means
+   not reviewed — and its latest review must be on the head SHA (the query below prints both).
+2. **Every thread is answered.** `bash .claude/skills/ship-pr/pr-threads.sh <n> --all`: every
+   bot-opened thread resolved, `0 with no reply from you`, and every open human thread has a
+   disposition in your report.
+3. **Every finding without a thread is answered** — nitpicks, outside-diff and suppressed
+   comments in review bodies (§4b), in the one PR comment that lists them.
+4. **Approved and green.** `gh pr view <n> --json reviewDecision,mergeable,mergeStateStatus`:
+   `APPROVED`, `MERGEABLE`; and `CI Gate` (or, before it is required, `Build & Test` and
+   `CodeQL Analysis`) green on the head.
+5. **While `CI Gate` is not a required check**, the queue waits only for the required ones, so
+   the AGENTS.md §2 rule 4 safeguards still apply: `main`'s current commit has a finished, green
+   `CI/CD` run, and no other PR is queued or merging. Check the repository's required checks first
+   (`gh api repos/labsai/EDDI/branches/main/protection --jq '.required_status_checks.contexts'`).
+
+Then:
+
+```bash
+# the PR's node id, the head SHA, the commit each recent review was on, and whether it is queued.
+# `gh pr view --json` has no merge-queue field, hence GraphQL.
+gh api graphql -F n=<n> -f query='query($n:Int!){repository(owner:"labsai",name:"EDDI"){pullRequest(number:$n){id state isInMergeQueue headRefOid reviews(last:10){nodes{author{login} state commit{oid}}}}}}'
+
+# Enqueue exactly the head the checklist passed. expectedHeadOid makes GitHub refuse the request if
+# the head moved; the mutation never arms auto-merge (gh pr merge can, if a check turns pending).
+gh api graphql -F id=<node id> -F oid=<checked head sha> -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$oid}){mergeQueueEntry{position state}}}'
+```
+
+If GitHub rejects the mutation, stop: re-run the checklist on the new head rather than retrying.
+Re-run the query afterwards: `isInMergeQueue: true` (or `state: MERGED`) is the confirmation.
+
+Never `gh pr merge --auto` (it arms a PR before it is ready, and fails when the repository
+disallows auto-merge), never `--admin`. If the queue ejects the PR, read the failed `merge_group` run
+before anything else: a failure there is real until shown otherwise, even if the PR's own run
+was green.
