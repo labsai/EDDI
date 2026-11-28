@@ -21,6 +21,7 @@ resources:
   - eddi-configmap.yaml
   - eddi-deployment.yaml
   - eddi-service.yaml
+  - eddi-networkpolicy.yaml
 
 commonAnnotations:
   app.kubernetes.io/managed-by: kustomize

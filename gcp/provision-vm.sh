@@ -329,11 +329,19 @@ ensure_firewall_rule() {
 setup_firewall_rules() {
   step "Firewall Rules"
 
-  # Direct EDDI ports (always open — useful for debugging / MCP direct access)
-  ensure_firewall_rule "$FIREWALL_RULE_HTTP" \
-    "$EDDI_PORT" "EDDI HTTP API and dashboard (direct)"
-  ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
-    "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
+  # Direct EDDI ports. Without --https they are how EDDI is reached. With
+  # --https they are NOT opened at all: EDDI is then bound to the VM's loopback
+  # (see the startup script) and nginx on 443 is the only way in, so a direct rule
+  # would lead to a closed port while advertising plain http for a login system
+  # whose tokens must not travel over it. (A VM created earlier with --https keeps
+  # its old allow-eddi-http / allow-eddi-https rules: delete them with
+  # `gcloud compute firewall-rules delete`.)
+  if [[ "$SETUP_HTTPS" != "true" ]]; then
+    ensure_firewall_rule "$FIREWALL_RULE_HTTP" \
+      "$EDDI_PORT" "EDDI HTTP API and dashboard (direct)"
+    ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
+      "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
+  fi
 
   # No rule for Keycloak's :8180. docker-compose.auth.yml publishes it on the
   # VM's loopback only (KEYCLOAK_BIND defaults to 127.0.0.1): on the HTTPS path
@@ -529,6 +537,8 @@ ACME_NGINX
     echo "Certificate obtained for \${EDDI_DOMAIN} and \${KC_DOMAIN}"
   else
     echo "WARNING: Let's Encrypt cert request failed — will continue without HTTPS."
+    echo "         EDDI is bound to the VM's loopback only and no direct port is open:"
+    echo "         reach it over an SSH tunnel until the certificate is obtained."
     echo "         Check: certbot certificates"
   fi
 else
@@ -541,13 +551,21 @@ export EDDI_BRANCH="${p_branch}"
 export EDDI_VERSION="${p_version}"
 export EDDI_PORT="${p_port}"
 export EDDI_HTTPS_PORT="${p_https_port}"
-# Publish EDDI on all interfaces INSIDE the VM. The compose files default to
-# 127.0.0.1 so a laptop install is not exposed by accident, but on a cloud VM the
-# whole point is to reach it at the VM's external IP — and the health poll, the
-# dashboard/API/MCP links and (behind nginx) the HTTPS proxy all need it bound to
-# 0.0.0.0. Off-box exposure is controlled by the now IP-scoped firewall and the
-# require_auth_or_public_ack gate, not by the bind address, so this is safe here.
-export EDDI_BIND="0.0.0.0"
+# Where EDDI is published INSIDE the VM. The compose files default to 127.0.0.1 so
+# a laptop install is not exposed by accident.
+#   --https     keep that loopback default: nginx (443, TLS) proxies to it on this
+#               VM, and no firewall rule opens the direct port, so there is no
+#               plain-http path to EDDI from outside. If the certificate cannot be
+#               obtained EDDI stays loopback-only (reach it over an SSH tunnel)
+#               rather than being exposed over http.
+#   otherwise   0.0.0.0: the whole point is to reach it at the VM's external IP.
+#               Off-box exposure is controlled by the IP-scoped firewall and the
+#               require_auth_or_public_ack gate, not by the bind address.
+if [[ "${p_setup_https}" == "true" ]]; then
+  export EDDI_BIND="127.0.0.1"
+else
+  export EDDI_BIND="0.0.0.0"
+fi
 # docker-compose.yml refuses that bind address while authentication is off
 # (its bind-guard service), and install.sh checks the same thing before pulling
 # images. The require_auth_or_public_ack gate above already made the operator
@@ -581,8 +599,36 @@ if [[ "${p_with_auth}" == "true" ]]; then
   set +a
 fi
 
-curl -fsSL "https://raw.githubusercontent.com/labsai/EDDI/\${EDDI_BRANCH}/install.sh" \\
-  | bash -s -- ${p_flags}
+# install.sh runs as root and installs everything else, so it is downloaded to a
+# file and, when the ref is a release tag, compared with that release's SHA256SUMS
+# before it runs (the release job lists install.sh there). A moved tag or a
+# replaced file is refused. A branch, or a release whose list does not name
+# install.sh, is verified by TLS only, with a warning.
+INSTALL_DIR=\$(mktemp -d /root/eddi-install.XXXXXX)
+INSTALL_SH="\${INSTALL_DIR}/install.sh"
+curl -fsSL "https://raw.githubusercontent.com/labsai/EDDI/\${EDDI_BRANCH}/install.sh" -o "\${INSTALL_SH}"
+if [[ "\${EDDI_BRANCH}" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?\$ ]]; then
+  SUMS_FILE="\${INSTALL_DIR}/SHA256SUMS"
+  if curl -fsSL --max-time 30 "https://github.com/labsai/EDDI/releases/download/\${EDDI_BRANCH}/SHA256SUMS" -o "\${SUMS_FILE}" && [[ -s "\${SUMS_FILE}" ]]; then
+    EXPECTED_SHA=\$(awk '\$2 == "install.sh" || \$2 == "*install.sh" { print \$1; exit }' "\${SUMS_FILE}")
+    if [[ -z "\${EXPECTED_SHA}" ]]; then
+      echo "WARNING: install.sh is not listed in the SHA256SUMS of release \${EDDI_BRANCH}; not verified." >&2
+    else
+      ACTUAL_SHA=\$(sha256sum "\${INSTALL_SH}" | cut -d' ' -f1)
+      if [[ "\${ACTUAL_SHA}" != "\${EXPECTED_SHA}" ]]; then
+        echo "ERROR: install.sh at \${EDDI_BRANCH} does not match the release's SHA256SUMS (expected \${EXPECTED_SHA}, got \${ACTUAL_SHA}). Not running it." >&2
+        exit 1
+      fi
+      echo "install.sh matches the SHA256SUMS of release \${EDDI_BRANCH}."
+    fi
+  else
+    echo "WARNING: release \${EDDI_BRANCH} has no downloadable SHA256SUMS; install.sh is verified by TLS only." >&2
+  fi
+else
+  echo "WARNING: '\${EDDI_BRANCH}' is not a release; install.sh is verified by TLS only." >&2
+fi
+bash "\${INSTALL_SH}" ${p_flags}
+rm -rf "\${INSTALL_DIR}"
 
 # ── [6/6] HTTPS reverse proxy + Keycloak HTTPS config ─────────────────────────
 if [[ "\${HTTPS_ENABLED}" == "true" ]]; then
@@ -626,7 +672,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
 
     location / {
-        proxy_pass         http://localhost:__EDDI_PORT__;
+        proxy_pass         http://127.0.0.1:__EDDI_PORT__;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade \$http_upgrade;
         proxy_set_header   Connection "upgrade";
@@ -709,10 +755,12 @@ NGINX_TMPL
     -e "s|__KC_PORT__|\${KC_PORT}|g" \\
     /tmp/nginx-eddi.tmpl > /etc/nginx/sites-available/eddi
 
-  rm -f /etc/nginx/sites-enabled/eddi-acme
-  ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi
-  nginx -t && systemctl reload nginx
-  echo "nginx configured for HTTPS."
+  # The public site (443) is NOT enabled here. It goes live only after the
+  # eddi-frontend Keycloak client has lost its loopback redirects and "+" web origin
+  # (below): until then nginx keeps serving only the ACME/"being configured" site on
+  # :80, so a failure in between never leaves a public login that still accepts
+  # http(s)://localhost:* redirects.
+  echo "nginx HTTPS site rendered (not yet enabled)."
 
   # ── docker-compose override: point Keycloak URLs to HTTPS domains ─────────────
   EDDI_CONFIG="\${EDDI_DIR}/.eddi-config"
@@ -759,7 +807,7 @@ OVERRIDE_EOF
   # Wait for EDDI to be healthy after restart
   echo "Waiting for EDDI to restart..."
   for i in \$(seq 1 60); do
-    if curl -sf --connect-timeout 3 "http://localhost:${p_port}/q/health/ready" &>/dev/null; then
+    if curl -sf --connect-timeout 3 --max-time 5 "http://localhost:${p_port}/q/health/ready" &>/dev/null; then
       echo "EDDI is healthy after restart."
       break
     fi
@@ -767,6 +815,9 @@ OVERRIDE_EOF
   done
 
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
+  # KC_CLIENT_RESTRICTED turns true only when the PUT answered 204; the public nginx
+  # site is enabled on that alone.
+  KC_CLIENT_RESTRICTED=false
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""
   # install.sh recorded this in .env (adopted from the file above). The
@@ -814,11 +865,18 @@ OVERRIDE_EOF
       2>/dev/null | jq -r '.[0].id // empty') || KC_CLIENT_UUID=""
 
     if [[ -n "\${KC_CLIENT_UUID:-}" ]]; then
+      # The public origin REPLACES the loopback entries instead of joining them, as
+      # the Helm chart does when keycloak.publicOrigin is set: left in, the
+      # http(s)://localhost:* redirects and the "+" web origin let any listener on
+      # a user's own machine receive an authorization code issued for this
+      # internet-facing realm. The eddi-mcp client keeps its loopback redirects
+      # (RFC 8252 native clients).
       EXISTING_CLIENT=\$(kc_curl -sf \\
         "\${KC_BASE}/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" 2>/dev/null)
       UPDATED_CLIENT=\$(echo "\${EXISTING_CLIENT}" | jq \\
         --arg d "https://\${EDDI_DOMAIN}" \\
-        '.redirectUris += [\$d + "/*"] | .webOrigins += [\$d]' 2>/dev/null) || UPDATED_CLIENT=""
+        '.redirectUris = ([.redirectUris[] | select(test("^https?://localhost(:|/|\$)") | not)] + [\$d + "/*"] | unique)
+         | .webOrigins = ([.webOrigins[] | select(. != "+" and (test("^https?://localhost(:|/|\$)") | not))] + [\$d] | unique)' 2>/dev/null) || UPDATED_CLIENT=""
 
       if [[ -n "\${UPDATED_CLIENT:-}" ]]; then
         STATUS=\$(kc_curl -sf -o /dev/null -w "%{http_code}" -X PUT \\
@@ -826,6 +884,7 @@ OVERRIDE_EOF
           "\${KC_BASE}/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" \\
           -d "\${UPDATED_CLIENT}" 2>/dev/null) || STATUS="000"
         if [[ "\${STATUS}" == "204" ]]; then
+          KC_CLIENT_RESTRICTED=true
           echo "Keycloak client updated with HTTPS origins."
         else
           echo "WARNING: Keycloak client update returned HTTP \${STATUS}"
@@ -840,12 +899,33 @@ OVERRIDE_EOF
   echo "0 12 * * * root certbot renew --quiet --deploy-hook 'systemctl reload nginx'" \\
     > /etc/cron.d/certbot-renew
 
-  echo ""
-  echo "=== HTTPS Setup Complete ==="
-  echo "  EDDI:      https://\${EDDI_DOMAIN}/manage"
-  echo "  Keycloak:  https://\${KC_DOMAIN}"
-  echo "  API Docs:  https://\${EDDI_DOMAIN}/q/swagger-ui"
-  echo "  MCP:       https://\${EDDI_DOMAIN}/mcp"
+  if [[ "\${KC_CLIENT_RESTRICTED}" == "true" ]]; then
+    rm -f /etc/nginx/sites-enabled/eddi-acme
+    ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi
+    if ! { nginx -t && systemctl reload nginx; }; then
+      echo "ERROR: nginx rejected the HTTPS site; it was NOT enabled. Fix it with: nginx -t" >&2
+      exit 1
+    fi
+    echo "nginx configured for HTTPS."
+    echo ""
+    echo "=== HTTPS Setup Complete ==="
+    echo "  EDDI:      https://\${EDDI_DOMAIN}/manage"
+    echo "  Keycloak:  https://\${KC_DOMAIN}"
+    echo "  API Docs:  https://\${EDDI_DOMAIN}/q/swagger-ui"
+    echo "  MCP:       https://\${EDDI_DOMAIN}/mcp"
+  else
+    echo "" >&2
+    echo "ERROR: the eddi-frontend Keycloak client could NOT be restricted to the public origin" >&2
+    echo "       (admin API unreachable, or the update was not accepted), so the public HTTPS site" >&2
+    echo "       was NOT enabled. The VM is left with: EDDI and Keycloak running on the loopback," >&2
+    echo "       nginx serving only the ACME/'being configured' page on :80, nothing on 443." >&2
+    echo "       Reach EDDI over an SSH tunnel. To retry: remove the http(s)://localhost:* redirect" >&2
+    echo "       URIs and the '+' web origin from the eddi-frontend client in the eddi realm, add" >&2
+    echo "       https://\${EDDI_DOMAIN}/* and https://\${EDDI_DOMAIN}, then:" >&2
+    echo "         ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi" >&2
+    echo "         rm -f /etc/nginx/sites-enabled/eddi-acme && nginx -t && systemctl reload nginx" >&2
+    exit 1
+  fi
 else
   echo "[6/6] Skipping HTTPS config (not requested or cert failed)."
 fi
@@ -888,7 +968,8 @@ create_vm() {
     --boot-disk-type="pd-ssd"
     --tags="$NETWORK_TAG"
     --metadata-from-file="startup-script=${startup_script_file}"
-    --scopes="default"
+    --no-service-account
+    --no-scopes
   )
 
   if [[ -n "${RESERVED_IP:-}" ]]; then
@@ -929,39 +1010,48 @@ wait_for_eddi() {
   step "Waiting for EDDI to become healthy"
 
   # With Keycloak, startup takes longer: image pull + KC init + EDDI boot.
-  # With HTTPS, there's an additional nginx + certbot + restart cycle after EDDI.
-  # Poll the direct HTTP port (7070) — always available even when HTTPS is on.
+  # With HTTPS, EDDI is bound to the VM's loopback and no direct port is open, so
+  # readiness is polled through nginx on 443, which only answers once the
+  # certificate is issued and nginx is configured: an extra certbot + nginx +
+  # restart cycle after EDDI itself is up. Without HTTPS the direct port is polled.
   local max_wait=720
   local elapsed=0
+  # Wall-clock, not a sum of sleeps: a probe that takes its full --max-time must
+  # not stretch the budget.
+  local started=$SECONDS
   local health_url="http://${EXTERNAL_IP}:${EDDI_PORT}/q/health/ready"
   local note="~3-5 min"
   [[ "$WITH_AUTH" == "true" ]] && note="~5-8 min (Keycloak adds startup time)"
+  if [[ "$SETUP_HTTPS" == "true" ]]; then
+    health_url="https://${EXTERNAL_IP//./-}.sslip.io/q/health/ready"
+    max_wait=900
+    note="~6-10 min (Keycloak, certificate and nginx setup)"
+  fi
 
   echo "  Polling: ${DIM}${health_url}${RESET}"
   echo "  (VM is booting, installing Docker + pulling images — ${note})"
   if [[ "$SETUP_HTTPS" == "true" ]]; then
-    echo "  (HTTPS setup will continue in background after EDDI is healthy)"
+    echo "  (EDDI is reachable only over HTTPS here, so this answers after the certificate is issued)"
   fi
   echo ""
   echo -ne "  "
 
   while [[ $elapsed -lt $max_wait ]]; do
-    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+    # Never past the budget: the probe and the sleep are capped to what is left.
+    local left=$((max_wait - elapsed))
+    local probe=$(( left < 10 ? left : 10 ))
+    if curl -sf --connect-timeout 5 --max-time "$probe" "$health_url" &>/dev/null 2>&1; then
       echo ""
       echo ""
       info "EDDI is healthy! (ready in ${elapsed}s)"
-      if [[ "$SETUP_HTTPS" == "true" ]]; then
-        echo ""
-        echo -e "  ${DIM}nginx + Let's Encrypt cert setup is still running on the VM.${RESET}"
-        echo -e "  ${DIM}HTTPS URLs will be ready in ~2-3 more minutes.${RESET}"
-        echo -e "  ${DIM}Watch progress:  $(basename "$0") logs ${VM_NAME}${RESET}"
-      fi
       return 0
     fi
-    sleep 10
-    elapsed=$((elapsed + 10))
+    elapsed=$((SECONDS - started))
+    left=$((max_wait - elapsed))
+    (( left > 0 )) && sleep $(( left < 10 ? left : 10 ))
+    elapsed=$((SECONDS - started))
     echo -ne "."
-    if (( elapsed % 60 == 0 )); then
+    if (( elapsed % 60 < 10 )); then
       echo -ne "\n  "
     fi
   done
@@ -991,6 +1081,7 @@ print_success() {
   echo -e "  ${BOLD}Zone${RESET}         ${ZONE}"
   echo ""
 
+  local ssh_cmd_https="gcloud compute ssh ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT}"
   if [[ "$SETUP_HTTPS" == "true" ]]; then
     echo -e "  ${BOLD}${GREEN}HTTPS URLs${RESET} (available once cert setup completes ~2-3 min):"
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}https://${eddi_domain}/manage${RESET}"
@@ -998,8 +1089,22 @@ print_success() {
     echo -e "  ${BOLD}MCP${RESET}          ${CYAN}https://${eddi_domain}/mcp${RESET}"
     echo -e "  ${BOLD}Keycloak${RESET}     ${CYAN}https://${kc_domain}${RESET}"
     echo ""
-    echo -e "  ${DIM}Direct HTTP (always available):${RESET}"
-    echo -e "  ${DIM}  http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
+    echo -e "  ${DIM}EDDI listens on the VM's loopback only and no direct port is open: nginx on 443${RESET}"
+    echo -e "  ${DIM}is the one way in. There is deliberately no plain-http URL.${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}If the HTTPS URLs do not answer${RESET} (certificate not issued, or the Keycloak client"
+    echo -e "  ${DIM}could not be restricted, in which case the VM deliberately keeps 443 closed):${RESET}"
+    echo -e "  ${DIM}1. Read the install log:  $(basename "$0") logs ${VM_NAME}   (/var/log/eddi-install.log on the VM)${RESET}"
+    echo -e "  ${DIM}2. Certificate:  ${ssh_cmd_https} --command='sudo certbot certificates'${RESET}"
+    echo -e "  ${DIM}   (sslip.io must resolve and port 80 must be reachable for the Let's Encrypt challenge)${RESET}"
+    echo -e "  ${DIM}3. Re-run the whole setup on the VM once the cause is fixed; the install step${RESET}"
+    echo -e "  ${DIM}   detects the running stack and the certificate and Keycloak client steps repeat:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd_https} --command='sudo google_metadata_script_runner startup'${RESET}"
+    echo -e "  ${DIM}A browser sign-in through an SSH tunnel does NOT work here: once the HTTPS override${RESET}"
+    echo -e "  ${DIM}is applied the Manager redirects to https://${kc_domain} and tokens carry that public${RESET}"
+    echo -e "  ${DIM}issuer, which a tunnelled backend rejects. Only unauthenticated endpoints are usable${RESET}"
+    echo -e "  ${DIM}over a tunnel, e.g. the health check:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd_https} --command='curl -s http://localhost:${EDDI_PORT}/q/health/ready'${RESET}"
   else
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
     echo -e "  ${BOLD}API Docs${RESET}     ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/q/swagger-ui${RESET}"
@@ -1279,21 +1384,35 @@ REMOTE_SCRIPT
 
   echo ""
   echo "  Waiting for EDDI to become healthy..."
+  # A VM created with --https has no direct port open, so try the HTTPS front
+  # door as well as the direct one.
   local health_url="http://${external_ip}:${EDDI_PORT}/q/health/ready"
+  local https_base="https://${external_ip//./-}.sslip.io"
   local elapsed=0
+  local started=$SECONDS
   echo -ne "  "
   while [[ $elapsed -lt 120 ]]; do
-    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+    local base=""
+    # Each probe and the sleep are capped to the time left of the 120 s budget.
+    local probe=$(( 120 - elapsed < 10 ? 120 - elapsed : 10 ))
+    if curl -sf --connect-timeout 5 --max-time "$probe" "$health_url" &>/dev/null 2>&1; then
+      base="http://${external_ip}:${EDDI_PORT}"
+    elif probe=$(( 120 - (SECONDS - started) )); (( probe > 0 )) \
+        && curl -sf --connect-timeout 5 --max-time "$(( probe < 10 ? probe : 10 ))" "${https_base}/q/health/ready" &>/dev/null 2>&1; then
+      base="$https_base"
+    fi
+    if [[ -n "$base" ]]; then
       echo ""
       echo ""
       info "EDDI is healthy! (${elapsed}s)"
       echo ""
-      echo -e "  ${BOLD}Dashboard${RESET}  →  ${CYAN}http://${external_ip}:${EDDI_PORT}/manage${RESET}"
+      echo -e "  ${BOLD}Dashboard${RESET}  →  ${CYAN}${base}/manage${RESET}"
       echo ""
       return 0
     fi
-    sleep 5
-    elapsed=$((elapsed + 5))
+    elapsed=$((SECONDS - started))
+    (( elapsed < 120 )) && sleep $(( 120 - elapsed < 5 ? 120 - elapsed : 5 ))
+    elapsed=$((SECONDS - started))
     echo -ne "."
   done
   echo ""
@@ -1358,37 +1477,50 @@ cmd_status() {
     return 0
   fi
 
+  # A VM created with --https has no direct port open (EDDI is bound to its
+  # loopback), so "not ready" over http says nothing about it: check both, and
+  # list only the links that answer.
+  local ip_dashes="${external_ip//./-}"
+  local https_health="https://${ip_dashes}.sslip.io/q/health/ready"
   local health_url="http://${external_ip}:${EDDI_PORT}/q/health/ready"
-  echo -ne "  EDDI health (HTTP): "
-  if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+  local https_ok="false" http_ok="false"
+  curl -sf --connect-timeout 5 --max-time 10 "$https_health" &>/dev/null 2>&1 && https_ok="true"
+  curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1 && http_ok="true"
+
+  echo -ne "  EDDI health (HTTPS): "
+  if [[ "$https_ok" == "true" ]]; then
+    echo -e "${GREEN}✅ ready${RESET}"
+  else
+    echo -e "${DIM}not configured / cert pending${RESET}"
+  fi
+  echo -ne "  EDDI health (direct HTTP): "
+  if [[ "$http_ok" == "true" ]]; then
     echo -e "${GREEN}✅ ready${RESET}"
     echo ""
     echo -ne "  Deployed agents: "
     local agent_count
-    agent_count=$(curl -sf --connect-timeout 5 \
+    agent_count=$(curl -sf --connect-timeout 5 --max-time 10 \
       "http://${external_ip}:${EDDI_PORT}/administration/production/deploymentstatus" \
       2>/dev/null | grep -o '"agentId"' | wc -l | tr -d ' ') || agent_count="0"
     echo -e "${BOLD}${agent_count}${RESET}"
+  elif [[ "$https_ok" == "true" ]]; then
+    echo -e "${DIM}closed (expected with --https: EDDI is only reachable through nginx)${RESET}"
   else
     echo -e "${RED}❌ not ready${RESET}"
     echo "    $(basename "$0") logs ${name}  ← check install progress"
   fi
 
-  local ip_dashes="${external_ip//./-}"
-  local https_health="https://${ip_dashes}.sslip.io/q/health/ready"
-  echo -ne "  EDDI health (HTTPS): "
-  if curl -sf --connect-timeout 5 "$https_health" &>/dev/null 2>&1; then
-    echo -e "${GREEN}✅ ready${RESET}"
-  else
-    echo -e "${DIM}not configured / cert pending${RESET}"
-  fi
-
   echo ""
   echo -e "  ${BOLD}Links:${RESET}"
-  echo -e "  HTTP   →  ${CYAN}http://${external_ip}:${EDDI_PORT}/manage${RESET}"
-  echo -e "  HTTPS  →  ${CYAN}https://${ip_dashes}.sslip.io/manage${RESET}  ${DIM}(if cert obtained)${RESET}"
-  echo -e "  KC     →  ${CYAN}https://auth.${ip_dashes}.sslip.io${RESET}  ${DIM}(if cert obtained)${RESET}"
-  echo -e "  MCP    →  ${CYAN}http://${external_ip}:${EDDI_PORT}/mcp${RESET}"
+  if [[ "$http_ok" == "true" ]]; then
+    echo -e "  HTTP   →  ${CYAN}http://${external_ip}:${EDDI_PORT}/manage${RESET}"
+    echo -e "  MCP    →  ${CYAN}http://${external_ip}:${EDDI_PORT}/mcp${RESET}"
+  fi
+  if [[ "$https_ok" == "true" || "$http_ok" != "true" ]]; then
+    echo -e "  HTTPS  →  ${CYAN}https://${ip_dashes}.sslip.io/manage${RESET}  ${DIM}(if cert obtained)${RESET}"
+    echo -e "  KC     →  ${CYAN}https://auth.${ip_dashes}.sslip.io${RESET}  ${DIM}(if cert obtained)${RESET}"
+    echo -e "  MCP    →  ${CYAN}https://${ip_dashes}.sslip.io/mcp${RESET}  ${DIM}(if cert obtained)${RESET}"
+  fi
   echo ""
 }
 
@@ -1494,6 +1626,28 @@ for arg in "$@"; do
       POSITIONAL+=("$arg") ;;
   esac
 done
+
+# ── Validate what is spliced into the VM's root scripts ───────────────────────
+#
+# --eddi-version lands in the startup script and in the `update` script that runs
+# under `sudo bash -s` (inside double quotes and a sed expression), and
+# --eddi-branch in the startup script's URLs. An unchecked value is code
+# execution as root on the VM, so both are held to what install.sh accepts
+# (valid_git_ref, and its EDDI_VERSION pattern).
+valid_git_ref() {
+  local ref="$1"
+  [[ "$ref" =~ ^[a-zA-Z0-9._/-]+$ ]] || return 1
+  case "$ref" in
+    *..*|*//*|/*|*/|.*|*/.*|-*|*.|*.lock) return 1 ;;
+  esac
+  return 0
+}
+if [[ ! "$EDDI_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+  fail "Invalid --eddi-version: ${EDDI_VERSION}\n     Expected an image tag such as 6.5.0 or latest."
+fi
+if [[ -n "$EDDI_BRANCH" ]] && ! valid_git_ref "$EDDI_BRANCH"; then
+  fail "Invalid --eddi-branch: ${EDDI_BRANCH}\n     Expected a git tag or branch name of labsai/EDDI."
+fi
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 

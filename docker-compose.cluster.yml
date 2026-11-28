@@ -118,6 +118,11 @@ services:
       replicas: 3
     environment:
       EDDI_VAULT_MASTER_KEY: ${EDDI_VAULT_MASTER_KEY:?set EDDI_VAULT_MASTER_KEY (openssl rand -base64 24)}
+      # SSRF protection is off by default (service names are private addresses).
+      # To turn it on, uncomment and list the internal hosts agents may call;
+      # 127.0.0.1:7070 (Platform Operator) and localhost:7070 (reference agent) stay reachable. See docs/security.md.
+      # EDDI_SECURITY_SSRF_PROTECTION_ENABLED: "${EDDI_SECURITY_SSRF_PROTECTION_ENABLED:-false}"
+      # EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS: "${EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS:-127.0.0.1:7070,localhost:7070}"
       # Least-privilege user on `eddi`, created by mongodb-app-user; see
       # docker-compose.yml. MONGO_APP_PASSWORD falls back to MONGO_PASSWORD.
       MONGODB_CONNECTIONSTRING: mongodb://${MONGO_APP_USERNAME:-eddi_app}:${MONGO_APP_PASSWORD:-${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}}@mongodb:27017/eddi?authSource=eddi
