@@ -31,15 +31,17 @@
   the sweep), and so does a row under the name that is not a HITL timeout. A row created by a sweep for a pause
   that ended meanwhile is withdrawn by its id; a withdrawal that fails is logged at `WARN` and leaves a row bound to
   the ended pause, whose fire is refused. A read that fails is retried twice within the pass (after 1 s and 4 s,
-  `readRetryDelays`); if it still fails nothing is written — on the restore path too, which used to create a row
-  then and so could put an enabled twin next to a row a person had disabled. For an approval gate the safe failure
-  is the pause waiting for a human: the failure counts in `eddi_hitl_timeout_arm_failures_total{surface}` and logs
+  `readRetryDelays`); if it still fails nothing more is written for that pause — on the restore path too, which used
+  to create a row then and so could put an enabled twin next to a row a person had disabled. The stored rows stay as
+  they are, so an armed timeout of the pause still fires; without one, the safe failure for an approval gate is the
+  pause waiting for a human: the failure counts in `eddi_hitl_timeout_arm_failures_total{surface}` and logs
   at `WARN` in a cluster (the next sweep reads again) or at `ERROR` on a single node (the pause waits without a
   re-armed timeout until the next start or a person's decision). A row the store cannot decode is skipped by
   `readSchedulesByName` and logged at `WARN` with its id, so it no longer blocks the repair of its readable
   siblings; the store reads past such rows until it has `limit` decodable ones (at most 100 more raw rows), so a
   result shorter than the limit is complete, and fails the read beyond that allowance. When 100 rows or more share the name, the stale ones read are
-  removed and nothing is created until a later pass has seen them all. A pause the startup pass restores from
+  removed and the name is read again, up to five rounds in the same pass; once a read returns fewer than 100 rows the
+  replacement is created in that pass, and only rows still remaining after five rounds defer it to a later pass. A pause the startup pass restores from
   `IN_PROGRESS` after a lost resume replaces a spent row at once (no backoff) but keeps a row of its own that can
   still fire or that a person disabled. Files: `engine/hitl/HitlCrashRecoveryObserver.java`,
   `engine/schedule/IScheduleStore.java`, `engine/schedule/mongo/MongoScheduleStore.java`,
@@ -115,10 +117,15 @@
 ### Behaviour an upgrader notices
 
 - In a cluster, finite HITL timeouts fire at their deadline. Schedules the old sweep left at `now + 2 min` are kept
-  and fire within two minutes of the upgrade; pauses whose deadline passed long ago are decided by their policy then.
+  and normally fire within about two minutes of the upgrade, once the poller's retry, claim and batch conditions
+  allow (a `FAILED` row waits for its retry time); pauses whose deadline passed long ago are decided by their policy
+  when their row fires. A finite timeout a person disabled stays disabled and does not fire.
 - A still-waiting pause whose timeout row an older build dead-lettered, retried out or disabled with its agent gets
   a fresh timeout and is decided by its policy.
-- A timeout whose decision can never apply now cancels the pause instead of leaving it waiting.
+- A timeout whose decision can never apply now cancels the pause instead of leaving it waiting — when the row is
+  bound to its pause. A row an older build armed without a pause id does not cancel: its fire completes and the pause
+  keeps waiting until recovery arms a bound timeout (about an hour later in a cluster, at the next start on a single
+  node) or a person decides.
 - The cluster sweep's `re-armed N schedule(s)` WARN line now appears only when a schedule was actually created.
 - A schedule named `hitl-timeout-…` can no longer be created or updated through the schedule API, the MCP tools or
   an import (`400`). A user schedule that already has such a name keeps working but can only be deleted or renamed
@@ -166,7 +173,13 @@
 - Read retries share one budget per recovery pass (30 s): with the store down, a thousand pauses no longer wait
   their own 1 s and 4 s each. Once it is spent a failed read is not retried and the pause stays unarmed this pass.
 - `findDueSchedules` (MongoDB and PostgreSQL) skips and names a row it cannot decode instead of failing the whole
-  poll, so a replacement timeout is not starved by an undecodable sibling.
+  poll, so a replacement timeout is not starved by an undecodable sibling. It reads past such rows — the poll
+  batch plus the same allowance of 100 — until it has a full batch of decodable ones, so undecodable rows at the
+  head of the `next_fire` order cannot take every poll's batch; beyond the allowance it logs at `ERROR`.
+- A legacy timeout row (no pause id) of another surface no longer passes for the pause being repaired: a group
+  approval and a HUMAN member turn share the schedule name `hitl-timeout-group-<id>`, and the handler routes a fire
+  by surface, so an armed approval row left behind used to stop the turn's `SKIP_TURN`/`ABORT` timeout from being
+  re-created. A row without a surface counts as `regular`, as the handler routes it.
 
 ### Left open
 

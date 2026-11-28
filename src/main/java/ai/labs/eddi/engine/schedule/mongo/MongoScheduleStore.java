@@ -651,17 +651,32 @@ public class MongoScheduleStore implements IScheduleStore {
             // meets first — the same subset every poll — so the rest wait for that
             // subset to drain regardless of how long they have been due. The
             // (enabled, nextFire, fireStatus) index serves this sort.
+            //
+            // An undecodable row is skipped but stays due, so it keeps its place at the
+            // head of that order: the scan reads past such rows (up to the same allowance
+            // readSchedulesByName uses) until it has a full batch of decodable ones, or
+            // they would fill every poll's batch and starve the readable rows behind them.
+            int rawLimit = rawRowsToScan(pollBatchSize);
             List<ScheduleConfiguration> result = new ArrayList<>();
-            for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
-                try {
-                    result.add(fromDocument(doc));
-                } catch (Exception e) {
-                    // One undecodable row must not fail the poll and starve its readable
-                    // siblings (a HITL timeout among them): it cannot be fired either way,
-                    // so it is left in place and named so it can be removed.
-                    LOGGER.warnf("Due schedule %s cannot be decoded — skipped: %s", sanitize(String.valueOf(doc.get(ID))),
-                            sanitize(e.getMessage()));
+            int skipped = 0;
+            try (var cursor = scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(rawLimit)
+                    .iterator()) {
+                while (result.size() < pollBatchSize && cursor.hasNext()) {
+                    Document doc = cursor.next();
+                    try {
+                        result.add(fromDocument(doc));
+                    } catch (Exception e) {
+                        // It cannot be fired either way, so it is left in place and named so
+                        // it can be removed.
+                        skipped++;
+                        LOGGER.warnf("Due schedule %s cannot be decoded — skipped: %s", sanitize(String.valueOf(doc.get(ID))),
+                                sanitize(e.getMessage()));
+                    }
                 }
+            }
+            if (result.size() < pollBatchSize && result.size() + skipped >= rawLimit) {
+                LOGGER.errorf("%d undecodable due schedules at the head of the poll order — due rows behind them wait until "
+                        + "they are removed", skipped);
             }
             return result;
         } catch (Exception e) {

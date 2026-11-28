@@ -1117,6 +1117,34 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("findDueSchedules — reads past undecodable rows at the head of the order until the batch is full")
+    void findDueSchedules_readsPastUndecodableRowsToAFullBatch() throws Exception {
+        MongoDatabase database = mock(MongoDatabase.class);
+        when(database.getCollection("eddi_schedules")).thenReturn(scheduleCollection);
+        when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogCollection);
+        var batchOfOne = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 1);
+        FindIterable<Document> due = findingDocs(new Document("_id", "broken-row"), new Document("_id", "readable-row"),
+                new Document("_id", "next-row"));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(due);
+        when(due.sort(any(Document.class))).thenReturn(due);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenAnswer(invocation -> {
+            Document doc = invocation.getArgument(0);
+            if ("broken-row".equals(doc.get("_id"))) {
+                throw new IOException("unexpected field type");
+            }
+            var schedule = new ScheduleConfiguration();
+            schedule.setId(String.valueOf(doc.get("_id")));
+            return schedule;
+        });
+
+        List<ScheduleConfiguration> result = batchOfOne.findDueSchedules(Instant.now(), Duration.ofMinutes(1), 3);
+
+        assertEquals(1, result.size(), "a full batch of decodable rows, no more");
+        assertEquals("readable-row", result.get(0).getId(), "the undecodable head row does not take the batch's only slot");
+        verify(due).limit(101); // the batch plus the allowance for skipped rows
+    }
+
+    @Test
     @DisplayName("findDueSchedules — returns due schedules, most overdue first")
     void findDueSchedules() throws Exception {
         setupSchedulePageIteration();

@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -185,10 +186,13 @@ class HitlTimeoutRearmSweepTest {
     }
 
     /**
-     * The poller at {@code now}: every enabled row due by then fires once and is
-     * completed the way {@code markCompleted} leaves a one-shot.
+     * A simulated poll at {@code now}: every enabled row whose {@code nextFire} has
+     * arrived is counted and completed in memory the way {@code markCompleted}
+     * leaves a one-shot. Neither the poller's claim and retry checks nor the
+     * timeout handler run, so the deadline assertions built on it check the
+     * persisted row, not delivery.
      *
-     * @return how many fires the timeout handler received
+     * @return how many rows the simulated poll found due
      */
     private int pollAt(Instant now) {
         int fired = 0;
@@ -861,6 +865,39 @@ class HitlTimeoutRearmSweepTest {
             verify(scheduleStore, never()).createSchedule(any());
             assertEquals(1, pollAt(deadline));
         }
+
+        @Test
+        @DisplayName("an armed legacy approval row under the shared group name does not pass for a HUMAN turn's timeout")
+        void legacyApprovalRowDoesNotArmAHumanTurn() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            var gc = new GroupConversation();
+            gc.setId(GC_ID);
+            gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
+            gc.setPausedAt(pausedAt);
+            gc.setHitlApprovalTimeout("PT5M");
+            gc.setPendingHumanInput(new PendingHumanInput("human-1", "Human", 0, 0, 0, "OPINION", "Your turn", "SKIP_TURN",
+                    pausedAt));
+            when(gcStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT)).thenReturn(List.of(gc));
+            when(gcStore.read(GC_ID)).thenReturn(gc);
+            // an older build's approval timeout (no pause id) that survived its by-name
+            // delete
+            var approval = new ScheduleConfiguration();
+            approval.setId("schedule-" + (++nextId));
+            approval.setName(GROUP_NAME);
+            approval.setEnabled(true);
+            approval.setNextFire(Instant.now().plus(Duration.ofHours(1)));
+            approval.setCreatedAt(pausedAt.minus(Duration.ofHours(1)));
+            approval.setMetadata(HitlSchedules.timeoutMetadata("AUTO_REJECT", HitlSchedules.SURFACE_GROUP, GC_ID, null));
+            rows.add(approval);
+
+            sweeps(1);
+
+            List<ScheduleConfiguration> named = rowsNamed(GROUP_NAME);
+            assertEquals(1, named.size(), "the turn's timeout is armed, the stale approval row removed");
+            assertEquals(HitlSchedules.SURFACE_GROUP_HUMAN, named.get(0).getMetadata().get(HitlSchedules.METADATA_SURFACE_KEY));
+            assertEquals("SKIP_TURN", named.get(0).getMetadata().get(HitlSchedules.METADATA_POLICY_KEY));
+            assertEquals(pausedAt.plus(Duration.ofMinutes(5)), named.get(0).getNextFire());
+        }
     }
 
     // --- review follow-ups: tri-state pause identity, backoff, fence, budget ----
@@ -965,6 +1002,7 @@ class HitlTimeoutRearmSweepTest {
         void retryBudgetIsPerPass() throws Exception {
             Instant pausedAt = Instant.now().minus(Duration.ofHours(5));
             regularPause("AUTO_REJECT", "PT30M", pausedAt);
+            groupApprovalPause("AUTO_REJECT", "PT30M", pausedAt); // a second name, read later in the same pass
             observer.readRetryDelays = List.of(Duration.ofMillis(5), Duration.ofMillis(5));
             observer.retryBudgetPerPass = Duration.ofMillis(5); // room for one wait only
             when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenThrow(new ResourceStoreException("store down"));
@@ -972,8 +1010,9 @@ class HitlTimeoutRearmSweepTest {
             sweeps(1);
 
             // three attempts would be the unbudgeted count; the budget allows the first
-            // retry only
-            verify(scheduleStore, times(2)).readSchedulesByName(anyString(), anyInt());
+            // name's first retry only - a budget per name would read the second twice too
+            verify(scheduleStore, times(2)).readSchedulesByName(eq(REGULAR_NAME), anyInt());
+            verify(scheduleStore, times(1)).readSchedulesByName(eq(GROUP_NAME), anyInt());
             verify(scheduleStore, never()).createSchedule(any());
         }
     }

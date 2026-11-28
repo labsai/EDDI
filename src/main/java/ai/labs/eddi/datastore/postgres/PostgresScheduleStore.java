@@ -962,8 +962,9 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setLong(2, lease.toMillis());
             ps.setLong(3, nowMs);
             ps.setInt(4, maxRetries);
-            ps.setInt(5, pollBatchSize);
-            return readDueScheduleList(ps);
+            int rawLimit = (int) Math.min((long) pollBatchSize + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
+            ps.setInt(5, rawLimit);
+            return readDueScheduleList(ps, pollBatchSize, rawLimit);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
@@ -1300,12 +1301,18 @@ public class PostgresScheduleStore implements IScheduleStore {
      * Like {@link #readScheduleList}, but one undecodable row is skipped (and
      * named) instead of failing the read: the poll must not be starved of its
      * readable rows — a HITL timeout among them — by a row it could not fire
-     * anyway. A failing query still fails the read.
+     * anyway. A failing query still fails the read. A skipped row stays due and
+     * keeps its place at the head of the poll order, so the query fetches
+     * {@code rawLimit} rows ({@link #UNDECODABLE_ALLOWANCE} beyond the batch) and
+     * this stops at {@code batchSize} decoded ones: undecodable rows cannot fill
+     * every poll's batch and starve the readable rows behind them.
      */
-    private List<ScheduleConfiguration> readDueScheduleList(PreparedStatement ps) throws SQLException {
+    private List<ScheduleConfiguration> readDueScheduleList(PreparedStatement ps, int batchSize, int rawLimit) throws SQLException {
         List<ScheduleConfiguration> result = new ArrayList<>();
+        int scanned = 0;
         try (ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
+            while (result.size() < batchSize && rs.next()) {
+                scanned++;
                 try {
                     result.add(fromResultSet(rs));
                 } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
@@ -1313,6 +1320,10 @@ public class PostgresScheduleStore implements IScheduleStore {
                             sanitize(e.getMessage()));
                 }
             }
+        }
+        if (result.size() < batchSize && scanned >= rawLimit) {
+            LOGGER.errorf("%d undecodable due schedules at the head of the poll order — due rows behind them wait until "
+                    + "they are removed", scanned - result.size());
         }
         return result;
     }

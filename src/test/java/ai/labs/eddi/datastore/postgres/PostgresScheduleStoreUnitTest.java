@@ -1439,6 +1439,19 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void findDueSchedules_readsPastUndecodableRowsToAFullBatch() throws Exception {
+        var batchOfOne = new PostgresScheduleStore(dataSourceInstance, jsonSerialization, 1);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        stubRows(List.of("broken-row", "readable-row", "next-row"), Set.of("broken-row"));
+
+        List<ScheduleConfiguration> rows = batchOfOne.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3);
+
+        assertEquals(1, rows.size(), "a full batch of decodable rows, no more");
+        assertEquals("readable-row", rows.get(0).getId(), "the undecodable head row does not take the batch's only slot");
+        verify(preparedStatement).setInt(5, 101); // the batch plus the allowance for skipped rows
+    }
+
+    @Test
     void findDueSchedules_ordersMostOverdueFirst() throws Exception {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);

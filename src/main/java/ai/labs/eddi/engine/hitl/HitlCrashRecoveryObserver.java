@@ -666,14 +666,14 @@ public class HitlCrashRecoveryObserver {
      * over every row stored under the schedule name, so the answer does not depend
      * on which of several rows a store returns first.
      */
-    TimeoutArming timeoutArming(List<ScheduleConfiguration> rows, String pauseId, Instant pausedAt) {
+    TimeoutArming timeoutArming(List<ScheduleConfiguration> rows, String surface, String pauseId, Instant pausedAt) {
         boolean disabled = false;
         boolean spent = false;
         for (ScheduleConfiguration row : rows) {
             if (!HitlSchedules.isHitlTimeout(row.getMetadata())) {
                 continue; // not a timeout row at all: it must not pass for this pause's timeout
             }
-            if (!ofThisPause(row, pauseId, pausedAt)) {
+            if (!ofThisPause(row, surface, pauseId, pausedAt)) {
                 continue; // a row of an earlier pause: never armed for this one
             }
             if (canFire(row)) {
@@ -721,9 +721,16 @@ public class HitlCrashRecoveryObserver {
      * whatever pause is current), when it was created after this pause began (the
      * row of an earlier pause was created before that pause ended — so a row a
      * person disabled during this pause stays disabled), and once it fired, if it
-     * fired after this pause began.
+     * fired after this pause began. A row of another surface is never this pause's:
+     * a group approval and a HUMAN member turn share one schedule name, and the
+     * fire handler routes by surface, so an approval row cannot apply a turn
+     * timeout (nor the reverse) — a row with no surface routes as a regular one.
      */
-    private boolean ofThisPause(ScheduleConfiguration row, String pauseId, Instant pausedAt) {
+    private boolean ofThisPause(ScheduleConfiguration row, String surface, String pauseId, Instant pausedAt) {
+        Object rowSurface = row.getMetadata() != null ? row.getMetadata().get(HitlSchedules.METADATA_SURFACE_KEY) : null;
+        if (!surface.equals(rowSurface != null ? rowSurface.toString() : HitlSchedules.SURFACE_REGULAR)) {
+            return false;
+        }
         Object value = row.getMetadata() != null ? row.getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY) : null;
         if (value != null) {
             return value.toString().equals(pauseId);
@@ -738,8 +745,9 @@ public class HitlCrashRecoveryObserver {
     }
 
     /** The latest fire among the completed timeout rows of THIS pause. */
-    private Instant lastFire(List<ScheduleConfiguration> rows, String pauseId, Instant pausedAt) {
-        return rows.stream().filter(r -> HitlSchedules.isHitlTimeout(r.getMetadata()) && ofThisPause(r, pauseId, pausedAt) && completed(r))
+    private Instant lastFire(List<ScheduleConfiguration> rows, String surface, String pauseId, Instant pausedAt) {
+        return rows.stream()
+                .filter(r -> HitlSchedules.isHitlTimeout(r.getMetadata()) && ofThisPause(r, surface, pauseId, pausedAt) && completed(r))
                 .map(ScheduleConfiguration::getLastFired).filter(Objects::nonNull).max(Instant::compareTo).orElse(null);
     }
 
@@ -810,7 +818,7 @@ public class HitlCrashRecoveryObserver {
                     // The store skips a row it cannot decode (and logs it): such a row cannot
                     // be fired by the poller either, so it is no timeout of this pause.
                     rows = readTimeoutRows(scheduleName);
-                    arming = timeoutArming(rows, pauseId, pausedAt);
+                    arming = timeoutArming(rows, surface, pauseId, pausedAt);
                 } catch (Exception e) {
                     // A failed read says nothing about the rows — on the restore path too: an
                     // armed one must not be joined or replaced on a transient error, and one a
@@ -851,7 +859,7 @@ public class HitlCrashRecoveryObserver {
                             scheduleName, rows.size(), conversationId, surface);
                     return false;
                 }
-                int removed = deleteReadTimeoutRows(rows, row -> ofThisPause(row, pauseId, pausedAt) && completed(row));
+                int removed = deleteReadTimeoutRows(rows, row -> ofThisPause(row, surface, pauseId, pausedAt) && completed(row));
                 if (removed == 0) {
                     LOGGER.warnf("HITL timeout schedule(s) %s: %d or more rows and none could be removed — nothing armed for %s",
                             scheduleName, rows.size(), conversationId);
@@ -859,7 +867,7 @@ public class HitlCrashRecoveryObserver {
                 }
             }
             if (!replace && arming == TimeoutArming.SPENT) {
-                Instant lastFired = lastFire(rows, pauseId, pausedAt);
+                Instant lastFired = lastFire(rows, surface, pauseId, pausedAt);
                 Instant retryAt = (lastFired != null ? lastFired : Instant.now()).plus(SPENT_REARM_BACKOFF);
                 if (retryAt.isAfter(fireAt)) {
                     fireAt = retryAt;
@@ -977,11 +985,12 @@ public class HitlCrashRecoveryObserver {
     }
 
     /**
-     * Every read of a pause's timeout rows failed: nothing was written and the
-     * pause waits for a human. In a cluster the next sweep reads again (WARN);
-     * without one — a single node, whose recovery runs only at startup — the pause
-     * keeps waiting until the next start or a person's decision (ERROR). Counted as
-     * an arm failure either way.
+     * Every read of a pause's timeout rows failed: nothing more was written, and
+     * the rows already stored stay as they are — an armed timeout of the pause
+     * still fires; without one the pause waits for a human. In a cluster the next
+     * sweep reads again (WARN); without one — a single node, whose recovery runs
+     * only at startup — the pause keeps waiting until the next start or a person's
+     * decision (ERROR). Counted as an arm failure either way.
      */
     private void readFailed(String scheduleName, String surface, String conversationId, Exception e) {
         boolean sweepFollows = clusterConfig != null && clusterConfig.isNats();
@@ -989,8 +998,8 @@ public class HitlCrashRecoveryObserver {
             LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — nothing written; the next recovery sweep "
                     + "reads again", scheduleName, e.getMessage());
         } else {
-            LOGGER.errorf("HITL timeout schedule(s) %s could not be read after %d attempt(s) (%s) — nothing written: the pause "
-                    + "of %s waits for a person's decision without a re-armed timeout until the next start", scheduleName,
+            LOGGER.errorf("HITL timeout schedule(s) %s could not be read after %d attempt(s) (%s) — nothing written: an armed timeout "
+                    + "of %s still fires; without one the pause waits for a person's decision until the next start", scheduleName,
                     readRetryDelays.size() + 1, e.getMessage(), conversationId);
         }
         if (meterRegistry != null) {
