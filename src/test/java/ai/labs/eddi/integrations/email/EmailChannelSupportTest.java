@@ -165,6 +165,8 @@ class EmailChannelSupportTest {
         assertTrue(support.lookup("int-1", "<m2@x.example>").isEmpty(), "another integration's mail is not found");
         assertThrows(BadRequestException.class, () -> support.lookup("int-1", " "));
         assertThrows(BadRequestException.class, () -> support.lookup("int-1", "<" + "a".repeat(600) + "@x.example>"));
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", "missing:" + (char) 0 + "x"), "a NUL is a 400, not a 500");
+        assertThrows(BadRequestException.class, () -> support.lookup("int-1", "<m1" + (char) 0 + "@x.example>"));
     }
 
     @Test

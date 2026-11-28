@@ -480,7 +480,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         requireEmailIntegrationForEdit(id);
         var query = new IEmailMessageLedger.LedgerQuery(enumParam("direction", direction, IEmailMessageLedger.Direction.class),
                 enumParam("kind", kind, IEmailMessageLedger.Kind.class), enumParam("state", state, IEmailMessageLedger.State.class),
-                reason == null ? null : reason.trim(), instantParam("since", since), instantParam("until", until), limitParam(limit),
+                reasonParam(reason), instantParam("since", since), instantParam("until", until), limitParam(limit),
                 cursorParam(after), false);
         var page = emailSupport().mailLog(id, query);
         return new EmailLogView.Page(page.rows().stream().map(RestChannelIntegrationStore::logView).toList(), page.nextCursor());
@@ -501,6 +501,20 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         return new EmailLogView(row.id(), row.kind().name(), row.direction().name(), row.messageId(), row.state().name(), row.lastError(),
                 IEmailMessageLedger.reasonCategory(row.lastError()), row.conversationId(), row.recipient(), row.attempts(),
                 row.createdAt().toString(), row.updatedAt() == null ? null : row.updatedAt().toString());
+    }
+
+    /**
+     * The reason prefix, trimmed. A NUL is a 400: PostgreSQL refuses it in a text
+     * parameter, which would otherwise surface as a 500.
+     */
+    private static String reasonParam(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        if (reason.indexOf('\0') >= 0) {
+            throw new BadRequestException("'reason' must not contain a NUL character.");
+        }
+        return reason.trim();
     }
 
     /** Blank and absent are the same (Quarkus hands {@code ?x=} over as null). */

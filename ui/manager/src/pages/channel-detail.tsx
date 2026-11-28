@@ -76,6 +76,7 @@ function TargetCard({
         type="button"
         className="flex w-full items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer text-start"
         onClick={() => setExpanded(!expanded)}
+        data-testid={`target-header-${index}`}
         aria-expanded={expanded}
         aria-controls={`${uid}-target-content`}
       >

@@ -228,11 +228,15 @@ public class EmailChannelSupport {
      * synthetic keys the ledger gives a mail without a Message-ID are accepted.
      *
      * @throws BadRequestException
-     *             when {@code messageId} is blank or too long
+     *             when {@code messageId} is blank, too long or contains a NUL
+     *             (which PostgreSQL refuses in a text parameter)
      */
     public List<IEmailMessageLedger.LedgerEntry> lookup(String integrationId, String messageId) {
         if (messageId == null || messageId.isBlank() || messageId.length() > 2 * MessageIds.MAX_ID_LENGTH) {
             throw new BadRequestException("The body must name the Message-ID to look up: {\"messageId\": \"<...@...>\"}.");
+        }
+        if (messageId.indexOf('\0') >= 0) {
+            throw new BadRequestException("'messageId' must not contain a NUL character.");
         }
         String trimmed = messageId.trim();
         String key = MessageIds.parseFirst(trimmed).orElse(trimmed);

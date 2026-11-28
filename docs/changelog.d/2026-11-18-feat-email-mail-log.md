@@ -28,7 +28,9 @@ Phase 2 of the email channel v2 plan: before EDDI starts ignoring mail it was no
 - New common key `ownerDigest` (`off` default | `daily`): from 00:05 UTC the inbound sweep has
   `EmailOwnerNotifier.sendDigestIfDue` send the previous UTC day's inbound counts by outcome to `ownerNotifyAddresses`
   inside `eddi.mail.notify.allowed-recipient-domains`, once per day cluster-wide (`claimNotice`), counts only, nothing
-  for a quiet day. No new scheduler.
+  for a quiet day — and a day whose only inbound rows were refused as loops counts as quiet. The day is claimed before
+  counting, so a count or relay failure after the claim loses that day's digest rather than risking two: a missing
+  digest is not proof that no mail arrived. No new scheduler.
 - `docs/email-integration.md`: "Troubleshooting: why didn't EDDI act on a mail?" with the reason table, both endpoints
   and the digest; `ownerDigest` in the keys table.
 - Manager: a **Mail log** section on an email integration's page (`#mail-log`): filters by direction, state and

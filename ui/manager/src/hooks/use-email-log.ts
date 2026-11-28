@@ -9,8 +9,10 @@ export function emailLogKey(id: string) {
 }
 
 /** Where a channel's mail-log denial is kept (outside `["channels"]`, which saves invalidate). */
+const DENIAL_ROOT = ["email-log-denial"] as const;
+
 function denialKey(id: string) {
-  return ["email-log-denial", id] as const;
+  return [...DENIAL_ROOT, id] as const;
 }
 
 /** A 403 from the integration's mail log: the last request sent before it, and the error to show. */
@@ -35,6 +37,10 @@ let requestSequence = 0;
  * sent before the denial must not repopulate the cache.
  */
 export function markEmailLogDenied(queryClient: QueryClient, id: string, error: unknown) {
+  // Nothing observes the denial (useEmailLogDenial subscribes to the cache, which
+  // adds no observer), so the default gcTime would drop it after five idle
+  // minutes and the log would show again. Kept until a later success clears it.
+  queryClient.setQueryDefaults(DENIAL_ROOT, { gcTime: Infinity });
   queryClient.setQueryData<EmailLogDenial>(denialKey(id), { afterRequest: requestSequence, error });
   // After the failing query has settled, so it is dropped with the rest.
   setTimeout(() => {

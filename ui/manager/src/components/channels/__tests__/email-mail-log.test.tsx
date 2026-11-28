@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderPage, renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
@@ -6,6 +6,22 @@ import { server } from "@eddi/app-kit/test/mocks/server";
 import { MOCK_EMAIL_LOG } from "@eddi/app-kit/test/mocks/handlers";
 import { EmailMailLog } from "@/components/channels/email-mail-log";
 import { EmailPlatformFields } from "@/components/channels/email-settings";
+
+/** How many mail-log list reads have come back to the hook: a completion signal at the API boundary. */
+const api = vi.hoisted(() => ({ settled: 0 }));
+vi.mock("@/lib/api/email-log", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/email-log")>();
+  return {
+    ...actual,
+    getEmailLog: async (...args: Parameters<typeof actual.getEmailLog>) => {
+      try {
+        return await actual.getEmailLog(...args);
+      } finally {
+        api.settled++;
+      }
+    },
+  };
+});
 
 describe("EmailMailLog", () => {
   it("lists the integration's rows with their state and reason", async () => {
@@ -55,7 +71,7 @@ describe("EmailMailLog", () => {
 
   const LOG_KEY = ["channels", "ch-email", "email-log"];
   type Mode = "ok" | "forbidden" | "down";
-  function serveLog(state: { mode: Mode; downHits: number }) {
+  function serveLog(state: { mode: Mode; downHits: number; okHits?: number }) {
     server.use(
       http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
         if (state.mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
@@ -63,6 +79,7 @@ describe("EmailMailLog", () => {
           state.downHits++;
           return HttpResponse.error();
         }
+        state.okHits = (state.okHits ?? 0) + 1;
         const filtered = new URL(request.url).searchParams.has("state");
         return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
       }),
@@ -182,10 +199,14 @@ describe("EmailMailLog", () => {
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
     expect(await screen.findByTestId("error-state")).toBeInTheDocument();
 
+    const settledBefore = api.settled;
     releaseAll!(); // the earlier request's success arrives afterwards
+    await waitFor(() => expect(api.settled).toBeGreaterThan(settledBefore));
+    await new Promise((resolve) => setTimeout(resolve, 0)); // and the hook's code after it has run
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(queryClient.getQueryData(["email-log-denial", "ch-email"])).toBeTruthy();
     expect(screen.queryByTestId("email-log-row-late")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
     expect(screen.getByTestId("error-state")).toBeInTheDocument();
   });
 
@@ -227,22 +248,68 @@ describe("EmailMailLog", () => {
   });
 
   it("a Retry that fails on the network keeps rows and lookup hidden, with Retry still offered", async () => {
-    const state = { mode: "forbidden" as Mode, downHits: 0 };
+    const state = { mode: "forbidden" as Mode, downHits: 0, okHits: 0 };
     serveLog(state);
-    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
     expect(await screen.findByTestId("error-state")).toBeInTheDocument();
 
     state.mode = "down";
     await userEvent.click(screen.getByTestId("error-state-retry"));
     await waitFor(() => expect(state.downHits).toBeGreaterThan(0));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The hook retries a network error, so wait until the attempt has settled in
+    // error: a click during its backoff would join it instead of starting one.
+    await waitFor(
+      () => {
+        const query = queryClient.getQueryState([...LOG_KEY, {}]);
+        expect(query?.status).toBe("error");
+        expect(query?.fetchStatus).toBe("idle");
+      },
+      { timeout: 8000 },
+    );
     expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
     expect(screen.getByTestId("error-state-retry")).toBeInTheDocument();
 
     state.mode = "ok";
     await userEvent.click(screen.getByTestId("error-state-retry"));
     expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+    expect(state.okHits).toBe(1); // the click started a request of its own
     expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
+  }, 15000);
+
+  it("keeps a denial past the cache's idle collection: nothing is fetched until Retry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const state = { mode: "forbidden" as Mode, downHits: 0, okHits: 0 };
+      serveLog(state);
+      const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+      expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+
+      // Nothing observes the denial, and the default gcTime is five minutes: were
+      // it collected, the section would fetch (and here show) the log unasked.
+      state.mode = "ok";
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      expect(queryClient.getQueryData(["email-log-denial", "ch-email"])).toBeTruthy();
+      expect(state.okHits).toBe(0);
+      expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument();
+      expect(screen.getByTestId("error-state-retry")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hides a lookup's outcome once the field names another Message-ID", async () => {
+    server.use(
+      http.post("*/channelstore/channels/:id/email-log/lookup", () => HttpResponse.json([{ ...MOCK_EMAIL_LOG[0], id: "found" }])),
+    );
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    const input = await screen.findByTestId("email-log-lookup-input");
+    await userEvent.type(input, "<a@x.example>");
+    await userEvent.click(screen.getByTestId("email-log-lookup-btn"));
+    expect(await screen.findByTestId("email-log-lookup-result")).toBeInTheDocument();
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "<b@x.example>");
+    expect(screen.queryByTestId("email-log-lookup-result")).not.toBeInTheDocument();
   });
 
   it("a list 403 that arrives after the section unmounted still drops the cached rows", async () => {

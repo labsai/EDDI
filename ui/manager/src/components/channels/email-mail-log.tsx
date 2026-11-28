@@ -81,7 +81,10 @@ function MessageIdLookup({ channelId }: { channelId: string }) {
   const uid = useId();
   const [messageId, setMessageId] = useState("");
   const lookup = useEmailLogLookup(channelId);
-  const notFound = lookup.isError && isApiError(lookup.error) && lookup.error.status === 404;
+  // The outcome belongs to the Message-ID that was submitted: once the field no
+  // longer holds it, the outcome is hidden rather than read as the new id's.
+  const current = lookup.variables !== undefined && messageId.trim() === lookup.variables;
+  const notFound = current && lookup.isError && isApiError(lookup.error) && lookup.error.status === 404;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -116,8 +119,8 @@ function MessageIdLookup({ channelId }: { channelId: string }) {
           {t("emailLog.lookupNotFound", "No mail with this Message-ID in the log. It was never fetched (another folder, spam), or it is older than the log's retention.")}
         </p>
       )}
-      {lookup.isError && !notFound && <ErrorState error={lookup.error} />}
-      {lookup.data && <LogTable rows={lookup.data} testId="email-log-lookup-result" />}
+      {current && lookup.isError && !notFound && <ErrorState error={lookup.error} />}
+      {current && lookup.data && <LogTable rows={lookup.data} testId="email-log-lookup-result" />}
     </div>
   );
 }

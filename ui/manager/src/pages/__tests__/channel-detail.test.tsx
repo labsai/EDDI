@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "@eddi/ui";
 import { server } from "@eddi/app-kit/test/mocks/server";
-import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
-import { Link, useNavigate } from "react-router-dom";
+import { createTestQueryClient, renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { NavigationGuardDialog } from "@eddi/app-kit/components/shared/navigation-guard-dialog";
+import { Link, Route, RouterProvider, Routes, createMemoryRouter, useNavigate } from "react-router-dom";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
@@ -317,11 +320,11 @@ describe("ChannelDetailPage", () => {
 
     // Click the header to collapse
     // A real button now, so it is reachable from the keyboard and announces its state.
-    const header = within(targetCard).getAllByText("default")[0]!.closest("button");
-    expect(header).toBeTruthy();
+    const header = within(targetCard).getByTestId("target-header-0");
+    expect(header.tagName).toBe("BUTTON");
     expect(header).toHaveAttribute("aria-expanded", "true");
 
-    await user.click(header!);
+    await user.click(header);
     expect(header).toHaveAttribute("aria-expanded", "false");
     // After collapsing, the name input should not be visible
     await waitFor(() => {
@@ -399,11 +402,40 @@ describe("ChannelDetailPage", () => {
     server.use(
       http.delete("*/channelstore/channels/:id", () => new HttpResponse(null, { status: 204 })),
     );
-    renderChannelDetail("ch1", 1);
+    // A data router, so the blocker is really there (a MemoryRouter has none).
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: (
+            <>
+              <NavigationGuardDialog />
+              <Routes>
+                <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
+                <Route path="/manage/channels" element={<div data-testid="channel-list" />} />
+              </Routes>
+            </>
+          ),
+        },
+      ],
+      { initialEntries: ["/manage/channels/ch1?version=1"] },
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+          <RouterProvider router={router} />
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
     const user = userEvent.setup();
-    await user.click(await screen.findByTestId("delete-channel-btn"));
+    // A dirty draft: without the bypass, leaving would ask to discard it.
+    const nameInput = await screen.findByTestId("channel-name-input");
+    await user.type(nameInput, " edited");
+    await user.click(screen.getByTestId("delete-channel-btn"));
     await user.click(await screen.findByTestId("alert-dialog-confirm"));
-    await waitFor(() => expect(guard.allowNextNavigation).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("channel-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
+    expect(guard.allowNextNavigation).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -599,7 +631,7 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
 
     release();
     expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
-  });
+  });
 
   it("asks again on Back instead of reusing a lookup still pending from the earlier visit", async () => {
     const answers: Array<() => void> = [];
@@ -636,9 +668,10 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
           : HttpResponse.json({ name: "Invoice intake", channelType: "EMAIL", platformConfig: { mode: "trigger", transport: "imap" }, targets: [] }),
       ),
     );
-    renderWithLinks("/manage/channels/ch-email?version=1");
+    const { queryClient } = renderWithLinks("/manage/channels/ch-email?version=1");
     expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Settled: the current version's type is known, so the absence is a decision.
+    await waitFor(() => expect(queryClient.getQueryState(["channels", "ch-email", 2])?.status).toBe("success"));
     expect(screen.queryByTestId("email-mail-log-section")).not.toBeInTheDocument();
   });
 

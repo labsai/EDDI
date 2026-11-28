@@ -252,6 +252,7 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "%%%"));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, "abc", null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "bm8tYmFy"));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, "blocked" + (char) 0 + "x", null, null, null, null));
     }
 
     @Test
