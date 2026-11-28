@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -99,16 +100,48 @@ public final class TaskBidEngine {
         sb.append("The following tasks are open for assignment. As ").append(member.displayName())
                 .append(", bid ONLY on tasks you are genuinely well-suited to execute.\n\n");
         for (TaskItem task : tasks) {
-            sb.append("- \"").append(task.subject()).append("\": ").append(task.description()).append('\n');
+            // Subject and description are planner (model) text: both are quoted. The
+            // subject is shown on one line, the form parseBids matches against.
+            sb.append(PeerContentGuard.fenced("subject: " + subjectLine(task.subject()) + "\n\n"
+                    + (task.description() != null ? task.description() : ""))).append("\n\n");
         }
         sb.append(
                 """
 
-                        Reply with ONLY this JSON:
+                        Reply with ONLY this JSON, where each "subject" is the text after "subject: " in that task's block, exactly:
                         {"bids": [{"subject": "<exact task subject>", "confidence": 0.0-1.0, "estimatedComplexity": "XS|S|M|L", "rationale": "<one sentence>"}]}
 
                         Bid only where you add real capability — an inflated confidence wins you work you will fail at, on the record.""");
-        return sb.toString();
+        return PeerContentGuard.withQuotedNotice(sb.toString());
+    }
+
+    /**
+     * A task subject on one line, as the bid prompt shows it: line breaks and other
+     * control characters become spaces, whitespace runs collapse, and a {@code ```}
+     * is broken, so a planner-written subject cannot end the quoted block it sits
+     * in. Applied to both sides of the bid match.
+     */
+    static String subjectLine(String subject) {
+        if (subject == null) {
+            return "";
+        }
+        var sb = new StringBuilder(subject.length());
+        boolean space = false;
+        for (int i = 0; i < subject.length(); i++) {
+            char c = subject.charAt(i);
+            if (Character.isWhitespace(c) || Character.isISOControl(c) || c == ' ' || c == ' ') {
+                space = true;
+                continue;
+            }
+            if (space && !sb.isEmpty()) {
+                sb.append(' ');
+            }
+            space = false;
+            sb.append(c);
+        }
+        // Idempotent (PeerContentGuard.breakFences): the prompt fences this line
+        // again, and a bid echoing what it shows must map back to the same key.
+        return PeerContentGuard.breakFences(sb.toString());
     }
 
     /**
@@ -127,8 +160,22 @@ public final class TaskBidEngine {
         if (node == null || !node.path("bids").isArray()) {
             return List.of();
         }
-        Map<String, String> canonicalBySubject = announcedSubjects.stream()
-                .collect(Collectors.toMap(s -> s.toLowerCase(Locale.ROOT), s -> s, (a, b) -> a));
+        // Keyed by the one-line form the prompt shows (buildBidPrompt), so a bid that
+        // echoes it lands on the task's real subject.
+        // Two announced subjects that show as the same line ("Review\nlogs" and
+        // "Review logs") cannot be told apart by a bid, so neither key is kept: their
+        // tasks get no bids and fall back to ROLE assignment, rather than one task
+        // receiving bids meant for the other.
+        Map<String, String> canonicalBySubject = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
+        for (String announced : announcedSubjects) {
+            String key = subjectLine(announced).toLowerCase(Locale.ROOT);
+            String prior = canonicalBySubject.putIfAbsent(key, announced);
+            if (prior != null && !prior.equals(announced)) {
+                ambiguous.add(key);
+            }
+        }
+        ambiguous.forEach(canonicalBySubject::remove);
         List<Bid> bids = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (JsonNode b : node.path("bids")) {
@@ -136,7 +183,7 @@ public final class TaskBidEngine {
             if (subject == null || subject.isBlank()) {
                 continue;
             }
-            String canonical = canonicalBySubject.get(subject.toLowerCase(Locale.ROOT));
+            String canonical = canonicalBySubject.get(subjectLine(subject).toLowerCase(Locale.ROOT));
             if (canonical == null) {
                 LOGGER.debugf("Bid from '%s' on unannounced task '%s' — dropped", member.agentId(), subject);
                 continue;

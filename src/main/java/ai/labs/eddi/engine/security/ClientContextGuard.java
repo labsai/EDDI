@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -62,6 +63,17 @@ public class ClientContextGuard {
      * ({@code CONTINUE_CONVERSATION}) and carries its number.
      */
     public static final String KEY_SELF_CONTINUATION = "selfContinuation";
+    /**
+     * Written by the schedule executor; names the run a scheduled fire belongs to,
+     * which {@code toolQuotas} rules with {@code window: "RUN"} count per. From a
+     * client, a fresh value each turn reset every such quota.
+     */
+    public static final String KEY_SCHEDULE_FIRE_ID = ScheduleConfiguration.CONTEXT_FIRE_ID;
+    /**
+     * Written by the schedule executor; the fire's {@code maxCostPerFire}
+     * allowance.
+     */
+    public static final String KEY_SCHEDULE_MAX_COST_PER_FIRE = ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE;
 
     /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
@@ -71,7 +83,8 @@ public class ClientContextGuard {
      * {@link #shadowsReserved(String)}.
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
-            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION);
+            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION,
+            KEY_SCHEDULE_FIRE_ID, KEY_SCHEDULE_MAX_COST_PER_FIRE);
 
     private final Set<String> permittedReservedKeys;
 

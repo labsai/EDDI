@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -120,6 +121,10 @@ public class FacilitatorEngine {
      * applies (M-A1). {@code null} skips it.
      */
     private final BiPredicate<String, String> useCheck;
+    /**
+     * {@code agentId -> created by the engine at runtime}; {@code null} skips it.
+     */
+    private final Predicate<String> dynamicAgentCheck;
     private GroupSigningGuard signingGuard;
 
     public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
@@ -137,6 +142,20 @@ public class FacilitatorEngine {
      */
     public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, BiPredicate<String, String> useCheck) {
+        this(memberTurnExecutor, deploymentStore, auditLedgerService, meterRegistry, useCheck, null);
+    }
+
+    /**
+     * @param dynamicAgentCheck
+     *            {@code agentId -> boolean}: whether the agent was created by the
+     *            engine at runtime ({@link CreatedAgentRecruitGuard}). Refused as a
+     *            recruit, as is any id on {@code createdAgentIds}. {@code null}
+     *            checks {@code createdAgentIds} only.
+     */
+    public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
+            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, BiPredicate<String, String> useCheck,
+            Predicate<String> dynamicAgentCheck) {
+        this.dynamicAgentCheck = dynamicAgentCheck;
         this.memberTurnExecutor = memberTurnExecutor;
         this.deploymentStore = deploymentStore;
         this.auditLedgerService = auditLedgerService;
@@ -484,6 +503,9 @@ public class FacilitatorEngine {
                     LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(gc.getId()));
             return "agent '" + agentId + "' is not available to this discussion's owner";
         }
+        if (gc.getCreatedAgentIds().contains(agentId) || (dynamicAgentCheck != null && isDynamic(agentId))) {
+            return CreatedAgentRecruitGuard.REFUSAL.formatted(agentId);
+        }
         if (!isDeployedAndReady(agentId)) {
             return "agent '" + agentId + "' is not deployed and ready";
         }
@@ -496,6 +518,15 @@ public class FacilitatorEngine {
      * it is a refused recruitment, not a failed discussion — {@code checkpoint}
      * promises never to throw.
      */
+    /** {@link #dynamicAgentCheck}, an exception counting as dynamic (refused). */
+    private boolean isDynamic(String agentId) {
+        try {
+            return dynamicAgentCheck.test(agentId);
+        } catch (RuntimeException e) {
+            return true;
+        }
+    }
+
     private boolean ownerMayUse(String agentId, GroupConversation gc) {
         try {
             return useCheck.test(agentId, gc.getUserId());
@@ -758,10 +789,10 @@ public class FacilitatorEngine {
                     .collect(Collectors.joining(", "))).append('\n');
         }
         if (latestExcerpt != null) {
-            sb.append("- Latest contribution excerpt: ").append(latestExcerpt).append('\n');
+            sb.append("- Latest contribution excerpt:\n").append(PeerContentGuard.fenced(latestExcerpt)).append('\n');
         }
         sb.append("\nWhen in doubt, choose CONTINUE.");
-        return sb.toString();
+        return PeerContentGuard.withQuotedNotice(sb.toString());
     }
 
     private static String moveContract(FacilitatorMove move) {

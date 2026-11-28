@@ -1027,6 +1027,7 @@ public class MemberTurnExecutor {
                                                   DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId,
                                                   GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
+        GroupConversation subConversation = null;
         try {
             // member.agentId() is actually a groupId for GROUP members
             String subGroupId = member.agentId();
@@ -1071,7 +1072,6 @@ public class MemberTurnExecutor {
             }
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation;
             int childTurns = claimedTurns != null ? claimedTurns : 0;
             try {
                 subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
@@ -1175,6 +1175,30 @@ public class MemberTurnExecutor {
                     Instant.now(), REASON_SUB_GROUP_DEPTH, targetAgentId);
         } catch (Exception e) {
             return handleAgentFailure(member, phaseIdx, phase, protocol, e, REASON_SUB_GROUP_FAILED, targetAgentId);
+        } finally {
+            closeNestedDiscussion(subConversation);
+        }
+    }
+
+    /**
+     * Closes a nested discussion once its answer has been read. Each GROUP-member
+     * turn starts a fresh child and the parent keeps no record of it, so nothing
+     * else would ever close it: a COMPLETED child defers its ephemeral-agent
+     * cleanup to a close, so the agents its members created stayed deployed, and
+     * the child stayed open to a continuation that spends outside the team budget
+     * (team admission and charging apply at depth 0 only). Best-effort: a child
+     * that cannot be closed (still pausing, already closed) is logged, never fails
+     * the parent's turn.
+     */
+    private void closeNestedDiscussion(GroupConversation subConversation) {
+        if (subConversation == null || subConversation.getId() == null) {
+            return;
+        }
+        try {
+            groupConversationService.closeGroupConversation(subConversation.getId());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not close nested group conversation %s: %s", LogSanitizer.sanitize(subConversation.getId()),
+                    e.getMessage());
         }
     }
 

@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -886,6 +887,12 @@ public class AgentTestRunner {
      * Context values as the engine takes them: a string becomes a {@code string}
      * context, a map an {@code object}, a list an {@code array}. The turn's values
      * are applied over the case's.
+     * <p>
+     * The engine-reserved keys ({@link ClientContextGuard#RESERVED_KEYS}) are
+     * dropped, as at every client entry point: a test case is editor-authored, and
+     * the runner reaches the conversation service directly, so without this a case
+     * could set {@code groupId}, {@code delegationDepth} or
+     * {@code dynamicAgentConfig} and be trusted as the engine.
      */
     static Map<String, Context> toContext(Map<String, Object> caseContext, Map<String, Object> turnContext) {
         var merged = new LinkedHashMap<String, Object>();
@@ -905,7 +912,7 @@ public class AgentTestRunner {
                 context.put(key, new Context(Context.ContextType.string, String.valueOf(value)));
             }
         });
-        return context;
+        return ClientContextGuard.strict().strip(context);
     }
 
     private static String truncate(String text) {

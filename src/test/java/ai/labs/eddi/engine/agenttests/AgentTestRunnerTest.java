@@ -321,6 +321,15 @@ class AgentTestRunnerTest {
     }
 
     @Test
+    @DisplayName("a test case cannot set the engine-reserved context keys")
+    void reservedContextKeysAreDropped() {
+        var context = AgentTestRunner.toContext(Map.of("groupId", "g-1", "dynamicAgentConfig", Map.of("allowCreation", true),
+                "language", "en"), Map.of("delegationDepth", "0", "scheduleFireId", "fresh-run"));
+
+        assertEquals(Set.of("language"), context.keySet(), "only the ordinary key survives: " + context.keySet());
+    }
+
+    @Test
     @DisplayName("a call without a mock fails the case and is reported — and was never executed")
     void unmockedToolCallFailsTheCase() throws Exception {
         var engine = engine();

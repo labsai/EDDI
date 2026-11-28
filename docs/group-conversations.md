@@ -193,6 +193,10 @@ consume the per-turn budget.
 a second writer racing it would corrupt the state machine that decides what runs
 next. Filing is the only agent-side write.
 
+`taskListConfig` also carries `onUnparseableVerdict` (`PASS` by default, `FAIL`
+recommended), which governs the VERIFY phase rather than the tools — see
+[TASK_FORCE Configuration](#task_force-configuration).
+
 
 ## Transcript windowing
 
@@ -347,7 +351,11 @@ peer-hidden until their phase completes (commit-reveal).
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
   emit them (the default synthesis prompt does not). The line may be written the
   way models write it: `**Option A:** …`, `- Option B: …`, `1. Option C) …`,
-  `Option D. …`, in any letter case.
+  `Option D. …`, in any letter case. The labels must run in sequence — A, B, C…
+  or 1, 2, 3… — because a ballot may vote by label and the label is resolved by
+  position: a synthesis with a gap, a repeat, an option line over 1,000
+  characters or a label with no text (the last one included) yields no options,
+  and the vote does not run. At most 32 options are read.
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
@@ -826,6 +834,16 @@ starting a sub-discussion. A cancel of the parent reaches the sub-group too: it
 stops before its next member turn. A sub-group that fails, or ends without any
 member answering, is a `FAILED` turn of its GROUP member — not an answer.
 
+Each GROUP-member turn runs a fresh child discussion, which is **closed** as soon
+as its answer has been read: its member conversations end and the agents its
+members created are cleaned up under its `lifecyclePolicy`, as for any closed
+discussion. A child stays readable, but it cannot be driven on its own —
+`continue` and `followup` on a discussion with `depth > 0` are refused with
+`409 Conflict` over REST, and refused by the MCP tools too; if the discussion
+cannot be read to check its depth, the request fails rather than running. A child is held to its parent's budget only while the parent runs
+it (the team budget admits and charges the root discussion), so a continuation of
+the child would have spent outside it. Continue the parent instead.
+
 ## Custom Phases
 
 For full control, define phases directly:
@@ -1049,10 +1067,32 @@ verifies nothing: every task of that pass is failed with the note *"Not verified
 cannot honour — which would be skipped again, so the tasks are failed once and no rework starts). A missing
 verdict is never a pass.
 
-**An unparseable verdict** (the verifier answered, but not with the JSON array) still auto-verifies every task of that
-pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
+**An unparseable verdict** (the verifier answered, but not with the JSON array, or with two) auto-verifies every task
+of that pass by default, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
 including bracketed asides such as `Checked [details]: [...]` — no longer makes it unparseable. It is no longer silent: it is logged as a warning naming the group and counted by
 `eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
+
+That default fails open: a verifier that a reviewed result talks out of the format approves everything. Set
+`taskListConfig.onUnparseableVerdict` to `FAIL` (**recommended** wherever the verifier is the check that matters)
+to fail those tasks instead — with `maxReworks` they then go back for another attempt. Under `FAIL`, a verdict
+entry with no `passed` field also counts as not passed, where the default reads it as a pass, and a task a
+readable verdict does not name is failed too (the default leaves it `COMPLETED`, unchecked). The VERIFICATION
+transcript entry renders the verdict as applied, with a line for every task the policy failed.
+
+```json
+{ "style": "TASK_FORCE", "taskListConfig": { "onUnparseableVerdict": "FAIL" } }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `taskListConfig.onUnparseableVerdict` | `PASS` \| `FAIL` | `PASS` | What VERIFY does with tasks an unreadable or ambiguous verdict left unsettled. `PASS` auto-verifies them (the behaviour before 6.7); `FAIL` fails them |
+
+Task results reach the verifier, and a dependency's result reaches the task that depends on it, inside a
+` ``` ` fence (a fence inside the result is broken), under the line that tells the model fenced text is quoted
+from other participants. The same holds for the engine's other prompts that quote members — the bid prompt
+(each task's subject and description sit in one fenced block, the subject on one line, which is the form a bid
+echoes), the convergence and verdict judges, the facilitator's briefing, the dissent round and the window
+summarizer (the previous rolling summary included).
 
 #### Pre-Configured Tasks
 
@@ -1222,7 +1262,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowCreation` | `false` | Allow creating new agents (vs. only recruiting existing) |
 | `allowRecruitment` | `false` | Allow recruiting already-deployed agents into the discussion |
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
-| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member; a torn-down agent frees its slot |
+| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member, including members whose turns run in parallel (each creation claims its slot on the live discussion before the agent is set up); a torn-down agent frees its slot |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
@@ -1270,6 +1310,13 @@ agents that have keys instead.
   same rule as recruitment above; agents this conversation or its discussion
   created are exempt — "created" meaning tracked **and** carrying a
   `dynamicOrigin` that names this conversation or its discussion.
+- `recruit_agent` and the facilitator's `RECRUIT` move refuse an agent the engine
+  created: one on the discussion's `createdAgentIds`, or any agent whose
+  configuration carries a `dynamicOrigin`, wherever it was created (an
+  unreadable configuration counts as created). A recruit votes with full weight
+  and counts toward quorum, and `create_sub_agent` writes the new agent's system
+  prompt from the creating member — so creating and then recruiting would let one
+  member add voters that say what it wants. Recruit agents deployed independently.
 
 #### Model and credential inheritance
 

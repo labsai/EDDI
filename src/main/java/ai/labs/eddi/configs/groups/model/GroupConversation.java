@@ -1815,6 +1815,68 @@ public class GroupConversation {
         }
     }
 
+    /**
+     * Creations admitted by {@link #tryReserveAgentCreation} whose agent is not on
+     * {@link #createdAgentIds} yet. Guarded by {@link #dynamicTrackingMutex};
+     * runtime state only, like the mutex.
+     */
+    @JsonIgnore
+    private transient int pendingAgentCreations;
+
+    /**
+     * Claims one of the discussion's {@code maxCreatedAgentsPerDiscussion} slots,
+     * atomically. Members of a parallel phase each used to check the created-agent
+     * total they were handed when their turn was dispatched, so N members could
+     * each create up to the cap. Counted here: the created agents plus every
+     * creation in flight.
+     *
+     * @return {@code false} when the cap is reached
+     */
+    public boolean tryReserveAgentCreation(int cap) {
+        synchronized (dynamicTrackingMutex) {
+            if (createdAgentIds.size() + pendingAgentCreations >= cap) {
+                return false;
+            }
+            pendingAgentCreations++;
+            return true;
+        }
+    }
+
+    /**
+     * Turns a reservation into a created agent: the id goes on
+     * {@link #createdAgentIds} now, not when the creating member's turn ends, so it
+     * keeps its slot (and is cleaned up) even if that turn never completes.
+     */
+    public void commitAgentCreation(String agentId) {
+        commitAgentCreation(agentId, false);
+    }
+
+    /**
+     * {@link #commitAgentCreation(String)} for an agent its creator asked to keep:
+     * the retention goes on {@link #retainedAgentIds} in the same critical section,
+     * and before the id is published, so terminal cleanup never sees the created id
+     * without its retention. Waiting for the creating member's turn to merge it
+     * meant a discussion that ended first deleted an agent the model had retained.
+     */
+    public void commitAgentCreation(String agentId, boolean retain) {
+        synchronized (dynamicTrackingMutex) {
+            pendingAgentCreations = Math.max(0, pendingAgentCreations - 1);
+            if (agentId != null && !tornDownAgentIds.contains(agentId) && !createdAgentIds.contains(agentId)) {
+                if (retain) {
+                    retainedAgentIds.add(agentId);
+                }
+                createdAgentIds.add(agentId);
+            }
+        }
+    }
+
+    /** Gives back a reservation whose creation failed. */
+    public void releaseAgentCreation() {
+        synchronized (dynamicTrackingMutex) {
+            pendingAgentCreations = Math.max(0, pendingAgentCreations - 1);
+        }
+    }
+
     @JsonIgnore
     public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
         return dynamicAgentConfig;
