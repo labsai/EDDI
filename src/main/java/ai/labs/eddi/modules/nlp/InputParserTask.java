@@ -227,11 +227,12 @@ public class InputParserTask implements ILifecycleTask {
                 : extractExpressions(parsedSolutions, config.isIncludeUnused(), config.isIncludeUnknown(), config.getMinMatchingAccuracy());
         Solution solution = solutions.isEmpty() ? null : solutions.getFirst();
 
+        // The tokens the dictionaries read: words past maxInputTokens must not select a
+        // semantic example, nor become matchable through the unknown expression a
+        // result too long to store is reduced to.
+        String readable = limits == null ? normalizedUserInput : InputParser.withinTokenLimit(normalizedUserInput, limits);
         if ((solution == null || !solution.hasMeaningfulExpressions()) && parser.getSemanticFallback() != null) {
-            // The same tokens the dictionaries read: words past maxInputTokens must not
-            // select an example either.
-            String fallbackInput = limits == null ? normalizedUserInput : InputParser.withinTokenLimit(normalizedUserInput, limits);
-            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), fallbackInput, userLanguage);
+            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), readable, userLanguage);
             if (semantic != null) {
                 solution = semantic;
                 solutions = List.of(semantic);
@@ -239,7 +240,7 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         if (solution != null) {
-            storeResultInMemory(currentStep, solution, solutions, config, normalizedUserInput);
+            storeResultInMemory(currentStep, solution, solutions, config, readable);
         }
     }
 

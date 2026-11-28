@@ -162,7 +162,7 @@ Now let's look at a more complex output configuration file:
 
 ### Output set language (`lang`)
 
-An output set may carry a top-level `lang` (for example `"lang": "de"`). It is compared case-insensitively with the conversation's `lang` property, and the set is used only when they are equal. A set without `lang` always applies. **If the conversation has no `lang` property, a set that declares `lang` produces no output at all, silently.** The server logs a WARN naming the set's `lang`, the conversation and the conversation's `lang` once per deployed configuration, so a missing property shows up in the log. Set the `lang` property (for example from the input context) when you use language-specific sets; the parser, by contrast, defaults to `en`.
+An output set may carry a top-level `lang` (for example `"lang": "de"`). It is compared case-insensitively with the conversation's `lang` property, and the set is used only when they are equal. A set without `lang` always applies. **If the conversation has no `lang` property, a set that declares `lang` produces no output at all, silently.** The server logs a WARN naming the set's `lang`, the conversation and the conversation's `lang` once per deployed configuration, so a missing property shows up in the log. Only the **first** mismatch is logged: if a conversation with a different `lang` reached the set first, that line is the one in the log, and a later conversation with no `lang` at all logs nothing. Set the `lang` property (for example from the input context) when you use language-specific sets; the parser, by contrast, defaults to `en`.
 
 ### Fields by output `type`
 
