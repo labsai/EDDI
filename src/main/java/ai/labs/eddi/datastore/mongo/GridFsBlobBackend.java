@@ -127,8 +127,11 @@ public class GridFsBlobBackend implements BlobBackend {
             byte[] buffer = new byte[COPY_BUFFER_BYTES];
             int n;
             while ((n = source.read(buffer)) != -1) {
-                upload.write(buffer, 0, n);
+                // Counted before the call: a write that inserts chunk 0 and then fails (on
+                // a later chunk, or with a non-duplicate error after the insert) may have
+                // stored ours, so cleanup must run.
                 written += n;
+                upload.write(buffer, 0, n);
             }
             closing = true;
             upload.close();
