@@ -78,6 +78,12 @@ public interface IRestConversationStore {
      * passed, not the principal), there is no owner to match and the flag changes
      * nothing.
      * <p>
+     * {@code filter} is a text search. For an administrator (or with authorization
+     * disabled) a search that matches no conversation at all is dropped and the
+     * listing returned without it. For every other caller a search that matches
+     * nothing they may be listed returns an empty page: whether other users'
+     * conversations match must not change what they are shown.
+     * <p>
      * {@code excludeGroupMembers=true} leaves out the private conversations a group
      * discussion started for its members (those whose descriptor records a
      * {@code groupConversationId}; member conversations started before 6.7.0 record

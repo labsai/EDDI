@@ -466,6 +466,16 @@ public class ConversationAccessGuard {
         return policy != null && policy.mayReview(agentResource);
     }
 
+    /**
+     * Whether the caller maintains this agent — the precondition for reviewing any
+     * of its conversations, before the per-version opt-in is looked at. A caller
+     * for whom this is {@code false} can review none of the agent's conversations.
+     */
+    public boolean maintainsAgent(String agentId) {
+        ConversationReviewPolicy policy = reviewPolicy();
+        return policy != null && agentId != null && policy.maintains(agentId);
+    }
+
     private ConversationReviewPolicy reviewPolicy() {
         return reviewPolicyInstance != null && reviewPolicyInstance.isResolvable() ? reviewPolicyInstance.get() : null;
     }

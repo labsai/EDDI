@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.memory;
 
 import java.util.Optional;
+import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 /**
  * The paid calls of one conversation that are in flight: what each is expected
@@ -65,6 +67,52 @@ public final class SpendReservations {
         heldUsd += amount;
         open++;
         return Optional.of(new Reservation(amount));
+    }
+
+    /**
+     * Reserves all the headroom left — {@code ceilingUsd} less {@code spentUsd}
+     * less what is already held — in one step, so nothing reserved in between can
+     * push the total above the ceiling.
+     *
+     * @return the reservation, holding the headroom it took; empty when there is
+     *         none
+     */
+    public synchronized Optional<Reservation> reserveHeadroom(double spentUsd, double ceilingUsd) {
+        return reserveHeadroom(() -> spentUsd, ceilingUsd);
+    }
+
+    /**
+     * As {@link #reserveHeadroom(double, double)}, with the recorded spend read
+     * <em>inside</em> this object's monitor: a charge written under the same
+     * monitor (see {@link #exclusively}) then lands either wholly before the read
+     * or wholly after the reservation, never between them.
+     */
+    public synchronized Optional<Reservation> reserveHeadroom(DoubleSupplier spentUsd, double ceilingUsd) {
+        double headroom = ceilingUsd - spentUsd.getAsDouble() - heldUsd;
+        if (!Double.isFinite(headroom) || !(headroom > 0.0)) {
+            return Optional.empty();
+        }
+        heldUsd += headroom;
+        open++;
+        return Optional.of(new Reservation(headroom));
+    }
+
+    /**
+     * Runs {@code action} under this object's monitor, the one every reservation,
+     * settlement and release takes, so a write to the recorded spend it makes is
+     * atomic with respect to {@link #reserveHeadroom(DoubleSupplier, double)}.
+     */
+    public synchronized void exclusively(Runnable action) {
+        action.run();
+    }
+
+    /**
+     * As {@link #exclusively(Runnable)}, returning what {@code action} computes:
+     * for a decision (the ceiling, the headroom, the hold) that must be taken from
+     * one consistent view of the spend.
+     */
+    public synchronized <T> T computeExclusively(Supplier<T> action) {
+        return action.get();
     }
 
     /** What the calls in flight are holding right now. */

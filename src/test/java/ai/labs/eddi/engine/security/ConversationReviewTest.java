@@ -72,6 +72,8 @@ class ConversationReviewTest {
         // v1 predates review; v2 turned it on.
         when(agentStore.read(AGENT, 1)).thenReturn(new AgentConfiguration());
         when(agentStore.read(AGENT, 2)).thenReturn(reviewing(null));
+        // The caller authors agents; tests that need a chat-only caller turn it off.
+        when(identity.hasRole("eddi-editor")).thenReturn(true);
         policy = new ConversationReviewPolicy(agentStore, guard, identity);
     }
 
@@ -112,10 +114,26 @@ class ConversationReviewTest {
         @DisplayName("without enforcement, only people who may author agents count as maintainers")
         void withoutEnforcementEditorsOnly() {
             when(guard.settings()).thenReturn(new WorkspaceSettings(false, true, "groups", WorkspaceSettings.LEGACY_SHARED, Optional.empty()));
+            when(identity.hasRole("eddi-editor")).thenReturn(false);
 
             assertFalse(policy.mayReview(AGENT_V2), "a chat-only eddi-user must not read other people's conversations");
             when(identity.hasRole("eddi-editor")).thenReturn(true);
             assertTrue(policy.mayReview(AGENT_V2));
+        }
+
+        @Test
+        @DisplayName("under enforcement, edit access through a team space is not enough without an authoring role")
+        void withEnforcementTeamMemberWithoutAuthoringRole() {
+            // A team space gives EDIT to every member regardless of role: requireAccess
+            // passes (the mock does not throw), but a chat-only member must not review.
+            when(identity.hasRole("eddi-editor")).thenReturn(false);
+            when(guard.isAdmin()).thenReturn(false);
+
+            assertFalse(policy.mayReview(AGENT_V2), "an eddi-user in the team space must not read other people's conversations");
+            assertFalse(policy.maintains(AGENT));
+
+            when(guard.isAdmin()).thenReturn(true);
+            assertTrue(policy.mayReview(AGENT_V2), "an admin still reviews");
         }
 
         @Test

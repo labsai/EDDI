@@ -331,4 +331,25 @@ class ConversationSecretClientInputTest {
     private Conversation conversation() {
         return new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
     }
+
+    @Test
+    @DisplayName("a secret input that reads like a number leaves the recorded costs alone; other data holding it is scrubbed")
+    void accountingKeysAreNotScrubbed() throws Exception {
+        IInputParser parser = normalizingParser();
+        doAnswer(invocation -> {
+            parserTask.execute(memory, parser);
+            var step = memory.getCurrentStep();
+            step.storeData(new Data<Object>(MemoryKeys.AUDIT_DELEGATED_COST, 0.125));
+            step.storeData(new Data<Object>(MemoryKeys.AUDIT_COST, 0.125));
+            step.storeData(new Data<Object>("httpCalls:echo", 0.125));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("0.125", secretFlag());
+
+        var step = memory.getCurrentStep();
+        assertEquals(0.125, step.getLatestData(MemoryKeys.AUDIT_DELEGATED_COST).getResult());
+        assertEquals(0.125, step.getLatestData(MemoryKeys.AUDIT_COST).getResult());
+        assertEquals(PLACEHOLDER, step.getLatestData("httpCalls:echo").getResult(), "the scrub did run");
+    }
 }

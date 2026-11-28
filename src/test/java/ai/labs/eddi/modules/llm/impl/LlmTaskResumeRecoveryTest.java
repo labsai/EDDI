@@ -245,6 +245,21 @@ class LlmTaskResumeRecoveryTest {
     }
 
     @Test
+    @DisplayName("onError=fallback: a provider the registry refuses on resume is a failed model phase — fallback served, pause consumed")
+    void refusedProviderOnResumeServesTheFallback() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any()))
+                .thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("provider 'jlama' is not allowed here"));
+
+        run(task(onErrorFallback().andThen(validation(v -> v.setFallbackMessage("Please try again later.")))));
+
+        var item = outputItem();
+        assertEquals("Please try again later.", item.getText());
+        assertEquals(Boolean.TRUE, item.getFallback());
+        verify(memory).setHitlPendingToolCalls(null);
+        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
     @DisplayName("without onError the failure still propagates and the pause stays pending (default behaviour)")
     void failedResumeWithoutOnErrorPropagates() throws Exception {
         when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))

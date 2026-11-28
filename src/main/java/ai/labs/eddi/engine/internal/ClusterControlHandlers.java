@@ -76,7 +76,8 @@ public class ClusterControlHandlers implements ClusterStartable {
     @Override
     public void startCluster() {
         rpc.handle(IClusterRpc.CONVERSATION_CANCEL,
-                request -> Map.of("signalled", conversationService.signalLocalInFlight(String.valueOf(request.get("conversationId")))));
+                request -> Map.of("signalled", conversationService.signalLocalInFlight(String.valueOf(request.get("conversationId")),
+                        ConversationService.CANCEL_REASON_END.equals(request.get(ConversationService.CANCEL_REASON)))));
         rpc.handle(IClusterRpc.GROUP_CONTROL, this::groupControl);
         rpc.handle(IClusterRpc.GDPR_STOP, this::gdprStop);
         rpc.handle(IClusterRpc.ERASURE_DRAIN, request -> drainReply());

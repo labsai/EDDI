@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
@@ -184,6 +185,31 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         TeamBudgetEditPolicy.check(old != null ? old.getTeamBudget() : null, after, teamBudgetAdminOnlyEdits, resourceAccessGuard);
     }
 
+    /**
+     * The group's own LLM settings (context-window summaries, stance summaries,
+     * lesson consolidation, judges) name a provider too: a restricted one, or
+     * content logging, needs an administrator unless the replaced version already
+     * had it — see {@link LlmProviderAuthorPolicy}.
+     */
+    private void requireMayAuthorProvider(AgentGroupConfiguration candidate, AgentGroupConfiguration stored) {
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(candidate, stored, "group");
+        }
+    }
+
+    private AgentGroupConfiguration readQuietly(String id, Integer version) {
+        try {
+            return groupStore.read(id, version);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
     private void requireUse(String agentId) {
         if (agentId != null && !agentId.isBlank()) {
             resourceAccessGuard.requireAgentUseAccess(agentId.trim());
@@ -192,7 +218,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
         requireUseOnMembers(groupConfiguration);
+        // Resolved once: the version the checks read is the version updated.
+        version = restVersionInfo.validateParameters(id, version);
         requireTeamBudgetChangeAllowed(id, version, groupConfiguration);
+        requireMayAuthorProvider(groupConfiguration, readQuietly(id, version));
         Response response = restVersionInfo.update(id, version, groupConfiguration);
         syncDescriptor(id, groupConfiguration);
         return response;
@@ -201,6 +230,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
         requireUseOnMembers(groupConfiguration);
+        requireMayAuthorProvider(groupConfiguration, null);
         TeamBudgetEditPolicy.check(null, groupConfiguration == null ? null : groupConfiguration.getTeamBudget(), teamBudgetAdminOnlyEdits,
                 resourceAccessGuard);
         Response response = restVersionInfo.create(groupConfiguration);
@@ -224,6 +254,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         // The copy is the caller's group: VIEW on the source is not USE on the agents
         // it runs, so the copy is held to the same check a create is.
         requireUseOnMembers(config);
+        requireMayAuthorProvider(config, null);
         TeamBudgetEditPolicy.check(null, config == null ? null : config.getTeamBudget(), teamBudgetAdminOnlyEdits, resourceAccessGuard);
         Response response = restVersionInfo.create(config);
         // Sync descriptor for the duplicate too

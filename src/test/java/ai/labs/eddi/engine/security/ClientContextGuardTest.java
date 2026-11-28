@@ -36,7 +36,7 @@ class ClientContextGuardTest {
 
     @ParameterizedTest(name = "reserved key {0} is removed")
     @ValueSource(strings = {"groupId", "groupConversationId", "groupDepth", "groupTranscript", "dynamicAgentConfig",
-            "dynamicCreatedAgentIds", "delegationDepth", "selfContinuation"})
+            "dynamicCreatedAgentIds", "delegationDepth", "selfContinuation", "delegationMaxCostUsd"})
     void reservedKeyIsRemoved(String key) {
         Map<String, Context> context = new HashMap<>();
         context.put(key, str("x"));
@@ -51,7 +51,7 @@ class ClientContextGuardTest {
     @Test
     @DisplayName("every reserved key is covered by the parameterized test above")
     void reservedSetIsExactlyTheDocumentedOnes() {
-        assertEquals(8, ClientContextGuard.RESERVED_KEYS.size());
+        assertEquals(9, ClientContextGuard.RESERVED_KEYS.size());
     }
 
     @Test

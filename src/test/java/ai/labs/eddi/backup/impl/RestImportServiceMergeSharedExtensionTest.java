@@ -25,6 +25,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -58,10 +59,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -436,6 +439,48 @@ class RestImportServiceMergeSharedExtensionTest {
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + LOCAL_DICT_ID + "?version=" + version));
         return descriptor;
+    }
+
+    @Test
+    @DisplayName("restorability is checked before every write of a resource merged twice, against the original")
+    void restorabilityCheckedBeforeEveryWrite() throws Exception {
+        stubTwoWorkflowsSharingOneDictionary();
+        LlmProviderAuthorPolicy policy = mock(LlmProviderAuthorPolicy.class);
+        importService.useLlmProviderAuthorPolicy(policy);
+        var original = new DictionaryConfiguration();
+        var dictionaryStore = mock(IDictionaryStore.class);
+        when(dictionaryStore.read(LOCAL_DICT_ID, 1)).thenReturn(original);
+        var current = new AtomicInteger(1);
+        var restDictionaryStore = mock(IRestDictionaryStore.class);
+        when(restDictionaryStore.updateRegularDictionary(eq(LOCAL_DICT_ID), anyInt(), any())).thenAnswer(i -> {
+            current.incrementAndGet();
+            return Response.ok().build();
+        });
+        when(documentDescriptorStore.findByOriginId(DICT_ORIGIN_ID)).thenAnswer(i -> List.of(localDescriptorAt(current.get())));
+        when(documentDescriptorStore.getCurrentResourceId(LOCAL_DICT_ID)).thenReturn(resourceId(LOCAL_DICT_ID, 1));
+        when(documentDescriptorStore.readDescriptor(LOCAL_DICT_ID, 1)).thenReturn(new DocumentDescriptor());
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("cccc11112222333344445551", 1),
+                resourceId("cccc11112222333344445552", 1));
+        var agentStore = mock(IAgentStore.class);
+        when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+        try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+            CDI cdi = mock(CDI.class);
+            cdiMock.when(CDI::current).thenReturn(cdi);
+            stubBean(cdi, IWorkflowStore.class, workflowStore);
+            stubBean(cdi, IAgentStore.class, agentStore);
+            stubBean(cdi, IDictionaryStore.class, dictionaryStore);
+            stubBean(cdi, IRestDictionaryStore.class, restDictionaryStore);
+            stubBean(cdi, CapabilityRegistryService.class, mock(CapabilityRegistryService.class));
+
+            assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+        }
+
+        // Both merges of the dictionary checked that the original can be written back
+        // over what they write — not only the first.
+        verify(policy, times(2)).requireMayAuthor(same(original), any(), anyString());
     }
 
     private void stubTwoWorkflowsSharingOneDictionary() throws Exception {
