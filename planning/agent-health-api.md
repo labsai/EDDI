@@ -226,7 +226,7 @@ confirm or change them, and update this file when it does.
    path into the body (`thresholds.resolutionRate.red`, `slo.agentTurnSuccess`) and `overrides[0].reason` for list
    items; the UI shows a violation under the field whose path it equals or starts.
 4. **Drill-down evidence for "confirmed".** The UI opens the sessions list for the *confirmed* part of the resolution
-   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED` and `evidence=external_event|conversation_id_event|agent_action`;
+   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED&evidence=external_event&evidence=conversation_id_event&evidence=agent_action` (`outcome` and `evidence` are **repeated** query parameters, one value each, never a delimited list);
    *self-reported* is `evidence=self_reported` (same outcomes); *agent closed* is `evidence=agent_closed` and *silence*
    is `evidence=silence`, both with `outcome=ASSUMED_RESOLVED`. The abandonment drill-down asks for `outcome=ABANDONED`
    only (`ENDED_QUIETLY` is a separate outcome).

@@ -18,6 +18,16 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive/15 text-destructive",
         outline: "text-foreground",
+        // Tinted with a matching border: a status pill that must read as a
+        // bounded chip next to plain text (e.g. the Agent Health bands).
+        "success-outline":
+          "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        "warning-outline":
+          "border-warning/40 bg-warning/10 text-warning",
+        "destructive-outline":
+          "border-destructive/40 bg-destructive/10 text-destructive",
+        "muted-outline":
+          "border-border bg-muted text-muted-foreground",
       },
     },
     defaultVariants: {
