@@ -33,6 +33,8 @@ export function authTypeLabel(t: TFunction, authType: AuthType): string {
       return t("connections.authType.jwtBearer", "Signed-key service account");
     case "OAUTH2_AUTHORIZATION_CODE":
       return t("connections.authType.authorizationCode", "OAuth user login");
+    case "SMIME_SIGNING":
+      return t("connections.authType.smimeSigning", "Email signing certificate");
   }
 }
 
@@ -63,6 +65,11 @@ export function authTypeDescription(t: TFunction, authType: AuthType): string {
       return t(
         "connections.choice.authorizationCodeBody",
         "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault.",
+      );
+    case "SMIME_SIGNING":
+      return t(
+        "connections.choice.smimeSigningBody",
+        "An S/MIME certificate an email integration signs its outgoing mail with. Never sent anywhere: only the public certificate travels in the signature.",
       );
   }
 }

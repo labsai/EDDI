@@ -2234,9 +2234,56 @@ your tool schemas do not cover it, not as a routine first step:
   app's service principal THIS mailbox only; IMAP.AccessAsApp alone does not
   limit which mailboxes the app can open, the per-mailbox permission is the
   restriction. Other hosts: a BASIC connection with an app password.
-- Email conversation mode adds: smtpHost (required, DNS name, same socket
-  policy as host), smtpPort 587 (STARTTLS, required) or 465 (TLS); fromName;
-  replyTemplate "{output}" (variables output and mail.subject, mail.from,
+- Email SMTP keys, valid in BOTH modes: smtpHost (DNS name, same socket
+  policy as host; required in conversation mode, optional in trigger mode,
+  where it is used only for the self-test, trigger mode still never replies),
+  smtpPort 587 (STARTTLS, required) or 465 (TLS), fromName. The connection's
+  baseUrlAllowlist must then also hold smtp://<smtpHost>:587 or
+  smtps://<smtpHost>.
+- Email typed settings live in emailControl, an object next to platformConfig
+  (email integrations only; on another channel type it is refused).
+  emailControl.smime: sign true (default), "required" or false; connection =
+  name of a connection with authType SMIME_SIGNING. Mail the integration sends
+  through its own SMTP (replies, pause notices, the self-test) is S/MIME-signed
+  (multipart/signed, SHA-256) when a signing connection is named. true without
+  a connection: unsigned, save warning email.smime-no-certificate. "required":
+  never unsigned; a missing, expired, mismatched or unreadable certificate
+  HOLDS the reply (ledger reason smime_unavailable, retried hourly without
+  using up attempts, owner notice), and saving with an unusable certificate is
+  refused. A reply still held after eddi.email.smime.max-hold (default 72h) is
+  given up: FAILED with reason smime_unavailable:expired, audited, final owner
+  notice smime_hold_expired. An unknown sign value is a 400 on write; in a
+  stored document it reads as true. The signature advertises no encryption
+  capabilities (encrypted mail cannot be read here; recommend a signing-only
+  certificate). Owner notices and HITL mails (system mailer) are never signed.
+  SMIME_SIGNING connection: binding SERVICE, smimeSigning.certificate =
+  \${vault:...} holding a base64 PKCS#12 keystore or PEM key plus chain,
+  smimeSigning.password = \${vault:...} (optional), baseUrlAllowlist = the
+  SMTP origins whose mail it may sign; it never resolves as an HTTP header or
+  a mail login. The certificate's rfc822Name SAN (or subject e-mail) must
+  equal address; key usage digitalSignature or nonRepudiation and extended key
+  usage emailProtection when present; not expired; chain to a public root. A
+  leaf plus intermediate(s) whose root is not publicly trusted or not shipped
+  (the usual .p12 of an S/MIME-only CA) still signs, with save warning
+  email.smime-untrusted-chain: trust is the recipient's decision. Refused only
+  when the chain is broken (a signature in it does not verify, or an issuer in
+  it is expired, not a CA or not allowed to sign certificates), the leaf comes
+  without its intermediates, or the bundle holds more than 10 certificates. Other save warnings:
+  email.smime-certificate-unusable, email.smime-certificate-expiring (within
+  30 days; checked daily too, owner notice, gauge
+  eddi_email_smime_certificate_days_left). Ledger OUT rows record signed.
+  Sending-health self-test: POST /channelstore/channels/<id>/email-self-test
+  (edit access, at most 5 per clock hour, needs smtpHost) mails the mailbox itself
+  with a single-use 15-minute token; GET .../email-self-test/<token> then
+  reports in plain words the DKIM verdict and signing domain, alignment,
+  whether S/MIME verified (verified, verified_untrusted_root or chain_broken)
+  and whether DMARC is published ("inconclusive" on
+  Microsoft 365, which does not DKIM-sign mail inside one organisation). A
+  "signs as x.gappssmtp.com, not <domain>" finding means DKIM authentication
+  for the domain was never started at the provider. The test mail never starts
+  a turn. You have no tool for it: point the admin at the Manager's channel
+  page (Run self-test) or the MCP tool run_email_self_test.
+- Email conversation mode adds: replyTemplate "{output}" (variables output and mail.subject, mail.from,
   mail.fromName, mail.date; the agent output is data, never parsed as a
   template); aiDisclosure, a default sentence appended to every reply (an
   empty value switches it off: save warning email.ai-disclosure-disabled, EU
@@ -2271,11 +2318,11 @@ your tool schemas do not cover it, not as a routine first step:
   {"address": "..."}) — you have no tool for these, so point the admin at
   them. The mail server must sign outgoing mail with DKIM for the domain of
   address (and the domain publish DMARC), or replies land in spam: the platform does
-  not sign. A conversation started but whose mail turn never ran (a node
+  not DKIM-sign (its S/MIME signature is separate, see emailControl.smime). A conversation started but whose mail turn never ran (a node
   died) is found again in the mailbox and run once; a reply lost the same
   way is rebuilt from the conversation. Metrics:
   eddi_email_outbound_total{kind="reply", outcome sent, retry, failed,
-  suppressed, throttled, refused, bounced, no_output},
+  suppressed, throttled, refused, bounced, no_output, held; signed true|false},
   eddi_email_outbound_latency_seconds, eddi_email_suppressions_total. Human
   takeover of an email conversation does not exist yet.
   When a helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) already

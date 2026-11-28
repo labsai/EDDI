@@ -24,9 +24,10 @@ import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
-import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
+import { emailConfigProblems, emailControlProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType } from "@/lib/channel-platform-config";
-import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
+import { emailControlProblemMessage, emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
+import { EmailSelfTestPanel } from "@/components/channels/email-self-test";
 import {
   CHANNEL_TYPES,
   type ChannelIntegrationConfiguration, type ChannelTarget,
@@ -314,6 +315,11 @@ export function ChannelDetailPage() {
         toast.error(emailProblemMessage(problems[0]!, t));
         return;
       }
+      const controlProblems = emailControlProblems(draft.emailControl);
+      if (controlProblems.length > 0) {
+        toast.error(emailControlProblemMessage(controlProblems[0]!, t));
+        return;
+      }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
     }
     try {
@@ -504,7 +510,13 @@ export function ChannelDetailPage() {
               if (channelType === draft.channelType) return;
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
-              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+              // emailControl is email-only: the backend refuses it on any other type.
+              setDraft({
+                ...draft,
+                channelType,
+                platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig),
+                emailControl: channelType === "email" ? draft.emailControl : undefined,
+              });
             }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
@@ -516,7 +528,13 @@ export function ChannelDetailPage() {
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
         {isEmail ? (
-          <EmailPlatformFields advancedOpen platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+          <EmailPlatformFields
+            advancedOpen
+            platformConfig={draft.platformConfig}
+            onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)}
+            emailControl={draft.emailControl}
+            onEmailControlChange={(emailControl) => setDraft((prev) => prev ? { ...prev, emailControl } : prev)}
+          />
         ) : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (
@@ -570,6 +588,19 @@ export function ChannelDetailPage() {
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
           <EmailSecurityNotes conversation={emailMode(draft?.platformConfig ?? {}) === "conversation"} />
+        </section>
+      )}
+
+      {/* Email: the sending-health self-test of the saved integration. */}
+      {isEmail && id && (
+        <section className="rounded-xl border border-border/50 p-5 space-y-3" data-testid="email-self-test-section">
+          <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.selfTest.title", "Sending-health self-test")}</h2>
+          <EmailSelfTestPanel
+            key={`${id}@${version}`}
+            integrationId={id}
+            hasSmtp={!!(baseline ? (JSON.parse(baseline) as { platformConfig?: Record<string, string> }).platformConfig?.smtpHost : draft.platformConfig.smtpHost)}
+            dirty={isDirty}
+          />
         </section>
       )}
 

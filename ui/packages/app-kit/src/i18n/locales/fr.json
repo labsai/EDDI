@@ -968,14 +968,16 @@
       "basic": "Identifiant & mot de passe",
       "clientCredentials": "Compte de service OAuth",
       "authorizationCode": "Connexion utilisateur OAuth",
-      "jwtBearer": "Compte de service à clé de signature"
+      "jwtBearer": "Compte de service à clé de signature",
+      "smimeSigning": "Certificat de signature d'e-mail"
     },
     "choice": {
       "staticBody": "Un en-tête fixe, identique pour tout le monde — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se charge de l'encodage : le mot de passe reste une entrée distincte du coffre, que vous pouvez renouveler seule.",
       "clientCredentialsBody": "L'agent se connecte en son propre nom. Un jeton d'accès partagé par tous, renouvelé automatiquement.",
       "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre.",
-      "jwtBearerBody": "L'agent se connecte en son propre nom avec une clé privée au lieu d'un secret — un compte de service Google, par exemple. Un seul jeton d'accès partagé par tous."
+      "jwtBearerBody": "L'agent se connecte en son propre nom avec une clé privée au lieu d'un secret — un compte de service Google, par exemple. Un seul jeton d'accès partagé par tous.",
+      "smimeSigningBody": "Un certificat S/MIME avec lequel une intégration e-mail signe ses messages sortants. Jamais envoyé nulle part : seul le certificat public voyage dans la signature."
     },
     "binding": {
       "perUser": "Par personne",

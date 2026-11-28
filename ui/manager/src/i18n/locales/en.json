@@ -4550,7 +4550,8 @@
       "paramValueTooLong": "A parameter value is at most 512 characters.",
       "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here.",
       "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url.",
-      "thumbprintRequiredEntra": "Microsoft Entra identifies the key only by its certificate thumbprint. Paste the thumbprint of the certificate you uploaded to the app registration."
+      "thumbprintRequiredEntra": "Microsoft Entra identifies the key only by its certificate thumbprint. Paste the thumbprint of the certificate you uploaded to the app registration.",
+      "originNotSmtp": "A signing certificate lists the SMTP relays whose mail it signs: smtps://host or smtp://host:587."
     },
     "backToList": "Back to Connections",
     "headerSecret": "Stored secret",
@@ -4596,7 +4597,11 @@
         "label": "Google service account (JSON key)",
         "description": "Google APIs as a service account, signed with its private key (RFC 7523 JWT bearer). Store the downloaded JSON key file as ONE vault entry and reference it as the private key; the issuer and key id are read from it. Add https://oauth2.googleapis.com to the credential endpoint allowlist. Without domain-wide delegation the account sees only what is shared with it."
       }
-    }
+    },
+    "smimeHint": "Store the certificate in the vault first: a base64 PKCS#12 (.p12/.pfx) keystore, or PEM text with the private key followed by the certificate chain. The certificate must be issued to the mailbox address that signs with it.",
+    "smimeCertificate": "Certificate and private key",
+    "smimePassword": "Keystore or key password (optional)",
+    "smimeOriginsHint": "List the SMTP relays whose mail this certificate may sign, e.g. smtp://smtp.office365.com:587 or smtps://smtp.gmail.com."
   },
   "workspaces": {
     "allSpaces": "All workspaces",
@@ -5579,13 +5584,19 @@
       "fromNameInvalid": "The sender name may be at most {{max}} characters, without line breaks.",
       "replyTemplateTooLong": "The reply template may be at most {{max}} characters.",
       "aiDisclosureTooLong": "The AI disclosure may be at most {{max}} characters.",
-      "maxRepliesPerThreadPerHour": "The reply limit must be a whole number from 1 to 1000."
+      "maxRepliesPerThreadPerHour": "The reply limit must be a whole number from 1 to 1000.",
+      "smimeConnectionRequired": "Signing 'required' needs a signing connection: without one every outgoing mail would be held.",
+      "smimeConnectionInvalid": "A connection name has letters, digits, '.', '_' and '-' only."
     },
     "warning": {
       "openTrigger": "Saved, but anyone on the internet can make this agent run: there is no sender allowlist and unauthenticated mail is processed.",
       "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
       "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
-      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes."
+      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      "smimeNoCertificate": "Saved, but mail goes out unsigned: S/MIME signing is on, and no SMIME_SIGNING connection is named. Add one under S/MIME signing, or switch signing off.",
+      "smimeCertificateUnusable": "Saved, but the S/MIME certificate cannot sign this mailbox's mail (wrong address, missing key usage, expired, or an incomplete chain), so mail goes out unsigned.",
+      "smimeCertificateExpiring": "Saved. The S/MIME certificate expires within 30 days: renew it and update the SMIME_SIGNING connection.",
+      "smimeUntrustedChain": "Saved, but the S/MIME certificate does not lead to a publicly trusted root, so recipients' mail clients will show the signature as untrusted."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5618,7 +5629,52 @@
     "replyTemplate": "Reply template",
     "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
     "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
-    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "DKIM signs for your domain",
+        "dkimUnaligned": "DKIM signs for another domain",
+        "dkimMissing": "No DKIM signature",
+        "dkimInconclusive": "DKIM: inconclusive inside Microsoft 365",
+        "dkimFailed": "DKIM signature does not verify",
+        "dkimDnsTemporary": "DNS lookup failed",
+        "smimeVerified": "S/MIME signature verified",
+        "smimeMissing": "Expected an S/MIME signature, none arrived",
+        "smimeOff": "Not S/MIME-signed",
+        "smimeInvalid": "S/MIME signature does not verify",
+        "smimeWrongSigner": "S/MIME certificate is for another address",
+        "smimeUntrustedRoot": "S/MIME signature verified; the root is not publicly trusted",
+        "smimeChainBroken": "S/MIME signature verified, but the certificate chain is broken",
+        "dmarcPresent": "DMARC record published",
+        "dmarcAbsent": "No DMARC record",
+        "dmarcUnknown": "DMARC could not be checked",
+        "sendFailed": "The test mail could not be sent",
+        "testExpired": "The test mail did not come back"
+      },
+      "rateLimited": "At most 5 self-tests per hour. Try again later.",
+      "hint": "Sends one short mail from the mailbox to itself through its SMTP relay, reads it back on the next poll and says how your provider signs it (DKIM, DMARC) and whether the S/MIME signature verifies. It never starts an agent conversation.",
+      "noSmtp": "Set an SMTP host and save first: the test is sent through it.",
+      "unsaved": "The test uses the saved settings; save your changes first to test them.",
+      "run": "Run self-test",
+      "waiting": "Test mail sent. Waiting for the next mailbox poll to read it back…",
+      "done": "The test mail came back.",
+      "expired": "The test mail did not come back within 15 minutes.",
+      "sendFailed": "The test mail could not be sent.",
+      "sentSigned": "(sent S/MIME-signed)",
+      "sentUnsigned": "(sent unsigned)",
+      "title": "Sending-health self-test"
+    },
+    "sendingSection": "Sending (SMTP)",
+    "smtpTriggerHint": "Optional in trigger mode, which never replies: the relay is used only for the sending-health self-test.",
+    "smimeSection": "S/MIME signing",
+    "smimeSign": "Sign outgoing mail",
+    "smimeSignOn": "On — sign when a certificate is configured (default)",
+    "smimeSignRequired": "Required — never send unsigned mail",
+    "smimeSignOff": "Off",
+    "smimeSignRequiredHint": "A missing, expired or mismatched certificate holds outgoing mail and tells the owners; nothing goes out unsigned.",
+    "smimeSignHint": "Recipients' mail clients show signed mail as coming from this mailbox. Mail the system mailer sends (owner notices) is not signed.",
+    "smimeConnection": "Signing certificate connection",
+    "smimeConnectionHint": "The name of an SMIME_SIGNING connection holding a certificate issued to the mailbox address; its allowlist must contain the SMTP origin."
   },
   "feedback": {
     "title": "Feedback",

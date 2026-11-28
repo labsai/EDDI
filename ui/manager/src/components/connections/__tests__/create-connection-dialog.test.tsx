@@ -37,7 +37,7 @@ async function toCredentials(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CreateConnectionDialog — the auth type chooser", () => {
-  it("is a real radio group, not five unrelated radios", async () => {
+  it("is a real radio group, not six unrelated radios", async () => {
     // `role="radio"` with no owning radiogroup is invalid ARIA: the options are
     // announced with no group name and no "1 of 4", on the one decision the
     // wizard itself calls unchangeable afterwards.
@@ -45,7 +45,7 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
 
     const group = screen.getByRole("radiogroup");
     expect(group).toBeInTheDocument();
-    expect(within(group).getAllByRole("radio")).toHaveLength(5);
+    expect(within(group).getAllByRole("radio")).toHaveLength(6);
   });
 
   it("moves the selection with the arrow keys", async () => {
@@ -447,5 +447,38 @@ describe("CreateConnectionDialog — discarding", () => {
 
     expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("CreateConnectionDialog — an email signing certificate", () => {
+  it("offers only the certificate and password, and refuses a literal certificate", async () => {
+    const user = userEvent.setup();
+    await renderDialog();
+
+    await user.type(screen.getByTestId("create-connection-name"), "mailbox-smime");
+    await user.click(screen.getByTestId("auth-type-choice-SMIME_SIGNING"));
+    expect(screen.getByTestId("auth-type-choice-SMIME_SIGNING")).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByTestId("create-connection-next"));
+
+    expect(await screen.findByTestId("create-connection-smime-fields")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-connection-header-name")).toBeNull();
+    // Next is blocked until a vault reference is chosen for the certificate.
+    await user.click(screen.getByTestId("create-connection-next"));
+    expect(await screen.findByTestId("create-connection-smime-certificate-error")).toBeInTheDocument();
+    expect(screen.getByTestId("create-connection-smime-certificate-input")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("refuses a pasted literal certificate, not only an empty field", async () => {
+    const user = userEvent.setup();
+    await renderDialog();
+
+    await user.type(screen.getByTestId("create-connection-name"), "mailbox-smime");
+    await user.click(screen.getByTestId("auth-type-choice-SMIME_SIGNING"));
+    await user.click(screen.getByTestId("create-connection-next"));
+    expect(await screen.findByTestId("create-connection-smime-fields")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("create-connection-smime-certificate-input"), "-----BEGIN PRIVATE KEY-----");
+    await user.click(screen.getByTestId("create-connection-next"));
+    expect(await screen.findByTestId("create-connection-smime-certificate-error")).toBeInTheDocument();
   });
 });

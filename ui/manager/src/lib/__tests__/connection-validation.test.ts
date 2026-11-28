@@ -651,3 +651,34 @@ describe("validateConnection — a caller-supplied connection", () => {
     ).toEqual({});
   });
 });
+
+describe("SMIME_SIGNING connections", () => {
+  const SMIME = {
+    name: "mailbox-smime",
+    authType: "SMIME_SIGNING",
+    binding: "SERVICE",
+    baseUrlAllowlist: ["smtp://smtp.office365.com:587"],
+    smimeSigning: { certificate: "${vault:smime-cert}", password: null },
+  };
+
+  it("accepts a vaulted certificate, with or without a vaulted password", () => {
+    expect(validateConnection(SMIME)).toEqual({});
+    expect(validateConnection({ ...SMIME, smimeSigning: { certificate: "${vault:c}", password: "${vault:p}" } })).toEqual({});
+  });
+
+  it("refuses a literal certificate or password, as the backend does", () => {
+    expect(validateConnection({ ...SMIME, smimeSigning: { certificate: "-----BEGIN PRIVATE KEY-----" } })["smimeSigning.certificate"]).toBe(
+      "secretMustBeReference",
+    );
+    expect(validateConnection({ ...SMIME, smimeSigning: { certificate: "${vault:c}", password: "hunter2" } })["smimeSigning.password"]).toBe(
+      "secretMustBeReference",
+    );
+  });
+
+  it("lists SMTP relays only, and binds SERVICE only", () => {
+    expect(validateConnection({ ...SMIME, baseUrlAllowlist: ["https://api.example.com"] }).baseUrlAllowlist).toBe("originNotSmtp");
+    expect(validateConnection({ ...SMIME, baseUrlAllowlist: ["smtps://smtp.gmail.com"] })).toEqual({});
+    expect(legalBindings("SMIME_SIGNING")).toEqual(["SERVICE"]);
+    expect(isOAuthType("SMIME_SIGNING")).toBe(false);
+  });
+});

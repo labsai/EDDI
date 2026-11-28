@@ -18,12 +18,17 @@ import {
   EMAIL_THREAD_PARTICIPANTS,
   aiDisclosureEnabled,
   emailConfigProblems,
+  emailControlProblems,
   emailMode,
   isOpenTrigger,
+  smimeSign,
   withEmailFixedKeys,
+  withSmime,
+  type EmailControlLike,
+  type EmailControlProblem,
   type EmailProblem,
 } from "@/lib/email-channel";
-import { emailProblemMessage } from "@/lib/email-channel-messages";
+import { emailControlProblemMessage, emailProblemMessage } from "@/lib/email-channel-messages";
 
 const selectClass =
   "flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary";
@@ -48,10 +53,16 @@ const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_J
 export function EmailPlatformFields({
   platformConfig: pc,
   onChange,
+  emailControl,
+  onEmailControlChange,
   advancedOpen = false,
 }: {
   platformConfig: Record<string, string>;
   onChange: (platformConfig: Record<string, string>) => void;
+  /** The integration's `emailControl` (S/MIME signing); null when unset. */
+  emailControl?: EmailControlLike | null;
+  /** Omitted: the S/MIME settings are not shown. */
+  onEmailControlChange?: (emailControl: EmailControlLike | null) => void;
   /** Whether the advanced section starts expanded (the detail page), or collapsed (the create dialog). */
   advancedOpen?: boolean;
 }) {
@@ -75,6 +86,27 @@ export function EmailPlatformFields({
         .filter((n): n is string => !!n),
     [connections],
   );
+  const smimeConnectionNames = useMemo(
+    () =>
+      (connections ?? [])
+        .filter((c) => c.authType === "SMIME_SIGNING")
+        .map((c) => c.connectionName)
+        .filter((n): n is string => !!n),
+    [connections],
+  );
+  const sign = smimeSign(emailControl);
+  const smimeConnection = emailControl?.smime?.connection ?? "";
+  const setSmime = (patch: { sign?: true | false | "required"; connection?: string }) =>
+    onEmailControlChange?.(withSmime(emailControl, { sign, connection: smimeConnection, ...patch }));
+  const controlProblems = new Set(emailControlProblems(emailControl));
+  const controlProblemFor = (...codes: EmailControlProblem[]) => {
+    const code = codes.find((c) => controlProblems.has(c));
+    return code ? (
+      <p className="text-[10px] text-destructive" data-testid={`email-problem-${code}`}>
+        {emailControlProblemMessage(code, t)}
+      </p>
+    ) : null;
+  };
 
   const problems = new Set(emailConfigProblems(pc));
   const problemFor = (...codes: EmailProblem[]) => {
@@ -286,35 +318,97 @@ export function EmailPlatformFields({
         </div>
       </div>
 
+      {/* Sending: the SMTP relay (replies in conversation mode, the self-test in both) and S/MIME signing. */}
+      <div className="space-y-3 border-t border-border/50 pt-3" data-testid="email-sending-section">
+        <p className="text-xs font-semibold text-muted-foreground">{t("emailChannel.sendingSection", "Sending (SMTP)")}</p>
+        {!conversation && (
+          <p className={hintClass} data-testid="email-smtp-trigger-hint">
+            {t(
+              "emailChannel.smtpTriggerHint",
+              "Optional in trigger mode, which never replies: the relay is used only for the sending-health self-test.",
+            )}
+          </p>
+        )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-smtp-host`} className={labelClass}>{t("emailChannel.smtpHost", "SMTP host")}</label>
+            <Input id={`${uid}-smtp-host`} data-testid="email-smtp-host" value={pc.smtpHost ?? ""} onChange={(e) => set("smtpHost", e.target.value)} placeholder="smtp.office365.com" />
+            <p className={hintClass}>
+              {t("emailChannel.smtpHostHint", "Required. The connection's allowlist must also contain smtp://<host>:587 or smtps://<host>; the same credential logs in.")}
+            </p>
+            {problemFor("smtpHostRequired", "smtpHostIpLiteral", "smtpHostInvalid")}
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-smtp-port`} className={labelClass}>{t("emailChannel.smtpPort", "SMTP port")}</label>
+            <select id={`${uid}-smtp-port`} data-testid="email-smtp-port" className={selectClass} value={pc.smtpPort || EMAIL_DEFAULTS.smtpPort} onChange={(e) => set("smtpPort", e.target.value)}>
+              {EMAIL_SMTP_PORTS.map((p) => (
+                <option key={p} value={p}>
+                  {p === "587" ? "587 (STARTTLS)" : "465 (TLS)"}
+                </option>
+              ))}
+            </select>
+            {problemFor("smtpPort")}
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-from-name`} className={labelClass}>{t("emailChannel.fromName", "Sender name")}</label>
+            <Input id={`${uid}-from-name`} data-testid="email-from-name" value={pc.fromName ?? ""} onChange={(e) => set("fromName", e.target.value)} placeholder="Contoso Support" />
+            <p className={hintClass}>{t("emailChannel.fromNameHint", "Shown next to the mailbox address on every reply.")}</p>
+            {problemFor("fromNameInvalid")}
+          </div>
+        </div>
+        {onEmailControlChange && (
+          <div className="space-y-3" data-testid="email-smime-section">
+            <p className="text-xs font-semibold text-muted-foreground">{t("emailChannel.smimeSection", "S/MIME signing")}</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label htmlFor={`${uid}-smime-sign`} className={labelClass}>{t("emailChannel.smimeSign", "Sign outgoing mail")}</label>
+                <select
+                  id={`${uid}-smime-sign`}
+                  data-testid="email-smime-sign"
+                  className={selectClass}
+                  value={String(sign)}
+                  onChange={(e) =>
+                    setSmime({ sign: e.target.value === "required" ? "required" : e.target.value === "false" ? false : true })
+                  }
+                >
+                  <option value="true">{t("emailChannel.smimeSignOn", "On — sign when a certificate is configured (default)")}</option>
+                  <option value="required">{t("emailChannel.smimeSignRequired", "Required — never send unsigned mail")}</option>
+                  <option value="false">{t("emailChannel.smimeSignOff", "Off")}</option>
+                </select>
+                <p className={hintClass}>
+                  {sign === "required"
+                    ? t("emailChannel.smimeSignRequiredHint", "A missing, expired or mismatched certificate holds outgoing mail and tells the owners; nothing goes out unsigned.")
+                    : t("emailChannel.smimeSignHint", "Recipients' mail clients show signed mail as coming from this mailbox. Mail the system mailer sends (owner notices) is not signed.")}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor={`${uid}-smime-connection`} className={labelClass}>{t("emailChannel.smimeConnection", "Signing certificate connection")}</label>
+                <Input
+                  id={`${uid}-smime-connection`}
+                  data-testid="email-smime-connection"
+                  list={`${uid}-smime-connection-names`}
+                  value={smimeConnection}
+                  disabled={sign === false}
+                  onChange={(e) => setSmime({ connection: e.target.value })}
+                  placeholder="mailbox-smime"
+                />
+                <datalist id={`${uid}-smime-connection-names`}>
+                  {smimeConnectionNames.map((n) => (<option key={n} value={n} />))}
+                </datalist>
+                <p className={hintClass}>
+                  {t("emailChannel.smimeConnectionHint", "The name of an SMIME_SIGNING connection holding a certificate issued to the mailbox address; its allowlist must contain the SMTP origin.")}
+                </p>
+                {controlProblemFor("smimeConnectionRequired", "smimeConnectionInvalid")}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {conversation && (
         <div className="space-y-3 border-t border-border/50 pt-3" data-testid="email-replies-section">
           <p className="text-xs font-semibold text-muted-foreground">{t("emailChannel.repliesSection", "Replies")}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label htmlFor={`${uid}-smtp-host`} className={labelClass}>{t("emailChannel.smtpHost", "SMTP host")}</label>
-              <Input id={`${uid}-smtp-host`} data-testid="email-smtp-host" value={pc.smtpHost ?? ""} onChange={(e) => set("smtpHost", e.target.value)} placeholder="smtp.office365.com" />
-              <p className={hintClass}>
-                {t("emailChannel.smtpHostHint", "Required. The connection's allowlist must also contain smtp://<host>:587 or smtps://<host>; the same credential logs in.")}
-              </p>
-              {problemFor("smtpHostRequired", "smtpHostIpLiteral", "smtpHostInvalid")}
-            </div>
-            <div className="space-y-1">
-              <label htmlFor={`${uid}-smtp-port`} className={labelClass}>{t("emailChannel.smtpPort", "SMTP port")}</label>
-              <select id={`${uid}-smtp-port`} data-testid="email-smtp-port" className={selectClass} value={pc.smtpPort || EMAIL_DEFAULTS.smtpPort} onChange={(e) => set("smtpPort", e.target.value)}>
-                {EMAIL_SMTP_PORTS.map((p) => (
-                  <option key={p} value={p}>
-                    {p === "587" ? "587 (STARTTLS)" : "465 (TLS)"}
-                  </option>
-                ))}
-              </select>
-              {problemFor("smtpPort")}
-            </div>
-            <div className="space-y-1">
-              <label htmlFor={`${uid}-from-name`} className={labelClass}>{t("emailChannel.fromName", "Sender name")}</label>
-              <Input id={`${uid}-from-name`} data-testid="email-from-name" value={pc.fromName ?? ""} onChange={(e) => set("fromName", e.target.value)} placeholder="Contoso Support" />
-              <p className={hintClass}>{t("emailChannel.fromNameHint", "Shown next to the mailbox address on every reply.")}</p>
-              {problemFor("fromNameInvalid")}
-            </div>
             <div className="space-y-1">
               <label htmlFor={`${uid}-participants`} className={labelClass}>{t("emailChannel.threadParticipants", "Who may continue a thread")}</label>
               <select

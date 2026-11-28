@@ -527,7 +527,7 @@ finding `smime.verified`), `verified_untrusted_root` (to a root outside the JDK 
 `smime.untrusted-root`, a warning) or `chain_broken` (finding `smime.chain-broken`, a problem) — and whether the domain
 publishes DMARC (advice only). **Microsoft 365 does not DKIM-sign mail
 inside one organisation**, so there an unsigned result is reported as `inconclusive`, with the advice to test from
-outside. Start it with `POST /channelstore/channels/{id}/email-self-test` (and read the result with `GET` on the token it returns), or, from an MCP client, with `run_email_self_test`.
+outside. The Manager runs it from the integration's page (**Run self-test**); REST clients use `POST /channelstore/channels/{id}/email-self-test` (and `GET` on the token it returns), MCP clients `run_email_self_test`.
 
 On Windows, dnsjava without `eddi.email.dns.servers` uses every adapter's resolvers, including dead or disconnected
 ones, and DKIM lookups can then fail temporarily: the self-test then says the DKIM result is incomplete. Set
