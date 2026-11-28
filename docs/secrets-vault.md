@@ -1067,7 +1067,11 @@ When the previous master key is **gone for good**:
      every sealed system value (the audit ledger pins a new key — see
      [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation)), and likewise the
      keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
-     created on the next store);
+     created on the next store). The GDPR erasure tombstone key is derived from that
+     key, so a reset changes it too: guarded writes, erasures and permanent
+     conversation deletes then fail closed until it is resolved as
+     [The tombstone key](gdpr-compliance.md#the-tombstone-key) describes, and the
+     answer's `message` says so;
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
 3. `POST /secretstore/secrets/{tenantId}/reset?confirm=true` for each of them, then store the
    secrets again.
