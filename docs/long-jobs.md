@@ -10,8 +10,14 @@ ordinary turns of one conversation**, and the conversation is the job's log:
 - the job's state is the conversation's properties and the previous step's actions, which
   behaviour rules route on, so the job is a state machine written in configuration;
 - a crash loses at most the turn that was running. A *continuation* turn is retried by its
-  schedule; the first turn of a job — the one a caller sent — has no schedule behind it, so the
-  caller sends it again (an `Idempotency-Key` makes that safe).
+  schedule, and a turn that had decided to continue when its node died is picked up by the
+  [recovery sweep](#crash-recovery). The first turn of a job — the one a caller sent — has no
+  schedule behind it: if it never committed, the caller sends it again; if it committed its
+  decision and only the response was lost, the sweep starts the chain and there is nothing to
+  resend. When the caller cannot tell which happened, it resends with the **same**
+  `Idempotency-Key` it sent the first time, which returns the stored answer of a turn that already
+  committed (within `eddi.turns.idempotency.ttl-seconds`, see
+  [Conversations](conversations.md#idempotent-turns)) instead of running it twice.
 
 What makes this possible is **self-continuation**: a turn can ask for the next turn of the same
 conversation, and the engine starts it without user input.
@@ -111,16 +117,68 @@ committed step: `continuation:next` (the number scheduled) or `continuation:refu
 and armed only **after** the commit, as a one-shot schedule due immediately. A turn that paused,
 failed, was cancelled, lost its cluster lease or could not be stored arms nothing. A schedule write
 that fails is retried a few times on the spot; one that keeps failing is counted
-(`schedule_failed`) and logged.
+(`schedule_failed`) and logged. With the recovery sweep on and the decision stored, it is left to
+the sweep and the job carries on. Otherwise — the sweep switched off, or no stored decision it could
+arm — the decision is retired and the job ends there, with `job.finished` (`schedule_failed`) for
+its owner. A decision that cannot even be retired is not announced as ended, since a sweep could
+still arm it; the failure is logged instead.
 
-**The one window that is not recovered automatically.** A node that dies in the moment between
-committing a turn and writing its schedule, or a schedule write that keeps failing, leaves a
-committed step with `continuation:next` and no schedule: the job stops there. Nothing re-arms it
-yet. Watch `eddi_continuation_refused_total{reason="schedule_failed"}`, and for a job that stopped
-without a refusal look at its last step: `continuation:next` without a later continuation turn is
-this case. To pick the job back up, send the conversation a message whose turn ends in
-`CONTINUE_CONVERSATION` again: a message starts one new turn, and only a turn that emits the
-action arms the next schedule.
+### Crash recovery
+
+A node that dies in the moment between committing a turn and writing its schedule — or a schedule
+write that keeps failing — would leave a committed `continuation:next` with no schedule, and the job
+would stop there. It does not, because the decision is written as an **outbox record** in the same
+document write as the step: the stored conversation carries a top-level `pendingContinuation`
+(the continuation's number, the agent's `maxContinuations` and `continuationInput` at the time,
+the environment, when it was decided and the decision's own id) for as long as its latest step
+decided to continue. The step stores the same decision id as `continuation:decision`, and the record
+is carried only while the two match — so an undo back to an earlier step never carries the undone
+turn's decision along. The next committed turn replaces or removes it, because it is derived from
+that turn's own step.
+
+A **recovery sweep** runs on every node every `eddi.continuation.recovery.interval` (1 minute). It
+reads the records older than `eddi.continuation.recovery.grace-period` (1 minute — by then the
+turn's own arm, which runs milliseconds after the commit, has long happened or never will), oldest
+first and at most `eddi.continuation.recovery.batch-size` (100) per pass, from an index that holds
+only those records — never the rest of the conversations. A record whose recovery fails is left out
+of the passes for ten minutes and the read reaches past it, so a record that fails on its own does
+not hold up the ones behind it — up to 1000 held-back candidates per node. Past that cap, failing
+candidates are retried on every pass and can delay the records behind them; the sweep logs a WARN
+when it is reached. A record that has only just started failing takes its slot for the pass in which
+it fails, so the records behind it can wait one interval. For each one:
+
+| The conversation… | What the sweep does |
+|---|---|
+| is READY and its continuation has no schedule | Writes the schedule, as the turn would have, and marks the record handled. Counted as `eddi_continuation_recovered_total` and logged at WARN. |
+| is READY and the schedule exists (the turn armed it) | Writes nothing; marks the record handled, which takes it out of the index. |
+| is not READY — ended, paused for a human, interrupted | Arms nothing — an ended conversation is never revived — and removes the record (the one case where a sweep removes one). |
+| was cancelled or ended, or ran a newer turn, while the sweep worked | Withdraws the schedule the sweep had just written. |
+
+**Exactly once.** The schedule's id is derived from the conversation, the continuation number and
+the decision id, and both stores write it as an insert-if-absent (MongoDB's unique `_id`,
+PostgreSQL's primary key with `ON CONFLICT DO NOTHING`). So the turn's own arm, a retry of it and
+any number of sweeping nodes write one schedule between them. A *later* decision of the same number
+— a turn that decided again before the continuation ran, say after its fire found the conversation
+paused — gets a schedule of its own instead of taking the earlier one's row for its own; the guards
+under [Once only](#once-only) still run the number once. For a READY conversation, sweeps only ever
+*mark* a record handled, matching its decision id; only a cancel, an end or a newer turn removes or
+replaces it — so a sweep that finds its decision gone knows the job was stopped or moved on, not
+that another sweep was faster. A cancel removes the record before it deletes the schedules, which
+closes the window between the two. Cancelling a job whose arm was lost therefore answers
+`200 CANCELLED`, as for any job between two turns; if the record itself cannot be removed, the
+cancel answers `500` instead — the conversation is still READY and the sweep could arm the job
+again — and is safe to repeat.
+
+**What the sweep does not decide again.** `maxContinuations`, the cost ceiling and the group-member
+rule were applied by the turn that decided; the sweep arms what it decided. Everything the fire
+checks — a duplicate, the owner, an ended, paused, erased or restricted conversation, an undeployed
+agent — applies to a recovered continuation exactly as to any other.
+
+In a cluster, the sweep holds the `leader.continuation-recovery` lease while it runs, so one node
+does the reads; correctness does not depend on it. `eddi.continuation.recovery.enabled=false`
+switches the sweep off; the records are still written, and a sweep switched back on later arms
+whatever is left — except a decision whose schedule write failed while it was off, which was
+retired when its owner was told the job had ended.
 
 A schedule rather than the conversation coordinator's queue, because the queue lives in memory and
 dies with its node. The schedule row survives a restart; exactly one node claims it
@@ -171,14 +229,20 @@ MCP `fire_schedule_now` tool refuses it) and is never exported with its agent.
 
 - **The conversation** — every phase is a step: `GET /agents/{conversationId}?returnDetailed=true`
   shows `continuation:number`, `continuation:next` and `continuation:refused` on the steps.
+- **The outbox record** — `pendingContinuation` on the stored conversation while its latest step
+  decided to continue; once the recovery sweep has confirmed the schedule its `decidedAt` is gone.
 - **Schedules** — the pending continuation is a schedule named `continuation-<conversationId>`,
   with its fire log (status, error, attempt) like any schedule. Spent continuations are pruned as the
   job runs: after a job only the last continuation's row is left, with its fire log.
 - **The owner's event stream** — [`GET /me/events`](user-events.md) sends the conversation's owner
   `job.finished` when the last turn of a job ran (`state`: `done`, or why it stopped — `limit`,
-  `cost_ceiling`, …) and `job.failed` when a continuation fire failed. Ids only.
-- **Metrics** — `eddi_continuation_scheduled_total`, `eddi_continuation_run_total` and
-  `eddi_continuation_refused_total{reason}`; see [Metrics](metrics.md#self-continuation-metrics).
+  `cost_ceiling`, …) and `job.failed` when a continuation fire failed. Ids only. A schedule
+  write that failed raises no `job.finished` while the recovery sweep will arm the stored decision
+  (the sweep is on): the job is not over. With the sweep off, or with no stored decision it could
+  arm, it raises `job.finished` with `schedule_failed`, after retiring the decision — and nothing
+  at all if the decision cannot be retired.
+- **Metrics** — `eddi_continuation_scheduled_total`, `eddi_continuation_run_total`,
+  `eddi_continuation_refused_total{reason}` and `eddi_continuation_recovered_total`; see [Metrics](metrics.md#self-continuation-metrics).
 
 ## Waiting for an external operation
 
