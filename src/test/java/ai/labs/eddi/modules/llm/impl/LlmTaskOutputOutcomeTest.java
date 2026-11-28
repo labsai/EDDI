@@ -23,6 +23,8 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -549,6 +551,89 @@ class LlmTaskOutputOutcomeTest {
             assertEquals("just text", templateData.get("taskA"));
             verify(dataFactory).createData(OUTCOME_KEY, "invalid");
             assertEquals(0, counted("wrapped"));
+        }
+
+        @Test
+        @DisplayName("recoverFields: a reply with an unescaped quote is stored as the recovered object, outcome recovered, counted and logged, no model call")
+        void brokenJsonIsRecovered() throws Exception {
+            var lines = new ArrayList<String>();
+            LlmRecoveryLog.observer = lines::add;
+            var model = FaultInjectingChatModel.script(Step.text("{\n  \"htmlResponseText\": \"Welcome! Type \"ready\" to start. <br>\"\n}"));
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+            var t = rescueTask(false, "wrap", "ignore", null);
+            t.getResponseValidation().setRecoverFields(List.of("htmlResponseText"));
+            try {
+                run(t);
+            } finally {
+                LlmRecoveryLog.observer = null;
+            }
+
+            assertEquals(Map.of("htmlResponseText", "Welcome! Type \"ready\" to start. <br>", "quickReplies", List.of()), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "recovered");
+            assertEquals(1, counted("recovered"));
+            assertEquals(1, recovered("recover_fields", "recovered"));
+            assertEquals(0, recovered("repair", "recovered"), "a recovery is not also counted as a repair");
+            assertEquals(1, model.requests().size());
+            assertTrue(lines.stream().anyMatch(l -> l.contains("action=recover_fields") && l.contains("outcome=recovered")), lines.toString());
+        }
+
+        @Test
+        @DisplayName("a streamed turn with recoverFields is buffered: no live streaming model is used, no token reaches the sink before validation, the stored object is the recovered one")
+        void recoveredReplyIsNotStreamedLive() throws Exception {
+            var sink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(sink);
+            when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(mock(StreamingChatModel.class));
+            String broken = "{\"htmlResponseText\": \"Type \"ready\" to start";
+            liveModelReplies(Step.text(broken));
+            var t = rescueTask(false, "ignore", "ignore", null);
+            t.getResponseValidation().setRecoverFields(List.of("htmlResponseText"));
+
+            run(t);
+
+            verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+            assertEquals(Map.of("htmlResponseText", "Type \"ready\" to start"), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "recovered");
+        }
+
+        @Test
+        @DisplayName("onUnwrappable=retry: broken JSON is re-asked once and the second reply is stored")
+        void unwrappableIsReasked() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.text("{\"htmlResponseText\": \"cut o"), Step.text("{\"htmlResponseText\":\"fixed\"}"));
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+            var t = rescueTask(false, "wrap", "fallback", null);
+            t.getResponseValidation().setOnUnwrappable("retry");
+
+            run(t);
+
+            assertEquals(Map.of("htmlResponseText", "fixed"), templateData.get("taskA"));
+            assertEquals(2, model.requests().size());
+            verify(dataFactory).createData(OUTCOME_KEY, "valid");
+        }
+
+        @Test
+        @DisplayName("onUnwrappable=retry: when the re-ask is also broken, one re-ask only, then fallbackAction applies")
+        void unwrappableThenFallback() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.text("{\"htmlResponseText\": \"cut o")).repeatLast();
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+            var t = rescueTask(false, "wrap", "warn", null);
+            t.getResponseValidation().setOnUnwrappable("retry");
+
+            run(t);
+
+            assertEquals(2, model.requests().size(), "the first call and exactly one re-ask");
+            verify(dataFactory).createData(OUTCOME_KEY, "invalid");
+            assertEquals(1, recovered("wrap", "not_wrappable"));
+        }
+
+        @Test
+        @DisplayName("without onUnwrappable the same broken reply is not re-asked")
+        void unwrappableOffByDefault() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.text("{\"htmlResponseText\": \"cut o")).repeatLast();
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+            run(rescueTask(false, "wrap", "warn", null));
+
+            assertEquals(1, model.requests().size());
         }
     }
 }

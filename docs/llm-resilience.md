@@ -43,21 +43,24 @@ Recovery always runs from cheapest to most expensive, and each step is skipped w
 ```text
 model answers
   1. local repair          fence strip, \' repair, double-escape repair, extract the object from prose,
-                           fieldAliases, shape check, then wrap (opt-in, see below)   free
+                           fieldAliases, shape check, recoverFields (broken JSON), then
+                           wrap (prose), both opt-in, see below                     free
   2. transport retry       retry: same request, provider delay honoured             transient faults only
-  3. same-model re-ask     responseValidation "retry" + corrective message          up to maxRetries (default 1)
+  3. same-model re-ask     responseValidation "retry" (or onUnwrappable "retry" under
+                           wrap) + corrective message                               up to maxRetries (default 1)
   4. escalate              next cascade step, which repeats 1-3 with its own re-asks
   5. fallback              fallbackAction / onError: fallback                       the user gets an answer
 ```
 
 ### Local rescue of near-miss JSON replies
 
-Step 1 can keep four common near-misses without any second model call. All of it is opt-in and absent by
+Step 1 can keep five common near-misses without any second model call. All of it is opt-in and absent by
 default (full reference and example in [LangChain: Rescue near-miss replies](langchain.md#rescue-near-miss-replies-without-a-second-model-call)):
 
 | Shape | Option | Outcome |
 | --- | --- | --- |
 | Plain HTML or text, no JSON | `responseValidation.onInvalidJson: "wrap"` + required `wrapField` (+ optional `wrapDefaults`, `wrapMaxChars`, default 20000); never text starting with `{` or `[` | `wrapped` |
+| Broken JSON that still holds the answer (unescaped quote inside the value, reply cut off mid-string) | `responseValidation.recoverFields: ["htmlResponseText"]`: the listed top-level **string** fields are read leniently out of a reply that starts with `{`; array fields are not recovered (give them a `wrapDefaults` default); never for text that does not start with `{`, never for a reply that parsed | `recovered` |
 | Double-escaped JSON (`{\"a\": \"b\"}`) | one-level unescape, on whenever `onInvalidJson` is `wrap` or `retry`; accepted only as an object, never tried on a reply that already parsed | `repaired` |
 | Valid JSON, wrong field name | task field `fieldAliases` (`{"htmlResponseStr": "htmlResponseText"}`); renames only into an absent target | `repaired` |
 | Valid but empty `{}` | not rescued: `nonBlankFields` + `onSchemaMismatch: "retry"` (the recommended pair, which also catches the other empty shapes) | `schema_mismatch`, then one re-ask |
@@ -66,7 +69,9 @@ A typical tool-using agent on a provider without native JSON mode combines them:
 `"onInvalidJson": "wrap"`, `"wrapField": "htmlResponseText"`, `"nonBlankFields": ["htmlResponseText"]`,
 `"onSchemaMismatch": "retry"`, plus the alias map. A wrapped reply is then checked against
 `nonBlankFields` and `responseSchema` like any parsed reply, so a rescue never lets an off-shape answer through.
-Broken JSON (it starts with `{` or `[`) is **not** wrapped: it stays `invalid` and `fallbackAction` applies.
+Broken JSON (it starts with `{` or `[`) is **not** wrapped: with `recoverFields` the listed string fields are lifted out of it (outcome `recovered`); otherwise it stays `invalid` and `fallbackAction` applies, or, with `onUnwrappable: "retry"`, the model is asked once more first (the same re-ask as every other `retry`: `maxRetries`, the turn deadline, `minAttemptMs` and the cost caps apply).
+
+The order inside step 1 is: fence strip or extraction, `\'` repair, double-escape repair, parse, `fieldAliases`, shape check, `recoverFields` (broken JSON), `wrap` (prose). Only a reply still unusable after that reaches step 3.
 
 The order is deliberate: a one-off format slip is usually fixed by the model that made it, and escalating
 first would pay a different, possibly slower or dearer model for every hiccup. A model that keeps failing the
@@ -107,6 +112,8 @@ Two rules hold at every step:
 | `responseValidation.onEmpty` / `onTruncation` / `onContentFilter` | `ignore`, `warn`, `fallback`, `error` or `retry` | `warn` |
 | `responseValidation.onInvalidJson` / `onSchemaMismatch` | As above, for a `convertToObject` reply that is not JSON / breaks the shape. `onInvalidJson` also accepts `wrap` | `ignore` |
 | `responseValidation.wrapField` / `wrapDefaults` / `wrapMaxChars` | With `onInvalidJson: "wrap"`: the top-level property a plain-text reply is wrapped into (required), an object of defaults merged next to it, and the longest text wrapped | none / none / `20000` |
+| `responseValidation.recoverFields` | Top-level string fields lifted out of broken JSON (starts with `{`, does not parse), before `wrap`; at most 10 names; needs `convertToObject` | none |
+| `responseValidation.onUnwrappable` | With `onInvalidJson: "wrap"`: `retry` re-asks once a reply that can be neither wrapped nor recovered, then `fallbackAction`; `fallback` applies `fallbackAction` at once | `fallback` |
 | `fieldAliases` | Task field: `{"alias": "target"}` renames a top-level key of the parsed reply when the target is absent | none |
 | `responseValidation.onContextTooLong` | `retry` re-sends once with the history window halved; anything else lets the failure propagate | `error` |
 | `responseValidation.onRefusal` / `onStreamingTimeout` | `retry` is **not** supported here (treated as `warn`) | `ignore` / `warn` |

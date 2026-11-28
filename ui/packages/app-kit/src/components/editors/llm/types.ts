@@ -409,10 +409,11 @@ export interface ResponseValidation {
   onContentFilter?: RetryableResponseValidationAction;
   /**
    * Action when a `convertToObject` reply is not valid JSON after the local
-   * repair. `retry` re-asks the same model with `correctiveMessage`.
-   * Default `ignore`.
+   * repair. `retry` re-asks the same model with `correctiveMessage`. `wrap`
+   * wraps prose into `wrapField` and recovers `recoverFields` (set it in the
+   * JSON view; the policy select does not offer it yet). Default `ignore`.
    */
-  onInvalidJson?: RetryableResponseValidationAction;
+  onInvalidJson?: RetryableResponseValidationAction | "wrap";
   /**
    * Action when a reply parses but breaks the response shape (`responseSchema`
    * or `nonBlankFields`). `retry` re-asks with the violation as the reason;
@@ -429,6 +430,20 @@ export interface ResponseValidation {
   wrapDefaults?: Record<string, unknown>;
   /** Longest reply, in characters, that `wrap` wraps. Default 20000. */
   wrapMaxChars?: number;
+  /**
+   * Top-level string fields to lift out of a reply that starts with `{` but is
+   * not valid JSON (an unescaped quote, a reply cut off mid-string), e.g.
+   * `["htmlResponseText"]`. Runs before `wrap`. Only string fields are
+   * recovered; give an array field a default in `wrapDefaults`. Needs
+   * `convertToObject`. Absent = off.
+   */
+  recoverFields?: string[];
+  /**
+   * With `onInvalidJson: "wrap"`: what happens to a reply that can be neither
+   * wrapped nor recovered. `retry` re-asks the model once (shares
+   * `maxRetries`), then `fallbackAction` applies. Default `fallback`.
+   */
+  onUnwrappable?: "fallback" | "retry";
   /**
    * Action when the prompt exceeds the model's context window. `retry` re-sends
    * once with the history window halved. Default `error`.
