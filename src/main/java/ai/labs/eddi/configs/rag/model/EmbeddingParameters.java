@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import ai.labs.eddi.secrets.VaultReferencePlacement;
 import ai.labs.eddi.utils.EndpointParameters;
 
 import java.util.Map;
@@ -46,6 +47,23 @@ public final class EmbeddingParameters {
             "gemini", Set.of(MODEL, MODEL_NAME, "apiKey", "baseUrl", "timeout", "maxRetries", "taskType", "outputDimensionality"),
             "vertex", Set.of(MODEL, MODEL_NAME, "project", "location", "endpoint", "maxRetries"));
 
+    /**
+     * The parameters of each provider that carry a credential — the only ones a
+     * {@code ${vault:…}} reference may sit in (see
+     * {@link VaultReferencePlacement}). Ollama, Bedrock and Vertex take none:
+     * Ollama is unauthenticated, Bedrock and Vertex authenticate through the cloud
+     * credential chain.
+     */
+    private static final Map<String, Set<String>> CREDENTIALS = Map.of(
+            "openai", Set.of("apiKey"),
+            "azure-openai", Set.of("apiKey"),
+            "ollama", Set.of(),
+            "mistral", Set.of("apiKey"),
+            "bedrock", Set.of(),
+            "cohere", Set.of("apiKey"),
+            "gemini", Set.of("apiKey"),
+            "vertex", Set.of());
+
     private EmbeddingParameters() {
     }
 
@@ -55,12 +73,44 @@ public final class EmbeddingParameters {
     }
 
     /**
+     * The parameters of {@code provider} that carry a credential; empty for an
+     * unknown provider, which therefore accepts no vault reference at all.
+     */
+    public static Set<String> credentialParameters(String provider) {
+        return provider == null ? Set.of() : CREDENTIALS.getOrDefault(provider.trim(), Set.of());
+    }
+
+    /**
      * Describes the first problem with these parameters that would make the
-     * provider send data somewhere other than configured, or {@code null}.
+     * provider send data somewhere other than configured, or {@code null} — a vault
+     * reference outside the credential parameters first, since every other
+     * description may quote a value.
      */
     public static String findProblem(String provider, Map<String, String> params) {
+        String misplaced = findMisplacedVaultReference(provider, params);
+        if (misplaced != null) {
+            return misplaced;
+        }
         String endpoint = findIgnoredEndpointParameter(provider, params);
         return endpoint != null ? endpoint : findModelNameConflict(params);
+    }
+
+    /**
+     * A vault reference in a parameter that does not carry a credential, described
+     * by its key (never its value), or {@code null}. Checked at save time by
+     * {@link RagConfiguration#validate()} and again, after global variables are
+     * expanded, before the model is built: a secret resolved into {@code model}
+     * comes back in the provider's error, which RAG search and the ingestion status
+     * return to the caller.
+     */
+    public static String findMisplacedVaultReference(String provider, Map<String, String> params) {
+        Set<String> credentials = credentialParameters(provider);
+        String key = VaultReferencePlacement.findMisplaced(params, credentials);
+        if (key == null) {
+            return null;
+        }
+        String name = provider == null ? "" : provider.trim();
+        return VaultReferencePlacement.describe("Embedding provider '" + name + "' (embeddingParameters)", key, credentials);
     }
 
     /**

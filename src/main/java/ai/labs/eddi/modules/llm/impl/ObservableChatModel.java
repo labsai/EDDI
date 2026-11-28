@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.engine.runtime.LogRecordRedactor;
 import ai.labs.eddi.modules.llm.pricing.UsageMetering;
 import dev.langchain4j.model.ModelProvider;
@@ -16,6 +17,7 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
@@ -131,8 +133,35 @@ public class ObservableChatModel implements ChatModel {
                 : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType, telemetryProvider));
     }
 
+    /**
+     * The credentials this model was built with, and where a failure is pinned to
+     * them — see {@code ResolvedCredentials#pin}. Set once by the registry before
+     * the model is published; empty for a model built elsewhere.
+     */
+    private volatile ResolvedCredentials credentialStore;
+    private volatile Set<String> credentials = Set.of();
+
+    /**
+     * Pins every failure of this model to {@code values}, so a scrubber handed the
+     * failure removes them however long ago this model was evicted.
+     */
+    ObservableChatModel pinFailuresTo(ResolvedCredentials store, Collection<String> values) {
+        this.credentials = values == null ? Set.of() : Set.copyOf(values);
+        this.credentialStore = store;
+        return this;
+    }
+
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
+        try {
+            return observedChat(chatRequest);
+        } catch (RuntimeException e) {
+            ResolvedCredentials.pin(credentialStore, e, credentials);
+            throw e;
+        }
+    }
+
+    private ChatResponse observedChat(ChatRequest chatRequest) {
         if (logRequests && LOGGER.isDebugEnabled()) {
             // DEBUG, and redacted: the last message is user input, which carries
             // whatever the user typed — a credential included (L12 of the 2026-10-15

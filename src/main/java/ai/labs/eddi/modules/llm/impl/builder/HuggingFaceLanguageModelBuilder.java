@@ -74,6 +74,19 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_BASE_URL, KEY_RETURN_FULL_TEXT);
     }
 
+    /** langchain4j's service root when no {@code baseUrl} is configured. */
+    static final String DEFAULT_ENDPOINT = "https://router.huggingface.co/hf-inference/";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_ACCESS_TOKEN);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_BASE_URL, DEFAULT_ENDPOINT);
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return applyTo(HuggingFaceChatModel.builder(), parameters, OutboundTargetPolicy.orPermissive(targetPolicy)).build();

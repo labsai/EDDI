@@ -29,11 +29,10 @@ import java.util.Map;
  * the provider's builder uses when there is none — so that is the list it
  * stores.
  * <p>
- * The list matters only when a configuration names an endpoint: a configuration
- * without one uses the provider's built-in endpoint and is not checked (see
- * {@code EndpointParameters}). The default hosts below are therefore what an
- * editor may legitimately <em>spell out</em>, not a precondition for the
- * default endpoint to work.
+ * A configuration without an endpoint uses the provider's built-in default,
+ * which is checked against the list like a configured endpoint (see
+ * {@code ILanguageModelBuilder.defaultEndpoint}). The default hosts below must
+ * therefore name the host each builder's default actually uses.
  */
 final class SetupSecretHosts {
 

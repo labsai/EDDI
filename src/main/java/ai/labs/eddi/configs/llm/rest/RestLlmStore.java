@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.modules.llm.impl.VaultReferencePlacementGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
@@ -60,6 +61,11 @@ public class RestLlmStore implements IRestLlmStore {
     // there, which skips the check.
     @Inject
     CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    // Field-injected for the same reason; null in direct constructions, which
+    // skips the check (the runtime check in ChatModelRegistry still applies).
+    @Inject
+    VaultReferencePlacementGuard vaultReferencePlacementGuard;
 
     private static final String KIND = "langchain";
 
@@ -201,6 +207,11 @@ public class RestLlmStore implements IRestLlmStore {
         // A document read through the redacted view must not be stored with the
         // marker in place of the credential — see RedactionMarkerGuard.
         RedactionMarkerGuard.requireNone(configuration);
+        // A ${vault:…} only in a credential parameter: resolved into modelName, a
+        // secret comes back in the provider's error — see VaultReferencePlacement.
+        if (vaultReferencePlacementGuard != null) {
+            vaultReferencePlacementGuard.requireNone(configuration);
+        }
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }

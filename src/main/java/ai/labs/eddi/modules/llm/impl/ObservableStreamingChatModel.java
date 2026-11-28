@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.engine.runtime.LogRecordRedactor;
 import ai.labs.eddi.modules.llm.pricing.UsageMetering;
 import dev.langchain4j.model.ModelProvider;
@@ -23,6 +24,7 @@ import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -96,10 +98,30 @@ class ObservableStreamingChatModel implements StreamingChatModel {
      * delegate therefore dispatches its own listeners, which is why
      * {@link #listeners()} carries only EDDI's.
      */
+    /**
+     * The credentials this model was built with, and where a failure is pinned to
+     * them — as on {@link ObservableChatModel}. Set once by the registry before the
+     * model is published.
+     */
+    private volatile ResolvedCredentials credentialStore;
+    private volatile Set<String> credentials = Set.of();
+
+    /** See {@link ObservableChatModel}'s method of the same name. */
+    ObservableStreamingChatModel pinFailuresTo(ResolvedCredentials store, Collection<String> values) {
+        this.credentials = values == null ? Set.of() : Set.copyOf(values);
+        this.credentialStore = store;
+        return this;
+    }
+
     @Override
     public void doChat(ChatRequest request, StreamingChatResponseHandler handler) {
         logRequest(request);
-        delegate.chat(request, metering(observing(handler), request));
+        try {
+            delegate.chat(request, metering(observing(handler), request));
+        } catch (RuntimeException e) {
+            ResolvedCredentials.pin(credentialStore, e, credentials);
+            throw e;
+        }
     }
 
     /**
@@ -157,6 +179,9 @@ class ObservableStreamingChatModel implements StreamingChatModel {
 
             @Override
             public void onError(Throwable error) {
+                // First, before any handler logs or stores it: the failure carries this
+                // model's credentials from here on.
+                ResolvedCredentials.pin(credentialStore, error, credentials);
                 handler.onError(error);
             }
         };
@@ -203,7 +228,8 @@ class ObservableStreamingChatModel implements StreamingChatModel {
             @Override
             public void onError(Throwable error) {
                 LOGGER.infof("[%s] Streaming chat error after %dms (%d chars streamed): %s", modelType,
-                        System.currentTimeMillis() - startMs, snapshot().length(), error != null ? error.getMessage() : "<null>");
+                        System.currentTimeMillis() - startMs, snapshot().length(),
+                        error != null ? ResolvedCredentials.scrubFailure(credentialStore, error, error.getMessage()) : "<null>");
                 handler.onError(error);
             }
 
