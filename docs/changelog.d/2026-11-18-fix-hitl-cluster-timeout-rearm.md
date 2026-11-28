@@ -23,8 +23,9 @@
     one hour after that fire (or the original deadline, if later) — a safety net, not a retry loop;
   - otherwise — no row, rows of earlier pauses only, rows that can never fire again (`DEAD_LETTERED`, `FAILED` out of
     `eddi.schedule.max-retries`, switched off by an agent undeploy: older builds did all three to HITL timeouts) — a
-    row is created at the original due time. An overdue one is due at once under the cluster sweep (no grace — the
-    sweep runs on a live leader) and 2 minutes after a single node starts, as before.
+    row is created due at the later of the original due time and the repair attempt plus a grace: none for the
+    cluster sweep's ordinary repair (an overdue row is due at once — the sweep runs on a live leader), 2 minutes from
+    the attempt on a single node's startup pass and when a cluster sweep restores a lost resume, as before.
   Before it writes anything the sweep re-checks that the scanned pause is still the current one, and it deletes
   only the timeout rows it read and judged, one by one by id — never every row under the name. A newer pause's row
   therefore survives (it can only be among the rows read once that pause is current, and the re-check then stops
@@ -80,7 +81,7 @@
   `ConversationHitlService.scheduleHitlTimeout` and the group approval and human-turn schedulers in
   `GroupHitlCoordinator` logged a failure at `WARN` and swallowed it. They now log at `ERROR` and count
   `eddi_hitl_timeout_arm_failures_total{surface}` (`regular`, `group`, `group-human`). The cluster sweep re-creates
-  the missing schedule on a sweep that reaches the pause (best effort: at most 10,000 paused conversations per pass); a single node does so at its next start.
+  the missing schedule on a sweep that reaches the pause (best effort: the regular pause scan reads at most 10,000 paused conversations per pass, each group pause scan at most 1,000); a single node does so at its next start.
 - **Docs.** `docs/hitl.md` → Crash Recovery describes what the sweep keeps, re-creates and re-arms, the undecidable
   outcome, the single-node limit, the startup grace (only for re-created rows: a surviving overdue row keeps its due
   time and fires once its retry time, claim and batch conditions allow, so `AUTO_APPROVE` decides soon after an
@@ -99,7 +100,8 @@
 - An undecodable row is skipped by the read rather than returned flagged: the poller cannot fire it either, so it is
   no timeout of the pause, and the interface keeps its method set (only its Javadoc changed). The store reads past
   skipped rows up to a fixed allowance and fails beyond it, so `rows.size() >= limit` stays a truthful "maybe more".
-- A failed read writes nothing on every path, including the restore after a lost resume: the alternative (create
+- A failed read writes nothing more for the pause on every path, including the restore after a lost resume (stale
+  rows a full-page cleanup removed before it stay removed): the alternative (create
   anyway) can arm an automatic decision next to a row a person disabled. The retry for a single node, which has no
   later sweep, is two short re-reads inside the pass rather than a deferred re-run: no new scheduling machinery,
   and a longer outage would fail a deferred run just the same — it ends loud (ERROR plus the arm-failure counter)

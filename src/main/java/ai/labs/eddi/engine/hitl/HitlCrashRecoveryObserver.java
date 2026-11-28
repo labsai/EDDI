@@ -757,13 +757,13 @@ public class HitlCrashRecoveryObserver {
      * fired, or waiting for a retry after a failed fire — is never deleted, moved
      * or re-created, so repeated sweeps cannot push a deadline out. A missing
      * schedule is created at the original due time (pausedAt + timeout), or
-     * {@code overdueGrace} from now if that time already passed; the next sweep
-     * then finds it armed. A row of this pause a person disabled is left alone; a
-     * spent one (its timeout fired and completed while the pause still waits) is
-     * re-armed {@link #SPENT_REARM_BACKOFF} after that fire. Only the timeout rows
-     * that were read and judged are deleted, one by one by id — never every row
-     * under the name, which could take a newer pause's timeout or a row that is not
-     * a timeout at all.
+     * {@code overdueGrace} from now if that is later; the next sweep then finds it
+     * armed. A row of this pause a person disabled is left alone; a spent one (its
+     * timeout fired and completed while the pause still waits) is re-armed
+     * {@link #SPENT_REARM_BACKOFF} after that fire. Only the timeout rows that were
+     * read and judged are deleted, one by one by id — never every row under the
+     * name, which could take a newer pause's timeout or a row that is not a timeout
+     * at all.
      *
      * @param policyName
      *            a {@code HitlTimeoutPolicy} name, or for human-turn schedules (I6)
